@@ -75,6 +75,8 @@ impl MarkText {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MarkKind {
     HeaderFooter,
+    /// Bates numbers: the Bates slots of a header & footer, kept in a stream of their own.
+    Bates,
     Watermark,
     Background,
     /// Printer marks: trim, bleed, registration, colour bars, page information.
@@ -85,6 +87,7 @@ impl MarkKind {
     pub(crate) fn tag(self) -> &'static str {
         match self {
             MarkKind::HeaderFooter => "HeaderFooter",
+            MarkKind::Bates => "Bates",
             MarkKind::Watermark => "Watermark",
             MarkKind::Background => "Background",
             MarkKind::PrinterMarks => "PrinterMarks",

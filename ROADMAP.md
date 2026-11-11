@@ -251,6 +251,7 @@ Ranked; detail and the full milestone table in [docs/roadmap.md](docs/roadmap.md
 | 8 | 1.0 polish: performance, right-to-left, missing languages, keyboard-only (M14) | 55–95 |
 
 ## Progress log
+- **2026-11-11 (M7, Remove Bates numbering):** Bates numbers PdfCraft adds are now drawn in a stream of their own (`/Artifact` `/Subtype /BatesN`, `/PCMark /Bates`), so Edit ▸ Bates numbering ▸ Remove Bates numbering (`edit.bates_remove`, `doc_bates_remove`) takes them off every page and leaves ordinary headers, footers and page content alone (a page shrink added with only Bates numbers goes too); undoable, and saved and reopened files keep working. On a one-line box with one Bates token only the token goes; other boxes with a token go whole. Update header & footer replaces Bates numbers when its new text has a Bates token and otherwise leaves them alone; Remove header & footer still takes them too. Bates numbers added before this change or by other tools aren't recognised. Estimates unchanged.
 - **2026-11-09 (M10, #5130):** Windows Printer default sends native two-sided bindings only when automatic duplex support is confirmed, preserving manual driver defaults (#5130/#5772); physical output remains unqualified. Both Windows submission paths preserve DLL guards and current spooler fixes. Review follow-up validates both duplex scopes through craft-print 9fe50c94 and corrects CI formatting. Estimates unchanged.
 
 - **2026-10-27 (M10, #5005):** Vector printing retains each annotation's optional-content membership when drawing its appearance.

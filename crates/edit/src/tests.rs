@@ -330,8 +330,8 @@ fn shrink_scales_the_original_content_into_the_band_between_header_and_footer() 
     add_header_footer(&mut doc, &[0], &shrinking("ACME", "<<Bates Number#6#1##>>"), false, &cx()).unwrap();
     let doc = reopen(&doc);
     let s = streams(&doc, 0);
-    // q-wrapper, shrink, original, Q-wrapper, header/footer.
-    assert_eq!(s.len(), 5, "{s:?}");
+    // q-wrapper, shrink, original, Q-wrapper, header, Bates number (a stream of its own).
+    assert_eq!(s.len(), 6, "{s:?}");
     assert_eq!((s[0].as_str(), s[3].as_str()), ("q %PdfCraft\n", "\nQ %PdfCraft\n"));
     assert!(s[2].contains("(Hi) Tj"), "the original content follows the shrink: {s:?}");
     let m = first_cm(&s[1]);
@@ -340,7 +340,8 @@ fn shrink_scales_the_original_content_into_the_band_between_header_and_footer() 
     // The page's corners land on the band, centred across.
     assert!(near(map_point(m, 0.0, 0.0), ((600.0 - 600.0 * k) / 2.0, 46.4)), "{m:?}");
     assert!(near(map_point(m, 600.0, 800.0), ((600.0 + 600.0 * k) / 2.0, 800.0 - 48.0)), "{m:?}");
-    assert!(s[4].contains("(000001) Tj"), "{}", s[4]);
+    assert!(s[4].contains("(ACME) Tj") && s[5].contains("(000001) Tj"), "{s:?}");
+    assert!(s[5].contains("/Subtype /BatesN /PCMark /Bates"), "{}", s[5]);
 }
 
 #[test]
@@ -15347,4 +15348,110 @@ fn thai_paragraphs_break_the_row_on_unicode_row_breaks() {
             .unwrap_or_else(|e| panic!("matching U+{:04X}: {e}", u32::from(separator)));
         assert_eq!(rows(&doc), ["กข", "ค"], "matching U+{:04X}", u32::from(separator));
     }
+}
+
+#[test]
+fn remove_bates_takes_only_bates_streams_and_header_footer_remove_still_takes_them_too() {
+    let hf = |left: &str, right: &str| {
+        let mut hf = HeaderFooter::default();
+        hf.text[3] = left.into();
+        hf.text[5] = right.into();
+        hf
+    };
+    let mut doc = fixture();
+    add_header_footer(&mut doc, &[0], &hf("KEEP", "<<Bates Number#4#7#B-#>>"), false, &cx()).unwrap();
+    assert!(marks_present(&doc).contains(&MarkKind::Bates) && marks_present(&doc).contains(&MarkKind::HeaderFooter));
+    assert_eq!(remove_marks(&mut doc, &[0], MarkKind::Bates).unwrap(), 1);
+    let s = streams(&reopen(&doc), 0).join("");
+    assert!(s.contains("(KEEP) Tj") && !s.contains("B-0007"), "{s}");
+    assert_eq!(remove_marks(&mut doc, &[0], MarkKind::Bates).unwrap(), 0, "nothing left to remove");
+    // Remove header & footer keeps taking Bates numbers with it, as it did before they had a tag.
+    let mut doc = fixture();
+    add_header_footer(&mut doc, &[0], &hf("KEEP", "<<Bates Number#4#7#B-#>>"), false, &cx()).unwrap();
+    assert_eq!(remove_marks(&mut doc, &[0], MarkKind::HeaderFooter).unwrap(), 2);
+}
+
+#[test]
+fn removing_bates_takes_its_shrink_with_it_but_keeps_a_headers_own() {
+    // Bates numbers alone, shrinking the page: removing them restores the original content.
+    let original = streams(&reopen(&fixture()), 0);
+    let mut doc = fixture();
+    add_header_footer(&mut doc, &[0], &shrinking("", "<<Bates Number#6#1##>>"), false, &cx()).unwrap();
+    assert_eq!(marks_present(&doc), [MarkKind::Bates], "the shrink goes with what was drawn");
+    assert!(remove_marks(&mut doc, &[0], MarkKind::Bates).unwrap() >= 1);
+    assert!(marks_present(&doc).is_empty(), "{:?}", marks_present(&doc));
+    assert_eq!(streams(&reopen(&doc), 0), original, "no scaling is left behind");
+
+    // A header and Bates numbers: removing Bates leaves the header and its shrink.
+    let mut doc = fixture();
+    add_header_footer(&mut doc, &[0], &shrinking("ACME", "<<Bates Number#6#1##>>"), false, &cx()).unwrap();
+    remove_marks(&mut doc, &[0], MarkKind::Bates).unwrap();
+    assert_eq!(marks_present(&doc), [MarkKind::HeaderFooter]);
+    let s = streams(&reopen(&doc), 0);
+    assert!(s.iter().any(|x| x.contains("(ACME) Tj")), "{s:?}");
+    assert!(s.iter().any(|x| x.ends_with(" cm\n") && !x.contains("Tj")), "the shrink stays: {s:?}");
+    assert!(!s.join("").contains("(000001)"), "{s:?}");
+    // And removing header & footer still takes everything, shrink included.
+    let mut doc = fixture();
+    add_header_footer(&mut doc, &[0], &shrinking("", "<<Bates Number#6#1##>>"), false, &cx()).unwrap();
+    remove_marks(&mut doc, &[0], MarkKind::HeaderFooter).unwrap();
+    assert_eq!(streams(&reopen(&doc), 0), original);
+}
+
+#[test]
+fn a_line_mixing_text_and_a_bates_token_keeps_its_text_when_bates_goes() {
+    let mut hf = HeaderFooter::default();
+    hf.text[5] = "Page <<1>> | <<Bates Number#4#7#B-#>> end".into();
+    let mut whole = hf.clone();
+    whole.text[5] = "Page <<1>> | B-0007 end".into();
+    let mut doc = fixture();
+    add_header_footer(&mut doc, &[0], &hf, false, &cx()).unwrap();
+    let mut plain = fixture();
+    add_header_footer(&mut plain, &[0], &whole, false, &cx()).unwrap();
+    // The pieces sit exactly where the whole line would put them.
+    let x_of = |d: &Document, text: &str| -> f64 {
+        let s = streams(&reopen(d), 0).join("");
+        let at = s.find(&format!("({text}) Tj")).unwrap_or_else(|| panic!("{text}: {s}"));
+        let tm = s[..at].rfind("1 0 0 1 ").unwrap_or_else(|| panic!("{s}"));
+        s[tm + 8..].split_whitespace().next().unwrap().parse().unwrap()
+    };
+    let before = added::Family::Helvetica.width("Page 1 | ", 8.0, false, false);
+    let whole_x = x_of(&plain, "Page 1 | B-0007 end");
+    assert!((x_of(&doc, "Page 1 | ") - whole_x).abs() < 0.01);
+    assert!((x_of(&doc, "B-0007") - (whole_x + before)).abs() < 0.01, "the token follows the text before it");
+    remove_marks(&mut doc, &[0], MarkKind::Bates).unwrap();
+    let s = streams(&reopen(&doc), 0).join("");
+    assert!(s.contains("(Page 1 | ) Tj") && s.contains("( end) Tj") && !s.contains("B-0007"), "{s}");
+}
+
+#[test]
+fn update_header_and_footer_leaves_bates_numbers_alone() {
+    let mut doc = fixture();
+    let mut bates = HeaderFooter::default();
+    bates.text[5] = "<<Bates Number#6#1##>>".into();
+    add_header_footer(&mut doc, &[0], &bates, false, &cx()).unwrap();
+    let mut header = HeaderFooter::default();
+    header.text[1] = "ONE".into();
+    add_header_footer(&mut doc, &[0], &header, false, &cx()).unwrap();
+    header.text[1] = "TWO".into();
+    add_header_footer(&mut doc, &[0], &header, true, &cx()).unwrap();
+    let s = streams(&reopen(&doc), 0).join("");
+    assert!(s.contains("(TWO) Tj") && !s.contains("(ONE) Tj") && s.contains("(000001) Tj"), "{s}");
+    assert!(marks_present(&doc).contains(&MarkKind::Bates));
+}
+
+#[test]
+fn updating_with_bates_replaces_them_and_updating_without_leaves_them() {
+    let bates_streams = |d: &Document| streams(&reopen(d), 0).iter().filter(|x| x.contains("/PCMark /Bates")).count();
+    let mut doc = fixture();
+    let mut hf = HeaderFooter::default();
+    hf.text[5] = "<<Bates Number#6#1##>>".into();
+    for _ in 0..2 {
+        add_header_footer(&mut doc, &[0], &hf, true, &cx()).unwrap();
+    }
+    assert_eq!(bates_streams(&doc), 1, "an update replaces the Bates numbers, it doesn't pile them up");
+    let mut header = HeaderFooter::default();
+    header.text[1] = "TOP".into();
+    add_header_footer(&mut doc, &[0], &header, true, &cx()).unwrap();
+    assert_eq!(bates_streams(&doc), 1, "a header-only update leaves the Bates numbers");
 }

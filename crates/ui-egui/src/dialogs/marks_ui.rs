@@ -470,7 +470,7 @@ pub(crate) fn body(ui: &mut egui::Ui, app: &mut PdfCraftApp, t: &Tokens, kind: M
     let mut browse = false;
     let verb = if d.replace { tl!("Update") } else { tl!("Add") };
     let title = match kind {
-        MarkKind::HeaderFooter => crate::i18n::fmt(tl!("{verb} Header and Footer"), &[("verb", verb)]),
+        MarkKind::HeaderFooter | MarkKind::Bates => crate::i18n::fmt(tl!("{verb} Header and Footer"), &[("verb", verb)]),
         MarkKind::Watermark => crate::i18n::fmt(tl!("{verb} Watermark"), &[("verb", verb)]),
         MarkKind::Background => crate::i18n::fmt(tl!("{verb} Background"), &[("verb", verb)]),
         // Printer marks have a dialog of their own (printer_marks_ui); this one is never opened for them.
@@ -479,7 +479,7 @@ pub(crate) fn body(ui: &mut egui::Ui, app: &mut PdfCraftApp, t: &Tokens, kind: M
     ui.label(egui::RichText::new(title).font(theme::semibold(18.0)));
     ui.add_space(8.0);
     match kind {
-        MarkKind::HeaderFooter => {
+        MarkKind::HeaderFooter | MarkKind::Bates => {
             ui.horizontal(|ui| {
                 // The standard faces a header can be drawn in (#3754).
                 ui.label(tl!("Font:"));
@@ -657,7 +657,7 @@ pub(crate) fn body(ui: &mut egui::Ui, app: &mut PdfCraftApp, t: &Tokens, kind: M
     let file_name = d.use_file.then(|| d.file.as_ref().map(|f| f.0.clone())).flatten();
     ui.horizontal(|ui| {
         preview(ui, t, page, picture, tint, |p, r, s| match kind {
-            MarkKind::HeaderFooter => {
+            MarkKind::HeaderFooter | MarkKind::Bates => {
                 if hf.shrink {
                     // The band the page content shrinks into, centred across.
                     let (top, bottom) = hf.bands();
@@ -763,7 +763,7 @@ pub(crate) fn body(ui: &mut egui::Ui, app: &mut PdfCraftApp, t: &Tokens, kind: M
     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
         let ready = undrawable.is_none()
             && match kind {
-                MarkKind::HeaderFooter => d.hf.text.iter().any(|x| !x.trim().is_empty()),
+                MarkKind::HeaderFooter | MarkKind::Bates => d.hf.text.iter().any(|x| !x.trim().is_empty()),
                 MarkKind::Watermark => {
                     if d.use_file {
                         d.file.is_some()
@@ -806,7 +806,7 @@ pub(crate) fn body(ui: &mut egui::Ui, app: &mut PdfCraftApp, t: &Tokens, kind: M
 /// draw it), as the engine decides it. Pictures draw no text.
 fn undrawable(kind: MarkKind, d: &MarksDraft) -> Option<char> {
     match kind {
-        MarkKind::HeaderFooter => d.hf.first_undrawable(),
+        MarkKind::HeaderFooter | MarkKind::Bates => d.hf.first_undrawable(),
         MarkKind::Watermark if !d.use_file => d.wm.first_undrawable(),
         MarkKind::Watermark | MarkKind::Background | MarkKind::PrinterMarks => None,
     }
@@ -878,7 +878,7 @@ fn backdrop_options(ui: &mut egui::Ui, t: &Tokens, d: &mut MarksDraft, doc: &pdf
 pub fn edit(d: &MarksDraft, kind: MarkKind, count: usize) -> Edit {
     let pages = d.range.pages(count);
     match kind {
-        MarkKind::HeaderFooter => Edit::AddHeaderFooter { pages, settings: d.hf.clone(), replace: d.replace },
+        MarkKind::HeaderFooter | MarkKind::Bates => Edit::AddHeaderFooter { pages, settings: d.hf.clone(), replace: d.replace },
         MarkKind::Watermark => {
             let mut wm = d.wm.clone();
             if d.fit {

@@ -141,6 +141,7 @@ impl PdfCraftApp {
             commands::Needs::Marks(k) if self.active.is_some() => {
                 let kind = match k {
                     pdfcraft_engine::MarkKind::HeaderFooter => tl!("header or footer"),
+                    pdfcraft_engine::MarkKind::Bates => tl!("Bates numbering"),
                     pdfcraft_engine::MarkKind::Watermark => tl!("watermark"),
                     pdfcraft_engine::MarkKind::Background => tl!("background"),
                     pdfcraft_engine::MarkKind::PrinterMarks => tl!("printer marks"),
@@ -546,6 +547,9 @@ impl PdfCraftApp {
                     _ => K::Background,
                 };
                 self.apply_edit(Edit::RemoveMarks { kind });
+            }
+            "edit.bates_remove" => {
+                self.apply_edit(Edit::RemoveMarks { kind: pdfcraft_engine::MarkKind::Bates });
             }
             "export.image" => self.dialog = Some(Dialog::Export(crate::export_ui::ExportKind::Image)),
             "export.text" => self.dialog = Some(Dialog::Export(crate::export_ui::ExportKind::Text)),

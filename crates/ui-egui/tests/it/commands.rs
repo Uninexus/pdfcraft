@@ -138,6 +138,12 @@ fn every_registered_command_is_implemented() {
                 file: None,
             });
         }
+        if spec.id == "edit.bates_remove" {
+            use pdfcraft_engine::{Edit, HeaderFooter};
+            let mut hf = HeaderFooter::default();
+            hf.text[5] = "<<Bates Number#6#1##>>".into();
+            app.apply_edit(Edit::AddHeaderFooter { pages: vec![0], settings: hf, replace: false });
+        }
         if matches!(spec.id, "comment.flatten" | "comment.export" | "comment.summarize") {
             use pdfcraft_engine::{Edit, NewAnnotation, Shape, Style};
             let shape = Shape::Rectangle { rect: [10.0, 10.0, 50.0, 50.0] };

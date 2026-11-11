@@ -2631,11 +2631,11 @@ title = "Remove Bates numbering"
 area = "C"
 tier = "P1"
 milestone = "M7"
-status = "planned"
-commands = []
-tools = []
-evidence = []
-notes = ""
+status = "partial"
+commands = ["edit.bates_remove"]
+tools = ["doc_bates_remove"]
+evidence = ["crates/automation/tests/it/automation.rs::bates_remove_takes_only_the_bates_numbers_off_every_page_and_survives_save_reopen", "crates/automation/tests/it/automation.rs::bates_remove_with_no_bates_numbers_says_there_is_nothing_to_remove", "crates/edit/src/tests.rs::remove_bates_takes_only_bates_streams_and_header_footer_remove_still_takes_them_too", "crates/edit/src/tests.rs::removing_bates_takes_its_shrink_with_it_but_keeps_a_headers_own", "crates/edit/src/tests.rs::a_line_mixing_text_and_a_bates_token_keeps_its_text_when_bates_goes", "crates/edit/src/tests.rs::update_header_and_footer_leaves_bates_numbers_alone", "crates/edit/src/tests.rs::updating_with_bates_replaces_them_and_updating_without_leaves_them"]
+notes = "Removes the Bates numbers PdfCraft adds (kept in their own /Subtype /BatesN, /PCMark /Bates stream, with the page shrink when only Bates numbers were drawn), on every page, undoable; refuses with 'nothing to remove' when there are none. On a one-line box with one Bates token only the token is removed; a multi-line box or one with several tokens is removed whole. Not recognised: Bates numbers PdfCraft added before they had their own stream, and Bates numbers from other tools. Update header & footer replaces Bates numbers when its new text has a Bates token and otherwise leaves them alone; Remove header & footer still removes them too. No page-range choice yet."
 
 [[feature]]
 id = "edit.spell-check"
