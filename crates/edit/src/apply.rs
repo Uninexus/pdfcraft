@@ -75,7 +75,10 @@ fn add_header_footer_in_place(doc: &mut Document, pages: &[usize], hf: &HeaderFo
         check_on_top(doc, &all[i])?;
     }
     if replace {
-        remove_marks(doc, pages, MarkKind::HeaderFooter)?;
+        // Update swaps out headers and footers, and the Bates numbers too when the new text
+        // has some; Bates numbers it doesn't redraw stay.
+        let redraws_bates = hf.text.iter().any(|t| t.contains("<<Bates"));
+        remove_tagged(doc, pages, MarkKind::HeaderFooter, redraws_bates)?;
     }
     let all = page_list(doc);
     let count = all.len();
@@ -107,9 +110,15 @@ fn add_header_footer_in_place(doc: &mut Document, pages: &[usize], hf: &HeaderFo
         };
         let base = hf.font.base_font(false, false);
         let resource = free_font_name(doc, &page_fonts(doc, page), preferred, base);
-        let mut body: Vec<u8> = format!("BT\n/{resource} {} Tf\n{}\n", n(size), rgb(hf.color)).into_bytes();
-        let mut current = None;
-        let mut underlines = String::new();
+        // Bates numbers are drawn in a stream of their own, tagged `/PCMark /Bates` and
+        // `/Subtype /BatesN`, so Remove Bates numbering can take them off alone. On a one-line
+        // slot with one Bates token the text around it stays in the header stream and only the
+        // token moves; any other slot with a token goes wholly into the Bates stream.
+        let mut bodies: [Vec<u8>; 2] = [0, 1].map(|_| format!("BT\n/{resource} {} Tf\n{}\n", n(size), rgb(hf.color)).into_bytes());
+        let mut current = [None, None];
+        let mut underlines = [String::new(), String::new()];
+        let mut drawn = [false; 2];
+        let face = |s: &str, size: f64| hf.font.width(s, size, false, false);
         for (slot, template) in hf.text.iter().enumerate() {
             if template.trim().is_empty() {
                 continue;
@@ -117,9 +126,13 @@ fn add_header_footer_in_place(doc: &mut Document, pages: &[usize], hf: &HeaderFo
             let lines: Vec<String> = expand(template, number, count, bates, cx).lines().map(str::to_owned).collect();
             let header = slot < 3;
             let line_h = size * 1.2;
+            // The pieces of a one-line slot with one token: before, token, after (templates).
+            let split = template.find("<<Bates").filter(|_| !template.contains('\n') && !template.contains('\r')).and_then(|i| {
+                let end = i + template[i..].find(">>")? + 2;
+                (!template[end..].contains("<<Bates")).then(|| (&template[..i], &template[i..end], &template[end..]))
+            });
             for (li, line) in lines.iter().enumerate() {
                 // Centred and right-aligned text is placed by its width in the chosen face.
-                let face = |s: &str, size: f64| hf.font.width(s, size, false, false);
                 let tw = thai_width(line, size, face);
                 let x = match slot % 3 {
                     0 => left,
@@ -128,30 +141,59 @@ fn add_header_footer_in_place(doc: &mut Document, pages: &[usize], hf: &HeaderFo
                 };
                 // Headers hang below the top margin; footers sit on the bottom margin.
                 let y = if header { h - top - size * 0.8 - li as f64 * line_h } else { bottom + (lines.len() - 1 - li) as f64 * line_h };
-                thai.show(&mut body, line, x, y, size, &resource, |s| face(s, size), &mut current);
-                if hf.underline {
-                    underlines.push_str(&format!("{} {} {} {} re f\n", n(x), n(y - size * 0.15), n(tw), n((size * 0.06).max(0.4))));
+                let mut pieces: Vec<(usize, String)> = Vec::new();
+                match split {
+                    Some((before, token, after)) => {
+                        for (group, part) in [(0, before), (1, token), (0, after)] {
+                            if !part.is_empty() {
+                                pieces.push((group, expand(part, number, count, bates, cx)));
+                            }
+                        }
+                    }
+                    None => pieces.push((usize::from(template.contains("<<Bates")), line.clone())),
+                }
+                let mut at = x;
+                for (group, text) in pieces {
+                    drawn[group] = true;
+                    let pw = thai_width(&text, size, face);
+                    thai.show(&mut bodies[group], &text, at, y, size, &resource, |s| face(s, size), &mut current[group]);
+                    if hf.underline {
+                        underlines[group].push_str(&format!("{} {} {} {} re f\n", n(at), n(y - size * 0.15), n(pw), n((size * 0.06).max(0.4))));
+                    }
+                    at += pw;
                 }
             }
         }
-        body.extend_from_slice(b"ET\n");
-        if !underlines.is_empty() {
-            body.extend(format!("{}\n{underlines}", rgb(hf.color)).bytes());
+        let mut streams = Vec::new();
+        for (group, mut body) in bodies.into_iter().enumerate() {
+            if !drawn[group] {
+                continue;
+            }
+            body.extend_from_slice(b"ET\n");
+            if !underlines[group].is_empty() {
+                body.extend(format!("{}\n{}", rgb(hf.color), underlines[group]).bytes());
+            }
+            let (kind, subtype) = if group == 1 { (MarkKind::Bates, "BatesN") } else { (MarkKind::HeaderFooter, "Header") };
+            let mut content = begin(kind, subtype, page.view_matrix(doc)).into_bytes();
+            content.extend(body);
+            content.extend_from_slice(END.as_bytes());
+            streams.push((kind, content));
         }
-        let mut content = begin(MarkKind::HeaderFooter, "Header", page.view_matrix(doc)).into_bytes();
-        content.extend(body);
-        content.extend_from_slice(END.as_bytes());
+        // The shrink belongs to what was drawn: with only Bates numbers it goes with them.
+        let shrink_kind = if drawn[0] { MarkKind::HeaderFooter } else { MarkKind::Bates };
         // A name already there is that very font (see `free_font_name`): left as it is.
         if !page_fonts(doc, page).contains(resource.as_bytes()) {
             add_page_resources(doc, page, None, &[(resource.into_bytes(), base)])?;
         }
         thai.add_to(doc, &page_list(doc)[i])?;
-        let page = &page_list(doc)[i];
-        place(doc, page, MarkKind::HeaderFooter, content, false)?;
+        for (kind, content) in streams {
+            let page = &page_list(doc)[i];
+            place(doc, page, kind, content, false)?;
+        }
         if let Some(Some(m)) = shrinks.get(k) {
             let cm = format!("{} cm\n", m.map(matrix_number).join(" "));
             let page = &page_list(doc)[i];
-            place_inside_wrapper(doc, page, MarkKind::HeaderFooter.tag(), cm.into_bytes())?;
+            place_inside_wrapper(doc, page, shrink_kind.tag(), cm.into_bytes())?;
         }
     }
     Ok(())
@@ -301,6 +343,11 @@ fn add_background_in_place(doc: &mut Document, pages: &[usize], bg: &Background,
 /// turns a backdrop [`add_background`] replaced back on where that is still safe; the pages where
 /// it isn't are [`backdrops_left_off`].
 pub fn remove_marks(doc: &mut Document, pages: &[usize], kind: MarkKind) -> Result<usize, EditError> {
+    remove_tagged(doc, pages, kind, true)
+}
+
+/// [`remove_marks`]; `with_bates` lets removing header & footer take Bates streams too.
+fn remove_tagged(doc: &mut Document, pages: &[usize], kind: MarkKind, with_bates: bool) -> Result<usize, EditError> {
     let all = page_list(doc);
     check(pages, all.len())?;
     let mut removed = 0;
@@ -311,7 +358,7 @@ pub fn remove_marks(doc: &mut Document, pages: &[usize], kind: MarkKind) -> Resu
         }
         let list = contents(doc, page)?;
         let before = list.len();
-        let mut kept: Vec<Object> = list.into_iter().filter(|o| stream_tag(doc, o).as_deref() != Some(kind.tag())).collect();
+        let mut kept: Vec<Object> = list.into_iter().filter(|o| !stream_tag(doc, o).is_some_and(|t| removes(kind, &t, with_bates))).collect();
         removed += before - kept.len();
         // Strip only wrapper pairs whose close ends the list (after stripping the pairs after
         // it): nothing comes after them to need the state they restore. Pairs come from the
@@ -354,6 +401,12 @@ pub fn remove_marks(doc: &mut Document, pages: &[usize], kind: MarkKind) -> Resu
         }
     }
     Ok(removed)
+}
+
+/// Whether removing `kind` takes away a stream tagged `tag`. Bates numbers went with the header
+/// and footer before they had a tag of their own, so removing header & footer still takes them.
+fn removes(kind: MarkKind, tag: &str, with_bates: bool) -> bool {
+    tag == kind.tag() || (with_bates && kind == MarkKind::HeaderFooter && tag == MarkKind::Bates.tag())
 }
 
 /// Which kinds of marks the document has (for enabling Update/Remove).

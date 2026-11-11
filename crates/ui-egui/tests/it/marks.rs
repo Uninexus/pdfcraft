@@ -102,7 +102,11 @@ fn header_and_footer_dialog_can_shrink_the_page_content() {
     h.get_by_label("OK").click();
     h.run_steps(4);
     assert_eq!(h.state().dialog, None);
-    assert_eq!(marks(&h), [MarkKind::HeaderFooter]);
+    assert_eq!(marks(&h), [MarkKind::Bates], "a Bates number is a mark of its own");
+    // Edit ▸ Bates numbering ▸ Remove takes it off again, and is then disabled.
+    assert!(h.state_mut().execute("edit.bates_remove"));
+    assert!(marks(&h).is_empty());
+    assert!(!h.state_mut().execute("edit.bates_remove"), "nothing left to remove");
 }
 
 #[test]

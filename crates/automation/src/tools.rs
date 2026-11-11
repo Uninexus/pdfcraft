@@ -1277,9 +1277,13 @@ pub fn tools() -> Vec<ToolDef> {
             .ro()
             .cmd("edit.background")
             .with(schema(json!({ "doc": doc(), "pages": pages("to check (default: all)") }), &["doc"])),
-        t("doc_remove_marks", "Remove header & footer, watermark, background or printer marks", "Remove every header and footer, watermark, background or printer marks PdfCraft (or a compatible tool) added. Undoable.")
+        t("doc_remove_marks", "Remove header & footer, watermark, background or printer marks", "Remove every header and footer, watermark, background or printer marks PdfCraft (or a compatible tool) added. kind header_footer also removes Bates numbers PdfCraft added (use doc_bates_remove to remove only those). Undoable.")
             .destructive()
             .with(schema(json!({ "doc": doc(), "kind": { "type": "string", "enum": ["header_footer", "watermark", "background", "printer_marks"] } }), &["doc", "kind"])),
+        t("doc_bates_remove", "Remove Bates numbering", "Remove the Bates numbers PdfCraft added to this document (doc_header_footer with a <<Bates Number…>> token). Only Bates numbers go (when a header or footer box mixes a Bates token with other text on one line, only the token goes): ordinary headers and footers, watermarks, backgrounds and page content stay. Bates numbers added by PdfCraft before they were kept apart, and numbers added by other tools, are not recognised. Fails when the document has no Bates numbers to remove. Undoable.")
+            .destructive()
+            .cmd("edit.bates_remove")
+            .with(schema(json!({ "doc": doc() }), &["doc"])),
         t("doc_export_images", "Export pages as images", "Write pages as PNG, JPEG or TIFF files (`<name>_page_<n>.png|jpg|tif`) into a folder, at a resolution (default 150 dpi). JPEG and TIFF are flattened onto white paper. A page too large for the renderer at that resolution is drawn at the most it allows, listed in `lower_dpi` ({page, dpi}). Includes unsaved edits.")
             .cmd("export.image")
             .with(schema(

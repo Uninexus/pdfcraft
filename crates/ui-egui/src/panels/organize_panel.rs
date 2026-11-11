@@ -44,6 +44,7 @@ pub(crate) fn panel(app: &mut PdfCraftApp, ui: &mut egui::Ui, t: &Tokens) {
     let Some(doc) = app.session.get(id) else { return };
     let info = &doc.info;
     let editable = doc.allows_assembly();
+    let has_bates = doc.allows_modification() && doc.marks().contains(&pdfcraft_engine::MarkKind::Bates);
     let n = info.pages.len();
     let mut act: Option<Act> = None;
     let mut back = false;
@@ -140,6 +141,10 @@ pub(crate) fn panel(app: &mut PdfCraftApp, ui: &mut egui::Ui, t: &Tokens) {
         });
         if row(ui, t, "hash", tl!("Bates numbering"), Availability::Ready, false).clicked() {
             act = Some(Act::Command("edit.bates"));
+        }
+        // Like the command: only while the document has Bates numbers to remove.
+        if ui.add_enabled_ui(has_bates, |ui| row(ui, t, "hash", tl!("Remove Bates numbering"), Availability::Ready, false)).inner.clicked() {
+            act = Some(Act::Command("edit.bates_remove"));
         }
         divider(ui, t);
         for (icon, label, availability, command) in [

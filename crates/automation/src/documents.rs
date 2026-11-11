@@ -667,6 +667,7 @@ impl Automation {
                 };
                 Edit::AddPrinterMarks { pages, settings, replace: a.opt_bool("replace")?.unwrap_or(true) }
             }
+            "doc_bates_remove" => Edit::RemoveMarks { kind: MarkKind::Bates },
             _ => {
                 let kind = match a.str("kind")? {
                     "header_footer" => MarkKind::HeaderFooter,

@@ -115,6 +115,8 @@ pub fn scan_markers(doc: &Document) -> MarkerScan {
                 let tag = dict.name(b"PCMark");
                 let kind = if tag == Some(&b"HeaderFooter"[..]) {
                     Some(MarkKind::HeaderFooter)
+                } else if tag == Some(&b"Bates"[..]) {
+                    Some(MarkKind::Bates)
                 } else if tag == Some(&b"Watermark"[..]) {
                     Some(MarkKind::Watermark)
                 } else if tag == Some(&b"Background"[..]) {

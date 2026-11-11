@@ -3908,6 +3908,48 @@ fn a_shrinking_header_and_footer_moves_the_page_content_out_of_their_way_through
 }
 
 #[test]
+fn bates_remove_takes_only_the_bates_numbers_off_every_page_and_survives_save_reopen() {
+    let dir = workdir("bates-remove");
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "a.pdf" }))["doc"].as_u64().unwrap();
+    // An ordinary header and footer, then Bates numbers in the other footer corner.
+    ok(&mut a, "doc_header_footer", json!({ "doc": doc, "header_center": "CONFIDENTIAL-HDR", "footer_left": "ACME-FTR" }));
+    ok(&mut a, "doc_header_footer", json!({ "doc": doc, "footer_right": "<<Bates Number#6#1#BX-#>>" }));
+    let numbered = page_text(&mut a, doc);
+    assert_eq!(numbered.len(), 3);
+    for (i, text) in numbered.iter().enumerate() {
+        assert!(text.contains(&format!("BX-{:06}", i + 1)), "page {} is Bates numbered: {text:?}", i + 1);
+    }
+    ok(&mut a, "doc_bates_remove", json!({ "doc": doc }));
+    ok(&mut a, "doc_save", json!({ "doc": doc, "path": "unbated.pdf" }));
+    let copy = ok(&mut a, "doc_open", json!({ "path": "unbated.pdf" }))["doc"].as_u64().unwrap();
+    for (i, text) in page_text(&mut a, copy).iter().enumerate() {
+        assert!(!text.contains("BX-") && !text.contains("00000"), "page {} still has a Bates number: {text:?}", i + 1);
+        assert!(text.contains("CONFIDENTIAL-HDR") && text.contains("ACME-FTR"), "page {} keeps its header and footer: {text:?}", i + 1);
+        assert!(text.contains(&format!("Page {}", i + 1)), "page {} keeps its body text: {text:?}", i + 1);
+    }
+    // Undoable: the numbers come back.
+    ok(&mut a, "edit_undo", json!({ "doc": doc }));
+    assert!(page_text(&mut a, doc)[2].contains("BX-000003"));
+    // Nothing left to remove after the second pass: refused with a clear error.
+    ok(&mut a, "doc_bates_remove", json!({ "doc": doc }));
+    assert!(matches!(a.call("doc_bates_remove", &json!({ "doc": doc })), Err(ToolError::Failed(_))));
+}
+
+#[test]
+fn bates_remove_with_no_bates_numbers_says_there_is_nothing_to_remove() {
+    let dir = workdir("bates-none");
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "a.pdf" }))["doc"].as_u64().unwrap();
+    let e = err(&mut a, "doc_bates_remove", json!({ "doc": doc }));
+    assert!(matches!(&e, ToolError::Failed(m) if m.contains("nothing to remove")), "{e}");
+    // An ordinary header and footer is not a Bates number.
+    ok(&mut a, "doc_header_footer", json!({ "doc": doc, "header_center": "KEEP-ME" }));
+    assert!(matches!(a.call("doc_bates_remove", &json!({ "doc": doc })), Err(ToolError::Failed(_))));
+    assert!(page_text(&mut a, doc)[0].contains("KEEP-ME"));
+}
+
+#[test]
 fn watermarks_move_from_the_page_centre_through_tools() {
     let dir = workdir("wm-offset");
     let mut a = auto(&dir);
