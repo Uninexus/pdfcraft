@@ -9736,6 +9736,122 @@ fn comparing_documents_through_tools() {
     assert!(a.call("doc_compare", &json!({ "doc": v2, "other": 999 })).is_err());
 }
 
+/// Compare files with a page range for each document: only the pages in range are compared,
+/// changes keep each document's own page numbers, and a bad range is refused.
+#[test]
+fn comparing_documents_through_tools_within_page_ranges() {
+    let dir = workdir("compare-ranges");
+    let mut a = auto(&dir);
+    // Four pages each; the documents differ on page 2 (alpha/ALPHA) and page 4 (delta/DELTA).
+    let old = "one first\u{c}two alpha\u{c}three third\u{c}four delta";
+    let new = "one first\u{c}two ALPHA\u{c}three third\u{c}four DELTA";
+    let v1 = ok(&mut a, "doc_create", json!({ "from": "text", "text": old }))["doc"].as_u64().unwrap();
+    let v2 = ok(&mut a, "doc_create", json!({ "from": "text", "text": new }))["doc"].as_u64().unwrap();
+    let texts = |r: &serde_json::Value| -> Vec<(String, u64)> {
+        r["changes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| (c["new"]["text"].as_str().unwrap().to_string(), c["new"]["page"].as_u64().unwrap()))
+            .collect()
+    };
+    // Default: both changes.
+    let r = ok(&mut a, "doc_compare", json!({ "doc": v2, "other": v1 }));
+    assert_eq!(texts(&r), [("ALPHA".to_string(), 2), ("DELTA".to_string(), 4)], "{r}");
+    // Pages 3 to 4 of each: only the change on page 4, still reported as page 4.
+    let r = ok(&mut a, "doc_compare", json!({ "doc": v2, "other": v1, "doc_from": 3, "doc_to": 4, "other_from": 3, "other_to": 4 }));
+    assert_eq!(texts(&r), [("DELTA".to_string(), 4)], "{r}");
+    assert_eq!((r["new_words"].as_u64(), r["old_words"].as_u64()), (Some(4), Some(4)), "{r}");
+    // A missing end defaults to the document's edge.
+    let r = ok(&mut a, "doc_compare", json!({ "doc": v2, "other": v1, "doc_to": 2, "other_to": 2 }));
+    assert_eq!(texts(&r), [("ALPHA".to_string(), 2)], "{r}");
+    // A range with no differences.
+    let r = ok(&mut a, "doc_compare", json!({ "doc": v2, "other": v1, "doc_from": 3, "doc_to": 3, "other_from": 3, "other_to": 3 }));
+    assert_eq!(r["identical"], true, "{r}");
+    assert!(r["changes"].as_array().unwrap().is_empty());
+    // Different ranges per document: old page 4 against new pages 3 to 4.
+    let r = ok(&mut a, "doc_compare", json!({ "doc": v2, "other": v1, "doc_from": 3, "doc_to": 4, "other_from": 4 }));
+    let got: Vec<(String, u64, u64)> = r["changes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| (c["kind"].as_str().unwrap().to_string(), c["old"]["page"].as_u64().unwrap(), c["new"]["page"].as_u64().unwrap()))
+        .collect();
+    assert_eq!(got, [("inserted".to_string(), 4, 3), ("replaced".to_string(), 4, 4)], "{r}");
+    assert_eq!((r["old_words"].as_u64(), r["new_words"].as_u64()), (Some(2), Some(4)), "{r}");
+}
+
+/// Visual differences with page ranges pair the ranges' pages by position and report both pages.
+#[test]
+fn comparing_documents_visually_within_page_ranges() {
+    let dir = workdir("compare-visual-ranges");
+    let mut a = auto(&dir);
+    let v1 = ok(&mut a, "doc_create", json!({ "from": "text", "text": "one first\u{c}two alpha\u{c}three third\u{c}four delta" }))["doc"]
+        .as_u64()
+        .unwrap();
+    let v2 = ok(&mut a, "doc_create", json!({ "from": "text", "text": "one first\u{c}two ALPHA\u{c}three third\u{c}four DELTA" }))["doc"]
+        .as_u64()
+        .unwrap();
+    let pages = |r: &serde_json::Value| -> std::collections::BTreeSet<(u64, u64)> {
+        r["visual"].as_array().unwrap().iter().map(|v| (v["old_page"].as_u64().unwrap_or(0), v["page"].as_u64().unwrap())).collect()
+    };
+    // No ranges: page n with page n, and no old_page key.
+    let r = ok(&mut a, "doc_compare", json!({ "doc": v2, "other": v1, "visual": true }));
+    assert!(r["visual"][0].get("old_page").is_none(), "{r}");
+    assert_eq!(
+        r["visual"].as_array().unwrap().iter().map(|v| v["page"].as_u64().unwrap()).collect::<std::collections::BTreeSet<_>>(),
+        [2, 4].into(),
+        "{r}"
+    );
+    // Pages 2 to 3 of each: page 2 differs, page 3 does not.
+    let r = ok(&mut a, "doc_compare", json!({ "doc": v2, "other": v1, "visual": true, "doc_from": 2, "doc_to": 3, "other_from": 2, "other_to": 3 }));
+    assert_eq!(pages(&r), [(2, 2)].into(), "{r}");
+    // Aligned by position: old page 4 against new page 2 is a visual difference, on new page 2.
+    let r = ok(&mut a, "doc_compare", json!({ "doc": v2, "other": v1, "visual": true, "doc_from": 2, "doc_to": 2, "other_from": 4, "other_to": 4 }));
+    assert_eq!(pages(&r), [(4, 2)].into(), "{r}");
+    // Identical pages paired: nothing.
+    let r = ok(&mut a, "doc_compare", json!({ "doc": v2, "other": v1, "visual": true, "doc_from": 3, "doc_to": 3, "other_from": 3, "other_to": 3 }));
+    assert!(r["visual"].as_array().unwrap().is_empty(), "{r}");
+}
+
+/// Each range argument's errors are InvalidArgs that name the argument and show only what was passed.
+#[test]
+fn compare_page_range_errors_name_the_argument() {
+    let dir = workdir("compare-range-errors");
+    let mut a = auto(&dir);
+    let make = |a: &mut Automation, text: &str| ok(a, "doc_create", json!({ "from": "text", "text": text }))["doc"].as_u64().unwrap();
+    let four = make(&mut a, "a\u{c}b\u{c}c\u{c}d");
+    let one = make(&mut a, "a");
+    for prefix in ["doc", "other"] {
+        let (new, old) = (four, four);
+        let call = |a: &mut Automation, k: &str, v: i64, extra: Option<(&str, i64)>| {
+            let mut args = json!({ "doc": new, "other": old, k: v });
+            if let Some((k2, v2)) = extra {
+                args[k2] = json!(v2);
+            }
+            let e = a.call("doc_compare", &args).unwrap_err();
+            assert!(matches!(e, ToolError::InvalidArgs(_)), "{args}: {e:?}");
+            e.to_string()
+        };
+        let (f, t) = (format!("{prefix}_from"), format!("{prefix}_to"));
+        let m = call(&mut a, &f, 0, None);
+        assert!(m.contains(&f) && m.contains("at least 1"), "{m}");
+        let m = call(&mut a, &t, -3, None);
+        assert!(m.contains(&t) && m.contains("-3"), "{m}");
+        let m = call(&mut a, &f, 5, None);
+        assert!(m.contains(&f) && m.contains("the document has 4 pages") && !m.contains(&t), "{m}");
+        let m = call(&mut a, &t, 9, None);
+        assert!(m.contains(&t) && m.contains("out of range"), "{m}");
+        let m = call(&mut a, &f, 3, Some((&t, 2)));
+        assert!(m.contains(&f) && m.contains(&t) && m.contains("after"), "{m}");
+        let m = call(&mut a, &f, i64::MAX, None);
+        assert!(m.contains(&f) && (m.contains("too large") || m.contains("out of range")), "{m}");
+    }
+    // One page: singular, and a defaulted bound is not shown.
+    let e = a.call("doc_compare", &json!({ "doc": one, "other": four, "doc_to": 2 })).unwrap_err().to_string();
+    assert!(e.contains("doc_to 2") && e.contains("has 1 page") && !e.contains("1 pages"), "{e}");
+}
+
 /// `action_list` and `action_run`: built-in actions by name and ad-hoc steps run on files,
 /// missing inputs are reported per file, and an unknown step is refused.
 #[test]

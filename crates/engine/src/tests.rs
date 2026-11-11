@@ -7456,6 +7456,36 @@ fn detecting_comb_boxes_adds_one_comb_field_per_row() {
 }
 
 #[test]
+fn comparing_page_ranges_keeps_original_page_numbers() {
+    let mut s = Session::new().with_clock(|| 1_700_000_000);
+    let v1 = s.create_from_text("t", "a one\u{c}b two\u{c}c three\u{c}d four").unwrap();
+    let v2 = s.create_from_text("t", "a one\u{c}b TWO\u{c}c three\u{c}d FOUR").unwrap();
+    let old = s.open("v1.pdf", None, v1, None).unwrap();
+    let new = s.open("v2.pdf", None, v2, None).unwrap();
+    let r = |from, to| Some(compare::PageRange { from, to });
+    let pages = |c: &compare::Comparison| c.changes.iter().map(|x| x.new.page).collect::<Vec<_>>();
+    assert_eq!(pages(&s.compare_in(old, new, None, None).unwrap()), [1, 3]);
+    assert_eq!(pages(&s.compare_in(old, new, r(3, 4), r(3, 4)).unwrap()), [3]);
+    assert!(s.compare_in(old, new, r(3, 3), r(3, 3)).unwrap().identical());
+    // The ranges are independent: page 4 of the old file against pages 3 to 4 of the new.
+    assert!(s.compare_in(old, new, r(4, 4), r(3, 4)).is_ok());
+    // A range without words puts the change on the range's first page, not page 1.
+    let blank = s.create_from_text("t", "a\u{c}\u{c}c").unwrap();
+    let blank = s.open("blank.pdf", None, blank, None).unwrap();
+    let c = s.compare_in(blank, blank, r(2, 2), r(3, 3)).unwrap();
+    assert_eq!((c.changes.len(), c.changes[0].old.page, c.changes[0].new.page), (1, 1, 2));
+    // Visual: ranges pair by position and report both pages.
+    let v = s.compare_visual_in(old, new, 72.0, r(2, 2), r(2, 2)).unwrap();
+    assert!(!v.is_empty() && v.iter().all(|(o, n, _)| (*o, *n) == (1, 1)), "{v:?}");
+    assert!(s.compare_visual_in(old, new, 72.0, r(1, 1), r(1, 1)).unwrap().is_empty());
+    assert!(matches!(s.compare_visual_in(old, new, 72.0, r(0, 1), None), Err(EditError::Compare(_))));
+    for bad in [r(0, 2), r(2, 1), r(1, 5), r(0, 0)] {
+        assert!(matches!(s.compare_in(old, new, bad, None), Err(EditError::Compare(_))), "{bad:?}");
+        assert!(matches!(s.compare_in(old, new, None, bad), Err(EditError::Compare(_))), "{bad:?}");
+    }
+}
+
+#[test]
 fn comparing_two_versions_of_a_document() {
     let mut s = Session::new().with_clock(|| 1_700_000_000);
     let v1 = s.create_from_text("t", "The contract starts on Monday.\n\nPayment is due within thirty days.\n\nSigned by both parties.").unwrap();

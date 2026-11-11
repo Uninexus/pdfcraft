@@ -26,6 +26,33 @@ pub fn colour(kind: Kind) -> crate::Rgb {
     }
 }
 
+/// A 1-based, inclusive range of pages of one document for Compare files ("Pages N to M").
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PageRange {
+    pub from: usize,
+    pub to: usize,
+}
+
+impl PageRange {
+    /// The 0-based pages this range covers in a document of `count` pages, or why it can't.
+    /// Nothing is clamped: a range that starts below 1, ends before it starts or reaches past
+    /// the last page is refused (as neighbouring page arguments are), saying what is allowed.
+    pub fn resolve(self, count: usize) -> Result<std::ops::Range<usize>, EditError> {
+        let bad = |why: String| EditError::Compare(why);
+        let pages = if count == 1 { "page" } else { "pages" };
+        if self.from < 1 || self.to < 1 {
+            return Err(bad(format!("page range {} to {} is invalid: pages start at 1", self.from, self.to)));
+        }
+        if self.from > self.to {
+            return Err(bad(format!("page range {} to {} is invalid: the first page is after the last", self.from, self.to)));
+        }
+        if self.to > count {
+            return Err(bad(format!("page range {} to {} is out of range: the document has {count} {pages}", self.from, self.to)));
+        }
+        Ok(self.from - 1..self.to)
+    }
+}
+
 impl crate::Document {
     /// Standards ▸ Verify PDF/A: the rules the document breaks for `level`.
     pub fn pdfa_verify(&self, level: pdfcraft_preflight::Level) -> Vec<pdfcraft_preflight::Issue> {
@@ -56,11 +83,39 @@ impl Session {
     /// Compare files: the text differences from document `old` to document `new`. The result
     /// carries both documents' text, so both must allow copying it.
     pub fn compare(&self, old: DocId, new: DocId) -> Result<Comparison, EditError> {
+        self.compare_in(old, new, None, None)
+    }
+
+    /// [`Session::compare`] of only the pages in `old_range` of `old` and `new_range` of `new`
+    /// (`None`: every page). Only the words on those pages are compared; the pages in the result
+    /// are the documents' own (page 7 is page 7, not renumbered from the range), and the word
+    /// counts are of the compared pages. An invalid range is an error ([`PageRange::resolve`]).
+    pub fn compare_in(&self, old: DocId, new: DocId, old_range: Option<PageRange>, new_range: Option<PageRange>) -> Result<Comparison, EditError> {
         let a = self.get(old).ok_or(EditError::NoDocument)?;
         let b = self.get(new).ok_or(EditError::NoDocument)?;
+        let old_pages = old_range.map(|r| r.resolve(a.info.pages.len())).transpose()?;
+        let new_pages = new_range.map(|r| r.resolve(b.info.pages.len())).transpose()?;
         a.check_copying()?;
         b.check_copying()?;
-        Ok(pdfcraft_compare::compare(&a.words(), &b.words()))
+        let within = |mut words: Vec<pdfcraft_compare::Word>, pages: Option<std::ops::Range<usize>>| {
+            if let Some(p) = pages {
+                words.retain(|w| p.contains(&w.page));
+            }
+            words
+        };
+        let (old_words, new_words) = (within(a.words(), old_pages.clone()), within(b.words(), new_pages.clone()));
+        let mut c = pdfcraft_compare::compare(&old_words, &new_words);
+        // A range without words has no neighbour to place a change by: put it on the range's
+        // first page rather than page 1.
+        for (words, pages, side) in [(&old_words, &old_pages, 0), (&new_words, &new_pages, 1)] {
+            if let (true, Some(p)) = (words.is_empty(), pages) {
+                for ch in &mut c.changes {
+                    let s = if side == 0 { &mut ch.old } else { &mut ch.new };
+                    (s.page, s.last_page) = (p.start, p.start);
+                }
+            }
+        }
+        Ok(c)
     }
 
     /// [`Session::compare`], keeping the changes on `pages` of `new` (0-based; empty: every page).
@@ -75,8 +130,25 @@ impl Session {
     /// Visual compare: regions where page n of `new` looks different from page n of `old`
     /// (rendered at `dpi`), as (page, user-space box in `new`).
     pub fn compare_visual(&self, old: DocId, new: DocId, dpi: f32) -> Result<Vec<(usize, [f64; 4])>, EditError> {
+        Ok(self.compare_visual_in(old, new, dpi, None, None)?.into_iter().map(|(_, page, rect)| (page, rect)).collect())
+    }
+
+    /// [`Session::compare_visual`] of page ranges: the pages of the ranges are paired by position
+    /// (`old_range.from + k` with `new_range.from + k`, for as many pairs as the shorter range
+    /// has; no range: the whole document, so page n with page n). Returns (old page, new page,
+    /// user-space box in `new`), pages 0-based and the documents' own.
+    pub fn compare_visual_in(
+        &self,
+        old: DocId,
+        new: DocId,
+        dpi: f32,
+        old_range: Option<PageRange>,
+        new_range: Option<PageRange>,
+    ) -> Result<Vec<(usize, usize, [f64; 4])>, EditError> {
         let a = self.get(old).ok_or(EditError::NoDocument)?;
         let b = self.get(new).ok_or(EditError::NoDocument)?;
+        let old_pages = old_range.map(|r| r.resolve(a.info.pages.len())).transpose()?.unwrap_or(0..a.info.pages.len());
+        let new_pages = new_range.map(|r| r.resolve(b.info.pages.len())).transpose()?.unwrap_or(0..b.info.pages.len());
         let renderer = |d: &crate::Document| {
             pdfcraft_render::PageRenderer::new(
                 d.bytes.clone(),
@@ -86,9 +158,10 @@ impl Session {
         let (mut ra, mut rb) = (renderer(a), renderer(b));
         let scale = dpi.clamp(18.0, 150.0) / 72.0;
         let mut out = Vec::new();
-        for (page, info) in b.info.pages.iter().enumerate().take(a.info.pages.len()) {
-            let req = pdfcraft_render::RenderRequest { page, scale, ..Default::default() };
-            let (x, y) = (ra.render(req), rb.render(req));
+        for (old_page, page) in old_pages.zip(new_pages) {
+            let Some(info) = b.info.pages.get(page) else { continue };
+            let x = ra.render(pdfcraft_render::RenderRequest { page: old_page, scale, ..Default::default() });
+            let y = rb.render(pdfcraft_render::RenderRequest { page, scale, ..Default::default() });
             if x.error.is_some() || y.error.is_some() {
                 continue;
             }
@@ -96,7 +169,7 @@ impl Session {
             for r in pdfcraft_compare::visual_regions((&y.rgba, y.width, y.height), (&x.rgba, x.width, x.height), 24) {
                 let p = info.view_to_user(r[0] as f32 / s, r[1] as f32 / s);
                 let q = info.view_to_user(r[2] as f32 / s, r[3] as f32 / s);
-                out.push((page, [p[0].min(q[0]) as f64, p[1].min(q[1]) as f64, p[0].max(q[0]) as f64, p[1].max(q[1]) as f64]));
+                out.push((old_page, page, [p[0].min(q[0]) as f64, p[1].min(q[1]) as f64, p[0].max(q[0]) as f64, p[1].max(q[1]) as f64]));
             }
         }
         Ok(out)

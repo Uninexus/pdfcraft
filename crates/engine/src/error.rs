@@ -55,6 +55,8 @@ pub enum EditError {
     Reopen(String),
     #[error("couldn't use {0}")]
     Source(String),
+    #[error("{0}")]
+    Compare(String),
     #[error("nothing to undo")]
     NothingToUndo,
     #[error("nothing to redo")]
