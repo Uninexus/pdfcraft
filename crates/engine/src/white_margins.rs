@@ -63,10 +63,10 @@ pub fn content_bounds(rgba: &[u8], width: usize, height: usize) -> Option<[usize
     }
     let (mut x0, mut y0, mut x1, mut y1) = (usize::MAX, usize::MAX, 0usize, 0usize);
     for (y, line) in rgba.chunks_exact(row.max(4)).take(height).enumerate() {
-        for (x, px) in line.chunks_exact(4).enumerate() {
+        let (px_chunks, _) = line.as_chunks::<4>();
+        for (x, px) in px_chunks.iter().enumerate() {
             let content = match px {
                 [r, g, b, a] => *a >= ALPHA_BLANK && (*r < WHITE_FROM || *g < WHITE_FROM || *b < WHITE_FROM),
-                _ => false,
             };
             if content {
                 x0 = x0.min(x);
