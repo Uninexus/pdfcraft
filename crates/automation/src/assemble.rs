@@ -143,6 +143,30 @@ impl Automation {
         Ok(out)
     }
 
+    /// `page_remove_white_margins`: crop pages to their content ([`Session::remove_white_margins`]).
+    pub(crate) fn page_remove_white_margins(&mut self, a: &Args) -> Result<Value> {
+        let doc = self.doc(a)?;
+        let (id, n) = (doc.id, doc.info.pages.len());
+        let pages = match a.opt_ints("pages")? {
+            Some(_) => self.pages(a, "pages")?,
+            None => (0..n).collect(),
+        };
+        let padding = a.opt_num("padding")?.unwrap_or(0.0);
+        if !padding.is_finite() || !(0.0..=pdfcraft_engine::white_margins::MAX_PADDING).contains(&padding) {
+            return Err(ToolError::InvalidArgs(format!("padding must be between 0 and {} points", pdfcraft_engine::white_margins::MAX_PADDING)));
+        }
+        let report = self.session.remove_white_margins(id, &pages, padding).map_err(failed)?;
+        let numbered = |v: &[usize]| v.iter().map(|p| p + 1).collect::<Vec<_>>();
+        let mut out = self.applied(a)?;
+        out["cropped"] = json!(report.cropped.iter().map(|(p, r)| json!({ "page": p + 1, "crop_box": r })).collect::<Vec<_>>());
+        out["unchanged"] = json!(numbered(&report.unchanged));
+        out["blank"] = json!(numbered(&report.blank));
+        out["failed"] = json!(report.failed.iter().map(|(p, why)| json!({ "page": p + 1, "error": why })).collect::<Vec<_>>());
+        let hundredths = |v: f32| (f64::from(v) * 100.0).round() / 100.0;
+        out["page_sizes"] = json!(self.doc(a)?.info.pages.iter().map(|p| [hundredths(p.width), hundredths(p.height)]).collect::<Vec<_>>());
+        Ok(out)
+    }
+
     pub(crate) fn insert_blank(&mut self, a: &Args) -> Result<Value> {
         let doc = self.doc(a)?;
         let at = self.position(a, "at")?;

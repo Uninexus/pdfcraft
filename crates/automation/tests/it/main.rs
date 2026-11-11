@@ -22,3 +22,4 @@ mod redact_text_after_q;
 mod render_warnings;
 mod text_copy;
 mod unreadable_objects;
+mod white_margins;

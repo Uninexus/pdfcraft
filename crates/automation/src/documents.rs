@@ -541,7 +541,7 @@ impl Automation {
     }
 
     /// The document's summary after an edit, with what it stored as typed but drew with `?`.
-    fn applied(&mut self, a: &Args) -> Result<Value> {
+    pub(crate) fn applied(&mut self, a: &Args) -> Result<Value> {
         let doc = self.doc(a)?;
         let mut out = summary(doc);
         // Text the edit stored as typed but drew with `?` (its font can't draw it): said, not silent.
