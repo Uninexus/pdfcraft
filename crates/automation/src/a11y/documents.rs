@@ -173,10 +173,43 @@ impl Automation {
         Ok((old, new))
     }
 
+    /// The optional `{prefix}_from` / `{prefix}_to` (1-based, inclusive) of document `id`; a
+    /// missing end defaults to the first or last page. `None` when neither is given. Errors name
+    /// the argument and show only values the caller passed.
+    fn compare_range(&self, a: &Args, prefix: &str, id: pdfcraft_engine::DocId) -> Result<Option<pdfcraft_engine::compare::PageRange>> {
+        let (from_key, to_key) = (format!("{prefix}_from"), format!("{prefix}_to"));
+        let (from, to) = (a.opt_int(&from_key)?, a.opt_int(&to_key)?);
+        if from.is_none() && to.is_none() {
+            return Ok(None);
+        }
+        let count = self.session.get(id).map_or(0, |d| d.info.pages.len());
+        let pages = if count == 1 { "page" } else { "pages" };
+        let bad = |m: String| ToolError::InvalidArgs(m);
+        let check = |key: &str, v: Option<i64>| -> Result<Option<usize>> {
+            let Some(v) = v else { return Ok(None) };
+            if v < 1 {
+                return Err(bad(format!("{key} must be at least 1 (pages start at 1), not {v}")));
+            }
+            let p = usize::try_from(v).map_err(|_| bad(format!("{key} {v} is too large: the document has {count} {pages}")))?;
+            if p > count {
+                return Err(bad(format!("{key} {v} is out of range: the document has {count} {pages}")));
+            }
+            Ok(Some(p))
+        };
+        let (f, t) = (check(&from_key, from)?, check(&to_key, to)?);
+        if let (Some(f), Some(t)) = (f, t)
+            && f > t
+        {
+            return Err(bad(format!("{from_key} ({f}) is after {to_key} ({t}): the first page must not come after the last")));
+        }
+        Ok(Some(pdfcraft_engine::compare::PageRange { from: f.unwrap_or(1), to: t.unwrap_or(count) }))
+    }
+
     pub(crate) fn doc_compare(&self, a: &Args) -> Result<Value> {
         use pdfcraft_engine::compare::Kind;
         let (old, new) = self.compare_ids(a)?;
-        let c = self.session.compare(old, new).map_err(failed)?;
+        let (old_range, new_range) = (self.compare_range(a, "other", old)?, self.compare_range(a, "doc", new)?);
+        let c = self.session.compare_in(old, new, old_range, new_range).map_err(failed)?;
         let limit = a.opt_int("limit")?.unwrap_or(500).max(1) as usize;
         let r2 = |r: &[f64; 4]| r.map(|v| (v * 100.0).round() / 100.0);
         let side =
@@ -188,7 +221,18 @@ impl Automation {
             .map(|ch| json!({ "kind": ch.kind.label().to_lowercase(), "old": side(&ch.old), "new": side(&ch.new) }))
             .collect();
         let visual: Vec<Value> = if a.opt_bool("visual")?.unwrap_or(false) {
-            self.session.compare_visual(old, new, 72.0).map_err(failed)?.iter().map(|(p, r)| json!({ "page": p + 1, "rect": r2(r) })).collect()
+            // Pages of the ranges are paired by position (old from + k with new from + k).
+            let ranged = old_range.is_some() || new_range.is_some();
+            self.session
+                .compare_visual_in(old, new, 72.0, old_range, new_range)
+                .map_err(failed)?
+                .iter()
+                .map(
+                    |(o, p, r)| {
+                        if ranged { json!({ "page": p + 1, "old_page": o + 1, "rect": r2(r) }) } else { json!({ "page": p + 1, "rect": r2(r) }) }
+                    },
+                )
+                .collect()
         } else {
             Vec::new()
         };

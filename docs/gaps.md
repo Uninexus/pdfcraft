@@ -386,14 +386,16 @@ update the numbers.
   the CPU and uploaded); pressure-sensitive ink; platform text-to-speech.
 - **Estimate:** 25–50 h; scanners need hardware. **Doc:** [hardware-parity.md](hardware-parity.md).
 
-### 21. Compare: filters by Acrobat's finer kinds of change, page ranges, scanned documents
+### 21. Compare: filters by Acrobat's finer kinds of change, page ranges in the dialog, scanned documents
 
 - **Done:** the synchronised side-by-side view; the Compare panel's Show: Text / Visual filter
   (Text hides the text changes from the list and the shading, Visual hides the visual differences
-  from the shading; they are counted, not listed).
+  from the shading; they are counted, not listed); a page range for each document in the engine
+  and `doc_compare` (`doc_from`/`doc_to`, `other_from`/`other_to`).
 - **Missing:** telling images, annotations, formatting and background/header-footer changes apart
   (all of them are Visual today), scrolling the two halves by matching content rather than by
-  offset, page ranges, scanned documents.
+  offset, the page ranges in the Compare Files dialog (its Pages field filters the new file's
+  changes only) and in the report and Mark as comments, scanned documents.
 - **Estimate:** 8–16 h. **Doc:** [target-app-parity.md](target-app-parity.md).
 
 ### 22. PDF 2.0 extras, linearization, Arlington validation
