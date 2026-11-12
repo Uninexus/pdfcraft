@@ -15,8 +15,15 @@
 pub const UPDATE_APP: craft_update::app::App = craft_update::app::App {
     icon_png: Some(include_bytes!("../../../assets/app-icon/hicolor/128x128/apps/ai.storyteller.pdfcraft.png")),
     accent: Some([0xb7, 0x02, 0x28]),
+    // This fork looks for updates in its own releases only, never upstream's: a build of ours
+    // must not offer to replace itself with the upstream app (it has our changes, they don't).
+    repo: FORK_REPO,
     ..craft_update::suite::PDFCRAFT
 };
+
+/// The GitHub `owner/repo` whose releases this build updates from.
+#[cfg(not(target_arch = "wasm32"))]
+pub const FORK_REPO: &str = "Uninexus/pdfcraft";
 
 use crate::control::Host as _;
 
