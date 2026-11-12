@@ -1,5 +1,5 @@
 //! The unit lengths are shown in: page sizes (Document Properties, Print) and the margins typed
-//! in Header & Footer and Set Page Boxes. Preferences ▸ Documents and view ▸ Units.
+//! in Header & Footer and Set Page Boxes. Preferences ▸ Units and paper.
 
 use serde::{Deserialize, Serialize};
 
@@ -49,6 +49,13 @@ impl Unit {
             Unit::Inches | Unit::Centimetres => 0.01,
             Unit::Millimetres | Unit::Points => 0.5,
         }
+    }
+
+    /// The unit a typed name stands for: its label (`in`, `mm`, `cm`, `pt`) or its saved name
+    /// (`inches`, `millimetres`, …), in any case; `None` for anything else.
+    pub fn from_token(name: &str) -> Option<Unit> {
+        let name = name.trim().to_ascii_lowercase();
+        Unit::ALL.into_iter().find(|u| u.label() == name || serde_json::to_value(u).ok().and_then(|v| v.as_str().map(|s| s == name)).unwrap_or(false))
     }
 
     /// The unit the system's region measures in: inches in the United States, Liberia and
@@ -190,6 +197,17 @@ mod tests {
         assert_eq!(Unit::Centimetres.size(595.276, 841.89), "21.00 × 29.70 cm");
         assert_eq!(Unit::Inches.size(612.0, 792.0), "8.50 × 11.00 in");
         assert_eq!(Unit::Points.size(612.0, 792.0), "612.0 × 792.0 pt");
+    }
+
+    #[test]
+    fn typed_names_find_their_unit() {
+        for u in Unit::ALL {
+            assert_eq!(Unit::from_token(u.label()), Some(u));
+            assert_eq!(Unit::from_token(&serde_json::to_value(u).unwrap().as_str().unwrap().to_uppercase()), Some(u));
+        }
+        for bad in ["", "feet", "px", "in ches"] {
+            assert_eq!(Unit::from_token(bad), None, "{bad:?}");
+        }
     }
 
     #[test]

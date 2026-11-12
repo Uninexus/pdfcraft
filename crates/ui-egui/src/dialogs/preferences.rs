@@ -318,6 +318,14 @@ impl<'a> PrefSearchContext<'a> {
         resp
     }
 
+    pub fn button(&mut self, ui: &mut egui::Ui, text: &str, t: &Tokens) -> egui::Response {
+        let (widget_text, count) = highlight_widget_text(text, self.query, theme::regular(13.0), t.text);
+        self.total_matches += count;
+        let resp = ui.button(widget_text);
+        self.scroll_if_first_match(&resp, count);
+        resp
+    }
+
     pub fn label(&mut self, ui: &mut egui::Ui, text: &str, font: egui::FontId, color: Color32) -> egui::Response {
         let (widget_text, count) = highlight_widget_text(text, self.query, font, color);
         self.total_matches += count;
@@ -523,10 +531,18 @@ pub(crate) fn preferences_body(ui: &mut egui::Ui, app: &mut PdfCraftApp, t: &Tok
     });
     ui.add_space(12.0);
 
-    // Card 4: Comment
+    // Units and paper
+    preference_card(ui, t, tl!("Units and paper"), Some("ruler"), &mut ctx, |ui, ctx| {
+        card_units_and_paper(ui, app, t, ctx);
+    });
+    ui.add_space(12.0);
+
+    // Card 4: Comment (the name on comments, then how the comment tools behave)
     let title4 = tl!("Comment");
     preference_card(ui, t, title4, Some("message-square-text"), &mut ctx, |ui, ctx| {
         card_identity(ui, app, t, ctx);
+        ui.add_space(10.0);
+        card_commenting_tools(ui, app, t, ctx);
     });
     ui.add_space(12.0);
 
@@ -828,6 +844,12 @@ fn card_documents_and_view(ui: &mut egui::Ui, app: &mut PdfCraftApp, t: &Tokens,
     ctx.label_secondary(ui, tl!("Only web (http, https) and email addresses open, and PdfCraft asks first, as for other links."), t);
     ui.add_space(6.0);
 
+    scrolling(ui, app, t, ctx);
+}
+
+/// Content for the Units and paper card: the unit lengths are shown in, and the paper a new blank
+/// page is made on.
+fn card_units_and_paper(ui: &mut egui::Ui, app: &mut PdfCraftApp, t: &Tokens, ctx: &mut PrefSearchContext) {
     ui.horizontal(|ui| {
         ctx.label_primary(ui, tl!("Units"), t);
         ctx.pill_choice(
@@ -844,7 +866,23 @@ fn card_documents_and_view(ui: &mut egui::Ui, app: &mut PdfCraftApp, t: &Tokens,
     });
     ctx.label_secondary(ui, tl!("For page sizes and margins."), t);
     ui.add_space(6.0);
-    scrolling(ui, app, t, ctx);
+    ui.horizontal(|ui| {
+        ctx.label_primary(ui, tl!("Paper for new blank pages"), t);
+        ctx.pill_choice(ui, t, &mut app.blank_paper, &[(crate::paper::Paper::Letter, tl!("US Letter")), (crate::paper::Paper::A4, tl!("A4"))]);
+    });
+    ctx.label_secondary(ui, tl!("Used by Create ▸ Blank page. It starts as the paper of the system's region."), t);
+}
+
+/// The comment tools' behaviour, in the Comment card: whether they stay selected and what they start with.
+fn card_commenting_tools(ui: &mut egui::Ui, app: &mut PdfCraftApp, t: &Tokens, ctx: &mut PrefSearchContext) {
+    ctx.checkbox(ui, &mut app.comment_prefs.pinned, tl!("Keep the selected comment tool selected after use"), t);
+    ctx.label_secondary(ui, tl!("The same as the pin on the comment toolbar."), t);
+    ui.add_space(6.0);
+    if ctx.button(ui, tl!("Reset comment tool colours and sizes"), t).clicked() {
+        app.comment_prefs.reset_defaults();
+        app.notify_fmt("Comment tool defaults reset", &[]);
+    }
+    ctx.label_secondary(ui, tl!("Forgets the colours, opacities, widths and font sizes saved with Make Current Properties Default. Fill & Sign text defaults are not changed."), t);
 }
 
 /// The scroll speed and the middle button's direction, in Card 3.

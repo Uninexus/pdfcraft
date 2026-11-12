@@ -188,6 +188,7 @@ impl PdfCraftApp {
         v["show_secured_notice"] = serde_json::Value::Bool(self.show_secured_notice);
         v["text_links"] = serde_json::Value::Bool(self.text_links);
         v["organize_zoom"] = serde_json::json!(self.organize_zoom);
+        v["blank_paper"] = serde_json::json!(self.blank_paper.token());
         // Canonical names survive changes to the order of PAPERS and do not depend on UI language;
         // a custom paper is stored by the name it was given.
         let d = &self.print_draft;
@@ -389,6 +390,10 @@ impl PdfCraftApp {
         }
         if let Ok(units) = serde_json::from_value::<units::Unit>(v["units"].clone()) {
             self.units = units;
+        }
+        // An unknown or mistyped paper keeps the one the system's region gives.
+        if let Some(paper) = v["blank_paper"].as_str().and_then(paper::Paper::from_token) {
+            self.blank_paper = paper;
         }
         if let Some(on) = v["always_default_view"].as_bool() {
             self.always_default_view = on;

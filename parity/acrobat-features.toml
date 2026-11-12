@@ -10099,7 +10099,7 @@ status = "partial"
 commands = ["app.preferences"]
 tools = ["js_enabled"]
 evidence = ["crates/ui-egui/tests/it/javascript.rs::document_scripts_and_preferences", "crates/ui-egui/tests/it/ui.rs::preferences_selects_default_workspace_for_next_open", "crates/ui-egui/tests/it/control.rs::control_default_workspace_and_session_override", "apps/pdfcraft/src/settings.rs::xdg_preferences_use_config_instead_of_data", "apps/pdfcraft/src/settings.rs::migration_preserves_preferences_and_other_data", "crates/ui-egui/tests/it/preferences_layout.rs::ok_is_on_screen_without_scrolling_at_any_window_height", "crates/ui-egui/tests/it/preferences_layout.rs::ok_closes_the_dialog_in_a_short_window_and_the_settings_still_scroll"]
-notes = "Preferences dialog with Interface language, Documents and view (persistent default workspace with session override), Identity, Fill & Sign (flatten on save, off by default) and JavaScript; other categories still live in their tools, and it isn't generated from a schema yet. XDG desktops store app.ron under XDG_CONFIG_HOME/pdfcraft or ~/.config/pdfcraft; existing data-folder preferences are copied without replacing configured preferences, with fallback on migration errors. Logs and recovery retain data locations. Portable/non-XDG locations are unchanged. The settings scroll when the window is short (down to a 60 pt scroll area, so OK stays on screen in the smallest window at the largest interface size) and the OK row stays below them, in reach (#3557); the dialog still has no Cancel, and a window shorter than the dialog's title, one row and OK would still clip it."
+notes = "Preferences dialog with Interface language, Documents and view (persistent default workspace with session override), Units and paper (units, blank-page paper), Comment (identity, keep tool selected, reset comment tool colours and sizes), Fill & Sign (flatten on save, off by default) and JavaScript; other categories still live in their tools, and it isn't generated from a schema yet. XDG desktops store app.ron under XDG_CONFIG_HOME/pdfcraft or ~/.config/pdfcraft; existing data-folder preferences are copied without replacing configured preferences, with fallback on migration errors. Logs and recovery retain data locations. Portable/non-XDG locations are unchanged. The settings scroll when the window is short (down to a 60 pt scroll area, so OK stays on screen in the smallest window at the largest interface size) and the OK row stays below them, in reach (#3557); the dialog still has no Cancel, and a window shorter than the dialog's title, one row and OK would still clip it."
 
 [[feature]]
 id = "misc.prefs-general"
@@ -10143,11 +10143,11 @@ title = "Preferences: commenting"
 area = "N"
 tier = "P1"
 milestone = "M14"
-status = "planned"
+status = "partial"
 commands = []
 tools = []
-evidence = []
-notes = ""
+evidence = ["crates/ui-egui/tests/it/preferences_pages.rs::the_comment_tool_pin_is_set_in_preferences_and_shared_with_the_toolbar_setting", "crates/ui-egui/tests/it/preferences_pages.rs::reset_comment_tool_defaults_forgets_saved_colours_and_keeps_the_name_and_pin", "crates/ui-egui/tests/it/control.rs::units_blank_paper_and_comment_defaults_are_set_and_reported_through_the_control_channel"]
+notes = "Preferences ▸ Comment (with the name on comments): Keep the selected comment tool selected after use (the same persisted setting as the comment toolbar pin) and Reset comment tool colours and sizes, which forgets every colour, opacity, width and font size saved with Make Current Properties Default (typed-text Fill & Sign defaults are not touched; also ui.set reset-comment-defaults=true). Missing: Acrobat's pop-up behaviours, pop-up font and size, comment-list options and the other Commenting preferences."
 
 [[feature]]
 id = "misc.prefs-forms"
@@ -10311,11 +10311,11 @@ title = "Preferences: units and guides"
 area = "N"
 tier = "P2"
 milestone = "M14"
-status = "planned"
+status = "partial"
 commands = []
 tools = []
-evidence = []
-notes = ""
+evidence = ["crates/ui-egui/tests/it/preferences_pages.rs::the_paper_for_new_blank_pages_is_chosen_applied_and_remembered", "crates/ui-egui/tests/it/preferences_pages.rs::the_unit_is_chosen_in_units_and_paper_and_remembered", "crates/ui-egui/tests/it/preferences_pages.rs::corrupt_or_unknown_saved_paper_and_units_keep_the_current_choice", "crates/ui-egui/tests/it/preferences_pages.rs::the_control_channel_sets_and_refuses_units_and_paper", "crates/ui-egui/tests/it/control.rs::units_blank_paper_and_comment_defaults_are_set_and_reported_through_the_control_channel"]
+notes = "Preferences ▸ Units and paper: the unit page sizes and margins are shown in (in, mm, cm, pt) and the paper Create ▸ Blank page uses (US Letter or A4, starting as the system region's paper), both remembered and applied at once; bad saved values keep the current choice. Reachable as ui.set units=in|mm|cm|pt and blank-paper=letter|a4, reported in ui.state. Missing: Acrobat's separate page and ruler units, grid and guides, which PdfCraft has no rulers or grid for."
 
 [[feature]]
 id = "misc.prefs-content-editing"

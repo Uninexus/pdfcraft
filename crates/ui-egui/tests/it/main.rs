@@ -68,6 +68,7 @@ mod pinned_tools;
 mod pointer;
 mod portfolio;
 mod preferences_layout;
+mod preferences_pages;
 mod prepare;
 mod print;
 mod print_custom_paper_names;

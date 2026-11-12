@@ -116,6 +116,36 @@ fn comment_pin_is_reported_and_persistent() {
 }
 
 #[test]
+fn units_blank_paper_and_comment_defaults_are_set_and_reported_through_the_control_channel() {
+    let (mut h, c) = harness();
+    for unit in ["in", "mm", "cm", "pt"] {
+        ok(&mut h, &c, "ui.set", json!({"key":"units","value":unit}));
+        assert_eq!(ok(&mut h, &c, "ui.state", json!({}))["units"], unit);
+    }
+    for paper in ["a4", "letter"] {
+        ok(&mut h, &c, "ui.set", json!({"key":"blank-paper","value":paper}));
+        assert_eq!(ok(&mut h, &c, "ui.state", json!({}))["blank_paper"], paper);
+    }
+    h.state_mut().comment_prefs.set_opacity(pdfcraft_ui_egui::comments::CommentTool::Highlight, 0.25);
+    h.state_mut().comment_prefs.pinned = true;
+    ok(&mut h, &c, "ui.set", json!({"key":"reset-comment-defaults","value":true}));
+    assert_ne!(h.state().comment_prefs.style(pdfcraft_ui_egui::comments::CommentTool::Highlight).opacity, 0.25);
+    assert_eq!(ok(&mut h, &c, "ui.state", json!({}))["comment_tool_pinned"], true, "the pin stays");
+    // Refused values change nothing.
+    h.state_mut().comment_prefs.set_opacity(pdfcraft_ui_egui::comments::CommentTool::Highlight, 0.25);
+    let before = ok(&mut h, &c, "ui.state", json!({}));
+    for key in ["units", "blank-paper", "reset-comment-defaults"] {
+        for invalid in [json!(1), json!(null), json!([]), json!("nonsense"), json!(false)] {
+            assert!(call(&mut h, &c, "ui.set", json!({"key":key,"value":invalid})).is_err(), "{key}={invalid}");
+        }
+    }
+    let after = ok(&mut h, &c, "ui.state", json!({}));
+    assert_eq!((&after["units"], &after["blank_paper"]), (&before["units"], &before["blank_paper"]));
+    assert_eq!(h.state().comment_prefs.style(pdfcraft_ui_egui::comments::CommentTool::Highlight).opacity, 0.25);
+    assert_eq!(after["documents"][0]["dirty"], false);
+}
+
+#[test]
 fn thumbnail_size_is_settable_and_inspectable_through_the_control_channel() {
     let (mut h, c) = harness();
     ok(&mut h, &c, "ui.set", json!({"key": "panel", "value": "pages"}));
