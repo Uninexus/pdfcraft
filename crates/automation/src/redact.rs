@@ -2,15 +2,56 @@
 //! (removing what they cover for good) or clear them.
 
 use pdfcraft_engine::{
-    Edit, HIDDEN, Hidden, NewAnnotation, REDACT_MAX_WORDS, REDACT_VALIDATORS, REDACTION_CODE_SETS, RedactPattern, RedactRegex, RedactValidator,
-    RedactionCodeSet, Shape, Style, find_pattern, rect_quad, redact_word_list, redacted_file_name,
+    CustomRedactionCodeSet, Edit, HIDDEN, Hidden, NewAnnotation, REDACT_MAX_WORDS, REDACT_VALIDATORS, REDACTION_CODE_SETS, RedactPattern,
+    RedactRegex, RedactValidator, RedactionCodeSet, Shape, Style, find_pattern, rect_quad, redact_word_list, redacted_file_name,
 };
 use serde_json::{Value, json};
 
 use crate::comments::{DEFAULT_AUTHOR, parse_color};
 use crate::{Args, Automation, Result, ToolError, failed};
 
+/// User text echoed in an error: quoted, at most 64 characters.
+fn shown(s: &str) -> String {
+    let head: String = s.chars().take(64).collect();
+    if head.len() < s.len() { format!("{head:?}…") } else { format!("{head:?}") }
+}
+
+/// The allowed codes for an error: the first 20, then how many more.
+fn allowed_codes<S: AsRef<str>>(codes: &[S]) -> String {
+    let head: Vec<&str> = codes.iter().take(20).map(AsRef::as_ref).collect();
+    match codes.len().saturating_sub(20) {
+        0 => head.join(", "),
+        n => format!("{} and {n} more", head.join(", ")),
+    }
+}
+
 impl Automation {
+    /// The user-defined code set of `custom_code_set` ({id, name, codes}), validated; none when absent.
+    fn custom_code_set(&self, a: &Args) -> Result<Option<CustomRedactionCodeSet>> {
+        let Some(v) = a.get("custom_code_set") else { return Ok(None) };
+        let wrong = || Args::wrong("custom_code_set", "an object with id, name and codes");
+        let obj = v.as_object().ok_or_else(wrong)?;
+        if let Some(extra) = obj.keys().find(|k| !matches!(k.as_str(), "id" | "name" | "codes")) {
+            return Err(ToolError::InvalidArgs(format!("custom_code_set has an unknown key {}; allowed: id, name, codes", shown(extra))));
+        }
+        let field = |k: &str| match obj.get(k) {
+            Some(Value::String(s)) => Ok(s.as_str()),
+            Some(_) => Err(ToolError::InvalidArgs(format!("custom_code_set.{k} must be a string"))),
+            None => Err(ToolError::InvalidArgs(format!("custom_code_set.{k} is missing"))),
+        };
+        let codes: Vec<&str> = match obj.get("codes") {
+            Some(Value::Array(items)) => items
+                .iter()
+                .map(|x| x.as_str().ok_or_else(|| ToolError::InvalidArgs("custom_code_set.codes must be an array of strings".into())))
+                .collect::<Result<_>>()?,
+            Some(_) => return Err(ToolError::InvalidArgs("custom_code_set.codes must be an array of strings".into())),
+            None => return Err(ToolError::InvalidArgs("custom_code_set.codes is missing".into())),
+        };
+        CustomRedactionCodeSet::new(field("id")?, field("name")?, &codes)
+            .map(Some)
+            .map_err(|e| ToolError::InvalidArgs(format!("custom_code_set.{e}")))
+    }
+
     pub(crate) fn redact_mark(&mut self, a: &Args) -> Result<Value> {
         let doc = self.doc(a)?;
         let (id, n) = (doc.id, doc.info.pages.len());
@@ -28,24 +69,42 @@ impl Automation {
                 None => (0..n).collect(),
             }
         };
+        let custom = self.custom_code_set(a)?;
         let overlay = match (a.opt_str("overlay")?, a.opt_str("code_set")?) {
             (Some(_), Some(_)) => return Err(ToolError::InvalidArgs("pass overlay or code_set with codes, not both".into())),
+            (Some(_), None) if custom.is_some() => return Err(ToolError::InvalidArgs("pass overlay or custom_code_set with codes, not both".into())),
             (Some(o), None) => o.to_string(),
-            (None, Some(id)) => {
-                let set = RedactionCodeSet::from_id(id).ok_or_else(|| {
-                    let ids: Vec<_> = REDACTION_CODE_SETS.iter().map(|s| s.id).collect();
-                    ToolError::InvalidArgs(format!("unknown code_set {id:?}; allowed: {}", ids.join(", ")))
-                })?;
+            (None, id) if custom.is_some() || id.is_some() => {
                 let picked = a.strs("codes")?;
-                let allowed = || format!("allowed in {}: {}", set.id, set.codes.join(", "));
-                match set.overlay(&picked) {
+                let (set_id, codes, result) = match (&custom, id) {
+                    (Some(c), Some(id)) if id != c.id() => {
+                        return Err(ToolError::InvalidArgs(format!(
+                            "code_set {id:?} is not the custom_code_set id {:?}; omit code_set or pass that id",
+                            c.id()
+                        )));
+                    }
+                    (Some(c), _) => (c.id().to_owned(), allowed_codes(c.codes()), c.overlay(&picked)),
+                    (None, id) => {
+                        let id = id.unwrap_or_default();
+                        let set = RedactionCodeSet::from_id(id).ok_or_else(|| {
+                            let ids: Vec<_> = REDACTION_CODE_SETS.iter().map(|s| s.id).collect();
+                            ToolError::InvalidArgs(format!(
+                                "unknown code_set {id:?}; allowed: {} (or define one with custom_code_set)",
+                                ids.join(", ")
+                            ))
+                        })?;
+                        (set.id.to_owned(), allowed_codes(set.codes), set.overlay(&picked))
+                    }
+                };
+                let allowed = || format!("allowed in {set_id}: {codes}");
+                match result {
                     Ok(o) if !o.is_empty() => o,
                     Ok(_) => return Err(ToolError::InvalidArgs(format!("codes is empty; {}", allowed()))),
-                    Err(bad) => return Err(ToolError::InvalidArgs(format!("unknown code {bad:?}; {}", allowed()))),
+                    Err(bad) => return Err(ToolError::InvalidArgs(format!("unknown code {}; {}", shown(bad), allowed()))),
                 }
             }
-            (None, None) if a.get("codes").is_some() => return Err(ToolError::InvalidArgs("codes needs code_set".into())),
-            (None, None) => String::new(),
+            (None, _) if a.get("codes").is_some() => return Err(ToolError::InvalidArgs("codes needs code_set or custom_code_set".into())),
+            (None, _) => String::new(),
         };
         let author = a.opt_str("author")?.unwrap_or(DEFAULT_AUTHOR).to_string();
         let mut style = Style::default_for(&Shape::Redact { quads: Vec::new(), overlay: String::new(), look: Default::default() });

@@ -202,7 +202,7 @@ Patterns are heuristic: dates, protocol identifiers and longer number runs are r
 
 `codes` holds the redaction code sets (U.S. FOIA and U.S. Privacy Act exemptions):
 `CodeSet::from_id("foia")?.overlay(&["(b)(6)"])` gives the overlay text for the picked codes.
-Custom code sets aren't supported yet.
+`CustomCodeSet::new(id, name, codes)` validates a user-defined set (id of `a-z0-9-`, up to 256 distinct codes, each a string the redaction overlay can draw: no control, invisible or line-break characters, no leading or trailing space) and gives the same overlay text. Custom sets are per call only; nothing stores them.
 
 Not yet: pattern locales, struct-tree/alt-text cleanup, re-encoding of DCT images (they are removed
 instead).

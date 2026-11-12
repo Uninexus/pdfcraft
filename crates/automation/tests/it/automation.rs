@@ -6108,6 +6108,63 @@ fn redacting_with_codes_through_tools() {
 }
 
 #[test]
+fn redacting_with_a_custom_code_set_through_tools() {
+    let dir = workdir("redact-custom-codes");
+    std::fs::write(dir.join("memo.txt"), "Informant Jane Roe met the agent\nPublic line").unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_create", json!({ "from": "text", "path": "memo.txt" }))["doc"].as_u64().unwrap();
+    let set = json!({ "id": "acme-legal", "name": "Acme legal", "codes": ["PRIV", "CONF", "PII"] });
+    let rejected = |a: &mut Automation, args: Value| match a.call("redact_mark", &args) {
+        Err(ToolError::InvalidArgs(m)) => m,
+        other => panic!("expected InvalidArgs, got {other:?}"),
+    };
+    let base = |extra: Value| {
+        let mut v = json!({ "doc": doc, "find": "Jane Roe" });
+        v.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        v
+    };
+    let m = rejected(&mut a, base(json!({ "custom_code_set": { "id": "foia", "name": "x", "codes": ["A"] }, "codes": ["A"] })));
+    assert!(m.contains("custom_code_set.id") && m.contains("built-in"), "{m}");
+    let m = rejected(&mut a, base(json!({ "custom_code_set": { "id": "Bad Id", "name": "x", "codes": ["A"] }, "codes": ["A"] })));
+    assert!(m.contains("custom_code_set.id") && m.contains("a-z"), "{m}");
+    let m = rejected(&mut a, base(json!({ "custom_code_set": { "id": "x", "name": "x", "codes": ["A", "A"] }, "codes": ["A"] })));
+    assert!(m.contains("custom_code_set.codes[1]"), "{m}");
+    let m = rejected(&mut a, base(json!({ "custom_code_set": { "id": "x", "name": "x", "codes": ["A\u{0}"] }, "codes": ["A"] })));
+    assert!(m.contains("custom_code_set.codes[0]") && m.contains("control"), "{m}");
+    let m = rejected(&mut a, base(json!({ "custom_code_set": { "id": "x", "name": "x", "codes": [] }, "codes": ["A"] })));
+    assert!(m.contains("custom_code_set.codes"), "{m}");
+    let m = rejected(&mut a, base(json!({ "custom_code_set": { "id": "x", "name": "x" }, "codes": ["A"] })));
+    assert!(m.contains("custom_code_set.codes is missing"), "{m}");
+    let m = rejected(&mut a, base(json!({ "custom_code_set": { "id": "x", "name": "x", "codes": ["A"], "extra": 1 }, "codes": ["A"] })));
+    assert!(m.contains("extra"), "{m}");
+    rejected(&mut a, base(json!({ "custom_code_set": "acme", "codes": ["A"] })));
+    let m = rejected(&mut a, base(json!({ "custom_code_set": set, "codes": ["SECRET"] })));
+    assert!(m.contains("SECRET") && m.contains("PRIV, CONF, PII"), "the error lists the allowed codes: {m}");
+    let m = rejected(&mut a, base(json!({ "custom_code_set": set, "codes": [] })));
+    assert!(m.contains("codes is empty"), "{m}");
+    let m = rejected(&mut a, base(json!({ "custom_code_set": set, "code_set": "foia", "codes": ["PRIV"] })));
+    assert!(m.contains("acme-legal"), "{m}");
+    let m = rejected(&mut a, base(json!({ "custom_code_set": set, "overlay": "X", "codes": ["PRIV"] })));
+    assert!(m.contains("overlay") && m.contains("custom_code_set") && m.contains("not both"), "{m}");
+    rejected(&mut a, base(json!({ "custom_code_set": set })));
+    // A built-in code is not in the custom set.
+    let m = rejected(&mut a, base(json!({ "custom_code_set": set, "codes": ["(b)(6)"] })));
+    assert!(m.contains("(b)(6)") && m.contains("allowed in acme-legal: PRIV, CONF, PII"), "{m}");
+    let m = rejected(&mut a, base(json!({ "custom_code_set": { "id": "x", "name": "x", "codes": ["機密"] }, "codes": ["機密"] })));
+    assert!(m.contains("custom_code_set.codes[0]") && m.contains("U+6A5F"), "{m}");
+    let long = "z".repeat(500);
+    let m = rejected(&mut a, base(json!({ "custom_code_set": set, "codes": [long] })));
+    assert!(m.len() < 400 && m.contains('…'), "echoed user text is bounded: {m}");
+    assert_eq!(ok(&mut a, "redact_mark", base(json!({ "custom_code_set": set, "code_set": "acme-legal", "codes": ["PII", "PRIV"] })))["marked"], 1);
+    ok(&mut a, "redact_apply", json!({ "doc": doc }));
+    let text = page_text(&mut a, doc)[0].clone();
+    assert!(!text.contains("Jane") && text.contains("PRIV, PII"), "{text}");
+    // The set is not remembered between calls.
+    let m = rejected(&mut a, json!({ "doc": doc, "find": "agent", "code_set": "acme-legal", "codes": ["PRIV"] }));
+    assert!(m.contains("unknown code_set") && m.contains("custom_code_set"), "{m}");
+}
+
+#[test]
 fn redacting_word_lists_through_tools() {
     let dir = workdir("redact-words");
     std::fs::write(dir.join("memo.txt"), "Call Ada today\nAda is private\nPublic line").unwrap();
