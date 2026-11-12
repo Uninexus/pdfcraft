@@ -339,3 +339,187 @@ fn nothing_to_find_is_refused() {
     let (s, id) = open(crate::tests::fixture(1));
     assert!(matches!(s.get(id).unwrap().plan_replace(&[0], &query("  ", "x"), Which::All, None), Err(EditError::Invalid(_))));
 }
+
+/// A Chrome-style subset (Type0 / Identity-H over a subset-free copy of Inter, CID = glyph id)
+/// drawing "Poland" and "Germany and more". Its ToUnicode has an entry for `z` with no glyph, so
+/// "Graz" needs a letter the font lacks while "Germany" is drawn from letters it has.
+///
+/// The glyph ids and widths below are those of `assets/fonts/Inter-Regular.ttf` with SHA-256
+/// 40d692fce188e4471e2b3cba937be967878f631ad3ebbbdcd587687c7ebe0c82 (the hash `ATTRIBUTION.toml`
+/// records); a different Inter build needs them looked up again.
+fn skia_subset_pdf() -> Vec<u8> {
+    let program = include_bytes!("../../../../assets/fonts/Inter-Regular.ttf");
+    let content = "BT /F3 12 Tf 72 700 Td <0177031602E001FB03050255> Tj ET \
+         BT /F3 12 Tf 72 650 Td <008D0266035402FE01FB030503E606F101FB0305025506F102FE031603540266> Tj ET";
+    let unicode = "1 begincodespacerange <0000> <FFFF> endcodespacerange 13 beginbfchar <0177> <0050> <0316> <006F> <02E0> <006C> \
+          <01FB> <0061> <0305> <006E> <0255> <0064> <008D> <0047> <0266> <0065> <0354> <0072> <02FE> <006D> <03E6> <0079> \
+          <06F1> <0020> <1000> <007A> endbfchar";
+    let widths = "[141 [746] 375 [639] 597 [612] 614 [583] 736 [242] 766 [876] 773 [591] 790 [600] 852 [376] 1777 [281]]";
+    let mut out = b"%PDF-1.7\n".to_vec();
+    let mut offsets = Vec::new();
+    let mut put = |out: &mut Vec<u8>, n: usize, body: &[u8]| {
+        offsets.push(out.len());
+        out.extend_from_slice(format!("{n} 0 obj\n").as_bytes());
+        out.extend_from_slice(body);
+        out.extend_from_slice(b"\nendobj\n");
+    };
+    let stream = |dict: &str, data: &[u8]| {
+        let mut v = format!("<< {dict} /Length {} >>\nstream\n", data.len()).into_bytes();
+        v.extend_from_slice(data);
+        v.extend_from_slice(b"\nendstream");
+        v
+    };
+    put(&mut out, 1, b"<< /Type /Catalog /Pages 2 0 R >>");
+    put(&mut out, 2, b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>");
+    put(&mut out, 3, b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] /Contents 4 0 R /Resources << /Font << /F3 5 0 R >> >> >>");
+    put(&mut out, 4, &stream("", content.as_bytes()));
+    put(
+        &mut out,
+        5,
+        b"<< /Type /Font /Subtype /Type0 /BaseFont /BAAAAA+SampleSans /Encoding /Identity-H /DescendantFonts [6 0 R] /ToUnicode 7 0 R >>",
+    );
+    put(
+        &mut out,
+        6,
+        format!(
+            "<< /Type /Font /Subtype /CIDFontType2 /BaseFont /BAAAAA+SampleSans /CIDToGIDMap /Identity /DW 562 /W {} /FontDescriptor 8 0 R >>",
+            widths
+        )
+        .as_bytes(),
+    );
+    put(&mut out, 7, &stream("", unicode.as_bytes()));
+    put(&mut out, 8, b"<< /Type /FontDescriptor /FontName /BAAAAA+SampleSans /Flags 32 /FontFile2 9 0 R >>");
+    put(&mut out, 9, &stream(&format!("/Length1 {}", program.len()), program));
+    let xref = out.len();
+    out.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", offsets.len() + 1).as_bytes());
+    for o in &offsets {
+        out.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+    }
+    out.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", offsets.len() + 1).as_bytes());
+    out
+}
+
+/// Off by default: a name the subset can't spell is left alone and counted. With
+/// `substitute_font` the match is replaced in the substitute font, counted, named, one undo step.
+#[test]
+fn a_substitute_font_replaces_where_the_subset_lacks_a_letter_when_asked() {
+    let original = skia_subset_pdf();
+    let (mut s, id) = open(original.clone());
+    assert_eq!(texts(&s, id, 0), ["Poland", "Germany and more"]);
+    let before = s.get(id).unwrap().bytes.clone();
+
+    // Default: skipped, nothing changes.
+    let plan = replace_all(&mut s, id, &query("Poland", "Graz"));
+    assert_eq!((plan.replaced, plan.substituted), (0, 0));
+    assert_eq!(plan.skipped, BTreeMap::from([(Skip::MissingGlyphs, 1)]));
+    assert!(plan.edit.is_none() && plan.substitute_fonts.is_empty());
+    assert_eq!(texts(&s, id, 0), ["Poland", "Germany and more"]);
+
+    // Asked for: replaced in another font, and said so.
+    let q = Replace { substitute_font: true, ..query("Poland", "Graz") };
+    let plan = replace_all(&mut s, id, &q);
+    assert_eq!((plan.replaced, plan.substituted, plan.skipped_total()), (1, 1, 0), "{plan:?}");
+    assert_eq!(plan.substitute_fonts.len(), 1, "{plan:?}");
+    assert!(!plan.substitute_fonts[0].is_empty());
+    assert_eq!(texts(&s, id, 0), ["Graz", "Germany and more"]);
+    assert!(!plan.substitute_fonts[0].ends_with("Type3"), "{plan:?}");
+    assert_eq!(plan.substituted_paragraphs, 1);
+    assert_eq!(page_text(&s, id, 0).plain_text().split_whitespace().next(), Some("Graz"), "the page text reads Graz");
+    assert_eq!(s.get(id).unwrap().can_undo(), Some("Replace all"));
+    s.undo(id).unwrap();
+    assert_eq!(texts(&s, id, 0), ["Poland", "Germany and more"], "one undo restores the paragraph");
+    assert_eq!(s.get(id).unwrap().can_undo(), None);
+    assert_eq!(s.get(id).unwrap().bytes, before);
+}
+
+/// Letters the subset has are replaced in its own font in both modes, and nothing is substituted.
+#[test]
+fn a_replacement_the_subset_can_draw_never_uses_a_substitute_font() {
+    for substitute_font in [false, true] {
+        let (mut s, id) = open(skia_subset_pdf());
+        let q = Replace { substitute_font, ..query("Poland", "Germany") };
+        let plan = replace_all(&mut s, id, &q);
+        assert_eq!((plan.replaced, plan.substituted, plan.skipped_total()), (1, 0, 0), "substitute_font {substitute_font}");
+        assert!(plan.substitute_fonts.is_empty());
+        assert_eq!(texts(&s, id, 0), ["Germany", "Germany and more"]);
+        let lines = s.get(id).unwrap().text_lines(0);
+        assert!(lines.iter().filter(|l| l.text == "Germany").all(|l| l.font == "F3"), "the subset keeps its font: {lines:?}");
+    }
+}
+
+/// The paragraph of several runs (styled rewrite) takes the option too.
+#[test]
+fn a_substitute_font_is_used_in_a_paragraph_of_several_runs_when_asked() {
+    let (mut s, id) = open(pdf("BT /F3 12 Tf 72 700 Td (ab ) Tj /F1 12 Tf (and Helvetica) Tj ET"));
+    let q = Replace { substitute_font: true, ..query("ab", "cb") };
+    let plan = replace_all(&mut s, id, &q);
+    assert_eq!((plan.replaced, plan.substituted, plan.skipped_total()), (1, 1, 0), "{plan:?}");
+    assert_eq!(texts(&s, id, 0), ["cb and Helvetica"]);
+}
+
+/// The substitute redraws the whole paragraph, not only the match: a word that was not replaced
+/// leaves the subset's font too.
+#[test]
+fn the_whole_paragraph_is_redrawn_in_the_substitute_font() {
+    let (mut s, id) = open(skia_subset_pdf());
+    let q = Replace { substitute_font: true, ..query("Germany", "Graz") };
+    let plan = replace_all(&mut s, id, &q);
+    assert_eq!((plan.replaced, plan.substituted, plan.substituted_paragraphs), (1, 1, 1), "{plan:?}");
+    assert_eq!(texts(&s, id, 0), ["Poland", "Graz and more"]);
+    let lines = s.get(id).unwrap().text_lines(0);
+    let more = lines.iter().find(|l| l.text.contains("more")).expect("the untouched words");
+    assert_ne!(more.font, "F3", "the untouched words are drawn in the substitute too: {lines:?}");
+    let poland = lines.iter().find(|l| l.text.contains("Poland")).expect("the other paragraph");
+    assert_eq!(poland.font, "F3", "another paragraph keeps its font");
+}
+
+/// Two pages, each with a paragraph the subset can't spell: Replace all counts both, names the
+/// font once and is one undo step; Which::At takes one only.
+#[test]
+fn substituted_paragraphs_on_two_pages_are_counted_and_undone_together() {
+    let content = ["BT /F3 12 Tf 72 700 Td (ab ba) Tj ET", "BT /F3 12 Tf 72 700 Td (ba ab) Tj ET"];
+    let objs: Vec<String> = vec![
+        "<< /Type /Catalog /Pages 2 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R 5 0 R] /Count 2 >>".into(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 4 0 R /Resources << /Font << /F3 7 0 R >> >> >>".into(),
+        format!("<< /Length {} >>\nstream\n{}\nendstream", content[0].len(), content[0]),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 6 0 R /Resources << /Font << /F3 7 0 R >> >> >>".into(),
+        format!("<< /Length {} >>\nstream\n{}\nendstream", content[1].len(), content[1]),
+        "<< /Type /Font /Subtype /TrueType /BaseFont /ABCDEF+NoSuchFace /FirstChar 97 /LastChar 99 /Widths [500 520 0] /Encoding /WinAnsiEncoding >>"
+            .into(),
+    ];
+    let mut out = b"%PDF-1.7\n".to_vec();
+    let mut offsets = Vec::new();
+    for (i, o) in objs.iter().enumerate() {
+        offsets.push(out.len());
+        out.extend_from_slice(format!("{} 0 obj\n{o}\nendobj\n", i + 1).as_bytes());
+    }
+    let xref = out.len();
+    out.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1).as_bytes());
+    for o in offsets {
+        out.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+    }
+    out.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objs.len() + 1).as_bytes());
+    let q = Replace { substitute_font: true, ..query("ab", "cb") };
+
+    let (mut s, id) = open(out.clone());
+    let before = s.get(id).unwrap().bytes.clone();
+    let plan = replace_all(&mut s, id, &q);
+    assert_eq!((plan.replaced, plan.substituted, plan.substituted_paragraphs, plan.skipped_total()), (2, 2, 2, 0), "{plan:?}");
+    assert_eq!(plan.substitute_fonts.len(), 1, "one font, named once: {plan:?}");
+    assert_eq!(plan.pages, vec![0, 1]);
+    assert_eq!((texts(&s, id, 0), texts(&s, id, 1)), (vec!["cb ba".to_string()], vec!["ba cb".to_string()]));
+    assert_eq!(s.get(id).unwrap().can_undo(), Some("Replace all"));
+    s.undo(id).unwrap();
+    assert_eq!(s.get(id).unwrap().can_undo(), None, "one undo step");
+    assert_eq!(s.get(id).unwrap().bytes, before);
+
+    // The match on page 2 only.
+    let text = page_text(&s, id, 1);
+    let which = Which::first_in([(1, &text)], &q).expect("a match on page 2");
+    let plan = s.get(id).unwrap().plan_replace(&[0, 1], &q, which, None).unwrap();
+    assert_eq!((plan.replaced, plan.substituted, plan.substituted_paragraphs, plan.pages.clone()), (1, 1, 1, vec![1]), "{plan:?}");
+    s.apply(id, plan.edit.clone().expect("an edit")).unwrap();
+    assert_eq!((texts(&s, id, 0), texts(&s, id, 1)), (vec!["ab ba".to_string()], vec!["ba cb".to_string()]));
+    assert_eq!(s.get(id).unwrap().can_undo(), Some("Edit text"));
+}

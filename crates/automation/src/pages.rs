@@ -380,6 +380,7 @@ impl Automation {
             with: a.str("replace")?.to_owned(),
             case_sensitive: a.opt_bool("case_sensitive")?.unwrap_or(false),
             whole_words: a.opt_bool("whole_words")?.unwrap_or(false),
+            substitute_font: a.opt_bool("substitute_fonts")?.unwrap_or(false),
         };
         let all = a.opt_bool("all")?.unwrap_or(true);
         let mut pages = pages;
@@ -447,6 +448,11 @@ impl Automation {
         out["pages"] = json!(plan.pages.iter().map(|p| p + 1).collect::<Vec<_>>());
         out["skipped"] = json!(plan.skipped_total());
         out["skipped_by"] = Value::Object(skipped);
+        out["substituted"] = json!(plan.substituted);
+        out["substituted_paragraphs"] = json!(plan.substituted_paragraphs);
+        if !plan.substitute_fonts.is_empty() {
+            out["substitute_font_names"] = json!(plan.substitute_fonts);
+        }
         if !plan.refusals.is_empty() {
             out["refusals"] = json!(plan.refusals);
         }

@@ -22,6 +22,7 @@ impl PdfCraftApp {
             with: find.replacement.clone(),
             case_sensitive: find.case_sensitive,
             whole_words: find.whole_words,
+            substitute_font: find.substitute_font,
         };
         let Some(doc) = self.session.get(view.id) else { return };
         let (pages, which, found) = if all {
@@ -54,7 +55,7 @@ impl PdfCraftApp {
         {
             return;
         }
-        if let Some(message) = outcome(&plan, all) {
+        if let Some(message) = outcome(&plan, all, query.substitute_font) {
             self.notify(message);
         }
     }
@@ -62,7 +63,7 @@ impl PdfCraftApp {
 
 /// What to tell the user: the count and pages after Replace all, what was left and why. Nothing
 /// after one match replaced (the page shows it).
-fn outcome(plan: &Replacement, all: bool) -> Option<String> {
+fn outcome(plan: &Replacement, all: bool, substitute_font: bool) -> Option<String> {
     let skipped = plan.skipped_total();
     if plan.replaced == 0 && skipped == 0 {
         return Some(tl!("No matches to replace").to_string());
@@ -73,8 +74,36 @@ fn outcome(plan: &Replacement, all: bool) -> Option<String> {
         .map(|(reason, n)| crate::i18n::fmt(tl!("{why} ({n})"), &[("why", crate::i18n::t(reason.wording())), ("n", &n.to_string())]))
         .collect::<Vec<_>>()
         .join(", ");
+    let mut hint = String::new();
+    if plan.substituted_paragraphs > 0 {
+        let sentence = crate::i18n::trn(
+            crate::i18n::current(),
+            plan.substituted_paragraphs as u64,
+            "{n} paragraph rewritten in a substitute font ({font})",
+            "{n} paragraphs rewritten in a substitute font ({font})",
+        );
+        hint = crate::i18n::fmt(&sentence, &[("font", &plan.substitute_fonts.join(", "))]);
+    }
+    // Where a font lacked letters and the option was off, say it exists.
+    let offer = !substitute_font && plan.skipped.contains_key(&pdfcraft_engine::find_replace::Skip::MissingGlyphs);
     if !all {
-        return (skipped > 0).then(|| crate::i18n::fmt(tl!("Not replaced: {why}"), &[("why", &why)]));
+        let mut message = if skipped > 0 { crate::i18n::fmt(tl!("Not replaced: {why}"), &[("why", &why)]) } else { String::new() };
+        for extra in [
+            hint,
+            if offer {
+                tl!("Turn on \"Use a substitute font if the font lacks letters\" in Find options to replace anyway").to_string()
+            } else {
+                String::new()
+            },
+        ] {
+            if !extra.is_empty() {
+                if !message.is_empty() {
+                    message.push_str(". ");
+                }
+                message.push_str(&extra);
+            }
+        }
+        return (!message.is_empty()).then_some(message);
     }
     let lang = crate::i18n::current();
     let pages = crate::i18n::trn(lang, plan.pages.len() as u64, "{n} page", "{n} pages");
@@ -86,6 +115,14 @@ fn outcome(plan: &Replacement, all: bool) -> Option<String> {
     if skipped > 0 {
         message.push_str(". ");
         message.push_str(&crate::i18n::fmt(tl!("{k} skipped: {why}"), &[("k", &skipped.to_string()), ("why", &why)]));
+    }
+    if !hint.is_empty() {
+        message.push_str(". ");
+        message.push_str(&hint);
+    }
+    if offer {
+        message.push_str(". ");
+        message.push_str(tl!("Turn on \"Use a substitute font if the font lacks letters\" in Find options to replace anyway"));
     }
     Some(message)
 }
