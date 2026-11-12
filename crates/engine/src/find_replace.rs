@@ -16,7 +16,10 @@
 //! A match is left alone, and counted, when it runs from one paragraph into the next, lies in
 //! invisible text over a scan, would need another font (the paragraph's own can't draw the new
 //! text, see [`pdfcraft_edit::LineEdit::substituted`]) or is not page text the paragraphs hold
-//! (a form field, a comment, text drawn inside a form XObject). Each paragraph is rewritten on a
+//! (a form field, a comment, text drawn inside a form XObject). The need for another font is
+//! opt-in: with [`Replace::substitute_font`] on, such a paragraph is rewritten with the substitute
+//! font Edit text uses, counted as replaced, and reported in [`Replacement::substituted`] and
+//! [`Replacement::substitute_fonts`]. Each paragraph is rewritten on a
 //! copy first, so the edit returned is exactly what will apply: [`Edit::Batch`] for Replace all,
 //! one undo step.
 
@@ -34,6 +37,11 @@ pub struct Replace {
     pub with: String,
     pub case_sensitive: bool,
     pub whole_words: bool,
+    /// Replace in a paragraph whose font can't draw the new text too, with the substitute font
+    /// Edit text falls back to (the result says how many and which). The whole paragraph is
+    /// redrawn in it, not only the match. Off, such a match is left alone as
+    /// [`Skip::MissingGlyphs`].
+    pub substitute_font: bool,
 }
 
 /// Which matches to replace.
@@ -68,7 +76,9 @@ pub enum Skip {
     SpansParagraphs,
     /// It is invisible text over a scanned image (recognized text).
     ScannedText,
-    /// The paragraph's font can't draw the new text; another font would have stepped in.
+    /// The paragraph's font can't draw the new text and [`Replace::substitute_font`] is off
+    /// (the tool's `substitute_fonts`, the Replace options' substitute-font box): turning it on
+    /// replaces anyway, in another font.
     MissingGlyphs,
     /// The paragraph couldn't be rewritten (see [`Replacement::refusals`]).
     Refused,
@@ -117,6 +127,17 @@ pub struct Replacement {
     pub skipped: BTreeMap<Skip, usize>,
     /// What the engine said about the paragraphs it refused (at most [`MAX_REFUSALS`]).
     pub refusals: Vec<String>,
+    /// Of [`Replacement::replaced`], the matches drawn in a substitute font because the
+    /// paragraph's own couldn't draw the new text (only with [`Replace::substitute_font`]).
+    pub substituted: usize,
+    /// The paragraphs rewritten in a substitute font. The edit rewrites the whole paragraph, not
+    /// only the match, so its other words are drawn in the substitute too.
+    pub substituted_paragraphs: usize,
+    /// The substitute fonts that stepped in, at least: the edit crate names one font per
+    /// paragraph, so a paragraph that took several is listed by one. Named as
+    /// [`pdfcraft_edit::LineEdit::substituted`] does, without a " Type3" suffix, de-duplicated,
+    /// in the order met.
+    pub substitute_fonts: Vec<String>,
 }
 
 /// Refusal messages kept in a [`Replacement`].
@@ -236,7 +257,18 @@ impl Document {
                 let style = pdfcraft_edit::BlockStyle { sources, ..Default::default() };
                 let mut trial = work.clone();
                 match guard(|| pdfcraft_edit::rewrite_block(&mut trial, page, k, Some(&text), &style)) {
-                    Ok(Ok(pdfcraft_edit::LineEdit { substituted: None })) => {
+                    // `trial` already holds the paragraph rewritten in the substitute font, so
+                    // accepting it is what the returned edit will do again on the document.
+                    Ok(Ok(pdfcraft_edit::LineEdit { substituted })) if substituted.is_none() || query.substitute_font => {
+                        if let Some(font) = substituted {
+                            out.substituted = out.substituted.saturating_add(count);
+                            out.substituted_paragraphs = out.substituted_paragraphs.saturating_add(1);
+                            // "Inter Type3" is the edit crate's name for a drawn-outline face; say "Inter".
+                            let font = font.strip_suffix(" Type3").map(str::to_owned).unwrap_or(font);
+                            if !out.substitute_fonts.contains(&font) {
+                                out.substitute_fonts.push(font);
+                            }
+                        }
                         work = trial;
                         rewrote = true;
                         edits.push(Edit::EditTextBlock { page, block: k, text, style });
@@ -245,7 +277,7 @@ impl Document {
                             out.pages.push(page);
                         }
                     }
-                    Ok(Ok(pdfcraft_edit::LineEdit { substituted: Some(_) })) => out.skip(Skip::MissingGlyphs, count),
+                    Ok(Ok(_)) => out.skip(Skip::MissingGlyphs, count),
                     Ok(Err(e)) => refused(&mut out, count, page, e.to_string()),
                     Err(panic) => refused(&mut out, count, page, panic),
                 }

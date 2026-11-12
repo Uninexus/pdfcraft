@@ -4568,6 +4568,65 @@ fn replacing_text_through_tools() {
     assert!(matches!(a.call("text_replace", &json!({ "doc": doc, "find": "x", "replace": "y", "pages": [9] })), Err(ToolError::InvalidArgs(_))));
 }
 
+/// A one-page PDF whose paragraph "ab ba" is set in a subset (glyphs for a and b only) of a face
+/// no computer has, and whose second paragraph is plain Helvetica.
+fn subset_font_pdf() -> Vec<u8> {
+    let content = "BT /F3 12 Tf 72 700 Td (ab ba) Tj ET BT /F1 12 Tf 72 500 Td (ab in Helvetica) Tj ET";
+    let objs: Vec<String> = vec![
+        "<< /Type /Catalog /Pages 2 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".into(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 4 0 R /Resources << /Font << /F1 5 0 R /F3 6 0 R >> >> >>".into(),
+        format!("<< /Length {} >>\nstream\n{content}\nendstream", content.len()),
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".into(),
+        "<< /Type /Font /Subtype /TrueType /BaseFont /ABCDEF+NoSuchFace /FirstChar 97 /LastChar 99 /Widths [500 520 0] /Encoding /WinAnsiEncoding >>"
+            .into(),
+    ];
+    let mut out = b"%PDF-1.7\n".to_vec();
+    let mut offsets = Vec::new();
+    for (i, o) in objs.iter().enumerate() {
+        offsets.push(out.len());
+        out.extend_from_slice(format!("{} 0 obj\n{o}\nendobj\n", i + 1).as_bytes());
+    }
+    let xref = out.len();
+    out.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1).as_bytes());
+    for o in offsets {
+        out.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+    }
+    out.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objs.len() + 1).as_bytes());
+    out
+}
+
+/// A font that lacks a letter of the new text skips the match (default), or substitutes another
+/// font and says so (`substitute_fonts`), one undo step.
+#[test]
+fn text_replace_uses_a_substitute_font_only_when_asked() {
+    let dir = workdir("replace-substitute");
+    std::fs::write(dir.join("subset.pdf"), subset_font_pdf()).unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "subset.pdf" }))["doc"].as_u64().unwrap();
+    let r = ok(&mut a, "text_replace", json!({ "doc": doc, "find": "ab", "replace": "cb" }));
+    assert_eq!((r["replaced"].as_u64(), r["substituted"].as_u64(), r["skipped"].as_u64()), (Some(1), Some(0), Some(1)), "{r}");
+    assert_eq!(r["skipped_by"], json!({ "missing_glyphs": 1 }));
+    assert!(r.get("substitute_font_names").is_none());
+    assert_eq!(page_text(&mut a, doc), ["ab ba\ncb in Helvetica"]);
+    ok(&mut a, "edit_undo", json!({ "doc": doc }));
+    let r = ok(&mut a, "text_replace", json!({ "doc": doc, "find": "ab", "replace": "cb", "substitute_fonts": false }));
+    assert_eq!((r["replaced"].as_u64(), r["skipped"].as_u64()), (Some(1), Some(1)));
+    ok(&mut a, "edit_undo", json!({ "doc": doc }));
+    let r = ok(&mut a, "text_replace", json!({ "doc": doc, "find": "ab", "replace": "cb", "substitute_fonts": true }));
+    assert_eq!((r["replaced"].as_u64(), r["substituted"].as_u64(), r["skipped"].as_u64()), (Some(2), Some(1), Some(0)), "{r}");
+    assert_eq!(r["skipped_by"], json!({}));
+    assert_eq!(r["substitute_font_names"].as_array().map(Vec::len), Some(1), "{r}");
+    assert_eq!(r["substituted_paragraphs"].as_u64(), Some(1), "{r}");
+    assert_eq!(page_text(&mut a, doc), ["cb ba\ncb in Helvetica"]);
+    assert_eq!(ok(&mut a, "edit_undo", json!({ "doc": doc }))["undone"], "Replace all");
+    assert_eq!(page_text(&mut a, doc), ["ab ba\nab in Helvetica"], "one undo step");
+    assert!(matches!(
+        a.call("text_replace", &json!({ "doc": doc, "find": "x", "replace": "y", "substitute_fonts": "yes" })),
+        Err(ToolError::InvalidArgs(_))
+    ));
+}
+
 #[test]
 fn editing_existing_text_through_tools() {
     let dir = workdir("edit-text");

@@ -29,6 +29,9 @@ pub struct Find {
     /// Find and replace (in Edit text mode): the Replace row shows, with what replaces a match.
     pub replacing: bool,
     pub replacement: String,
+    /// Replace also where the paragraph's font lacks a letter of the new text, in a substitute
+    /// font (off: such a match is left alone and counted).
+    pub substitute_font: bool,
     /// Focus the Replace field on the next frame.
     pub focus_replace: bool,
 }
@@ -346,13 +349,22 @@ pub(super) fn find_bar(view: &mut DocView, pages: usize, area: Rect, editing: bo
                                 find.focus_replace = find.replacing;
                             }
                         }
-                        let opts = icons::button(ui, "settings-2", 26.0, find.case_sensitive || find.whole_words, tl!("Find options"));
+                        let opts = icons::button(
+                            ui,
+                            "settings-2",
+                            26.0,
+                            find.case_sensitive || find.whole_words || (editing && find.substitute_font),
+                            tl!("Find options"),
+                        );
                         egui::Popup::menu(&opts).show(|ui| {
                             let a = ui.add(widgets::checkbox(&mut find.whole_words, tl!("Whole words only"))).changed();
                             let b = ui.add(widgets::checkbox(&mut find.case_sensitive, tl!("Case-sensitive"))).changed();
                             if a || b {
                                 // Search again with the new options.
                                 find.case_query.clear();
+                            }
+                            if editing {
+                                ui.add(widgets::checkbox(&mut find.substitute_font, tl!("Use a substitute font if the font lacks letters")));
                             }
                         });
                         if icons::button(ui, "x", 26.0, false, tl!("Close (Esc)")).clicked() {
