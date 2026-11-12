@@ -426,6 +426,14 @@ impl CommentPrefs {
         }
     }
 
+    /// Back to the colours, opacities, widths and font sizes the tools start with, forgetting
+    /// every Make Current Properties Default. The name, the pin and the hover preference stay.
+    pub fn reset_defaults(&mut self) {
+        let fresh = Self::default();
+        self.styles = fresh.styles;
+        self.font_sizes = fresh.font_sizes;
+    }
+
     pub fn set_style(&mut self, tool: CommentTool, style: Style) {
         if let Some((_, s)) = self.styles.iter_mut().find(|(t, _)| *t == tool) {
             *s = style;

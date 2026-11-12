@@ -360,6 +360,18 @@ impl PdfCraftApp {
                 };
             }
             ("author", _) => self.comment_prefs.author = value.to_string(),
+            ("units", _) => {
+                self.units = units::Unit::from_token(value).ok_or("units must be in, mm, cm or pt")?;
+            }
+            ("blank-paper", _) => {
+                self.blank_paper = paper::Paper::from_token(value).ok_or("blank-paper must be letter or a4")?;
+            }
+            ("reset-comment-defaults", _) => {
+                if value != "true" {
+                    return Err("reset-comment-defaults must be true".into());
+                }
+                self.comment_prefs.reset_defaults();
+            }
             ("folder-collapsed", _) => self.set_folder_collapsed(value)?,
             ("comment-tool-pinned", _) => {
                 self.comment_prefs.pinned = match value {

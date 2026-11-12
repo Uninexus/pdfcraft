@@ -388,7 +388,7 @@ update the numbers.
 
 - **Missing:** most of Acrobat's twenty or so preference pages (General, Documents, Commenting, Forms, Identity,
   Signatures, Security, Measuring, Units and guides, Convert, …). Today: Interface language,
-  Documents and view, Identity, Fill & Sign, JavaScript.
+  Documents and view, Units and paper, Comment, Fill & Sign, JavaScript.
 - **Estimate:** 15–25 h. **Doc:** [ui-parity.md](ui-parity.md).
 
 ### 20. Scanners, GPU page rendering, pen pressure, Read Out Loud
