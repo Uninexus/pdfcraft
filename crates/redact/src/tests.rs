@@ -5683,6 +5683,91 @@ fn redaction_codes_join_in_set_order_and_reject_strangers() {
 }
 
 #[test]
+fn custom_code_sets_join_in_set_order_and_reject_strangers() {
+    use crate::codes::CustomCodeSet;
+    let set = CustomCodeSet::new("acme-legal", "Acme legal", &["PRIV", "CONF", "PII"]).unwrap();
+    assert_eq!((set.id(), set.name(), set.codes().len()), ("acme-legal", "Acme legal", 3));
+    assert_eq!(set.overlay(&["PII", "PRIV", "PII"]), Ok("PRIV, PII".into()));
+    assert_eq!(set.overlay(&[]), Ok(String::new()));
+    assert_eq!(set.overlay(&["PRIV", "SECRET"]), Err("SECRET"));
+    // A built-in code is not in a custom set.
+    assert_eq!(set.overlay(&["(b)(6)"]), Err("(b)(6)"));
+}
+
+#[test]
+fn custom_code_sets_are_validated_hostilely() {
+    use crate::codes::{CUSTOM_ID_MAX, CUSTOM_NAME_MAX, CodeSetError as E, CustomCodeSet as C};
+    let ok = ["A"];
+    assert!(matches!(C::new("", "n", &ok), Err(E::BadId(_))));
+    assert!(matches!(C::new("Upper", "n", &ok), Err(E::BadId(_))));
+    assert!(matches!(C::new("a b", "n", &ok), Err(E::BadId(_))));
+    assert!(matches!(C::new("a_b", "n", &ok), Err(E::BadId(_))));
+    assert!(matches!(C::new("é", "n", &ok), Err(E::BadId(_))));
+    assert!(matches!(C::new("-", "n", &ok), Err(E::BadId(_))));
+    assert!(matches!(C::new("---", "n", &ok), Err(E::BadId(_))));
+    assert!(C::new("-a-", "n", &ok).is_ok());
+    assert!(matches!(C::new(&"a".repeat(CUSTOM_ID_MAX + 1), "n", &ok), Err(E::BadId(_))));
+    assert!(C::new(&"a".repeat(CUSTOM_ID_MAX), "n", &ok).is_ok());
+    // A huge hostile id is reported truncated, not echoed whole.
+    let Err(E::BadId(shown)) = C::new(&"X".repeat(1 << 20), "n", &ok) else { panic!("bad id") };
+    assert_eq!(shown.chars().count(), CUSTOM_ID_MAX);
+    assert_eq!(C::new("foia", "n", &ok), Err(E::BuiltInId("foia".into())));
+    assert_eq!(C::new("privacy-act", "n", &ok), Err(E::BuiltInId("privacy-act".into())));
+    for name in
+        ["", "   ", "a\nb", "a\u{0}b", "a\u{7f}b", "a\u{85}b", "\u{202E}evil", "a\u{200B}b", "a\u{2028}b", "a\u{FEFF}", "a\u{AD}b", "\u{2067}x"]
+    {
+        assert_eq!(C::new("x", name, &ok), Err(E::BadName), "{name:?}");
+    }
+    assert_eq!(C::new("x", &"n".repeat(CUSTOM_NAME_MAX + 1), &ok), Err(E::BadName));
+    assert!(C::new("x", &"n".repeat(CUSTOM_NAME_MAX), &ok).is_ok());
+}
+
+#[test]
+fn custom_code_set_codes_are_validated_hostilely() {
+    use crate::codes::{CUSTOM_CODE_MAX, CUSTOM_CODES_MAX, CodeSetError as E, CustomCodeSet as C};
+    assert_eq!(C::new("x", "n", &[]), Err(E::CodeCount(0)));
+    let many: Vec<String> = (0..=CUSTOM_CODES_MAX).map(|i| format!("c{i}")).collect();
+    let many: Vec<&str> = many.iter().map(String::as_str).collect();
+    assert_eq!(C::new("x", "n", &many), Err(E::CodeCount(CUSTOM_CODES_MAX + 1)));
+    assert!(C::new("x", "n", &many[..CUSTOM_CODES_MAX]).is_ok());
+    for bad in [
+        "",
+        " ",
+        "a\tb",
+        "a\rb",
+        "a\nb",
+        "a\u{1b}b",
+        "\u{202E}",
+        "\u{2066}x",
+        "\u{200B}",
+        "a\u{FEFF}",
+        "a\u{2028}b",
+        "a\u{AD}b",
+        " lead",
+        "trail ",
+        "x\u{a0}",
+    ] {
+        assert_eq!(C::new("x", "n", &["ok", bad]), Err(E::BadCode(1)), "{bad:?}");
+    }
+    // A character the standard fonts can't draw would be written as "?", so it is refused.
+    assert_eq!(C::new("x", "n", &["ok", "機密"]), Err(E::Undrawable { index: 1, ch: '機' }));
+    let m = C::new("x", "n", &["ok", "a→b"]).unwrap_err().to_string();
+    assert!(m.starts_with("codes[1]: ") && m.contains("U+2192"), "{m}");
+    assert!(C::new("x", "n", &["(b)(6)", "Privilégié", "a b"]).is_ok());
+    let long = "c".repeat(CUSTOM_CODE_MAX + 1);
+    assert_eq!(C::new("x", "n", &["ok", &long]), Err(E::BadCode(1)));
+    assert!(C::new("x", "n", &["c".repeat(CUSTOM_CODE_MAX).as_str()]).is_ok());
+    assert_eq!(C::new("x", "n", &["a", "b", "a"]), Err(E::DuplicateCode { first: 0, dup: 2 }));
+    // Many long codes pass the per-code and count limits but not the total size.
+    let big: Vec<String> = (0..CUSTOM_CODES_MAX).map(|i| format!("{i:0>width$}", width = CUSTOM_CODE_MAX)).collect();
+    let big: Vec<&str> = big.iter().map(String::as_str).collect();
+    assert!(matches!(C::new("x", "n", &big), Err(E::TooLarge(n)) if n > crate::codes::CUSTOM_TOTAL_MAX));
+    for e in [E::BadId("q".into()), E::BuiltInId("foia".into()), E::BadName, E::CodeCount(0), E::BadCode(2), E::TooLarge(1)] {
+        assert!(!e.to_string().is_empty());
+    }
+}
+
+#[test]
 fn tags_lose_what_redaction_removed() {
     let content = b"/P <</MCID 0>> BDC BT /F1 10 Tf 10 200 Td (SECRET) Tj ET EMC /P <</MCID 1>> BDC BT /F1 10 Tf 10 100 Td (Public) Tj ET EMC";
     let mut doc = pdf(vec![

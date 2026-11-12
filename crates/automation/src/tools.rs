@@ -690,7 +690,7 @@ pub fn tools() -> Vec<ToolDef> {
         t(
             "redact_mark",
             "Mark for redaction",
-            "Mark content for redaction (nothing is removed until redact_apply). One of: rect [x0, y0, x1, y1] (points from the top-left of the displayed page) with page; find (text, every match); words (a list of words or phrases, every match of each; the result's matched_words says how many marks each made); pattern (phone, email, credit-card, ssn, date, iban: every match, Acrobat's Search & Redact patterns); regex (your own regular expression, every match, on the page text with words and lines separated by one space; Rust regex syntax: linear-time, no look-around or back-references, case-sensitive unless (?i), at most 1024 bytes, more than 10000 matches on one page fail the call, matches of the empty string are refused) with optional validate (luhn, mod97, iban: keep a match only if its checksum holds); whole_pages: true. find and words accept case_sensitive and whole_words (both default false). Select one page with page or multiple with pages (default all); do not pass both. rect requires page. overlay: text shown on the box once applied, or code_set (foia: U.S. FOIA (b)(1)(A)…(b)(9); privacy-act: U.S. Privacy Act (d)(5), (j)(1)…(k)(7)) with codes, shown as \"(b)(6), (b)(7)(C)\"; fill: box colour (default black). Undoable.",
+            "Mark content for redaction (nothing is removed until redact_apply). One of: rect [x0, y0, x1, y1] (points from the top-left of the displayed page) with page; find (text, every match); words (a list of words or phrases, every match of each; the result's matched_words says how many marks each made); pattern (phone, email, credit-card, ssn, date, iban: every match, Acrobat's Search & Redact patterns); regex (your own regular expression, every match, on the page text with words and lines separated by one space; Rust regex syntax: linear-time, no look-around or back-references, case-sensitive unless (?i), at most 1024 bytes, more than 10000 matches on one page fail the call, matches of the empty string are refused) with optional validate (luhn, mod97, iban: keep a match only if its checksum holds); whole_pages: true. find and words accept case_sensitive and whole_words (both default false). Select one page with page or multiple with pages (default all); do not pass both. rect requires page. overlay: text shown on the box once applied, or code_set (foia: U.S. FOIA (b)(1)(A)…(b)(9); privacy-act: U.S. Privacy Act (d)(5), (j)(1)…(k)(7)) with codes, shown as \"(b)(6), (b)(7)(C)\", or your own set: custom_code_set {id, name, codes} (validated; per call only, not saved) with codes picked from it; fill: box colour (default black). Undoable.",
         )
         .with(schema(
             json!({
@@ -707,8 +707,19 @@ pub fn tools() -> Vec<ToolDef> {
                 "whole_pages": { "type": "boolean" },
                 "pages": pages("to search or mark (default: all); mutually exclusive with page, and not valid with rect"),
                 "overlay": { "type": "string" },
-                "code_set": { "type": "string", "enum": ["foia", "privacy-act"] },
-                "codes": { "type": "array", "items": { "type": "string" }, "minItems": 1, "description": "Redaction codes from code_set, e.g. [\"(b)(6)\"]." },
+                "code_set": { "type": "string", "description": "A built-in redaction code set: foia or privacy-act (or the id of custom_code_set)." },
+                "custom_code_set": {
+                    "type": "object",
+                    "description": "Your own redaction code set for this call only (nothing is saved). The picked codes become the overlay text, in this set's order. code_set may be left out or name this id.",
+                    "properties": {
+                        "id": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-z0-9-]+$", "description": "a-z, 0-9 and hyphen, with a letter or digit; not foia or privacy-act." },
+                        "name": { "type": "string", "minLength": 1, "maxLength": 128, "description": "No control or invisible formatting characters." },
+                        "codes": { "type": "array", "items": { "type": "string", "minLength": 1, "maxLength": 128 }, "minItems": 1, "maxItems": 256, "description": "Distinct codes the overlay can draw (Western European characters; no control, invisible or line-break characters, no leading or trailing space), at most 16384 bytes together." }
+                    },
+                    "required": ["id", "name", "codes"],
+                    "additionalProperties": false
+                },
+                "codes": { "type": "array", "items": { "type": "string" }, "minItems": 1, "description": "Redaction codes from code_set or custom_code_set, e.g. [\"(b)(6)\"]." },
                 "fill": { "type": "string", "description": "#RRGGBB or a colour name." },
                 "author": { "type": "string" },
             }),

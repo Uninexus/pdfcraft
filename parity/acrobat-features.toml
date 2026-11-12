@@ -5907,8 +5907,8 @@ milestone = "M8"
 status = "partial"
 commands = ["redact.properties"]
 tools = ["redact_mark"]
-evidence = ["crates/redact/src/tests.rs::redaction_codes_join_in_set_order_and_reject_strangers", "crates/automation/tests/it/automation.rs::redacting_with_codes_through_tools", "crates/ui-egui/tests/it/redact.rs::redaction_codes_become_the_overlay_text"]
-notes = "built-in U.S. FOIA (5 U.S.C. 552(b)) and U.S. Privacy Act (552a) sets; picked codes become the overlay text, in the set's order. Missing: Edit Codes, custom code sets, import/export of code sets"
+evidence = ["crates/redact/src/tests.rs::redaction_codes_join_in_set_order_and_reject_strangers", "crates/automation/tests/it/automation.rs::redacting_with_codes_through_tools", "crates/ui-egui/tests/it/redact.rs::redaction_codes_become_the_overlay_text", "crates/redact/src/tests.rs::custom_code_sets_join_in_set_order_and_reject_strangers", "crates/redact/src/tests.rs::custom_code_sets_are_validated_hostilely", "crates/redact/src/tests.rs::custom_code_set_codes_are_validated_hostilely", "crates/automation/tests/it/automation.rs::redacting_with_a_custom_code_set_through_tools"]
+notes = "built-in U.S. FOIA (5 U.S.C. 552(b)) and U.S. Privacy Act (552a) sets; picked codes become the overlay text, in the set's order. redact_mark also takes a custom_code_set {id, name, codes} for one call (validated: id a-z0-9- up to 64 and not a built-in id, up to 256 distinct codes the overlay can draw, with no control or invisible characters or edge spaces, 16 KiB in total). Missing: the Edit Codes editor and choosing a custom set in the Redaction Properties dialog, saving custom sets between calls and runs (they are tool arguments only), import/export of code sets"
 
 [[feature]]
 id = "protect.apply-redactions"
