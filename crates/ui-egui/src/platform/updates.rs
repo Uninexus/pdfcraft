@@ -10,7 +10,7 @@ use craft_update::{CheckResultDialog, CheckResultResponse};
 use crate::PdfCraftApp;
 
 /// Where every PdfCraft release is listed.
-pub const RELEASES_PAGE: &str = "https://github.com/storytold/pdfcraft/releases";
+pub const RELEASES_PAGE: &str = "https://github.com/Uninexus/pdfcraft/releases";
 
 /// Stands in for the network in tests.
 #[cfg(not(target_arch = "wasm32"))]
@@ -339,5 +339,14 @@ mod tests {
         let mut app = PdfCraftApp::new();
         app.on_exit(None);
         assert_eq!(app.updates.exits, 1);
+    }
+
+    /// A build of this fork must only ever look at the fork's own releases: with upstream's
+    /// repository the app told users of this fork to "update" to upstream's build.
+    #[test]
+    fn updates_come_from_the_forks_releases_only() {
+        assert_eq!(crate::UPDATE_APP.repo, "Uninexus/pdfcraft");
+        assert_eq!(crate::UPDATE_APP.releases_url(), RELEASES_PAGE);
+        assert!(!RELEASES_PAGE.contains("storytold"));
     }
 }
