@@ -1,4 +1,4 @@
-# Batch conversion, OCR and compression
+# Batch conversion, OCR, compression and PDF/A
 
 `pdfcraft-cli batch` runs the same steps over files or folders, one file at a time.
 It writes separate PDF outputs and a JSON report to stdout. It does not change
@@ -21,7 +21,7 @@ folder are retained inside the output folder. Files encountered more than once
 through overlapping selections run once; the first selection determines their
 relative output path. Processing order is sorted by input path.
 
-Steps are `convert`, `ocr` and `optimize`, each at most once. `convert`, when used,
+Steps are `convert`, `ocr`, `optimize` and `pdfa`, each at most once. `convert`, when used,
 must come first. Conversion uses the same supported extensions as Create PDF;
 new engine importers become available here automatically. Without `convert`,
 only `.pdf` inputs are processed. Unsupported extensions are reported as skipped.
@@ -38,6 +38,15 @@ only `.pdf` inputs are processed. Unsupported extensions are reported as skipped
   default 300), `--language` (default `en`) and `--ocr-all-pages` configure it.
   By default pages already containing text are skipped. Missing models are
   reported as file errors; nothing is downloaded or installed by the batch.
+- `pdfa` (last, when used) runs Save as PDF/A on the result, as `pdfa_convert` does.
+  `pdfcraft-cli batch` converts to PDF/A-2b. For 3b, call `doc_batch` with `level` set to
+  `3b`, for example `pdfcraft-cli run --script steps.json` with a `doc_batch` step whose
+  `args` include `"steps": ["pdfa"], "level": "3b"`. Each file's step report gives
+  `remaining_issues`, a count of what verification still finds (for example fonts that are
+  not embedded), `compliant` (true when that count is 0) and the conversion's warnings.
+  A file with remaining issues is still written and counted completed; run `pdfa_verify` on
+  the output for the details. A file the conversion cannot handle (for example an encrypted
+  one without the owner's rights) is a per-file error with no output.
 - `--stop-on-error` stops processing after the first file error. By default the
   remaining files continue. Earlier successful outputs stay, and unprocessed
   files are listed as skipped. A file is published only after all its steps succeed.

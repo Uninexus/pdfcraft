@@ -38,7 +38,7 @@ pub(super) fn run(args: &[String]) -> Result<(), CliError> {
         }
         i += 1;
     }
-    let steps: Vec<_> = flag(args, "--steps").ok_or("batch: missing --steps (convert, ocr, optimize)")?.split(',').collect();
+    let steps: Vec<_> = flag(args, "--steps").ok_or("batch: missing --steps (convert, ocr, optimize, pdfa)")?.split(',').collect();
     let out = flag(args, "--out-dir").ok_or("batch: missing --out-dir")?;
     let mut params =
         json!({"paths":paths,"steps":steps,"out_dir":out,"recursive":seen.contains("--recursive"),"stop_on_error":seen.contains("--stop-on-error")});

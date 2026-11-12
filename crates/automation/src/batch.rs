@@ -5,7 +5,7 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use pdfcraft_engine::{Session, ocr, optimize};
+use pdfcraft_engine::{Edit, Session, ocr, optimize, pdfa};
 use serde_json::{Value, json};
 
 use crate::{Args, Automation, Result, failed};
@@ -19,6 +19,8 @@ struct Recipe<'a> {
     images: optimize::ImageSettings,
     mono: optimize::MonoSettings,
     ocr: ocr::OcrSettings,
+    /// The PDF/A level the `pdfa` step converts to.
+    pdfa: pdfa::Level,
     /// The calling session's JavaScript preference, carried into each file's own session.
     javascript: bool,
 }
@@ -28,16 +30,20 @@ impl<'a> Recipe<'a> {
     /// `auto`'s session.
     fn parse(auto: &Automation, args: &'a Args) -> Result<Self> {
         let steps = args.strs("steps")?;
-        if steps.is_empty() || steps.len() > 3 {
-            return Err(Args::wrong("steps", "one to three unique steps: convert, ocr, optimize"));
+        if steps.is_empty() || steps.len() > 4 {
+            return Err(Args::wrong("steps", "one to four unique steps: convert, ocr, optimize, pdfa"));
         }
         let mut seen = HashSet::new();
         for (i, step) in steps.iter().enumerate() {
-            if !matches!(*step, "convert" | "ocr" | "optimize") || !seen.insert(*step) || (*step == "convert" && i != 0) {
-                return Err(Args::wrong("steps", "unique convert/ocr/optimize steps, with convert first when present"));
+            if !matches!(*step, "convert" | "ocr" | "optimize" | "pdfa")
+                || !seen.insert(*step)
+                || (*step == "convert" && i != 0)
+                || (*step == "pdfa" && i + 1 != steps.len())
+            {
+                return Err(Args::wrong("steps", "unique convert/ocr/optimize/pdfa steps, with convert first and pdfa last when present"));
             }
         }
-        for (keys, step) in [(&["ppi", "quality"][..], "optimize"), (&["dpi", "language", "skip_text_pages"][..], "ocr")] {
+        for (keys, step) in [(&["ppi", "quality"][..], "optimize"), (&["dpi", "language", "skip_text_pages"][..], "ocr"), (&["level"][..], "pdfa")] {
             if !steps.contains(&step) && keys.iter().any(|k| args.get(k).is_some()) {
                 return Err(failed(format!("{} settings need the {step} step", keys.join("/"))));
             }
@@ -64,7 +70,8 @@ impl<'a> Recipe<'a> {
         if args.opt_num("dpi")?.is_some_and(|dpi| !(72.0..=600.0).contains(&dpi)) {
             return Err(Args::wrong("dpi", "72 to 600"));
         }
-        Ok(Self { steps, images, mono, ocr: auto.ocr_settings(args)?, javascript: auto.session.javascript() })
+        let pdfa = auto.pdfa_level(args)?;
+        Ok(Self { steps, images, mono, ocr: auto.ocr_settings(args)?, pdfa, javascript: auto.session.javascript() })
     }
 
     fn accepts(&self, path: &Path) -> bool {
@@ -109,6 +116,23 @@ impl<'a> Recipe<'a> {
                     if candidate.len() < bytes.len() {
                         bytes = candidate;
                     }
+                }
+                "pdfa" => {
+                    let id = session.open(name, None, bytes.clone(), None).map_err(failed)?;
+                    let converted = session.with_own_js_output(id, |s| s.apply(id, Edit::ConvertPdfA { level: self.pdfa }));
+                    let saved = converted.map_err(failed).and_then(|((), out)| Ok((session.save_bytes(id).map_err(failed)?, out.errors)));
+                    // The count is only taken once conversion and saving succeeded. Issues that remain
+                    // (fonts not embedded, say) do not fail the file: it is still written and counted
+                    // completed, and `compliant` says whether verification found none.
+                    let verified = saved.and_then(|(candidate, warnings)| {
+                        let doc = session.get(id).ok_or_else(|| failed("the PDF/A document closed during conversion"))?;
+                        Ok((candidate, warnings, doc.pdfa_verify(self.pdfa).len()))
+                    });
+                    session.close(id);
+                    let (candidate, warnings, remaining) = verified?;
+                    bytes = candidate;
+                    log.push(json!({"step":"pdfa","level":self.pdfa.label(),"bytes_before":before,"bytes_after":bytes.len(),"remaining_issues":remaining,"compliant":remaining == 0,"warnings":warnings}));
+                    continue;
                 }
                 _ => return Err(failed("unknown batch step")),
             }
