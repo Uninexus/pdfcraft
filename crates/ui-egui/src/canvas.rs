@@ -591,6 +591,9 @@ pub struct DocView {
     text_links: HashMap<usize, (Arc<PageText>, Arc<[TextLink]>)>,
     pub(crate) text_failed: HashSet<usize>,
     pub find: Option<Find>,
+    /// Advanced search's Folder scope. Here, not in [`Find`], so closing the find bar does not end a running search.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub folder_search: crate::search_folder::FolderScope,
     selection: Option<Selection>,
     /// Select All while scrolling continuously (#2639): the text of every page of the document,
     /// highlighted on each page as its text arrives and copied whole ([`DocView::whole_text`]).
@@ -1077,6 +1080,8 @@ impl DocView {
             text_links: HashMap::new(),
             text_failed: HashSet::new(),
             find: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            folder_search: Default::default(),
             selection: None,
             all_text: false,
             actions_dismissed: None,
