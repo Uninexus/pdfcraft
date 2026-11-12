@@ -31,9 +31,6 @@ pub struct Find {
     pub replacement: String,
     /// Focus the Replace field on the next frame.
     pub focus_replace: bool,
-    /// Advanced search's Folder scope: the PDFs of a folder instead of this document.
-    #[cfg(not(target_arch = "wasm32"))]
-    pub folder: crate::panels::search_folder::FolderScope,
 }
 
 /// What a text layer arriving after a search began may do with the automatic choice.

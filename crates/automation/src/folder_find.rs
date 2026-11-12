@@ -1,5 +1,5 @@
-//! `text_find_folder`: the text search of every PDF in a folder, as the Advanced search window's
-//! Folder scope runs it (the engine's `folder_search`).
+//! `text_find_folder`: the text search of every PDF in a folder, as Edit > Advanced search with the Folder
+//! scope runs it (the engine's `folder_search`).
 
 use pdfcraft_engine::folder_search::{self, FileOutcome, MAX_FILES, MAX_RESULTS, Options};
 
@@ -29,12 +29,12 @@ impl Automation {
             return Err(Args::wrong("folder", "a folder path"));
         }
         let options = Options {
-            query: query.to_owned(),
             case_sensitive: a.opt_bool("case_sensitive")?.unwrap_or(false),
             whole_words: a.opt_bool("whole_words")?.unwrap_or(false),
             recursive: a.opt_bool("recursive")?.unwrap_or(false),
             max_files: bounded(a, "max_files", MAX_FILES, MAX_FILES)?,
             max_results: bounded(a, "limit", 500, MAX_RESULTS)?,
+            ..Options::new(query)
         };
         let folder = self.resolve(requested, false)?;
         if !folder.is_dir() {
@@ -42,42 +42,56 @@ impl Automation {
         }
         let report = folder_search::search_folder_report(&folder, &options, &|| false).map_err(failed)?;
         let name = |path: &Path| path.strip_prefix(&folder).unwrap_or(path).to_string_lossy().replace('\\', "/");
-        let mut pages_failed_total = 0usize;
+        // A name that is not UTF-8 is shown with replacement characters: `path_lossy` says so, and
+        // such a path can't be passed back as given.
+        let lossy = |path: &Path| path.to_str().is_none();
         let files: Vec<Value> = report
             .files
             .iter()
             .filter_map(|f| match f {
-                FileOutcome::Searched { path, pages, pages_failed, matches } => {
-                    pages_failed_total = pages_failed_total.saturating_add(*pages_failed);
+                FileOutcome::Searched { path, pages, pages_failed, pages_truncated, matches } => {
                     let matches: Vec<Value> = matches
                         .iter()
                         .map(|m| {
                             json!({ "page": m.page.saturating_add(1), "text": m.text, "before": m.before, "after": m.after, "snippet": m.snippet() })
                         })
                         .collect();
-                    Some(json!({ "path": path.to_string_lossy(), "relative": name(path), "pages": pages, "pages_failed": pages_failed,
-                        "count": matches.len(), "matches": matches }))
+                    Some(json!({ "path": path.to_string_lossy(), "relative": name(path), "path_lossy": lossy(path), "pages": pages,
+                        "pages_failed": pages_failed, "pages_truncated": pages_truncated, "count": matches.len(), "matches": matches }))
                 }
-                FileOutcome::Skipped { .. } => None,
+                _ => None,
             })
             .collect();
         let skipped: Vec<Value> = report
             .skipped
             .iter()
             .filter_map(|f| match f {
-                FileOutcome::Skipped { path, reason } => Some(json!({ "path": path.to_string_lossy(), "relative": name(path), "reason": reason })),
-                FileOutcome::Searched { .. } => None,
+                FileOutcome::Skipped { path, reason } => {
+                    Some(json!({ "path": path.to_string_lossy(), "relative": name(path), "path_lossy": lossy(path), "reason": reason.english() }))
+                }
+                _ => None,
+            })
+            .collect();
+        let unlistable: Vec<Value> = report
+            .unlistable
+            .iter()
+            .filter_map(|f| match f {
+                FileOutcome::FolderUnlistable { path, error } => {
+                    Some(json!({ "path": path.to_string_lossy(), "relative": name(path), "path_lossy": lossy(path), "error": error }))
+                }
+                _ => None,
             })
             .collect();
         let s = &report.summary;
-        // Files that had no match are not listed, but a failed page on one of them still counts.
-        let complete = !s.files_capped && !s.results_capped && !s.listing_capped && !s.cancelled && pages_failed_total == 0;
         Ok(json!({
             "folder": folder.to_string_lossy(), "query": query, "count": s.match_count,
             "files_found": s.files_found, "files_searched": s.files_searched, "files_with_matches": files.len(), "files_skipped": s.files_skipped,
-            "complete": complete, "files_capped": s.files_capped, "results_capped": s.results_capped, "listing_capped": s.listing_capped,
+            // Files without a match are not listed, but their failed or cut pages count here.
+            "complete": s.complete(), "files_capped": s.files_capped, "results_capped": s.results_capped, "listing_capped": s.listing_capped,
+            "bytes_capped": s.bytes_capped, "pages_failed": s.pages_failed, "pages_truncated": s.pages_truncated,
             "files": files, "skipped_truncated": skipped.len() > MAX_SKIPPED_LISTED,
             "skipped": skipped.into_iter().take(MAX_SKIPPED_LISTED).collect::<Vec<_>>(),
+            "folders_unlistable": s.folders_unlistable, "unlistable_folders": unlistable.into_iter().take(MAX_SKIPPED_LISTED).collect::<Vec<_>>(),
         }))
     }
 }

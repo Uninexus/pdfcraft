@@ -215,3 +215,19 @@ fn a_link_out_of_the_root_is_not_followed() {
     assert_eq!(names(&r, "files"), ["in.pdf"], "{r}");
     assert_eq!(names(&r, "skipped"), ["link.pdf"], "{r}");
 }
+
+/// A file name that is not UTF-8 is marked, not hidden.
+#[cfg(unix)]
+#[test]
+fn a_name_that_is_not_utf8_is_flagged() {
+    use std::os::unix::ffi::OsStrExt;
+    let dir = tmp("lossy");
+    let name = std::ffi::OsStr::from_bytes(b"caf\xe9.pdf");
+    std::fs::write(dir.join(name), pdf(&["invoice"])).unwrap();
+    write(&dir, "plain.pdf", &pdf(&["invoice"]));
+    let mut a = Automation::new().with_root(&dir).unwrap();
+    let r = ok(&mut a, json!({ "folder": ".", "query": "invoice" }));
+    let lossy: Vec<bool> = r["files"].as_array().unwrap().iter().map(|f| f["path_lossy"].as_bool().unwrap()).collect();
+    assert_eq!(lossy.iter().filter(|l| **l).count(), 1, "{r}");
+    assert_eq!(r["count"], 2);
+}

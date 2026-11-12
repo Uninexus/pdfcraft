@@ -809,6 +809,14 @@ impl PdfCraftApp {
         let _ = path;
     }
 
+    /// Open the file `path` (a file name, never split at a `#`) at the 0-based `page`; a file
+    /// that is already open comes to the front at that page.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn open_path_at_page(&mut self, path: &str, page: usize) -> OpenOutcome {
+        let destination = pdfcraft_render::RemoteDestination::Page { page, view: pdfcraft_render::DestView::Top };
+        self.open_file_request(path, Some(destination), None, None)
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     pub fn open_path(&mut self, path: &str) -> OpenOutcome {
         self.open_path_then(path, None)

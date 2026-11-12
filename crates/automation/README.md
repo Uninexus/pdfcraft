@@ -52,16 +52,20 @@ and per-page Unicode word/character counts, with optional tagged-table, tagged-c
 image/OCR exclusions. See [word count](../../docs/word-count.md) for counting rules and limits.
 
 `text_find_folder {folder, query, case_sensitive?, whole_words?, recursive?, max_files?, limit?}`
-searches the `.pdf` files in a folder (Advanced search's Folder scope) with the same matcher as
-`text_find`, plus the find bar's case and whole-word options. It reads the files from disk and
+searches the `.pdf` files in a folder (Edit > Advanced search, scope Folder) with the same matcher
+as `text_find`, plus the find bar's case and whole-word options. It reads the files from disk and
 opens nothing in the session, so it does not use the text cache. `folder` must be inside `--root`
-(and the automation read root). Links are not followed, so a link out of the root is listed as
-skipped, never read. At most 2000 files (`max_files`) and 5000 matches (`limit`, default 500) are
-returned; `files_capped`, `results_capped` and `listing_capped` say when a cap cut the answer, and
-`complete` is false then and after a page whose text could not be read (`pages_failed`). A file that
-cannot be searched (corrupt, password protected, over 256 MiB, a link) is in `skipped` with its
-reason and never fails the call. Pages are numbered from 1, and each match has `before`, `text`,
-`after` and a one-line `snippet`. Scanned pages without a text layer have nothing to match.
+(and the automation read root). A link named `.pdf` is listed in `skipped` and never read, and a
+link to a folder is never entered, so nothing outside the root is reached through one. At most 2000
+files (`max_files`), 5000 matches (`limit`, default 500) and 4 GiB of files are read;
+`files_capped`, `results_capped`, `listing_capped` and `bytes_capped` say when a cap cut the answer.
+`complete` is false then, after a failed or cut page (`pages_failed`, `pages_truncated`, counted in
+files with and without matches), after a sub-folder that could not be listed (`unlistable_folders`,
+kept apart from `skipped`) and after a cancel. A file that cannot be searched (corrupt, password
+protected, over 256 MiB, a link) is in `skipped` with its reason and never fails the call. Pages are
+numbered from 1, and each match has `before`, `text`, `after` and a one-line `snippet`. A file name
+that is not UTF-8 is shown with replacement characters and has `path_lossy: true`. Scanned pages
+without a text layer have nothing to match.
 
 Extracted page text is reused in a session-wide LRU cache: at most **64 MiB** of estimated owned
 text storage and **4,096 pages**, shared by all open documents. Accounting includes glyph-vector

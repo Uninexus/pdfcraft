@@ -46,17 +46,18 @@ pub(crate) fn panel(ui: &mut egui::Ui, t: &Tokens, view: &mut DocView, pages: us
     // Where to search: this document, or every PDF in a folder.
     #[cfg(not(target_arch = "wasm32"))]
     {
+        let folder = &mut view.folder_search;
         ui.horizontal(|ui| {
             ui.label(egui::RichText::new(tl!("Search in:")).color(t.text_muted));
-            ui.selectable_value(&mut find.folder.on, false, tl!("This document"));
-            ui.selectable_value(&mut find.folder.on, true, tl!("Folder"));
+            ui.selectable_value(&mut folder.on, false, tl!("This document"));
+            ui.selectable_value(&mut folder.on, true, tl!("Folder"));
         });
-        if find.folder.on {
+        if folder.on {
             let (query, case_sensitive, whole_words) = (find.query.clone(), find.case_sensitive, find.whole_words);
-            if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) && find.folder.folder.is_some() && !query.trim().is_empty() {
-                find.folder.start(ui.ctx(), &query, case_sensitive, whole_words);
+            if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) && folder.folder.is_some() && !query.trim().is_empty() {
+                folder.start(ui.ctx(), &query, case_sensitive, whole_words);
             }
-            return crate::search_folder::section(ui, t, &mut find.folder, &query, case_sensitive, whole_words);
+            return crate::search_folder::section(ui, t, folder, &query, case_sensitive, whole_words);
         }
     }
     if find.query != find.case_query {

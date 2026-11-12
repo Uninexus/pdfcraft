@@ -9,7 +9,7 @@ use std::sync::mpsc::{Receiver, TryRecvError, channel};
 
 use egui::text::LayoutJob;
 use egui::{Color32, FontId, TextFormat};
-use pdfcraft_engine::folder_search::{self, FileOutcome, Match, Options, Summary};
+use pdfcraft_engine::folder_search::{self, FileOutcome, Match, Options, SkipReason, Summary};
 
 use crate::theme::{self, Tokens};
 use crate::{PdfCraftApp, widgets};
@@ -44,6 +44,8 @@ enum Msg {
 struct Job {
     rx: Receiver<Msg>,
     cancel: Arc<AtomicBool>,
+    /// Set by the worker as its last act.
+    finished: Arc<AtomicBool>,
 }
 
 impl Drop for Job {
@@ -52,7 +54,11 @@ impl Drop for Job {
     }
 }
 
-/// The folder scope of one document's Search panel.
+/// Messages taken from the worker in one frame; more wait for the next (a repaint is asked for).
+const POLL_BATCH: usize = 512;
+
+/// The folder scope of one document's Search panel. It lives on the document's view, so closing
+/// the find bar or pressing Escape does not end a running search.
 #[derive(Default)]
 pub struct FolderScope {
     /// Search the folder instead of this document.
@@ -60,11 +66,17 @@ pub struct FolderScope {
     pub folder: Option<PathBuf>,
     pub recursive: bool,
     pub results: Vec<FileHits>,
-    pub skipped: Vec<(PathBuf, String)>,
+    pub skipped: Vec<(PathBuf, SkipReason)>,
+    pub unlistable: Vec<(PathBuf, String)>,
     pub summary: Option<Summary>,
+    /// The search was stopped before it finished; what it found stays listed.
+    pub stopped: bool,
     pub error: Option<String>,
     files_done: usize,
+    pages_failed: usize,
     job: Option<Job>,
+    /// A stopped worker's flag: it may still be finishing a file, and a new search waits for it.
+    winding_down: Option<Arc<AtomicBool>>,
 }
 
 impl FolderScope {
@@ -72,47 +84,67 @@ impl FolderScope {
         self.job.is_some()
     }
 
-    /// Stop a running search (what it found stays listed).
-    pub fn stop(&mut self) {
-        self.job = None;
+    /// A stopped worker has not finished yet.
+    pub fn winding_down(&self) -> bool {
+        self.winding_down.as_ref().is_some_and(|f| !f.load(Ordering::Acquire))
     }
 
-    /// Search `folder` for `query` on a worker thread, replacing the listed results.
+    /// Stop a running search. What it found stays listed, marked as stopped.
+    pub fn stop(&mut self) {
+        if let Some(job) = self.job.take() {
+            self.winding_down = Some(job.finished.clone());
+            self.stopped = true;
+        }
+    }
+
+    /// Search `folder` for `query` on a worker thread, replacing the listed results. Nothing
+    /// starts while a stopped worker is still finishing.
     pub fn start(&mut self, ctx: &egui::Context, query: &str, case_sensitive: bool, whole_words: bool) {
         let Some(folder) = self.folder.clone() else { return };
-        self.job = None;
-        (self.results, self.skipped, self.summary, self.error, self.files_done) = (Vec::new(), Vec::new(), None, None, 0);
+        if self.running() || self.winding_down() {
+            return;
+        }
+        self.winding_down = None;
+        self.results.clear();
+        self.skipped.clear();
+        self.unlistable.clear();
+        (self.summary, self.error, self.stopped, self.files_done, self.pages_failed) = (None, None, false, 0, 0);
         let options = Options { case_sensitive, whole_words, recursive: self.recursive, max_results: MAX_LISTED, ..Options::new(query) };
         let (tx, rx) = channel();
-        let cancel = Arc::new(AtomicBool::new(false));
-        let (stop, ctx) = (cancel.clone(), ctx.clone());
+        let (cancel, finished) = (Arc::new(AtomicBool::new(false)), Arc::new(AtomicBool::new(false)));
+        let (stop, done, ctx) = (cancel.clone(), finished.clone(), ctx.clone());
         let work = move || {
             let result = folder_search::search_folder(&folder, &options, &|| stop.load(Ordering::Relaxed), &mut |outcome| {
                 let _ = tx.send(Msg::File(outcome));
                 ctx.request_repaint();
             });
             let _ = tx.send(Msg::Done(result));
+            done.store(true, Ordering::Release);
             ctx.request_repaint();
         };
         match std::thread::Builder::new().name("pdfcraft-folder-search".into()).spawn(work) {
-            Ok(_) => self.job = Some(Job { rx, cancel }),
+            Ok(_) => self.job = Some(Job { rx, cancel, finished }),
             Err(e) => self.error = Some(e.to_string()),
         }
     }
 
-    /// Take what the worker has sent since the last frame.
-    pub fn poll(&mut self) {
+    /// Take what the worker has sent since the last frame (at most [`POLL_BATCH`] messages; a
+    /// repaint is asked for when more may wait).
+    pub fn poll(&mut self, ctx: &egui::Context) {
         let Some(job) = &self.job else { return };
         let mut done = false;
-        for _ in 0..256 {
+        let mut drained = false;
+        for _ in 0..POLL_BATCH {
             match job.rx.try_recv() {
-                Ok(Msg::File(FileOutcome::Searched { path, matches, .. })) => {
+                Ok(Msg::File(FileOutcome::Searched { path, matches, pages_failed, .. })) => {
                     self.files_done += 1;
+                    self.pages_failed += pages_failed;
                     if !matches.is_empty() {
                         self.results.push(FileHits { path, matches });
                     }
                 }
                 Ok(Msg::File(FileOutcome::Skipped { path, reason })) => self.skipped.push((path, reason)),
+                Ok(Msg::File(FileOutcome::FolderUnlistable { path, error })) => self.unlistable.push((path, error)),
                 Ok(Msg::Done(result)) => {
                     match result {
                         Ok(summary) => self.summary = Some(summary),
@@ -121,7 +153,10 @@ impl FolderScope {
                     done = true;
                     break;
                 }
-                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Empty) => {
+                    drained = true;
+                    break;
+                }
                 Err(TryRecvError::Disconnected) => {
                     self.error = Some(tl!("The search stopped unexpectedly").to_owned());
                     done = true;
@@ -131,12 +166,38 @@ impl FolderScope {
         }
         if done {
             self.job = None;
+        } else if !drained {
+            ctx.request_repaint();
         }
     }
 }
 
 fn file_name(path: &Path) -> String {
     path.file_name().map_or_else(|| path.to_string_lossy().into_owned(), |n| n.to_string_lossy().into_owned())
+}
+
+/// A skipped file's reason in the interface language.
+fn reason_text(reason: &SkipReason) -> String {
+    match reason {
+        SkipReason::Link => tl!("A link is not followed").to_owned(),
+        SkipReason::SpecialFile => tl!("Not a regular file").to_owned(),
+        SkipReason::TooLarge(mib) => crate::i18n::fmt(tl!("Larger than {n} MiB"), &[("n", &mib.to_string())]),
+        SkipReason::PasswordProtected => tl!("Password protected").to_owned(),
+        SkipReason::Unreadable(detail) => format!("{}: {detail}", tl!("Could not be read")),
+        SkipReason::Invalid(_) => tl!("Not a readable PDF").to_owned(),
+        SkipReason::Unsupported(_) => tl!("Uses a feature that is not supported").to_owned(),
+        SkipReason::NoPages => tl!("Has no pages").to_owned(),
+        SkipReason::Failed(_) => tl!("Reading it failed unexpectedly").to_owned(),
+    }
+}
+
+/// The count line: "{n} instances - {f} files searched".
+fn count_line(found: usize, files: usize) -> String {
+    let count =
+        if found == 1 { crate::i18n::fmt(tl!("1 instance"), &[]) } else { crate::i18n::fmt(tl!("{n} instances"), &[("n", &found.to_string())]) };
+    let files =
+        if files == 1 { tl!("1 file searched").to_owned() } else { crate::i18n::fmt(tl!("{n} files searched"), &[("n", &files.to_string())]) };
+    format!("{count} - {files}")
 }
 
 /// The Folder scope's controls and results, below the query and options.
@@ -149,7 +210,11 @@ pub(crate) fn section(
     whole_words: bool,
 ) -> Option<PanelAction> {
     let mut action = None;
-    scope.poll();
+    scope.poll(ui.ctx());
+    if scope.running() {
+        // A search that is quiet for a while still shows its progress.
+        ui.ctx().request_repaint_after(std::time::Duration::from_millis(200));
+    }
     ui.horizontal(|ui| {
         if ui.button(tl!("Choose folder")).clicked() {
             action = Some(PanelAction::ChooseFolder);
@@ -166,29 +231,31 @@ pub(crate) fn section(
             if ui.button(tl!("Stop")).clicked() {
                 scope.stop();
             }
+        } else if scope.winding_down() {
+            ui.add_enabled(false, egui::Button::new(tl!("Stopping")));
+            ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
         } else if ui.add_enabled(ready, egui::Button::new(tl!("Search"))).clicked() {
             scope.start(ui.ctx(), query, case_sensitive, whole_words);
         }
     });
     if let Some(error) = &scope.error {
-        ui.colored_label(ui.visuals().error_fg_color, error);
+        ui.colored_label(ui.visuals().error_fg_color, format!("{}: {error}", tl!("The search failed")));
     }
     let found: usize = scope.results.iter().map(|f| f.matches.len()).sum();
     let status = if scope.running() {
         crate::i18n::fmt(tl!("Searching, {n} files done"), &[("n", &scope.files_done.to_string())])
-    } else if scope.summary.is_some() {
-        let count =
-            if found == 1 { crate::i18n::fmt(tl!("1 instance"), &[]) } else { crate::i18n::fmt(tl!("{n} instances"), &[("n", &found.to_string())]) };
-        let files = scope.summary.as_ref().map_or(0, |s| s.files_searched);
-        let files =
-            if files == 1 { tl!("1 file searched").to_owned() } else { crate::i18n::fmt(tl!("{n} files searched"), &[("n", &files.to_string())]) };
-        format!("{count} - {files}")
+    } else if scope.stopped {
+        crate::i18n::fmt(tl!("Stopped, {n} files searched"), &[("n", &scope.files_done.to_string())])
+    } else if let Some(s) = &scope.summary {
+        count_line(found, s.files_searched)
     } else {
         String::new()
     };
     ui.add_space(6.0);
     ui.label(egui::RichText::new(status).font(theme::semibold(12.5)));
-    if scope.summary.as_ref().is_some_and(|s| s.results_capped || s.files_capped || s.listing_capped) {
+    // Anything that stopped the search short of every page of every file.
+    let cut = scope.stopped || scope.pages_failed > 0 || scope.summary.as_ref().is_some_and(|s| !s.complete());
+    if cut {
         ui.label(egui::RichText::new(tl!("Not every file or match is listed")).small().color(t.text_faint));
     }
     if !scope.skipped.is_empty() {
@@ -198,7 +265,18 @@ pub(crate) fn section(
         };
         egui::CollapsingHeader::new(title).id_salt("folder-search-skipped").show(ui, |ui| {
             for (path, reason) in scope.skipped.iter().take(MAX_SKIPPED_LISTED) {
-                ui.label(egui::RichText::new(format!("{}: {reason}", file_name(path))).small().color(t.text_muted));
+                ui.label(egui::RichText::new(format!("{}: {}", file_name(path), reason_text(reason))).small().color(t.text_muted));
+            }
+        });
+    }
+    if !scope.unlistable.is_empty() {
+        let title = match scope.unlistable.len() {
+            1 => tl!("1 folder could not be listed").to_owned(),
+            n => crate::i18n::fmt(tl!("{n} folders could not be listed"), &[("n", &n.to_string())]),
+        };
+        egui::CollapsingHeader::new(title).id_salt("folder-search-unlistable").show(ui, |ui| {
+            for (path, error) in scope.unlistable.iter().take(MAX_SKIPPED_LISTED) {
+                ui.label(egui::RichText::new(format!("{}: {error}", file_name(path))).small().color(t.text_muted));
             }
         });
     }
@@ -235,19 +313,25 @@ pub(crate) fn section(
 }
 
 impl PdfCraftApp {
-    /// Ask for the folder the active document's Search panel searches.
+    /// Ask for the folder the active document's Search panel searches. The answer goes to the
+    /// document that was in front when the picker opened, whatever is in front when it closes.
     pub(crate) fn choose_search_folder(&mut self) {
+        let Some((_, id)) = self.active_ids() else { return };
         let dialog = rfd::AsyncFileDialog::new();
-        self.ask_one(crate::pickers::Ask::Folder(dialog), None, |app, dir| {
-            if let Some(find) = app.active.and_then(|i| app.views.get_mut(i)).and_then(|v| v.find.as_mut()) {
-                find.folder.folder = Some(dir);
+        self.ask_one(crate::pickers::Ask::Folder(dialog), None, move |app, dir| {
+            if let Some(view) = app.views.iter_mut().find(|v| v.id == id) {
+                view.folder_search.folder = Some(dir);
             }
         });
     }
 
-    /// Open `path` at the 0-based `page`, as `file.pdf#page=N` does.
+    /// Open `path` at the 0-based `page`. A name that is not UTF-8 can't be handed to the opener.
     pub(crate) fn open_search_result(&mut self, path: &Path, page: usize) {
-        let target = format!("{}#page={}", path.to_string_lossy(), page.saturating_add(1));
-        let _ = self.open_path(&target);
+        match path.to_str() {
+            Some(path) => {
+                let _ = self.open_path_at_page(path, page);
+            }
+            None => self.notify_tr("This file's name can't be opened from here"),
+        }
     }
 }

@@ -74,19 +74,19 @@ fn the_folder_scope_lists_matches_by_file_and_opens_one_at_its_page() {
     h.get_by_label("This document");
     h.get_by_role_and_label(Role::Button, "Folder").click();
     h.run_steps(2);
-    assert!(h.state().views[i].find.as_ref().unwrap().folder.on, "the Folder scope is chosen");
+    assert!(h.state().views[i].folder_search.on, "the Folder scope is chosen");
 
     // The folder comes from the picker.
     h.state_mut().pick_override = Some(vec![dir.0.to_string_lossy().into_owned()]);
     h.get_by_role_and_label(Role::Button, "Choose folder").click();
-    assert!(step_until(&mut h, |h| h.state().views[i].find.as_ref().unwrap().folder.folder.is_some()), "the picked folder is kept");
+    assert!(step_until(&mut h, |h| h.state().views[i].folder_search.folder.is_some()), "the picked folder is kept");
     h.state_mut().views[i].find.as_mut().unwrap().query = "invoice".into();
     h.run_steps(2);
     h.get_by_role_and_label(Role::Button, "Search").click();
-    assert!(step_until(&mut h, |h| h.state().views[i].find.as_ref().unwrap().folder.summary.is_some()), "the worker thread finished");
+    assert!(step_until(&mut h, |h| h.state().views[i].folder_search.summary.is_some()), "the worker thread finished");
     h.run_steps(2);
 
-    let scope = &h.state().views[i].find.as_ref().unwrap().folder;
+    let scope = &h.state().views[i].folder_search;
     let found: Vec<(String, Vec<usize>)> = scope
         .results
         .iter()
@@ -113,4 +113,97 @@ fn the_folder_scope_lists_matches_by_file_and_opens_one_at_its_page() {
     );
     let opened = h.state().active.unwrap();
     assert_eq!(h.state().views[opened].current, 1);
+
+    // A file that is open already comes to the front at that page instead of opening twice.
+    h.state_mut().active = Some(0);
+    h.run_steps(3);
+    let at = h.get_by_label_contains("Page 2  ...").rect().center();
+    crate::support::input::double_click(&mut h, at);
+    h.run_steps(3);
+    assert_eq!(h.state().views.len(), 2, "no second tab for the same file");
+    assert_eq!(h.state().active, Some(1), "the open tab is shown");
+    assert_eq!(h.state().views[1].current, 1);
+}
+
+/// Starts the Folder search from the panel; the worker has not been polled yet when this returns.
+fn start_folder_search(h: &mut Harness<'static, PdfCraftApp>, dir: &std::path::Path, query: &str) -> usize {
+    let i = h.state().active.unwrap();
+    assert!(h.state_mut().execute("edit.advanced_search"));
+    h.run_steps(2);
+    h.get_by_role_and_label(Role::Button, "Folder").click();
+    h.run_steps(2);
+    h.state_mut().views[i].folder_search.folder = Some(dir.to_path_buf());
+    h.state_mut().views[i].find.as_mut().unwrap().query = query.into();
+    h.run_steps(2);
+    h.get_by_role_and_label(Role::Button, "Search").click();
+    h.run_steps(1);
+    i
+}
+
+fn small_folder(name: &str) -> Dir {
+    let dir = Dir(std::env::temp_dir().join(format!("pdfcraft-search-folder-ui-{}-{name}", std::process::id())));
+    let _ = std::fs::remove_dir_all(&dir.0);
+    std::fs::create_dir_all(&dir.0).unwrap();
+    std::fs::write(dir.0.join("one.pdf"), pdf(&["alpha invoice"])).unwrap();
+    dir
+}
+
+/// Stop keeps a "Stopped" state with the incomplete hint, and a new search can follow.
+#[test]
+fn stopping_a_search_says_so_and_a_new_search_can_follow() {
+    let dir = small_folder("stop");
+    let mut h = harness();
+    let i = start_folder_search(&mut h, &dir.0, "invoice");
+    assert!(h.state().views[i].folder_search.running(), "the worker was just started");
+    // Stop is what the Stop button calls; whether the worker is still busy is a race a test can't pin.
+    h.state_mut().views[i].folder_search.stop();
+    h.run_steps(2);
+    assert!(h.state().views[i].folder_search.stopped);
+    h.get_by_label("Stopped, 0 files searched");
+    h.get_by_label("Not every file or match is listed");
+    // A new search waits for the stopped worker, then runs to the end.
+    assert!(step_until(&mut h, |h| !h.state().views[i].folder_search.winding_down()), "the stopped worker finished");
+    h.run_steps(2);
+    h.get_by_role_and_label(Role::Button, "Search").click();
+    assert!(step_until(&mut h, |h| h.state().views[i].folder_search.summary.is_some()), "the second search finished");
+    let scope = &h.state().views[i].folder_search;
+    assert!(!scope.stopped);
+    assert_eq!(scope.results.len(), 1);
+}
+
+/// Closing the find bar (Escape) does not end a running folder search: its results are there when
+/// the panel comes back.
+#[test]
+fn closing_the_find_bar_does_not_end_a_folder_search() {
+    let dir = small_folder("escape");
+    let mut h = harness();
+    let i = start_folder_search(&mut h, &dir.0, "invoice");
+    h.state_mut().views[i].find = None;
+    h.state_mut().right = None;
+    h.run_steps(2);
+    assert!(h.state().views[i].folder_search.running() || h.state().views[i].folder_search.summary.is_some());
+    assert!(h.state_mut().execute("edit.advanced_search"));
+    assert!(step_until(&mut h, |h| h.state().views[i].folder_search.summary.is_some()), "the search finished");
+    assert_eq!(h.state().views[i].folder_search.results.len(), 1);
+}
+
+/// The folder picked while one document was in front belongs to that document, not to the one in
+/// front when the picker answers.
+#[test]
+fn a_picked_folder_goes_to_the_document_that_asked() {
+    let dir = small_folder("picker");
+    let mut h = harness();
+    let asking = h.state().active.unwrap();
+    assert!(h.state_mut().execute("edit.advanced_search"));
+    h.run_steps(2);
+    h.get_by_role_and_label(Role::Button, "Folder").click();
+    h.run_steps(2);
+    h.state_mut().pick_override = Some(vec![dir.0.to_string_lossy().into_owned()]);
+    h.get_by_role_and_label(Role::Button, "Choose folder").click();
+    h.run_steps(1);
+    h.state_mut().open_bytes("other.pdf", None, fixtures::pdf_pages(1)).unwrap();
+    let other = h.state().active.unwrap();
+    assert_ne!(other, asking);
+    assert!(step_until(&mut h, |h| h.state().views[asking].folder_search.folder.is_some()), "the folder arrives");
+    assert!(h.state().views[other].folder_search.folder.is_none());
 }
