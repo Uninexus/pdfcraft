@@ -2803,11 +2803,11 @@ title = "Insert pages from the clipboard"
 area = "D"
 tier = "P1"
 milestone = "M10"
-status = "planned"
-commands = []
-tools = []
-evidence = []
-notes = ""
+status = "shipped"
+commands = ["page.insert_clipboard"]
+tools = ["page_insert_image"]
+evidence = ["crates/engine/src/tests.rs::planned_insert_puts_pictures_and_files_in_as_one_undoable_step", "crates/automation/tests/it/automation.rs::inserting_pictures_makes_one_undoable_step_and_refuses_other_files", "crates/ui-egui/tests/it/editing.rs::inserting_from_the_clipboard_goes_after_the_selection_as_one_undo_step"]
+notes = "Edit > Pages > Insert pages from clipboard, the Organize Insert menu and the Pages panel's page tools put a picture on the system clipboard (a screenshot, a picture copied in a browser), or the PDFs, images and .txt files copied in a file manager, after the selection (or the current page) in order, as one undo step, with the inserted pages selected. A copied picture is one page of its own size; copied files are used in order and one that can't be (another type, unreadable, over 256 MB) is named and left out; at most 100 files, 256 MB each and 512 MB together, and the clipboard image size limits as paste. Desktop only: the web build has no clipboard access to read. The page_insert_image tool takes PDF, picture (PNG, JPEG, JPEG 2000, TIFF, GIF, BMP) and .txt files by path, up to 100 and 512 MB together, and refuses the whole call if one is another kind (Word, Excel, PowerPoint) or can't be read; it can't read the system clipboard. Missing: choosing the position in the app."
 
 [[feature]]
 id = "organize.insert-from-scanner"

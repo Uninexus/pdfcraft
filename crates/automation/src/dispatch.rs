@@ -160,6 +160,7 @@ impl Automation {
             }
             "page_insert_blank" => self.insert_blank(&a)?,
             "page_insert_file" => self.insert_file(&a)?,
+            "page_insert_image" => self.insert_image(&a)?,
             "page_extract" => self.page_extract(&a)?,
             "doc_combine" => self.doc_combine(&a)?,
             "doc_create_multiple" => self.doc_create_multiple(&a)?,

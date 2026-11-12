@@ -2099,6 +2099,110 @@ fn inserting_a_file_goes_after_the_selection_and_undoes() {
     assert_eq!(texts_of(h.state(), 0), ["Page 1", "Page 2"]);
 }
 
+/// Organize ▸ Insert ▸ From Clipboard: a copied picture, or copied files, become pages after the
+/// selection, are selected, and come out again with one undo.
+#[test]
+fn inserting_from_the_clipboard_goes_after_the_selection_as_one_undo_step() {
+    use pdfcraft_ui_egui::Clip;
+    let dir = temp_path("insert-clipboard");
+    std::fs::create_dir_all(&dir).unwrap();
+    let (extra, note, zip) = (dir.join("extra.pdf"), dir.join("note.txt"), dir.join("bundle.zip"));
+    std::fs::write(&extra, fixture(2)).unwrap();
+    std::fs::write(&note, "a note").unwrap();
+    std::fs::write(&zip, b"PK").unwrap();
+    let mut h = organize(3);
+    h.state_mut().system_clipboard = false;
+    h.get_by_label("Page 1").click();
+    h.run_steps(2);
+    // Text, or nothing, can't be inserted: a message says what can, and nothing changes.
+    h.state_mut().clipboard_override = Some(Clip::Text("hello".into()));
+    insert_menu(&mut h, "Insert pages from the clipboard");
+    h.run_steps(3);
+    assert_eq!(texts_of(h.state(), 0), ["Page 1", "Page 2", "Page 3"]);
+    let said = h.state().toast.as_ref().map(|(t, _)| t.clone()).unwrap_or_default();
+    assert!(said.contains("picture") && said.contains("PDF"), "{said}");
+    // A picture: one page of its own size after the selected page.
+    h.state_mut().clipboard_override = Some(Clip::Image { width: 30, height: 20, rgba: [90u8, 90, 90, 255].repeat(30 * 20) });
+    insert_menu(&mut h, "Insert pages from the clipboard");
+    h.run_steps(3);
+    assert_eq!(texts_of(h.state(), 0), ["Page 1", "", "Page 2", "Page 3"]);
+    assert_eq!(picked(&h), [1], "the inserted page is selected");
+    {
+        let s = h.state();
+        let doc = s.session.get(s.views[0].id).unwrap();
+        assert_eq!((doc.info.pages[1].width, doc.info.pages[1].height), (30.0, 20.0));
+    }
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    h.run_steps(3);
+    assert_eq!(texts_of(h.state(), 0), ["Page 1", "Page 2", "Page 3"]);
+    // Copied files, in order, with the one that can't be used named and left out: one undo step.
+    h.state_mut().clipboard_override = None;
+    h.state_mut().clipboard_files_override = Some(vec![extra, zip, note]);
+    h.get_by_label("Page 2").click();
+    h.run_steps(2);
+    assert!(h.state_mut().execute("page.insert_clipboard"));
+    h.run_steps(3);
+    assert_eq!(texts_of(h.state(), 0), ["Page 1", "Page 2", "Page 1", "Page 2", "a note", "Page 3"]);
+    assert_eq!(picked(&h), [2, 3, 4], "the inserted pages are selected");
+    let said = h.state().toast.as_ref().map(|(t, _)| t.clone()).unwrap_or_default();
+    assert!(said.contains("bundle.zip"), "{said}");
+    assert!(said.contains("bundle.zip (") && !said.contains("bundle.zip: bundle.zip"), "the reason is given once: {said}");
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    h.run_steps(3);
+    assert_eq!(texts_of(h.state(), 0), ["Page 1", "Page 2", "Page 3"], "one undo takes out every inserted page");
+}
+
+/// What Insert from the clipboard won't take: too many files, a file over the size limit, files
+/// over the total, a file that is not a regular file, and a gap left by an earlier "+".
+#[test]
+fn inserting_from_the_clipboard_keeps_to_its_limits() {
+    let dir = temp_path("insert-clipboard-limits");
+    std::fs::create_dir_all(&dir).unwrap();
+    let note = dir.join("note.txt");
+    std::fs::write(&note, "a note").unwrap();
+    let sparse = |name: &str, len: u64| {
+        let path = dir.join(name);
+        std::fs::File::create(&path).unwrap().set_len(len).unwrap();
+        path
+    };
+    let mut h = organize(2);
+    h.state_mut().system_clipboard = false;
+    let said = |h: &Harness<'static, PdfCraftApp>| h.state().toast.as_ref().map(|(t, _)| t.clone()).unwrap_or_default();
+    // 101 files: refused whole.
+    h.state_mut().clipboard_files_override = Some(vec![note.clone(); 101]);
+    assert!(h.state_mut().execute("page.insert_clipboard"));
+    h.run_steps(2);
+    assert_eq!(texts_of(h.state(), 0), ["Page 1", "Page 2"]);
+    assert!(said(&h).contains("at most 100"), "{}", said(&h));
+    // A file over 256 MB is named and left out; the rest goes in.
+    let huge = sparse("huge.pdf", 256 * 1024 * 1024 + 1);
+    h.state_mut().clipboard_files_override = Some(vec![huge, note.clone()]);
+    assert!(h.state_mut().execute("page.insert_clipboard"));
+    h.run_steps(3);
+    assert_eq!(texts_of(h.state(), 0), ["Page 1", "a note", "Page 2"]);
+    assert!(said(&h).contains("huge.pdf (it is larger than 256 MB)"), "{}", said(&h));
+    // Files that are each allowed but together too much are refused before they are read.
+    h.state_mut().clipboard_files_override =
+        Some(vec![sparse("a.bin", 200 * 1024 * 1024), sparse("b.bin", 200 * 1024 * 1024), sparse("c.bin", 200 * 1024 * 1024)]);
+    assert!(h.state_mut().execute("page.insert_clipboard"));
+    h.run_steps(2);
+    assert_eq!(texts_of(h.state(), 0), ["Page 1", "a note", "Page 2"]);
+    assert!(said(&h).contains("512 MB"), "{}", said(&h));
+    // A folder is not a file; more than three left out are counted.
+    h.state_mut().clipboard_files_override = Some(vec![dir.clone(), dir.join("x1"), dir.join("x2"), dir.join("x3"), dir.join("x4")]);
+    assert!(h.state_mut().execute("page.insert_clipboard"));
+    h.run_steps(2);
+    let msg = said(&h);
+    assert!(msg.contains("it is not a file") && msg.contains("and 2 more"), "{msg}");
+    // A gap a "+" chose and left unused does not move the insert: the selection decides.
+    h.state_mut().views[0].insert_at = Some(0);
+    h.state_mut().clipboard_files_override = Some(vec![note]);
+    h.state_mut().views[0].select_pages(&[2]);
+    assert!(h.state_mut().execute("page.insert_clipboard"));
+    h.run_steps(3);
+    assert_eq!(texts_of(h.state(), 0), ["Page 1", "a note", "Page 2", "a note"]);
+}
+
 #[test]
 fn plus_between_pages_inserts_picked_files_there_in_order() {
     let dir = temp_path("insert-gap");

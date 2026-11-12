@@ -21,6 +21,7 @@ use crate::{
 
 mod editing;
 mod files;
+pub use files::{INSERT_FROM_CLIPBOARD, InsertPlan};
 mod save;
 mod view;
 

@@ -754,6 +754,9 @@ pub struct PdfCraftApp {
     os_clipboard: Option<arboard::Clipboard>,
     /// What ⌘V reads instead of the system clipboard (tests).
     pub clipboard_override: Option<create_ui::Clip>,
+    /// The copied files Insert pages from the clipboard reads instead of the system clipboard's
+    /// (tests).
+    pub clipboard_files_override: Option<Vec<std::path::PathBuf>>,
     /// Attach file: the file to attach instead of asking (tests, automation).
     pub attach_override: Option<(String, Vec<u8>)>,
     /// Duplicate Field: which field and onto which pages.

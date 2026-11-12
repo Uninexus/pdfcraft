@@ -149,6 +149,8 @@ fn tools_that_read_a_path_are_held_to_the_read_root() {
     let model = s(&base.join("in/m.prc"));
     for (tool, args) in [
         ("page_insert_file", json!({"doc": 1, "path": secret, "at": 1})),
+        ("page_insert_image", json!({"doc": 1, "paths": [pic], "at": 1})),
+        ("page_insert_image", json!({"doc": 1, "paths": [s(&base.join("in/pic.png")), pic], "at": 1})),
         ("page_replace", json!({"doc": 1, "pages": [1], "path": secret})),
         ("doc_combine", json!({"paths": [s(&base.join("in/a.pdf")), secret], "out": out})),
         ("doc_create_multiple", json!({"paths": [secret], "mode": "combine", "out": out})),
@@ -193,6 +195,9 @@ fn tools_that_read_a_path_are_held_to_the_read_root() {
     ok(&mut server, "page_insert_file", json!({"doc": 1, "path": s(&base.join("in/b.pdf")), "at": 2}));
     assert!(text_of(&mut server, 1).contains("Second inside"));
     ok(&mut server, "page_add_image", json!({"doc": 1, "page": 1, "path": s(&base.join("in/pic.png"))}));
+    let before = ok(&mut server, "doc_list", json!({}))["documents"][0]["pages"].as_u64().unwrap();
+    let done = ok(&mut server, "page_insert_image", json!({"doc": 1, "paths": [s(&base.join("in/pic.png"))], "at": 1}));
+    assert_eq!(done["pages"].as_u64().unwrap(), before + 1);
     ok(&mut server, "doc_combine", json!({"paths": [s(&base.join("in/a.pdf")), s(&base.join("in/b.pdf"))], "out": out}));
     assert_eq!(names(&base.join("out")), ["result.pdf"]);
     // Without a folder to list, the installed fonts are outside the read root: it is searched instead.

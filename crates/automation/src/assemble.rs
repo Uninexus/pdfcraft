@@ -190,6 +190,60 @@ impl Automation {
         self.apply(a, Edit::InsertPagesFrom { name, bytes: Arc::new(bytes), pages, at, field_conflicts: pdfcraft_organize::FieldConflicts::Rename })
     }
 
+    /// `page_insert_image`: PDFs, pictures and text files as new pages from position `at`, in
+    /// order and as one undo step (the headless Insert pages from the clipboard). A file of
+    /// another kind (Word, Excel, PowerPoint, anything else) or one that can't be read fails the
+    /// call and changes nothing.
+    pub(crate) fn insert_image(&mut self, a: &Args) -> Result<Value> {
+        /// Most files one call inserts.
+        const MAX_FILES: usize = 100;
+        /// Most bytes of files one call holds at once.
+        const MAX_TOTAL: u64 = 512 * 1024 * 1024;
+        let at = self.position(a, "at")?;
+        let id = self.doc(a)?.id;
+        let paths = a.strs("paths")?;
+        if paths.is_empty() || paths.len() > MAX_FILES {
+            return Err(ToolError::InvalidArgs(format!("paths must list between 1 and {MAX_FILES} files")));
+        }
+        let too_much = || ToolError::InvalidArgs("the files total more than 512 MB; insert fewer at a time".into());
+        // Every file is resolved and sized before any is read, so a pile of large files is refused unread.
+        // (A single file over the limit is refused by `read_input` with its own message.)
+        let resolved = paths.iter().map(|p| self.resolve(p, false).map(|path| (*p, path))).collect::<Result<Vec<_>>>()?;
+        let total = resolved
+            .iter()
+            .filter_map(|(_, path)| std::fs::metadata(path).ok().map(|m| m.len()).filter(|len| *len <= MAX_TOTAL))
+            .fold(0u64, u64::saturating_add);
+        if total > MAX_TOTAL {
+            return Err(too_much());
+        }
+        let mut held = 0u64;
+        let mut sources = Vec::with_capacity(resolved.len());
+        for (p, path) in resolved {
+            let bytes = read_input(&path)?;
+            // A file that grew since it was sized still counts.
+            held = held.saturating_add(bytes.len() as u64);
+            if held > MAX_TOTAL {
+                return Err(too_much());
+            }
+            let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            use pdfcraft_engine::SourceKind::{Image, Pdf, Text};
+            if !matches!(pdfcraft_engine::source_kind(&name, &bytes), Some(Pdf | Image | Text)) {
+                return Err(ToolError::InvalidArgs(format!(
+                    "{p} can't be inserted: use a PDF, a picture (PNG, JPEG, JPEG 2000, TIFF, GIF or BMP) or a .txt file"
+                )));
+            }
+            sources.push((name, Arc::new(bytes)));
+        }
+        let plan = self.session.plan_insert(id, at, sources);
+        if let Some((name, why)) = plan.skipped.first() {
+            return Err(failed(format!("{name}: {why}; the document was not changed")));
+        }
+        let edit = plan.edit.ok_or_else(|| failed("there was nothing to insert"))?;
+        let mut out = self.apply(a, edit)?;
+        out["inserted"] = json!({ "first_page": plan.start + 1, "pages": plan.pages });
+        Ok(out)
+    }
+
     /// Write freshly created bytes to `out` and/or open them as a new document.
     pub(crate) fn deliver(&mut self, a: &Args, name: &str, bytes: Arc<Vec<u8>>) -> Result<Value> {
         let mut result = json!({ "bytes": bytes.len() });
