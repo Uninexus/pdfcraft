@@ -93,13 +93,13 @@ fn the_dialog_opens_at_its_full_size_and_does_not_grow_afterwards() {
 
 #[test]
 fn a_very_tall_window_does_not_leave_a_blank_gap_above_ok() {
-    // The settings are some 2 700 pt tall; in a taller window the scroll area is not stretched
+    // The settings are some 3 000 pt tall; in a taller window the scroll area is not stretched
     // past them.
-    let mut h = harness(3400.0);
+    let mut h = harness(3900.0);
     h.run_steps(6);
     let ok = h.get_by_label("OK").rect();
     let last = h.get_by_label_contains("Enable Acrobat JavaScript").rect();
-    assert!(on_screen(ok, 3400.0) && on_screen(last, 3400.0), "{last:?} {ok:?}");
+    assert!(on_screen(ok, 3900.0) && on_screen(last, 3900.0), "{last:?} {ok:?}");
     assert!(ok.min.y - last.max.y < 120.0, "a gap of {} pt between the last setting and OK", ok.min.y - last.max.y);
 }
 

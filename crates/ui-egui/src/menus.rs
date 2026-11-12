@@ -126,6 +126,7 @@ const FILE: &[&str] = &[
     SEP,
     "file.properties",
     "file.word_count",
+    "ai.ask",
     SEP,
     "print.dialog",
 ];

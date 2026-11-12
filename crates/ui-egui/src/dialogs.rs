@@ -7,6 +7,7 @@ use pdfcraft_engine::Edit;
 
 use crate::{CloseRequest, Dialog, PdfCraftApp, PropsTab, panels::human_size, widgets};
 
+pub(super) mod ai_ui;
 pub(super) mod appearance;
 pub mod bookmark_styles_ui;
 pub(super) mod comment_props;
@@ -116,6 +117,9 @@ fn dialogs(app: &mut PdfCraftApp, ctx: &egui::Context) {
     if app.dialog != Some(Dialog::WordCount) {
         app.word_count_draft.cancel();
     }
+    if app.dialog != Some(Dialog::AskAi) {
+        app.ai.ask.cancel();
+    }
     if app.dialog != Some(Dialog::FieldTable) {
         app.field_table_draft = None;
     }
@@ -175,6 +179,9 @@ fn dialog_body(ui: &mut egui::Ui, app: &mut PdfCraftApp, dialog: Dialog, req: &m
     match dialog {
         Dialog::WordCount => {
             req.close = crate::word_count_ui::body(ui, app);
+        }
+        Dialog::AskAi => {
+            req.close = crate::ai_ui::body(ui, app);
         }
         Dialog::CreateImages => {
             let (go, cancel) = crate::create_ui::image_import_body(ui, app);

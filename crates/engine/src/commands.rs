@@ -197,6 +197,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     c("print.dialog", "Print…", FILE, Some(Shortcut::cmd("P")), Printing, "printer"),
     c("file.properties", "Document properties…", FILE, Some(Shortcut::cmd("D")), Document, "info"),
     c("file.word_count", "Word count…", FILE, None, Copying, "hash"),
+    c("ai.ask", "Ask AI Assistant…", FILE, None, Copying, "sparkles"),
     ct("edit.undo", "Undo", EDIT, Some(Shortcut::cmd("Z")), Undo, "undo-2"),
     ct("edit.redo", "Redo", EDIT, Some(Shortcut::cmd_shift("Z")), Redo, "redo-2"),
     c("edit.find", "Find…", EDIT, Some(Shortcut::cmd("F")), Document, "search"),

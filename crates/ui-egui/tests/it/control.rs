@@ -146,6 +146,25 @@ fn units_blank_paper_and_comment_defaults_are_set_and_reported_through_the_contr
 }
 
 #[test]
+fn ai_settings_are_set_and_reported_through_the_control_channel_without_the_key() {
+    let (mut h, c) = harness();
+    let before = ok(&mut h, &c, "ui.state", json!({}));
+    assert_eq!(before["ai"]["api_key_set"], false);
+    ok(&mut h, &c, "ui.set", json!({"key":"ai-base-url","value":"http://localhost:11434/v1"}));
+    ok(&mut h, &c, "ui.set", json!({"key":"ai-model","value":"llama3.1"}));
+    ok(&mut h, &c, "ui.set", json!({"key":"ai-api-key","value":"sk-secret"}));
+    let state = ok(&mut h, &c, "ui.state", json!({}));
+    assert_eq!(state["ai"]["configured"], true);
+    assert_eq!(state["ai"]["base_url"], "http://localhost:11434/v1");
+    assert_eq!(state["ai"]["model"], "llama3.1");
+    assert_eq!(state["ai"]["api_key_set"], true);
+    assert!(!state.to_string().contains("sk-secret"), "the key is never reported");
+    ok(&mut h, &c, "ui.set", json!({"key":"dialog","value":"ask-ai"}));
+    h.run_steps(2);
+    assert_eq!(ok(&mut h, &c, "ui.state", json!({}))["ai"]["configured"], true);
+}
+
+#[test]
 fn thumbnail_size_is_settable_and_inspectable_through_the_control_channel() {
     let (mut h, c) = harness();
     ok(&mut h, &c, "ui.set", json!({"key": "panel", "value": "pages"}));

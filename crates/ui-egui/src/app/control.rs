@@ -119,6 +119,7 @@ impl PdfCraftApp {
                     "printer-marks" => Some(Dialog::PrinterMarks),
                     "export-image" => Some(Dialog::Export(export_ui::ExportKind::Image)),
                     "word-count" => Some(Dialog::WordCount),
+                    "ask-ai" => Some(Dialog::AskAi),
                     "export-text" => Some(Dialog::Export(export_ui::ExportKind::Text)),
                     "export-all-images" => Some(Dialog::Export(export_ui::ExportKind::AllImages)),
                     "accessibility-options" => Some(Dialog::AccessibilityOptions),
@@ -360,6 +361,18 @@ impl PdfCraftApp {
                 };
             }
             ("author", _) => self.comment_prefs.author = value.to_string(),
+            ("ai-base-url", _) => {
+                self.ai.base_url = value.to_string();
+                self.ai.save_if_changed();
+            }
+            ("ai-model", _) => {
+                self.ai.model = value.to_string();
+                self.ai.save_if_changed();
+            }
+            ("ai-api-key", _) => {
+                self.ai.api_key = value.to_string();
+                self.ai.save_if_changed();
+            }
             ("units", _) => {
                 self.units = units::Unit::from_token(value).ok_or("units must be in, mm, cm or pt")?;
             }

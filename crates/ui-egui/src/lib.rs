@@ -124,6 +124,7 @@ use canvas::signature_drag;
 use canvas::wheel_boost;
 use canvas::wheel_pager;
 use canvas::zoom_snap;
+use dialogs::ai_ui;
 use dialogs::appearance;
 pub use dialogs::bookmark_styles_ui;
 use dialogs::comment_props;
@@ -147,6 +148,7 @@ use panels::organize_panel;
 use panels::page_selection_ui;
 use panels::search_ui;
 pub use panels::side_panels;
+pub use persist::ai as ai_settings;
 pub use persist::last_session;
 pub use persist::last_view;
 pub use persist::paper;
@@ -808,6 +810,9 @@ pub struct PdfCraftApp {
     /// Number pages dialog settings (1-based pages).
     pub number_draft: NumberDraft,
     pub(crate) word_count_draft: word_count_ui::Draft,
+    /// The AI assistant: its settings (Preferences) and the running request (Ask AI Assistant).
+    pub(crate) ai: ai_settings::AiSettings,
+    pub(crate) ai_draft: ai_ui::Draft,
     pub printer_marks_draft: printer_marks_ui::PrinterMarksDraft,
     pub convert_colours_draft: convert_colours_ui::ConvertColoursDraft,
     pub hairlines_draft: hairlines_ui::HairlinesDraft,

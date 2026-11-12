@@ -553,6 +553,12 @@ pub(crate) fn preferences_body(ui: &mut egui::Ui, app: &mut PdfCraftApp, t: &Tok
     });
     ui.add_space(12.0);
 
+    // AI Assistant
+    preference_card(ui, t, tl!("AI Assistant"), Some("sparkles"), &mut ctx, |ui, ctx| {
+        card_ai(ui, app, t, ctx);
+    });
+    ui.add_space(12.0);
+
     // Card 6: JavaScript
     let title6 = "JavaScript";
     preference_card(ui, t, title6, Some("code-xml"), &mut ctx, |ui, ctx| {
@@ -913,6 +919,71 @@ fn card_identity(ui: &mut egui::Ui, app: &mut PdfCraftApp, t: &Tokens, ctx: &mut
     });
     ctx.checkbox(ui, &mut app.comment_prefs.hide_empty_highlight_hover, tl!("Hide hover previews for highlights without comment text"), t);
 }
+
+/// The servers the preset buttons fill in.
+const AI_PRESETS: [(&str, &str); 3] =
+    [("Ollama", "http://localhost:11434/v1"), ("LM Studio", "http://localhost:1234/v1"), ("OpenAI", "https://api.openai.com/v1")];
+
+/// Content for the AI Assistant card: which server answers questions about a document.
+fn card_ai(ui: &mut egui::Ui, app: &mut PdfCraftApp, t: &Tokens, ctx: &mut PrefSearchContext) {
+    ctx.label_secondary(
+        ui,
+        tl!("Ask questions about a document with a language model you choose (File menu, Ask AI Assistant). Nothing is sent until you ask a question. A local server such as Ollama or LM Studio keeps the text on this computer; a hosted service receives the text of the pages you ask about."),
+        t,
+    );
+    ui.add_space(6.0);
+    ui.horizontal_wrapped(|ui| {
+        ctx.label_primary(ui, tl!("Presets"), t);
+        for (name, url) in AI_PRESETS {
+            if ctx.button(ui, name, t).clicked() {
+                app.ai.base_url = url.to_owned();
+            }
+        }
+    });
+    ui.add_space(4.0);
+    ui.horizontal(|ui| {
+        let label = ctx.label_primary(ui, tl!("Base URL"), t);
+        ui.add(widgets::line(&mut app.ai.base_url).desired_width(300.0).hint_text("http://localhost:11434/v1").char_limit(MAX_AI_FIELD_CHARS))
+            .labelled_by(label.id);
+    });
+    ui.horizontal(|ui| {
+        let label = ctx.label_primary(ui, tl!("Model"), t);
+        ui.add(widgets::line(&mut app.ai.model).desired_width(300.0).char_limit(MAX_AI_FIELD_CHARS)).labelled_by(label.id);
+    });
+    ui.horizontal(|ui| {
+        let label = ctx.label_primary(ui, tl!("API key"), t);
+        ui.add(widgets::line(&mut app.ai.api_key).password(true).desired_width(300.0).char_limit(MAX_AI_FIELD_CHARS)).labelled_by(label.id);
+    });
+    ctx.label_secondary(ui, tl!("A local server usually needs no key. Empty fields use the PDFCRAFT_AI_BASE_URL, PDFCRAFT_AI_MODEL and PDFCRAFT_AI_API_KEY environment variables."), t);
+    ui.add_space(6.0);
+    app.ai.test.poll();
+    ui.horizontal(|ui| {
+        let running = app.ai.test.is_running();
+        if ui.add_enabled_ui(!running, |ui| ctx.button(ui, tl!("Test connection"), t)).inner.clicked() {
+            let config = app.ai.effective();
+            app.ai.test.start(ui.ctx(), app.run_inline, move || pdfcraft_ai::list_models(&config).map_err(|e| e.to_string()));
+        }
+        if running {
+            ui.spinner();
+        }
+    });
+    match app.ai.test.result() {
+        Some(Ok(models)) => {
+            ui.label(crate::ai_ui::describe_models(models, &app.ai.effective().model));
+        }
+        Some(Err(error)) => {
+            ui.colored_label(ui.visuals().error_fg_color, error.as_str());
+        }
+        None => {}
+    }
+    app.ai.save_if_changed();
+    if let Some(problem) = &app.ai.problem {
+        ui.colored_label(ui.visuals().error_fg_color, problem.as_str());
+    }
+}
+
+/// The longest address, model name or key accepted in the AI settings.
+const MAX_AI_FIELD_CHARS: usize = 512;
 
 /// Content for Card 5: Fill & Sign
 fn card_fill_and_sign(ui: &mut egui::Ui, app: &mut PdfCraftApp, t: &Tokens, ctx: &mut PrefSearchContext) {
