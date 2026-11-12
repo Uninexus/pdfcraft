@@ -41,3 +41,9 @@ pub(crate) fn has_text() -> bool {
 pub(crate) fn for_image_paste() -> Option<crate::create_ui::Clip> {
     if has_text() { Some(crate::create_ui::Clip::Text(String::new())) } else { crate::create_ui::read_clipboard() }
 }
+
+/// The files copied to the system clipboard (in a file manager), in the order it holds them;
+/// empty when it holds none or can't be read.
+pub(crate) fn files() -> Vec<std::path::PathBuf> {
+    with(|cb| cb.get().file_list()).unwrap_or_default()
+}

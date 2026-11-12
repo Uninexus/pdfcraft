@@ -681,6 +681,7 @@ fn tool_file_reads_refuse_inputs_exceeding_512_mib() {
     for (tool, args) in [
         ("doc_open", json!({ "path": huge_str })),
         ("page_insert_file", json!({ "doc": id, "at": 1, "path": huge_str })),
+        ("page_insert_image", json!({ "doc": id, "at": 1, "paths": [huge_str] })),
         ("page_replace", json!({ "doc": id, "pages": [1], "path": huge_str })),
         ("page_add_image", json!({ "doc": id, "page": 1, "path": huge_str })),
         ("doc_import_data", json!({ "doc": id, "path": huge_str })),

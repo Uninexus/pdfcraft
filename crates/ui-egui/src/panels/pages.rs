@@ -6,9 +6,10 @@ use super::{Align, Align2, Color32, CornerRadius, DocInfo, Layout, Nav, Rect, Se
 /// does; the items say so, apart from the thumbnails' own menu. `enabled` is false while the
 /// document may not be assembled or a dialog is open. Returns the command a click asks for.
 pub(super) fn page_tools(ui: &mut egui::Ui, enabled: bool) -> Option<&'static str> {
-    let tools: [(&'static str, &str); 6] = [
+    let tools: [(&'static str, &str); 7] = [
         ("page.insert_blank", tl!("Insert a blank page after the selection")),
         ("page.insert", tl!("Insert pages from a file after the selection…")),
+        ("page.insert_clipboard", tl!("Insert pages from the clipboard after the selection")),
         ("page.rotate_ccw", tl!("Rotate the selected pages counterclockwise")),
         ("page.rotate", tl!("Rotate the selected pages clockwise")),
         ("page.extract", tl!("Extract the selected pages…")),

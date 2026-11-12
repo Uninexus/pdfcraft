@@ -292,6 +292,7 @@ impl PdfCraftApp {
             #[cfg(not(target_arch = "wasm32"))]
             os_clipboard: None,
             clipboard_override: None,
+            clipboard_files_override: None,
             attach_override: None,
             duplicate_draft: None,
             page_props_draft: None,

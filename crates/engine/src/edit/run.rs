@@ -561,7 +561,8 @@ pub(crate) fn run_edit(doc: &mut pdfcraft_cos::Document, edit: &Edit, cx: &mut E
             // The file's bookmarks come along under one named after it, as in Combine Files.
             let title = std::path::Path::new(name).file_stem().map_or_else(|| name.clone(), |s| s.to_string_lossy().into_owned());
             let outcome = pdfcraft_organize::insert_file_pages(doc, &src, &title, &pages, *at, *field_conflicts)?;
-            cx.renamed_fields = outcome.renamed_fields;
+            // A batch may insert several files: keep every rename (the list is cleared per applied edit).
+            cx.renamed_fields.extend(outcome.renamed_fields);
             invalidate_form_script_snapshot(cx);
         }
         Edit::AddBookmark { parent, index, title, page, left, top } => {

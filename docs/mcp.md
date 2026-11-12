@@ -70,7 +70,7 @@ The two flags (VectorCraft, PhotoCraft and the other Craft apps take the same on
 config works across the suite) keep the agent to the folders you give it:
 
 - Every file a tool reads must lie inside the **read root**: `doc_open`, `page_insert_file`,
-  `page_replace`, `doc_combine` and `doc_create_multiple` inputs, `doc_create` images, stamp,
+  `page_insert_image`, `page_replace`, `doc_combine` and `doc_create_multiple` inputs, `doc_create` images, stamp,
   picture, attachment, signature and form-image files, `doc_watermark` and `doc_background` files,
   `doc_import_data`, `form_merge_data`, the files `action_run` and `ocr_recognize_files` process,
   digital ID, graphic and certificate files for signing and `sign_trust`, `text_font_import`, and

@@ -12,6 +12,22 @@ enum Office {
     Refuse,
 }
 
+/// The name of the edit that inserts what the clipboard holds, one of [`crate::BATCH_LABELS`].
+pub const INSERT_FROM_CLIPBOARD: &str = "Insert pages from the clipboard";
+
+/// What [`Session::plan_insert`] made of a set of files.
+#[derive(Debug)]
+pub struct InsertPlan {
+    /// The edit that inserts them all, or `None` when none could be used.
+    pub edit: Option<crate::Edit>,
+    /// The 0-based page the first inserted page takes.
+    pub start: usize,
+    /// How many pages the edit inserts.
+    pub pages: usize,
+    /// The sources left out, each with its name and why.
+    pub skipped: Vec<(String, String)>,
+}
+
 impl Session {
     /// The page count of another PDF (Replace Pages, Insert Pages dialogs).
     pub fn page_count_of(&self, name: &str, bytes: &Arc<Vec<u8>>) -> Result<usize, EditError> {
@@ -110,6 +126,44 @@ impl Session {
         }
         let src = crate::sources::open_source_into(name, bytes, self.cos(dest)?)?;
         Ok((pdfcraft_organize::page_count(&src)?, bytes.clone()))
+    }
+
+    /// Insert Pages from the clipboard (and any other set of files taken together): `sources`
+    /// (a name and the bytes of each: PDFs, images and text files) as pages from position `at`
+    /// of `dest`, in order, as the one edit [`InsertPlan::edit`], so they are one undo step and
+    /// the pages land together (`at` is kept within the document). A source that can't be used,
+    /// as a PDF, an image or a text file, is left out and named in [`InsertPlan::skipped`] with
+    /// why; the edit is `None` when none could be. Office files are refused, as
+    /// [`Self::insert_source_inline`] refuses them. Nothing is changed here: the caller applies
+    /// the edit.
+    pub fn plan_insert(&self, dest: DocId, at: usize, sources: impl IntoIterator<Item = (String, Arc<Vec<u8>>)>) -> InsertPlan {
+        let count = self.get(dest).map_or(0, |d| d.info.pages.len());
+        let start = at.min(count);
+        let (mut edits, mut pages, mut skipped) = (Vec::new(), 0usize, Vec::new());
+        for (name, bytes) in sources {
+            match self.insert_source_inline(dest, &name, &bytes) {
+                Ok((n, bytes)) => {
+                    edits.push(crate::Edit::InsertPagesFrom {
+                        name,
+                        bytes,
+                        pages: None,
+                        at: start.saturating_add(pages),
+                        field_conflicts: pdfcraft_organize::FieldConflicts::Rename,
+                    });
+                    pages = pages.saturating_add(n);
+                }
+                Err(e) => {
+                    // Source errors lead with the file's name, which the entry already holds.
+                    let mut why = e.to_string();
+                    while let Some(rest) = why.strip_prefix(name.as_str()).and_then(|r| r.strip_prefix(": ")) {
+                        why = rest.to_string();
+                    }
+                    skipped.push((name, why));
+                }
+            }
+        }
+        let edit = (!edits.is_empty()).then(|| crate::Edit::Batch { label: INSERT_FROM_CLIPBOARD.into(), edits });
+        InsertPlan { edit, start, pages, skipped }
     }
 
     /// The page count of a PDF for Replace Pages in `dest`, checked as the replace itself checks

@@ -104,6 +104,10 @@ fn every_registered_command_is_implemented() {
             use pdfcraft_engine::{Edit, PrinterMarks};
             app.apply_edit(Edit::AddPrinterMarks { pages: vec![0], settings: PrinterMarks::default(), replace: false });
         }
+        // Insert from the clipboard must not read the real one.
+        if spec.id == "page.insert_clipboard" {
+            app.system_clipboard = false;
+        }
         // Copying comments needs a selected comment; pasting needs copied ones.
         if matches!(spec.id, "comment.copy" | "comment.paste") {
             let shape = pdfcraft_engine::Shape::Rectangle { rect: [10.0, 10.0, 50.0, 50.0] };

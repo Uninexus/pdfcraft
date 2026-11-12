@@ -1234,6 +1234,35 @@ fn insert_blank_between_pages_keeps_both_neighbours() {
     assert_eq!(page_texts(&s, id), ["Page 1", "", "Page 2"]);
 }
 
+/// Insert pages from the clipboard: a picture, a PDF and a text file go in together after the
+/// first page, as one undo step, and what can't be used is named and left out.
+#[test]
+fn planned_insert_puts_pictures_and_files_in_as_one_undoable_step() {
+    let (mut s, id) = session_with(2);
+    let sources = vec![
+        ("Clipboard.png".to_string(), quadrant_png()),
+        ("extra.pdf".to_string(), Arc::new(fixture(2))),
+        ("broken.png".to_string(), Arc::new(b"not a picture".to_vec())),
+        ("archive.zip".to_string(), Arc::new(b"PK".to_vec())),
+    ];
+    let plan = s.plan_insert(id, 1, sources);
+    assert_eq!((plan.start, plan.pages), (1, 3));
+    assert_eq!(plan.skipped.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(), ["broken.png", "archive.zip"]);
+    assert!(plan.skipped.iter().all(|(name, why)| !why.is_empty() && !why.starts_with(name.as_str())), "{:?}", plan.skipped);
+    s.apply(id, plan.edit.expect("some sources were usable")).unwrap();
+    assert_eq!(page_texts(&s, id), ["Page 1", "", "Page 1", "Page 2", "Page 2"]);
+    assert_eq!(s.get(id).unwrap().can_undo(), Some(INSERT_FROM_CLIPBOARD));
+    s.undo(id).unwrap();
+    assert_eq!(page_texts(&s, id), ["Page 1", "Page 2"], "one undo takes every inserted page back out");
+    // Nothing usable: no edit; an `at` past the end goes to the end.
+    let plan = s.plan_insert(id, 9, vec![("x.zip".to_string(), Arc::new(Vec::new()))]);
+    assert!(plan.edit.is_none());
+    assert_eq!((plan.pages, plan.start), (0, 2));
+    let plan = s.plan_insert(id, 9, vec![("Clipboard.png".to_string(), quadrant_png())]);
+    s.apply(id, plan.edit.unwrap()).unwrap();
+    assert_eq!(page_texts(&s, id), ["Page 1", "Page 2", ""]);
+}
+
 #[test]
 fn combine_extract_split_and_insert_from_file() {
     let (mut s, id) = session_with(3);
@@ -1347,6 +1376,26 @@ fn insert_from_file_renames_colliding_fields_and_notes_it() {
     let doc = s.get(id).unwrap();
     let names: Vec<&str> = doc.form.iter().map(|f| f.name.as_str()).collect();
     assert_eq!(names, ["Text1"], "undo restores the single original field");
+}
+
+/// Several files inserted as one batch each rename their clashing fields, and the repair note
+/// names every rename, not only the last file's.
+#[test]
+fn planned_insert_notes_the_renames_of_every_file_in_the_batch() {
+    let mut s = Session::new().with_clock(|| 1_700_000_000);
+    let id = s.open("a.pdf", None, Arc::new(form_with_field("Text1")), None).unwrap();
+    let sources = vec![
+        ("b.pdf".to_string(), Arc::new(form_with_field("Text1"))),
+        ("c.pdf".to_string(), Arc::new(form_with_field("Text1"))),
+        ("Clipboard.png".to_string(), quadrant_png()),
+    ];
+    let plan = s.plan_insert(id, 1, sources);
+    s.apply(id, plan.edit.unwrap()).unwrap();
+    let doc = s.get(id).unwrap();
+    let names: Vec<&str> = doc.form.iter().map(|f| f.name.as_str()).collect();
+    assert_eq!(names, ["Text1", "Text1-1", "Text1-2"]);
+    let note = doc.repair_log().iter().find(|l| l.contains("were not rewritten")).cloned().unwrap_or_default();
+    assert!(note.contains("Text1 → Text1-1") && note.contains("Text1 → Text1-2"), "{:?}", doc.repair_log());
 }
 
 /// A combine reports the fields it renamed — the tool result tells callers what their scripts

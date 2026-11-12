@@ -1242,6 +1242,60 @@ fn combine_takes_images_and_text_files() {
     }
 }
 
+/// Insert pages from the clipboard, headless: pictures, PDFs and text become pages after `at`, in
+/// order, as one undo step.
+#[test]
+fn inserting_pictures_makes_one_undoable_step_and_refuses_other_files() {
+    let dir = workdir("insert-pictures");
+    let rgb = |width: u32| {
+        let mut png = Vec::new();
+        let mut encoder = png::Encoder::new(&mut png, width, 2);
+        encoder.set_color(png::ColorType::Rgb);
+        encoder.set_depth(png::BitDepth::Eight);
+        encoder.write_header().unwrap().write_image_data(&vec![90; width as usize * 6]).unwrap();
+        png
+    };
+    std::fs::write(dir.join("one.png"), rgb(4)).unwrap();
+    std::fs::write(dir.join("two.png"), rgb(6)).unwrap();
+    std::fs::write(dir.join("broken.png"), b"\x89PNG\r\n\x1a\nbroken").unwrap();
+    std::fs::write(dir.join("notes.txt"), "Some notes").unwrap();
+    std::fs::write(dir.join("report.docx"), b"PK\x03\x04").unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "a.pdf" }))["doc"].as_u64().unwrap();
+    // Nothing but a PDF, a picture or a text file; a refused call changes nothing and names the file.
+    for (bad, said) in [("report.docx", "can't be inserted"), ("broken.png", "broken.png"), ("missing.png", "missing.png")] {
+        let refused = err(&mut a, "page_insert_image", json!({ "doc": doc, "paths": ["one.png", bad], "at": 2 }));
+        assert!(refused.to_string().contains(said), "{bad}: {refused}");
+        assert_eq!(page_text(&mut a, doc), ["Page 1", "Page 2", "Page 3"], "{bad}");
+    }
+    let refused = err(&mut a, "page_insert_image", json!({ "doc": doc, "paths": ["broken.png"], "at": 2 })).to_string();
+    assert!(!refused.contains("broken.png: broken.png"), "{refused}");
+    assert!(matches!(a.call("page_insert_image", &json!({ "doc": doc, "paths": [], "at": 2 })), Err(ToolError::InvalidArgs(_))));
+    assert!(matches!(a.call("page_insert_image", &json!({ "doc": doc, "paths": ["one.png"], "at": 9 })), Err(ToolError::InvalidArgs(_))));
+    // At most 100 files.
+    let many = vec!["one.png"; 101];
+    assert!(matches!(a.call("page_insert_image", &json!({ "doc": doc, "paths": many, "at": 2 })), Err(ToolError::InvalidArgs(_))));
+    // At most 512 MB together, refused before anything is read.
+    for name in ["big1.bin", "big2.bin"] {
+        std::fs::File::create(dir.join(name)).unwrap().set_len(300 * 1024 * 1024).unwrap();
+    }
+    let refused = err(&mut a, "page_insert_image", json!({ "doc": doc, "paths": ["big1.bin", "big2.bin"], "at": 2 }));
+    assert!(matches!(&refused, ToolError::InvalidArgs(m) if m.contains("512 MB")), "{refused}");
+    assert_eq!(page_text(&mut a, doc), ["Page 1", "Page 2", "Page 3"]);
+    // In order: the wider picture is second.
+    let done = ok(&mut a, "page_insert_image", json!({ "doc": doc, "paths": ["one.png", "two.png", "notes.txt", "b.pdf"], "at": 2 }));
+    assert_eq!(done["pages"], 8);
+    assert_eq!(done["inserted"], json!({ "first_page": 2, "pages": 5 }));
+    assert_eq!(page_text(&mut a, doc), ["Page 1", "", "", "Some notes", "Page 1", "Page 2", "Page 2", "Page 3"]);
+    {
+        let pages = &a.session().get(pdfcraft_engine::DocId(doc)).unwrap().info.pages;
+        assert_eq!((pages[1].width, pages[2].width), (4.0, 6.0), "the pictures keep the order given");
+    }
+    let undone = ok(&mut a, "edit_undo", json!({ "doc": doc }));
+    assert_eq!(undone["undone"], "Insert pages from the clipboard");
+    assert_eq!(page_text(&mut a, doc), ["Page 1", "Page 2", "Page 3"], "everything comes out with one undo");
+}
+
 #[test]
 fn combine_extract_and_split() {
     let dir = workdir("organize");
