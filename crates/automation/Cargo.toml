@@ -12,6 +12,7 @@ workspace = true
 pdfcraft-engine = { workspace = true }
 pdfcraft-cos = { workspace = true }
 pdfcraft-render = { workspace = true }
+pdfcraft-ai = { workspace = true }
 pdfcraft-organize = { workspace = true }
 pdfcraft-platform = { workspace = true }
 pdfcraft-prc = { workspace = true }

@@ -9819,11 +9819,11 @@ title = "AI provider interface (local model or own endpoint), off by default"
 area = "N"
 tier = "P2"
 milestone = "M13"
-status = "planned"
-commands = []
-tools = []
-evidence = []
-notes = ""
+status = "partial"
+commands = ["ai.ask"]
+tools = ["ai_status", "ai_ask"]
+evidence = ["crates/automation/tests/it/ai.rs::ask_sends_the_page_text_and_returns_the_answer", "crates/automation/tests/it/ai.rs::unconfigured_ask_fails_clearly_and_status_hides_the_key", "crates/ai/src/tests.rs::chat_posts_to_chat_completions_with_key_and_reads_the_reply", "crates/ui-egui/src/persist/ai.rs::settings_are_saved_once_per_change_and_read_back", "crates/ui-egui/src/persist/ai.rs::a_task_goes_from_idle_to_running_to_done_and_can_be_cancelled", "crates/ui-egui/src/persist/ai.rs::page_texts_reads_the_requested_pages_and_refuses_bad_ones"]
+notes = "pdfcraft-ai talks to any OpenAI-compatible chat endpoint (a local server such as Ollama or LM Studio, or a hosted API with a bearer key). Off by default: no endpoint or key is built in, nothing is sent until ai_ask is called. Settings from tool arguments, a JSON config file or PDFCRAFT_AI_BASE_URL, PDFCRAFT_AI_MODEL and PDFCRAFT_AI_API_KEY. In the app: Preferences has an AI Assistant card (base URL, model, API key, Ollama / LM Studio / OpenAI presets, Test connection on a background thread) saved to ai.json in the settings folder (owner-only, never in app.ron), and File has Ask AI Assistant… (all pages or the current page, answered on a background thread, selectable and copyable, with a pointer to Preferences when not set up). ui.set ai-base-url, ai-model and ai-api-key and ui.state.ai reach the settings from the control channel. Missing: streaming replies, conversation history."
 
 [[feature]]
 id = "misc.ai-summary"

@@ -102,6 +102,8 @@ pub(crate) type GridFile = (String, Result<Vec<u8>, std::path::PathBuf>);
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Dialog {
     WordCount,
+    /// File ▸ Ask AI Assistant…: a question about the active document.
+    AskAi,
     CreateImages,
     Properties(PropsTab),
     About,

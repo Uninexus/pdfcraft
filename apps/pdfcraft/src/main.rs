@@ -360,7 +360,12 @@ fn native_options(integrated: bool, app_frame: bool, renderer: eframe::Renderer)
         // The tab strip is the title bar (pdfcraft_ui_egui::window_controls).
         viewport = viewport.with_decorations(false);
     }
-    let persistence_path = settings_dir().map(|d| d.join("app.ron"));
+    let settings = settings_dir();
+    // The AI assistant keeps its endpoint and key in `ai.json` beside `app.ron`, never in `app.ron`.
+    if let Some(dir) = &settings {
+        pdfcraft_ui_egui::ai_settings::set_settings_dir(dir.clone());
+    }
+    let persistence_path = settings.map(|d| d.join("app.ron"));
     // Set explicitly, so the renderer never depends on which one eframe defaults to.
     let mut native = eframe::NativeOptions { viewport, persistence_path, renderer, ..Default::default() };
     // PdfCraft installs its own last-resort system face (`PDFCRAFT_SYSTEM_FONTS`); eframe's
