@@ -305,6 +305,9 @@ struct PendingDestination {
     receiver: std::sync::mpsc::Receiver<Option<(usize, pdfcraft_render::DestView)>>,
 }
 
+/// How a tab moves to a window of its own: the file and the page to show.
+pub type WindowSpawner = fn(&str, usize) -> Result<(), String>;
+
 pub struct PdfCraftApp {
     /// Split view (`panes`); which pane shows each tab is its view's.
     pub panes: panes::Panes,
@@ -315,6 +318,9 @@ pub struct PdfCraftApp {
     pub(crate) status_captions_lang: Option<i18n::Lang>,
     pub views: Vec<DocView>,
     pub(crate) closed_tabs: Vec<String>,
+    /// Starts a PdfCraft window of its own on a file, at a page (0-based), for a tab moved out of
+    /// this window. Replaced in tests, which must not start a real window.
+    pub window_spawner: WindowSpawner,
     /// `None` shows the Home tab.
     pub active: Option<usize>,
     pub mode: Mode,

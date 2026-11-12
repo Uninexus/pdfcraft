@@ -55,6 +55,12 @@ impl Arguments {
     }
 }
 
+/// Whether a launch brings last session's files back first. `--new-window` is a window for the
+/// files named alone: a tab moved out of another window must not open that window's session again.
+pub(super) fn reopens_last_session(new_window: bool) -> bool {
+    !new_window
+}
+
 pub(super) fn open_files(app: &mut PdfCraftApp, files: &[String], two_paged: bool) {
     for path in files {
         if two_paged {
@@ -72,6 +78,16 @@ mod tests {
 
     fn parse(args: &[&str]) -> Arguments {
         Arguments::parse(args.iter().map(|s| s.to_string()))
+    }
+
+    #[test]
+    fn a_new_window_does_not_reopen_last_session() {
+        let parsed = parse(&["--new-window", "--page", "5", "/tmp/a.pdf"]);
+        assert!(parsed.new_window);
+        assert_eq!(parsed.files, ["/tmp/a.pdf"]);
+        assert_eq!(parsed.options, [("page".to_string(), "5".to_string())]);
+        assert!(!reopens_last_session(parsed.new_window));
+        assert!(reopens_last_session(parse(&["/tmp/a.pdf"]).new_window));
     }
 
     #[test]
