@@ -134,7 +134,8 @@ fn settings_round_trip_and_merge() {
 
     let env = AiConfig::from_vars(|n| match n {
         "PDFCRAFT_AI_MODEL" => Some("env-model".into()),
-        "OPENAI_API_KEY" => Some("env-key".into()),
+        "PDFCRAFT_AI_API_KEY" => Some("env-key".into()),
+        "OPENAI_API_KEY" => Some("must-not-be-read".into()),
         _ => None,
     });
     let merged = AiConfig { base_url: "http://h/v1".into(), ..Default::default() }.or(env);

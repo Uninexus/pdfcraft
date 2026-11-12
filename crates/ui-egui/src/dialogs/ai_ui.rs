@@ -98,6 +98,10 @@ pub(crate) fn body(ui: &mut egui::Ui, app: &mut PdfCraftApp) -> bool {
         app.ai_draft.asked = Some((question.clone(), pages_label(app.ai_draft.current_page.then_some(current))));
         let config = app.ai.effective();
         app.ai.ask.start(ui.ctx(), app.run_inline, move || {
+            // The web build cannot call the endpoint, so don't read every page just to say so.
+            if cfg!(target_arch = "wasm32") {
+                return pdfcraft_ai::chat(&config, &[]).map(|reply| reply.content).map_err(|e| e.to_string());
+            }
             let texts = page_texts(source, &pages)?;
             pdfcraft_ai::chat(&config, &pdfcraft_ai::document_messages(&question, &texts)).map(|reply| reply.content).map_err(|e| e.to_string())
         });

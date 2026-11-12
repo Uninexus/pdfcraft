@@ -976,7 +976,10 @@ fn card_ai(ui: &mut egui::Ui, app: &mut PdfCraftApp, t: &Tokens, ctx: &mut PrefS
         }
         None => {}
     }
-    app.ai.save_if_changed();
+    // Not on every keystroke: a disk write per key would stall typing on a slow drive.
+    if !ui.ctx().memory(|m| m.focused().is_some()) {
+        app.ai.save_if_changed();
+    }
     if let Some(problem) = &app.ai.problem {
         ui.colored_label(ui.visuals().error_fg_color, problem.as_str());
     }

@@ -19,6 +19,7 @@ use serde_json::{Value, json};
 /// character boundary) and the model is told so.
 pub const MAX_CONTEXT_CHARS: usize = 60_000;
 /// The longest reply read from a server, in bytes.
+#[cfg(not(target_arch = "wasm32"))]
 const MAX_REPLY_BYTES: u64 = 8 * 1024 * 1024;
 /// The longest settings file read, in bytes.
 const MAX_CONFIG_BYTES: u64 = 64 * 1024;
@@ -65,7 +66,7 @@ impl AiConfig {
     pub const DEFAULT_TIMEOUT_SECS: u64 = 120;
 
     /// Settings from `PDFCRAFT_AI_BASE_URL`, `PDFCRAFT_AI_MODEL` and `PDFCRAFT_AI_API_KEY`
-    /// (`OPENAI_API_KEY` when that one is not set). Unset variables leave the field empty.
+    /// (`OPENAI_API_KEY` is deliberately not read: it would go to whatever address is set.) Unset variables leave the field empty.
     pub fn from_env() -> AiConfig {
         Self::from_vars(|name| std::env::var(name).ok())
     }
@@ -74,7 +75,7 @@ impl AiConfig {
         let get = |name: &str| var(name).map(|v| v.trim().to_owned()).filter(|v| !v.is_empty());
         AiConfig {
             base_url: get("PDFCRAFT_AI_BASE_URL").unwrap_or_default(),
-            api_key: get("PDFCRAFT_AI_API_KEY").or_else(|| get("OPENAI_API_KEY")),
+            api_key: get("PDFCRAFT_AI_API_KEY"),
             model: get("PDFCRAFT_AI_MODEL").unwrap_or_default(),
             timeout_secs: get("PDFCRAFT_AI_TIMEOUT_SECS").and_then(|v| v.parse().ok()).unwrap_or(0),
         }
@@ -114,7 +115,7 @@ impl AiConfig {
     }
 
     /// Writes the settings atomically. On Unix the file is readable by its owner only, because it
-    /// can hold an API key.
+    /// can hold an API key; on Windows the caller restricts it (`pdfcraft_platform::owner_only`).
     pub fn save(&self, path: &Path) -> Result<()> {
         let fail = |e: std::io::Error| AiError::Config(format!("cannot save AI settings {}: {e}", path.display()));
         let body = json!({ "base_url": self.base_url, "api_key": self.api_key, "model": self.model, "timeout_secs": self.timeout_secs });
@@ -159,6 +160,7 @@ impl AiConfig {
         Ok(format!("{root}/{leaf}"))
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn timeout(&self) -> std::time::Duration {
         std::time::Duration::from_secs(if self.timeout_secs == 0 { Self::DEFAULT_TIMEOUT_SECS } else { self.timeout_secs })
     }
@@ -168,7 +170,13 @@ impl AiConfig {
 fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     use std::io::Write;
     use std::os::unix::fs::OpenOptionsExt;
-    let mut f = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(path)?;
+    // A leftover file keeps its old permissions under `create`, so start from nothing.
+    match std::fs::remove_file(path) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e),
+    }
+    let mut f = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(path)?;
     f.write_all(bytes)?;
     f.sync_all()
 }
@@ -242,6 +250,7 @@ fn error_message(v: &Value) -> Option<String> {
 }
 
 /// What to tell the user for an HTTP failure.
+#[cfg(not(target_arch = "wasm32"))]
 fn status_message(status: u16, body: &str) -> String {
     let detail = serde_json::from_str::<Value>(body).ok().and_then(|v| error_message(&v)).unwrap_or_default();
     let hint = match status {
@@ -306,7 +315,8 @@ pub fn parse_models(body: &str) -> Result<Vec<String>> {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn agent(config: &AiConfig) -> ureq::Agent {
-    ureq::Agent::config_builder().timeout_global(Some(config.timeout())).http_status_as_error(false).build().into()
+    let tls = ureq::tls::TlsConfig::builder().root_certs(ureq::tls::RootCerts::PlatformVerifier).build();
+    ureq::Agent::config_builder().timeout_global(Some(config.timeout())).http_status_as_error(false).tls_config(tls).build().into()
 }
 
 #[cfg(not(target_arch = "wasm32"))]

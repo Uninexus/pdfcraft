@@ -164,6 +164,15 @@ impl AiSettings {
         self.saved = now.clone();
         let Some(path) = &self.path else { return };
         self.problem = now.save(path).err().map(|e| e.to_string());
+        // The file can hold an API key: on Windows only the user and SYSTEM may read it (Unix gets
+        // mode 0600 from the save itself).
+        #[cfg(windows)]
+        if self.problem.is_none()
+            && let Err(e) =
+                pdfcraft_platform::owner_only::current_user_sid().and_then(|me| pdfcraft_platform::owner_only::restrict_to_owner(path, &me))
+        {
+            self.problem = Some(format!("cannot restrict the AI settings file to your account: {e}"));
+        }
     }
 
     /// Where the settings are kept, when they are kept.
