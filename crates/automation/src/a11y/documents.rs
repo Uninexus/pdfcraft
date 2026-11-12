@@ -28,7 +28,7 @@ impl Automation {
         Ok(out)
     }
 
-    fn pdfa_level(&self, a: &Args) -> Result<pdfcraft_engine::pdfa::Level> {
+    pub(crate) fn pdfa_level(&self, a: &Args) -> Result<pdfcraft_engine::pdfa::Level> {
         let l = a.opt_str("level")?.unwrap_or("2b");
         pdfcraft_engine::pdfa::Level::from_id(l).ok_or_else(|| ToolError::InvalidArgs(format!("unknown PDF/A level {l:?} (2b or 3b)")))
     }

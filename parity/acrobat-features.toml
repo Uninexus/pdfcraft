@@ -9606,8 +9606,8 @@ milestone = "M13"
 status = "partial"
 commands = ["actions.wizard", "ocr.recognize_batch"]
 tools = ["action_run", "ocr_recognize_files", "doc_batch"]
-evidence = ["crates/automation/tests/it/automation.rs::actions_through_tools", "crates/ui-egui/tests/it/actions.rs::run_and_create_actions", "crates/automation/tests/it/batch.rs::batch_recurses_preserves_paths_continues_errors_and_never_replaces_outputs", "apps/pdfcraft-cli/tests/it/batch.rs::cli_batch_reports_partial_failure_and_continues_into_subfolders"]
-notes = "Actions and OCR run over chosen files. CLI/MCP doc_batch adds bounded recursive folders for convert/ocr/optimize recipes, retained relative paths, collision-safe outputs and per-file reports. GUI folder selection, generic action recipes, scheduling and resume remain absent. See docs/cli-batch.md."
+evidence = ["crates/automation/tests/it/automation.rs::actions_through_tools", "crates/ui-egui/tests/it/actions.rs::run_and_create_actions", "crates/automation/tests/it/batch.rs::batch_recurses_preserves_paths_continues_errors_and_never_replaces_outputs", "crates/automation/tests/it/batch.rs::batch_pdfa_step_saves_a_file_that_verifies_and_reports_per_file_errors", "apps/pdfcraft-cli/tests/it/batch.rs::cli_batch_reports_partial_failure_and_continues_into_subfolders"]
+notes = "Actions and OCR run over chosen files. CLI/MCP doc_batch adds bounded recursive folders for convert/ocr/optimize/pdfa recipes (the pdfa step is Save as PDF/A at 2b or 3b and reports a remaining_issues count and a compliant flag; outputs with remaining issues are still written and counted completed, and a file the conversion refuses is a per-file error), retained relative paths, collision-safe outputs and per-file reports. GUI folder selection, generic action recipes, scheduling and resume remain absent. See docs/cli-batch.md."
 
 [[feature]]
 id = "misc.action-prompt-steps"

@@ -296,3 +296,112 @@ fn dry_run_planned_files_are_not_counted_as_skipped() {
         }
     }
 }
+
+fn open_output(path: &std::path::Path) -> (Session, pdfcraft_engine::DocId) {
+    let mut session = Session::new();
+    let id = session.open("out.pdf", None, std::sync::Arc::new(std::fs::read(path).unwrap()), None).unwrap();
+    (session, id)
+}
+
+#[test]
+fn batch_pdfa_step_saves_a_file_that_verifies_and_reports_per_file_errors() {
+    use pdfcraft_engine::pdfa::Level;
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir(dir.path().join("input")).unwrap();
+    std::fs::write(dir.path().join("input/a.pdf"), pdf()).unwrap();
+    std::fs::write(dir.path().join("input/b.pdf"), b"broken").unwrap();
+    let mut auto = Automation::new().with_root(dir.path()).unwrap();
+
+    // The synthetic file is not PDF/A; the step makes it one the verifier accepts the identification of.
+    let (session, id) = open_output(&dir.path().join("input/a.pdf"));
+    let before = session.get(id).unwrap().pdfa_verify(Level::A2b);
+    assert!(before.iter().any(|i| i.fixable), "the fixture must need converting");
+    assert!(session.get(id).unwrap().standards().pdfa.is_none());
+
+    let report = result(&mut auto, json!({"paths":["input"],"steps":["optimize","pdfa"],"out_dir":"out"}));
+    assert_eq!(report["completed"], 1, "{report}");
+    assert_eq!(report["failed"], 1, "a broken file is a per-file error and the batch continues: {report}");
+    let ok = report["files"].as_array().unwrap().iter().find(|f| f["status"] == "ok").unwrap();
+    let step = &ok["steps"][1];
+    assert_eq!(step["step"], "pdfa", "{ok}");
+    assert_eq!(step["level"], "PDF/A-2b");
+    let written = std::fs::metadata(dir.path().join("out/a.pdf")).unwrap().len();
+    assert_eq!(step["bytes_after"].as_u64().unwrap(), written, "{step}");
+    assert_eq!(ok["bytes"].as_u64().unwrap(), written, "{ok}");
+    assert!(step["bytes_before"].as_u64().unwrap() > 0, "{step}");
+    assert_eq!(step["warnings"], json!([]), "{step}");
+
+    let (session, id) = open_output(&dir.path().join("out/a.pdf"));
+    let doc = session.get(id).unwrap();
+    assert_eq!(doc.standards().pdfa, Some((2, "B".to_string())));
+    let after = doc.pdfa_verify(Level::A2b);
+    assert!(after.iter().all(|i| !i.fixable), "everything fixable was fixed: {after:?}");
+    assert_eq!(after.len() as u64, step["remaining_issues"].as_u64().unwrap());
+    assert_eq!(step["compliant"], after.is_empty(), "{step}");
+
+    let report = result(&mut auto, json!({"paths":["input/a.pdf"],"steps":["pdfa"],"out_dir":"out3","level":"3b"}));
+    assert_eq!(report["completed"], 1, "{report}");
+    assert_eq!(report["files"][0]["steps"][0]["level"], "PDF/A-3b");
+    let (session, id) = open_output(&dir.path().join("out3/a.pdf"));
+    assert_eq!(session.get(id).unwrap().standards().pdfa, Some((3, "B".to_string())));
+}
+
+#[test]
+fn batch_pdfa_step_refuses_a_bad_level_or_position_before_writing() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir(dir.path().join("input")).unwrap();
+    std::fs::write(dir.path().join("input/a.pdf"), pdf()).unwrap();
+    let mut auto = Automation::new().with_root(dir.path()).unwrap();
+    for (change, needle) in [
+        (json!({"steps":["pdfa"],"level":"9z"}), "level"),
+        (json!({"steps":["pdfa"],"level":3}), "level"),
+        (json!({"steps":["optimize"],"level":"2b"}), "pdfa"),
+        (json!({"steps":["pdfa","optimize"]}), "pdfa"),
+        (json!({"steps":["pdfa","pdfa"]}), "steps"),
+    ] {
+        let mut args = json!({"paths":["input"],"out_dir":"out"});
+        args.as_object_mut().unwrap().extend(change.as_object().unwrap().clone());
+        let error = auto.call("doc_batch", &args).unwrap_err().to_string();
+        assert!(error.contains(needle), "{args}: {error}");
+        assert!(!dir.path().join("out").exists(), "invalid arguments must be refused before writing");
+    }
+    let error = auto.call("doc_batch", &json!({"paths":["input"],"out_dir":"out","steps":["pdfa"],"level":"9z"})).unwrap_err().to_string();
+    assert!(error.contains("2b or 3b"), "{error}");
+}
+
+#[test]
+fn batch_pdfa_step_failure_is_a_per_file_error_and_stop_on_error_stops() {
+    use pdfcraft_engine::{Edit, Protection};
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir(dir.path().join("input")).unwrap();
+    std::fs::write(dir.path().join("input/a.pdf"), pdf()).unwrap();
+    // Protected by an owner password only: it opens without a password, but converting to PDF/A
+    // must remove the encryption, which the owner's rights alone allow.
+    let mut session = Session::new();
+    let id = session.open("p.pdf", None, std::sync::Arc::new(pdf()), None).unwrap();
+    session.apply(id, Edit::Protect(Protection { permissions_password: Some("owner".into()), ..Protection::default() })).unwrap();
+    std::fs::write(dir.path().join("input/b.pdf"), &*session.save_bytes(id).unwrap()).unwrap();
+    let mut auto = Automation::new().with_root(dir.path()).unwrap();
+
+    let report = result(&mut auto, json!({"paths":["input"],"steps":["pdfa"],"out_dir":"out"}));
+    assert_eq!(report["completed"], 1, "{report}");
+    assert_eq!(report["failed"], 1, "{report}");
+    assert_eq!(report["stopped"], false);
+    let files = report["files"].as_array().unwrap();
+    let bad = files.iter().find(|f| f["status"] == "error").unwrap();
+    assert!(bad["path"].as_str().unwrap().ends_with("b.pdf"), "{bad}");
+    assert!(bad["error"].as_str().unwrap().contains("PDF/A forbids"), "{bad}");
+    assert!(dir.path().join("out/a.pdf").exists());
+    assert!(!dir.path().join("out/b.pdf").exists(), "a failed file leaves no output");
+    let good = files.iter().find(|f| f["status"] == "ok").unwrap();
+    assert_eq!(good["steps"][0]["compliant"], good["steps"][0]["remaining_issues"] == 0, "{good}");
+
+    // With stop_on_error the failure (b.pdf sorts after a.pdf) stops what follows it.
+    std::fs::write(dir.path().join("input/c.pdf"), pdf()).unwrap();
+    let report = result(&mut auto, json!({"paths":["input"],"steps":["pdfa"],"out_dir":"out2","stop_on_error":true}));
+    assert_eq!(report["stopped"], true, "{report}");
+    assert_eq!(report["failed"], 1, "{report}");
+    assert_eq!(report["completed"], 1, "{report}");
+    assert_eq!(report["skipped"], 1, "c.pdf is skipped after the error: {report}");
+    assert!(!dir.path().join("out2/c.pdf").exists());
+}
