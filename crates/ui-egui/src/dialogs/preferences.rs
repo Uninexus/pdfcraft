@@ -870,7 +870,7 @@ fn card_units_and_paper(ui: &mut egui::Ui, app: &mut PdfCraftApp, t: &Tokens, ct
         ctx.label_primary(ui, tl!("Paper for new blank pages"), t);
         ctx.pill_choice(ui, t, &mut app.blank_paper, &[(crate::paper::Paper::Letter, tl!("US Letter")), (crate::paper::Paper::A4, tl!("A4"))]);
     });
-    ctx.label_secondary(ui, tl!("Used by Create ▸ Blank page. It starts as the paper of the system's region."), t);
+    ctx.label_secondary(ui, tl!("Used by Create > Blank page. It starts as the paper of the system's region."), t);
 }
 
 /// The comment tools' behaviour, in the Comment card: whether they stay selected and what they start with.
