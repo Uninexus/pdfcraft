@@ -464,3 +464,111 @@ fn system_fallback_covers_hangul() {
     }
     assert!(layout_widths(&mut fonts, HANGUL).iter().all(|w| w.is_finite() && *w > 0.0));
 }
+
+/// Characters in the interface source that the bundled faces need not cover, each with why.
+/// Everything else non-ASCII in non-test code must have a glyph in the embedded faces alone:
+/// egui panics ("No glyph for X in Proportional") rather than drawing a box for a character no
+/// loaded face has, which took down 28 tests on Windows for U+25B8 (a Windows runner has no
+/// system face to mask it).
+const GLYPH_EXEMPT: &[(char, &str)] = &[
+    // macOS menu key symbols: shown only by the native macOS menu bar, never laid out by egui.
+    ('\u{21e7}', "Shift key symbol, macOS menus only"),
+    ('\u{2303}', "Control key symbol, macOS menus only"),
+    ('\u{2318}', "Command key symbol, macOS menus only"),
+    ('\u{2325}', "Option key symbol, macOS menus only"),
+];
+
+/// Han, kana, Hangul, fullwidth forms and emoji: drawn from the optional craft-fonts faces (or an
+/// installed one) by design, covered by the CJK tests above.
+fn needs_optional_face(c: char) -> bool {
+    matches!(c as u32, 0x3000..=0x9fff | 0xac00..=0xd7af | 0xff00..=0xffef | 0x1f000..=0x1faff)
+}
+
+/// Every non-ASCII character outside comments in `src`, up to its first `#[cfg(test)]` (test
+/// modules may hold any text): in strings, char literals and anywhere else code can carry one.
+fn non_ascii_outside_comments(src: &str) -> Vec<char> {
+    let mut found = Vec::new();
+    let mut in_string = false;
+    for line in src.lines() {
+        if !in_string && line.trim_start().starts_with("#[cfg(test)]") {
+            break;
+        }
+        let mut prev = ' ';
+        let mut escaped = false;
+        for c in line.chars() {
+            if in_string {
+                if escaped {
+                    escaped = false;
+                } else if c == '\\' {
+                    escaped = true;
+                } else if c == '"' {
+                    in_string = false;
+                }
+            } else if c == '"' {
+                in_string = true;
+            } else if c == '/' && prev == '/' {
+                break;
+            }
+            if !c.is_ascii() {
+                found.push(c);
+            }
+            prev = c;
+        }
+    }
+    found
+}
+
+fn source_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if path.is_dir() {
+            if name != "tests" {
+                source_files(&path, out);
+            }
+        } else if name.ends_with(".rs") && name != "tests.rs" {
+            out.push(path);
+        }
+    }
+}
+
+/// Every non-ASCII character the interface source can show has a glyph in the embedded faces,
+/// with `theme::font_definitions()` alone: no system face and no craft-fonts, so the result is
+/// the same on a runner that has none (Windows CI) as on a machine that has them all.
+#[test]
+fn interface_source_characters_have_embedded_glyphs() {
+    let mut files = Vec::new();
+    source_files(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src"), &mut files);
+    assert!(files.len() > 50, "found only {} source files", files.len());
+    let mut chars = std::collections::BTreeMap::<char, String>::new();
+    for file in &files {
+        let Ok(src) = std::fs::read_to_string(file) else { continue };
+        for c in non_ascii_outside_comments(&src) {
+            chars.entry(c).or_insert_with(|| file.display().to_string());
+        }
+    }
+    // font_definitions() adds an installed face only through installed_font_definitions().
+    let mut fonts = Fonts::new(TextOptions::default(), theme::font_definitions());
+    let mut missing = Vec::new();
+    for (c, file) in &chars {
+        if GLYPH_EXEMPT.iter().any(|(e, _)| e == c) || needs_optional_face(*c) {
+            continue;
+        }
+        let text = c.to_string();
+        for id in families() {
+            if !fonts.has_glyphs(&id, &text) {
+                missing.push(format!("U+{:04X} {c} in {file} ({id:?})", *c as u32));
+            }
+        }
+    }
+    assert!(missing.is_empty(), "no embedded glyph, so egui would panic drawing it; use an ASCII or covered character:\n{}", missing.join("\n"));
+}
+
+/// The check above can fail: U+25B8, the character that broke Windows, has no embedded glyph.
+#[test]
+fn glyph_check_detects_an_uncovered_character() {
+    let mut fonts = Fonts::new(TextOptions::default(), theme::font_definitions());
+    assert!(!fonts.has_glyphs(&FontId::proportional(13.0), "\u{25b8}"), "U+25B8 became covered: pick another probe");
+    assert!(non_ascii_outside_comments("let a = \"x\u{25b8}\"; // \u{2318}\n#[cfg(test)]\n\"\u{2713}\"").eq(&['\u{25b8}']));
+}
