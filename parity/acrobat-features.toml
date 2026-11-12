@@ -9819,11 +9819,11 @@ title = "AI provider interface (local model or own endpoint), off by default"
 area = "N"
 tier = "P2"
 milestone = "M13"
-status = "planned"
+status = "partial"
 commands = []
-tools = []
-evidence = []
-notes = ""
+tools = ["ai_status", "ai_ask"]
+evidence = ["crates/automation/tests/it/ai.rs::ask_sends_the_page_text_and_returns_the_answer", "crates/automation/tests/it/ai.rs::unconfigured_ask_fails_clearly_and_status_hides_the_key", "crates/ai/src/tests.rs::chat_posts_to_chat_completions_with_key_and_reads_the_reply"]
+notes = "pdfcraft-ai talks to any OpenAI-compatible chat endpoint (a local server such as Ollama or LM Studio, or a hosted API with a bearer key). Off by default: no endpoint or key is built in, nothing is sent until ai_ask is called. Settings from tool arguments, a JSON config file or PDFCRAFT_AI_BASE_URL, PDFCRAFT_AI_MODEL and PDFCRAFT_AI_API_KEY. Missing: the in-app settings page and Ask panel, streaming replies."
 
 [[feature]]
 id = "misc.ai-summary"
