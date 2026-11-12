@@ -1247,11 +1247,11 @@ title = "Multiple windows; drag a tab out into a window"
 area = "B"
 tier = "P1"
 milestone = "M14"
-status = "planned"
+status = "partial"
 commands = []
 tools = []
-evidence = []
-notes = ""
+evidence = ["crates/ui-egui/tests/it/split_view.rs::a_saved_tab_dragged_out_of_the_window_opens_in_a_new_one_and_closes_here", "crates/ui-egui/tests/it/split_view.rs::move_to_new_window_in_the_tab_menu_does_the_same", "crates/ui-egui/tests/it/split_view.rs::a_slight_overshoot_of_the_edge_does_not_open_a_new_window", "crates/ui-egui/tests/it/split_view.rs::a_failed_launch_keeps_the_tab_and_says_why", "crates/ui-egui/tests/it/split_view.rs::a_tab_with_unsaved_changes_is_refused", "crates/ui-egui/tests/it/split_view.rs::a_document_with_no_file_is_refused", "crates/ui-egui/tests/it/split_view.rs::a_document_shown_in_two_tabs_is_refused", "apps/pdfcraft/src/startup.rs::a_new_window_does_not_reopen_last_session"]
+notes = "A tab dragged more than 32 points out of the window (the cursor changes there), or Move to new window in its right-click menu, starts a second PdfCraft process (--new-window --page N, which does not reopen last session) on the document's file, at the page shown, and closes the tab. Only a saved document without unsaved changes and with no other tab of it moves (otherwise a notification says why); a failed launch keeps the tab. The tests drag tabs headlessly with the launch replaced; starting the real process, and the window itself, are not tested. Not yet: unsaved documents, dragging into another window, and no automation tool (pure window management)."
 
 [[feature]]
 id = "view.split-window"

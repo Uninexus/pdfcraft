@@ -72,6 +72,7 @@ impl PdfCraftApp {
             status_captions_lang: None,
             views: Vec::new(),
             closed_tabs: Vec::new(),
+            window_spawner: crate::menus::tab_context::spawn_new_window,
             active: None,
             mode: Mode::AllTools,
             default_mode: Mode::AllTools,

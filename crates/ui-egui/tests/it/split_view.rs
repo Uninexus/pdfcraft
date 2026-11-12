@@ -82,6 +82,10 @@ fn click_at(h: &mut Harness<'static, PdfCraftApp>, at: egui::Pos2) {
 
 fn drag_tab(h: &mut Harness<'static, PdfCraftApp>, name: &str, to: egui::Pos2) {
     let from = h.get_by_role_and_label(Role::Tab, name).rect().center();
+    drag_from(h, from, to);
+}
+
+fn drag_from(h: &mut Harness<'static, PdfCraftApp>, from: egui::Pos2, to: egui::Pos2) {
     h.event(egui::Event::PointerMoved(from));
     h.event(egui::Event::PointerButton { pos: from, button: egui::PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE });
     h.run_steps(1);
@@ -290,10 +294,10 @@ fn a_tab_dropped_on_the_right_half_of_the_page_splits_right_with_it() {
     drag_tab(&mut h, "one.pdf", strip.right_center() + egui::vec2(40.0, 0.0));
     assert!(h.state().panes.split.is_none());
     assert_eq!(places(&h), [Place::Main, Place::Main]);
-    // Let go outside the window, a tab moves along the strip as before split view (here to the
-    // front), and nothing splits.
+    // Let go just past the window's edge, a tab moves along the strip as before split view (here
+    // to the front), and nothing splits. (Well past it, it opens a window of its own.)
     let ids: Vec<_> = h.state().views.iter().map(|v| v.id).collect();
-    drag_tab(&mut h, "two.pdf", egui::pos2(-200.0, 300.0));
+    drag_tab(&mut h, "two.pdf", egui::pos2(-20.0, 300.0));
     assert!(h.state().panes.split.is_none());
     assert_eq!(h.state().views.iter().map(|v| v.id).collect::<Vec<_>>(), [ids[1], ids[0]]);
 }
@@ -314,4 +318,177 @@ fn closing_the_second_panes_tab_from_its_strip_keeps_the_program_running() {
     h.run_steps(3);
     assert!(h.state().panes.split.is_none());
     assert_eq!(h.state().views.len(), 1);
+}
+
+// A tab dragged out of the window opens its document in a window of its own (view.multiple-windows).
+// The tests replace `PdfCraftApp::window_spawner`, so no process starts; it is per test thread.
+
+thread_local! {
+    static SPAWNED: std::cell::RefCell<Vec<(String, usize)>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+fn record_spawn(path: &str, page: usize) -> Result<(), String> {
+    SPAWNED.with(|s| s.borrow_mut().push((path.to_owned(), page)));
+    Ok(())
+}
+
+fn failing_spawn(path: &str, page: usize) -> Result<(), String> {
+    SPAWNED.with(|s| s.borrow_mut().push((path.to_owned(), page)));
+    Err("no such program".into())
+}
+
+fn spawned() -> Vec<(String, usize)> {
+    SPAWNED.with(|s| s.borrow().clone())
+}
+
+/// Each call gets a directory of its own: tests run in parallel and one of them deletes its files.
+fn temp_pdf(name: &str) -> String {
+    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("pdfcraft-newwin-{}-{n}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join(name);
+    std::fs::write(&path, fixture(3)).unwrap();
+    path.to_str().unwrap().to_owned()
+}
+
+/// Saved files `names` open as tabs (and one document with no file, `memory.pdf`, last when
+/// `with_unsaved_file`), the app's spawner `spawn`.
+fn window_harness(names: &[&str], spawn: pdfcraft_ui_egui::WindowSpawner, with_unsaved_file: bool) -> (Harness<'static, PdfCraftApp>, Vec<String>) {
+    SPAWNED.with(|s| s.borrow_mut().clear());
+    let paths: Vec<String> = names.iter().map(|n| temp_pdf(n)).collect();
+    let open = paths.clone();
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |_cc| {
+        let mut app = PdfCraftApp::new();
+        app.run_inline = true;
+        app.window_spawner = spawn;
+        app.set_option("language", "en").unwrap();
+        for path in &open {
+            app.open_path(path);
+        }
+        if with_unsaved_file {
+            app.open_bytes("memory.pdf", None, fixture(3)).unwrap();
+        }
+        app
+    });
+    h.run_steps(4);
+    (h, paths)
+}
+
+const OUT: egui::Pos2 = egui::pos2(-200.0, 300.0);
+
+#[test]
+fn a_saved_tab_dragged_out_of_the_window_opens_in_a_new_one_and_closes_here() {
+    let (mut h, paths) = window_harness(&["one.pdf", "two.pdf"], record_spawn, false);
+    let name = h.state().session.get(h.state().views[0].id).unwrap().name.clone();
+    let i = index(&h, &name);
+    h.state_mut().views[i].go_to_page(2);
+    h.run_steps(2);
+    drag_tab(&mut h, &name, OUT);
+    assert_eq!(spawned(), [(paths[0].clone(), 2)], "the file, at the page shown");
+    assert_eq!(h.state().views.len(), 1, "the tab closed here");
+    assert_eq!(h.query_all_by_role_and_label(Role::Tab, name.as_str()).count(), 0);
+    for p in paths {
+        let _ = std::fs::remove_file(p);
+    }
+}
+
+#[test]
+fn move_to_new_window_in_the_tab_menu_does_the_same() {
+    let (mut h, paths) = window_harness(&["one.pdf", "two.pdf"], record_spawn, false);
+    let name = h.state().session.get(h.state().views[1].id).unwrap().name.clone();
+    h.get_by_role_and_label(Role::Tab, name.as_str()).click_secondary();
+    h.run_steps(2);
+    h.get_by_label("Move to new window").click();
+    h.run_steps(3);
+    assert_eq!(spawned(), [(paths[1].clone(), 0)]);
+    assert_eq!(h.state().views.len(), 1);
+    for p in paths {
+        let _ = std::fs::remove_file(p);
+    }
+}
+
+#[test]
+fn a_slight_overshoot_of_the_edge_does_not_open_a_new_window() {
+    let (mut h, paths) = window_harness(&["one.pdf", "two.pdf"], record_spawn, false);
+    let name = h.state().session.get(h.state().views[1].id).unwrap().name.clone();
+    drag_tab(&mut h, &name, egui::pos2(-10.0, 300.0));
+    assert!(spawned().is_empty());
+    assert_eq!(h.state().views.len(), 2);
+    for p in paths {
+        let _ = std::fs::remove_file(p);
+    }
+}
+
+#[test]
+fn a_failed_launch_keeps_the_tab_and_says_why() {
+    let (mut h, paths) = window_harness(&["one.pdf", "two.pdf"], failing_spawn, false);
+    let name = h.state().session.get(h.state().views[0].id).unwrap().name.clone();
+    drag_tab(&mut h, &name, OUT);
+    assert_eq!(spawned().len(), 1, "it tried");
+    assert_eq!(h.state().views.len(), 2, "the tab stays");
+    assert_eq!(h.state().toast.clone().unwrap().0, "Couldn't open a new window: no such program");
+    for p in paths {
+        let _ = std::fs::remove_file(p);
+    }
+}
+
+#[test]
+fn a_tab_with_unsaved_changes_is_refused() {
+    let (mut h, paths) = window_harness(&["one.pdf", "two.pdf"], record_spawn, false);
+    let name = h.state().session.get(h.state().views[1].id).unwrap().name.clone();
+    h.state_mut().active = Some(1);
+    h.state_mut().run_command("page.rotate");
+    h.run_steps(2);
+    assert!(h.state().session.get(h.state().views[1].id).unwrap().dirty);
+    let label = format!("{name} (edited)");
+    drag_tab(&mut h, &label, OUT);
+    assert!(spawned().is_empty(), "not even tried");
+    assert_eq!(h.state().views.len(), 2);
+    assert_eq!(h.state().toast.clone().unwrap().0, "Save the document before moving it to a new window");
+    for p in paths {
+        let _ = std::fs::remove_file(p);
+    }
+}
+
+#[test]
+fn a_document_with_no_file_is_refused() {
+    let (mut h, paths) = window_harness(&["one.pdf"], record_spawn, true);
+    drag_tab(&mut h, "memory.pdf", OUT);
+    assert!(spawned().is_empty());
+    assert_eq!(h.state().views.len(), 2);
+    assert_eq!(h.state().toast.clone().unwrap().0, "Save the document before moving it to a new window");
+    for p in paths {
+        let _ = std::fs::remove_file(p);
+    }
+}
+
+#[test]
+fn a_file_that_is_gone_is_refused() {
+    let (mut h, paths) = window_harness(&["one.pdf", "two.pdf"], record_spawn, false);
+    let name = h.state().session.get(h.state().views[0].id).unwrap().name.clone();
+    std::fs::remove_file(&paths[0]).unwrap();
+    drag_tab(&mut h, &name, OUT);
+    assert!(spawned().is_empty());
+    assert_eq!(h.state().views.len(), 2);
+    assert_eq!(h.state().toast.clone().unwrap().0, "The document's file no longer exists");
+    let _ = std::fs::remove_file(&paths[1]);
+}
+
+#[test]
+fn a_document_shown_in_two_tabs_is_refused() {
+    let (mut h, paths) = window_harness(&["one.pdf"], record_spawn, false);
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Backslash);
+    h.run_steps(3);
+    assert_eq!(places(&h), [Place::Main, Place::Second]);
+    let main_right = h.state().views[0].viewport_rect().right();
+    let from =
+        h.get_all_by_role_and_label(Role::Tab, "one.pdf").find(|t| t.rect().right() <= main_right).expect("the main strip's tab").rect().center();
+    drag_from(&mut h, from, OUT);
+    assert!(spawned().is_empty());
+    assert_eq!(h.state().views.len(), 2);
+    assert_eq!(h.state().toast.clone().unwrap().0, "Close the other tab of this document before moving it to a new window");
+    for p in paths {
+        let _ = std::fs::remove_file(p);
+    }
 }

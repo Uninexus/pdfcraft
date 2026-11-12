@@ -314,6 +314,10 @@ fn tab_menu(app: &PdfCraftApp, ui: &mut egui::Ui, index: usize, action: &mut Opt
         *action = Some(Action::Split { tab, down: true });
         ui.close();
     }
+    if ui.add_enabled(cfg!(not(target_arch = "wasm32")), egui::Button::new(tl!("Move to new window"))).clicked() {
+        *action = Some(Action::MoveToNewWindow(tab));
+        ui.close();
+    }
     ui.separator();
     let reveal = cfg!(not(target_arch = "wasm32")) && app.session.get(id).is_some_and(|d| d.path.is_some());
     let label = if cfg!(target_os = "macos") { tl!("Reveal in Finder") } else { tl!("Reveal in File Explorer") };
@@ -331,8 +335,13 @@ fn tab_menu(app: &PdfCraftApp, ui: &mut egui::Ui, index: usize, action: &mut Opt
 /// pointer's x while the tab moves along the strip, for scrolling at the strip's edges.
 fn tab_drag(app: &mut PdfCraftApp, ui: &egui::Ui, slots: &[(usize, Rect)], dragged: Option<(usize, bool)>, place: Place, busy: bool) -> Option<f32> {
     let (from, released) = dragged?;
-    let pos = ui.ctx().pointer_latest_pos()?;
-    match app.drop_target(pos, place) {
+    // Winit keeps reporting the pointer while a button is held, so a drag past the window's edge
+    // still has a position. Where the platform reports none (it left and stopped reporting), the
+    // last position seen in this drag stands in, so the tab is never sent anywhere on a guess.
+    let pos = ui.ctx().pointer_latest_pos().or(app.panes.drag_pos)?;
+    app.panes.drag_pos = if released { None } else { Some(pos) };
+    let window = ui.ctx().content_rect();
+    match app.drop_target(pos, place, window) {
         TabDrop::Strip => {
             let x = pos.x;
             let to = drop_index(slots, from, x);
@@ -356,7 +365,9 @@ fn tab_drag(app: &mut PdfCraftApp, ui: &egui::Ui, slots: &[(usize, Rect)], dragg
         }
         target => {
             if !released {
-                ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+                // A different cursor says the tab will open a window of its own.
+                let new_window = target == TabDrop::NewWindow;
+                ui.ctx().set_cursor_icon(if new_window { egui::CursorIcon::Alias } else { egui::CursorIcon::Grabbing });
                 app.panes.drop_hint = app.drop_hint_rect(target);
             } else if !busy {
                 app.drop_tab(from, target);

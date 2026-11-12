@@ -86,7 +86,15 @@ pub(crate) enum TabDrop {
     Pane(Place),
     /// The right half of a page area that isn't split: split right with it.
     SplitRight,
+    /// Well outside the window ([`NEW_WINDOW_MARGIN`]): the tab's document opens in a window of its
+    /// own.
+    NewWindow,
 }
+
+/// How far past the window's edge a dragged tab must be to open a window of its own, in points.
+/// Reordering tabs often overshoots the edge a little (and the strip scrolls there), which must
+/// not pop the tab out.
+pub(crate) const NEW_WINDOW_MARGIN: f32 = 32.0;
 
 /// Split view's state: see the module docs.
 #[derive(Default)]
@@ -106,6 +114,9 @@ pub struct Panes {
     pub(crate) drawing: Place,
     /// Where a dragged tab would land, painted over the page area this frame.
     pub(crate) drop_hint: Option<Rect>,
+    /// Where the pointer last was while a tab was dragged, for a release the platform reports
+    /// without a position (`chrome::tab_drag`).
+    pub(crate) drag_pos: Option<Pos2>,
 }
 
 impl Panes {
@@ -432,8 +443,13 @@ impl PdfCraftApp {
 
     /// Where a tab dragged from `from`'s strip lands if let go at `pos`: the other pane, the right
     /// half of a page area that isn't split, or else its own strip (as before split view, the
-    /// tab moves along the strip wherever it is let go).
-    pub(crate) fn drop_target(&self, pos: Pos2, from: Place) -> TabDrop {
+    /// tab moves along the strip wherever it is let go). More than [`NEW_WINDOW_MARGIN`] outside
+    /// `window` (the window's content rect) it is a new window, as in Acrobat; not on the web,
+    /// which has no second window to open.
+    pub(crate) fn drop_target(&self, pos: Pos2, from: Place, window: Rect) -> TabDrop {
+        if cfg!(not(target_arch = "wasm32")) && !window.expand(NEW_WINDOW_MARGIN).contains(pos) {
+            return TabDrop::NewWindow;
+        }
         if from != Place::Main && self.panes.main_strip.is_some_and(|r| r.contains(pos)) {
             return TabDrop::Pane(Place::Main);
         }
@@ -464,7 +480,7 @@ impl PdfCraftApp {
                 Some(if p == Place::Second { second } else { first })
             }
             TabDrop::SplitRight => Some(Rect::from_min_max(egui::pos2(page.center().x, page.top()), page.max)),
-            TabDrop::Strip => None,
+            TabDrop::Strip | TabDrop::NewWindow => None,
         }
     }
 
@@ -476,6 +492,7 @@ impl PdfCraftApp {
                 self.move_tab_to(index, place);
             }
             TabDrop::SplitRight => self.split_tab(index, false),
+            TabDrop::NewWindow => self.move_tab_to_new_window(index),
         }
     }
 
@@ -625,6 +642,25 @@ fn pane(app: &mut PdfCraftApp, ui: &mut egui::Ui, rect: Rect, place: Place, fron
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_tab_let_go_outside_the_window_goes_to_a_new_window() {
+        let window = Rect::from_min_size(egui::pos2(0.0, 0.0), vec2(1000.0, 600.0));
+        let mut app = PdfCraftApp::new();
+        app.panes.page_rect = Some(Rect::from_min_max(egui::pos2(0.0, 40.0), window.max));
+        for outside in [egui::pos2(-40.0, 20.0), egui::pos2(500.0, -33.0), egui::pos2(1033.0, 300.0), egui::pos2(500.0, 640.0)] {
+            assert_eq!(app.drop_target(outside, Place::Main, window), TabDrop::NewWindow, "{outside:?}");
+        }
+        // A slight overshoot of the edge still moves the tab along the strip.
+        for overshoot in [egui::pos2(-20.0, 20.0), egui::pos2(500.0, -31.0), egui::pos2(1031.0, 300.0), egui::pos2(500.0, 631.0)] {
+            assert_ne!(app.drop_target(overshoot, Place::Main, window), TabDrop::NewWindow, "{overshoot:?}");
+        }
+        // Inside, as before: its own strip over the tab strip or the left half, split right on the right.
+        assert_eq!(app.drop_target(egui::pos2(500.0, 10.0), Place::Main, window), TabDrop::Strip);
+        assert_eq!(app.drop_target(egui::pos2(100.0, 300.0), Place::Main, window), TabDrop::Strip);
+        assert_eq!(app.drop_target(egui::pos2(900.0, 300.0), Place::Main, window), TabDrop::SplitRight);
+        assert_eq!(app.drop_hint_rect(TabDrop::NewWindow), None);
+    }
 
     #[test]
     fn the_panes_share_the_area_and_the_divider_stays_inside() {
