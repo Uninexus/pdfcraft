@@ -1211,6 +1211,19 @@ pub fn tools() -> Vec<ToolDef> {
             &["doc"],
         )),
         t(
+            "page_remove_white_margins",
+            "Remove white margins",
+            "Crop pages to their content, as Crop Pages ▸ Remove White Margins does: each page's crop box becomes the bounds of everything the page paints (text, images, drawings, visible annotations), found from a raster of the page at up to 144 dpi (so to about half a point; coarser on very large pages) where a pixel counts as content unless it is transparent or nearly white (every colour channel 250 or more), plus `padding` points on every side (default 0), never beyond the current crop box. /Rotate and /UserUnit are followed. The page is judged as the file sets it, whatever the view shows: layers are at the file's own defaults and comments are shown. The box is rounded outward to 0.01 pt and is at least 1 user unit on a side. A page with no content is left as it is and listed in `blank`; a page whose content already fills its crop box is listed in `unchanged`; a page that couldn't be drawn is left as it is and listed in `failed` with why. `cropped` lists the new crop box of each page in user space [x0, y0, x1, y1]. It sets the same crop box page_set_box does, so the media box is untouched, and all pages go in one undoable step. No per-odd/even or per-page-size options; whiteness is judged from the drawn page, not from the page's content stream.",
+        )
+        .with(schema(
+            json!({
+                "doc": doc(),
+                "pages": pages("to crop (default: all)"),
+                "padding": { "type": "number", "minimum": 0, "maximum": pdfcraft_engine::white_margins::MAX_PADDING, "description": "Points of white to keep around the content on every side (default 0)." },
+            }),
+            &["doc"],
+        )),
+        t(
             "doc_header_footer",
             "Add header and footer",
             "Add a header and/or footer to pages. Text boxes: header_left/center/right, footer_left/center/right. Tokens: <<1>> page number, <<n>> page count, <<1 of n>>, <<Page 1 of n>>, <<1/n>>, dates <<m/d/yyyy>> <<yyyy-mm-dd>> <<mmmm d, yyyy>> <<dd.mm.yyyy>> (and more), Bates <<Bates Number#6#1#PREFIX#SUFFIX>>. shrink: true scales the page content down evenly into the room the header and footer leave free, so they don't cover it. font: Helvetica (default), Times or Courier; Thai is drawn from PdfCraft's built-in Thai face beside it (a build without one refuses it). replace: true swaps out existing ones (Update). Undoable.",

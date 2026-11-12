@@ -25,3 +25,4 @@ mod render_warnings;
 mod text_copy;
 mod timesheet_compat;
 mod unreadable_objects;
+mod white_margins;
