@@ -234,7 +234,7 @@ fn main() -> eframe::Result {
     }
     startup.files = rejoin_split_paths(startup.files, |p| std::path::Path::new(p).is_file());
     let may_hand_off = startup.may_hand_off();
-    let startup::Arguments { files, options, control_file, create_images, combine, two_paged, .. } = startup;
+    let startup::Arguments { files, options, control_file, create_images, combine, two_paged, new_window, .. } = startup;
     let integrated = cfg!(target_os = "macos");
     // GNOME on Wayland leaves the window frame to the app (src/decorations.rs).
     let window_controls = if cfg!(any(target_os = "macos", target_os = "windows")) { None } else { decorations::app_drawn() };
@@ -264,7 +264,7 @@ fn main() -> eframe::Result {
         single_instance::Claim::Alone => None,
     };
     let choice = renderer_choice(std::env::var("PDFCRAFT_RENDERER").ok().as_deref());
-    let launch = Launch { files, options, control_file, create_images, combine, integrated, window_controls, two_paged };
+    let launch = Launch { files, options, control_file, create_images, combine, integrated, window_controls, two_paged, new_window };
     // Finder, Open With and the Dock deliver files as Apple events, not arguments; catch the one
     // that launched us as well as later ones. Lives until the event loop returns.
     #[cfg(target_os = "macos")]
@@ -385,6 +385,8 @@ struct Launch {
     /// The window buttons the app draws, when the desktop leaves the frame to it.
     window_controls: Option<pdfcraft_ui_egui::window_controls::Layout>,
     two_paged: bool,
+    /// `--new-window`: a window for these files alone (it doesn't bring last session back).
+    new_window: bool,
 }
 
 /// Whether the window is a native Wayland one (not X11 or XWayland).
@@ -447,7 +449,7 @@ fn app_creator<'a>(
     instance: Option<&'a single_instance::Server>,
     #[cfg(target_os = "macos")] apple_events: &'a apple_events::AppleEvents,
 ) -> eframe::AppCreator<'a> {
-    let Launch { files, options, control_file, create_images, combine, integrated, window_controls, two_paged } = launch;
+    let Launch { files, options, control_file, create_images, combine, integrated, window_controls, two_paged, new_window } = launch;
     Box::new(move |cc| {
         started.set(true);
         let mut app = PdfCraftApp::new();
@@ -526,12 +528,16 @@ fn app_creator<'a>(
                 app.notify(e);
             }
         } else if combine {
-            app.reopen_last_files(&[]);
+            if startup::reopens_last_session(new_window) {
+                app.reopen_last_files(&[]);
+            }
             app.combine_paths(&files);
         } else {
             // With the preference on, last session's files come back first; files named on
             // the command line open after them, in front (#442).
-            app.reopen_last_files(&files);
+            if startup::reopens_last_session(new_window) {
+                app.reopen_last_files(&files);
+            }
             startup::open_files(&mut app, &files, two_paged);
         }
         for (k, v) in options {

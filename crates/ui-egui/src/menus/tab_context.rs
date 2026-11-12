@@ -12,6 +12,114 @@ pub(crate) enum Action {
         tab: u64,
         down: bool,
     },
+    /// Open the tab's document in a second PdfCraft window, by its view key (#view.multiple-windows).
+    MoveToNewWindow(u64),
+}
+
+/// Why a tab can't move to a window of its own yet: the other window reads the file from disk, so
+/// the document needs a saved path and nothing the file doesn't have, and no other view of it
+/// here, or it would be open in two processes at once.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum NewWindowRefusal {
+    /// It has unsaved changes (the new window would show the older file, and closing the tab here
+    /// would lose them).
+    Unsaved,
+    /// It has no file on disk (a new, combined or pasted document).
+    NoPath,
+    /// Split view shows the document in another tab too.
+    OtherView,
+}
+
+impl NewWindowRefusal {
+    /// What the notification says; translated when shown.
+    pub(crate) fn message(self) -> &'static str {
+        match self {
+            Self::Unsaved | Self::NoPath => "Save the document before moving it to a new window",
+            Self::OtherView => "Close the other tab of this document before moving it to a new window",
+        }
+    }
+}
+
+/// Whether a document with `path`, `unsaved` work and another view (`twin`) can move to a new
+/// window, and the file the new window opens. Unsaved changes are checked first: a
+/// saved-but-edited document is not safe to hand over, whatever its path.
+pub(crate) fn new_window_plan(path: Option<&str>, unsaved: bool, twin: bool) -> Result<&str, NewWindowRefusal> {
+    if unsaved {
+        return Err(NewWindowRefusal::Unsaved);
+    }
+    let path = path.filter(|p| !p.is_empty()).ok_or(NewWindowRefusal::NoPath)?;
+    if twin {
+        return Err(NewWindowRefusal::OtherView);
+    }
+    Ok(path)
+}
+
+/// The program and arguments that start a PdfCraft window of its own on `path`, at `page`
+/// (0-based). `--new-window` keeps the launch out of single-instance handoff
+/// (`apps/pdfcraft/src/single_instance.rs`), which would otherwise pass the file to this very
+/// process, and out of reopening last session's files. `path` must be absolute, so a name that
+/// starts with `-` can't be read as an option.
+#[cfg(not(target_arch = "wasm32"))]
+fn new_window_command(exe: &std::path::Path, path: &std::path::Path, page: usize) -> (std::ffi::OsString, Vec<std::ffi::OsString>) {
+    let page = page.saturating_add(1).to_string();
+    (exe.as_os_str().to_owned(), vec!["--new-window".into(), "--page".into(), page.into(), path.as_os_str().to_owned()])
+}
+
+/// Start a new PdfCraft process on `path` at `page`, without waiting for it.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn spawn_new_window(path: &str, page: usize) -> Result<(), String> {
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let path = std::path::absolute(path).map_err(|e| e.to_string())?;
+    let (program, args) = new_window_command(&exe, &path, page);
+    let mut child = std::process::Command::new(program).args(args).spawn().map_err(|e| e.to_string())?;
+    // Reap it when it ends, so it doesn't stay a zombie for as long as this window lives. The
+    // window is open by now: if the thread can't start, that is only logged.
+    if let Err(e) = std::thread::Builder::new().name("pdfcraft-new-window".into()).spawn(move || drop(child.wait())) {
+        log::warn!("new window: can't wait for the process: {e}");
+    }
+    Ok(())
+}
+
+/// Moving a tab to a window of its own isn't offered on the web.
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn spawn_new_window(_path: &str, _page: usize) -> Result<(), String> {
+    Err("Not available in the browser".into())
+}
+
+impl crate::PdfCraftApp {
+    /// Open tab `index`'s document in a new window, at the page shown, and close the tab here. A
+    /// document with unsaved changes, no file, a file that is gone or another tab of it is
+    /// refused with a notification; a launch that fails keeps the tab.
+    ///
+    /// The closed tab is not added to the reopen history: the document lives on in the other
+    /// window, and reopening it here would show it twice.
+    pub(crate) fn move_tab_to_new_window(&mut self, index: usize) {
+        let Some(view) = self.views.get(index) else { return };
+        let (id, page) = (view.id, view.current);
+        // A document under OCR review stays put until the review ends (and says so).
+        if self.hold_close_for_ocr_review(index) {
+            return;
+        }
+        let path = self.session.get(id).and_then(|d| d.path.clone());
+        let path = match new_window_plan(path.as_deref(), self.has_unsaved_work(index), self.has_twin(index)) {
+            Ok(path) => path.to_owned(),
+            Err(refusal) => {
+                self.notify_tr(refusal.message());
+                return;
+            }
+        };
+        if !std::path::Path::new(&path).is_file() {
+            self.notify_tr("The document's file no longer exists");
+            return;
+        }
+        if let Err(e) = (self.window_spawner)(&path, page) {
+            self.notify_fmt("Couldn't open a new window: {e}", &[("e", &e)]);
+            return;
+        }
+        let history = self.closed_tabs.clone();
+        self.close_tab(index);
+        self.closed_tabs = history;
+    }
 }
 
 impl crate::PdfCraftApp {
@@ -25,6 +133,11 @@ impl crate::PdfCraftApp {
             Action::Split { tab, down } => {
                 if let Some(i) = self.tab_with_key(tab) {
                     self.split_tab(i, down);
+                }
+            }
+            Action::MoveToNewWindow(tab) => {
+                if let Some(i) = self.tab_with_key(tab) {
+                    self.move_tab_to_new_window(i);
                 }
             }
             Action::Reopen => {
@@ -189,6 +302,37 @@ mod tests {
         assert_eq!(app.active, Some(0));
         app.close_tab(0);
         assert_eq!(app.closed_tabs.len(), 1, "pathless tabs are not recorded");
+    }
+
+    #[test]
+    fn new_window_needs_a_saved_path_no_unsaved_changes_and_no_other_view() {
+        assert_eq!(new_window_plan(Some("/a/b.pdf"), false, false), Ok("/a/b.pdf"));
+        assert_eq!(new_window_plan(Some("/a/b.pdf"), true, false), Err(NewWindowRefusal::Unsaved));
+        assert_eq!(new_window_plan(None, false, false), Err(NewWindowRefusal::NoPath));
+        assert_eq!(new_window_plan(Some(""), false, false), Err(NewWindowRefusal::NoPath));
+        assert_eq!(new_window_plan(None, true, true), Err(NewWindowRefusal::Unsaved));
+        assert_eq!(new_window_plan(Some("/a/b.pdf"), false, true), Err(NewWindowRefusal::OtherView));
+    }
+
+    #[test]
+    fn new_window_command_asks_for_a_window_of_its_own_at_the_same_page() {
+        let path = std::path::Path::new("/tmp/年度 report -x.pdf");
+        let (program, args) = new_window_command(std::path::Path::new("/opt/pdfcraft/pdfcraft"), path, 4);
+        assert_eq!(program, "/opt/pdfcraft/pdfcraft");
+        let want: Vec<std::ffi::OsString> = vec!["--new-window".into(), "--page".into(), "5".into(), path.as_os_str().into()];
+        assert_eq!(args, want);
+    }
+
+    #[test]
+    fn moving_an_unsaved_or_pathless_tab_refuses_and_keeps_it() {
+        let mut app = crate::PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.open_bytes("memory.pdf", None, PDF.to_vec()).unwrap();
+        assert!(app.session.get(app.views[0].id).unwrap().path.is_none());
+        let key = app.views[0].view_key();
+        app.tab_action(Action::MoveToNewWindow(key));
+        assert_eq!(app.views.len(), 1, "no path: the tab stays");
+        assert_eq!(app.toast.as_ref().map(|t| t.0.as_str()), Some("Save the document before moving it to a new window"));
     }
 
     #[test]
