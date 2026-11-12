@@ -1487,11 +1487,11 @@ title = "Search all PDFs in a folder"
 area = "B"
 tier = "P1"
 milestone = "M12"
-status = "planned"
-commands = []
-tools = []
-evidence = []
-notes = ""
+status = "shipped"
+commands = ["edit.advanced_search"]
+tools = ["text_find_folder"]
+evidence = ["crates/automation/tests/it/find_folder.rs::matches_across_two_files_with_pages_and_snippets", "crates/automation/tests/it/find_folder.rs::options_agree_with_the_find_bar", "crates/automation/tests/it/find_folder.rs::no_match_is_an_empty_complete_answer", "crates/automation/tests/it/find_folder.rs::a_corrupt_file_is_reported_as_skipped_not_fatal", "crates/automation/tests/it/find_folder.rs::a_password_protected_file_is_skipped_with_its_reason", "crates/automation/tests/it/find_folder.rs::caps_on_files_and_results_say_so", "crates/automation/tests/it/find_folder.rs::a_folder_outside_the_root_is_refused_and_arguments_are_checked", "crates/engine/src/folder_search.rs::cancelling_keeps_the_files_done_and_stops_the_rest", "crates/ui-egui/tests/it/search_folder.rs::the_folder_scope_lists_matches_by_file_and_opens_one_at_its_page"]
+notes = "Advanced search has a Search in: This document / Folder scope. Folder searches the .pdf files of a chosen folder (optionally its sub-folders, to 32 levels) on a worker thread with the engine's folder_search, which extracts each page's text and uses the find bar's matcher, so Case-sensitive and Whole words agree; results are listed by file with the page and context, and a double-click opens the file at that page. The text_find_folder tool does the same headlessly: folder inside --root, at most 2000 files and 5000 matches (the answer says when a cap cut it), a corrupt, password-protected, oversized or linked file is listed as skipped with its reason and never stops the search, and links are never followed. The search reads the text layer only: scanned pages need OCR first, a password-protected file is skipped (there is no per-file password), files are read one after another, and there is no index, so a large folder is read again on every search (a full-text index is view.search-index). In the window the search starts from its Search button or Enter, lists up to 1000 matches; a file that is already open comes to the front at that page."
 
 [[feature]]
 id = "view.search-boolean"

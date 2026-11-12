@@ -51,6 +51,18 @@ DeviceCMYK `k`), so text added to a print file can be 100 K black. `content_list
 and per-page Unicode word/character counts, with optional tagged-table, tagged-code and
 image/OCR exclusions. See [word count](../../docs/word-count.md) for counting rules and limits.
 
+`text_find_folder {folder, query, case_sensitive?, whole_words?, recursive?, max_files?, limit?}`
+searches the `.pdf` files in a folder (Advanced search's Folder scope) with the same matcher as
+`text_find`, plus the find bar's case and whole-word options. It reads the files from disk and
+opens nothing in the session, so it does not use the text cache. `folder` must be inside `--root`
+(and the automation read root). Links are not followed, so a link out of the root is listed as
+skipped, never read. At most 2000 files (`max_files`) and 5000 matches (`limit`, default 500) are
+returned; `files_capped`, `results_capped` and `listing_capped` say when a cap cut the answer, and
+`complete` is false then and after a page whose text could not be read (`pages_failed`). A file that
+cannot be searched (corrupt, password protected, over 256 MiB, a link) is in `skipped` with its
+reason and never fails the call. Pages are numbered from 1, and each match has `before`, `text`,
+`after` and a one-line `snippet`. Scanned pages without a text layer have nothing to match.
+
 Extracted page text is reused in a session-wide LRU cache: at most **64 MiB** of estimated owned
 text storage and **4,096 pages**, shared by all open documents. Accounting includes glyph-vector
 capacity, each glyph string's capacity, line indexes and word-break flags. Cache hits share the

@@ -22,6 +22,7 @@ pub fn right_panel(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
     let mut sig_action: Option<crate::sign_ui::PanelAction> = None;
     let mut a11y_action: Option<crate::a11y_ui::PanelAction> = None;
     let mut compare_action: Option<crate::compare_ui::PanelAction> = None;
+    let mut search_action: Option<crate::search_ui::PanelAction> = None;
     let mut bm_rename = app.bookmark_rename.clone();
     let bm_editable = app.session.get(id).is_some_and(|d| d.allows_assembly() && d.read_only_reason.is_none());
     let bm_can_paste = app.bookmark_clipboard.is_some();
@@ -304,7 +305,7 @@ pub fn right_panel(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
                         }
                         panel_edit = edit;
                     }
-                    RightPanel::Search => crate::search_ui::panel(ui, &t, view, info.pages.len()),
+                    RightPanel::Search => search_action = crate::search_ui::panel(ui, &t, view, info.pages.len()),
                     RightPanel::Compare => compare_action = crate::compare_ui::panel(ui, &t, compare, id),
                     RightPanel::Attachments => {
                         let attachable = doc.allows_modification() && doc.read_only_reason.is_none();
@@ -438,6 +439,14 @@ pub fn right_panel(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
     if let Some(a) = compare_action {
         app.compare_action(index, a);
     }
+    #[cfg(not(target_arch = "wasm32"))]
+    match search_action {
+        Some(crate::search_ui::PanelAction::ChooseFolder) => app.choose_search_folder(),
+        Some(crate::search_ui::PanelAction::Open { path, page }) => app.open_search_result(&path, page),
+        None => {}
+    }
+    #[cfg(target_arch = "wasm32")]
+    let _ = search_action;
     match sig_action {
         Some(crate::sign_ui::PanelAction::Validate) => app.run_command("sign.validate"),
         Some(crate::sign_ui::PanelAction::GoTo(p)) => app.views[index].go_to_page(p),

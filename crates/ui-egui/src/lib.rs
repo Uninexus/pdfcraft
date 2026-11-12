@@ -145,6 +145,10 @@ use panels::comments_panel;
 use panels::format_text_ui;
 use panels::organize_panel;
 use panels::page_selection_ui;
+#[cfg(not(target_arch = "wasm32"))]
+use panels::search_folder;
+#[cfg(not(target_arch = "wasm32"))]
+pub use panels::search_folder::{FileHits, FolderScope};
 use panels::search_ui;
 pub use panels::side_panels;
 pub use persist::last_session;

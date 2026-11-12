@@ -17,6 +17,8 @@ pub(super) mod organize_panel;
 pub(super) mod page_selection_ui;
 mod pages;
 mod right;
+#[cfg(not(target_arch = "wasm32"))]
+pub(super) mod search_folder;
 pub(super) mod search_ui;
 pub mod side_panels;
 mod tools;

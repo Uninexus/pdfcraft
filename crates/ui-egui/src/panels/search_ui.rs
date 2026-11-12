@@ -8,14 +8,20 @@ use crate::canvas::DocView;
 use crate::theme::{self, Tokens};
 use crate::widgets;
 
+/// What the panel asks the app to do beyond its own view.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) use crate::search_folder::PanelAction;
+#[cfg(target_arch = "wasm32")]
+pub(crate) enum PanelAction {}
+
 /// Glyphs of context shown on each side of a match.
 const CONTEXT: usize = 36;
 
 /// Draw the Search panel with its query, options, progress and clickable result excerpts.
-pub(crate) fn panel(ui: &mut egui::Ui, t: &Tokens, view: &mut DocView, pages: usize) {
+pub(crate) fn panel(ui: &mut egui::Ui, t: &Tokens, view: &mut DocView, pages: usize) -> Option<PanelAction> {
     crate::widgets::begin_dialog(ui);
     let searched = view.texts.len() + view.text_failed.len();
-    let Some(find) = view.find.as_mut() else { return };
+    let find = view.find.as_mut()?;
     find.in_panel = true;
     let l = ui.label(egui::RichText::new(tl!("What word or phrase would you like to search for?")).color(t.text_muted));
     let r = ui
@@ -37,10 +43,26 @@ pub(crate) fn panel(ui: &mut egui::Ui, t: &Tokens, view: &mut DocView, pages: us
             find.case_query.clear();
         }
     });
+    // Where to search: this document, or every PDF in a folder.
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new(tl!("Search in:")).color(t.text_muted));
+            ui.selectable_value(&mut find.folder.on, false, tl!("This document"));
+            ui.selectable_value(&mut find.folder.on, true, tl!("Folder"));
+        });
+        if find.folder.on {
+            let (query, case_sensitive, whole_words) = (find.query.clone(), find.case_sensitive, find.whole_words);
+            if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) && find.folder.folder.is_some() && !query.trim().is_empty() {
+                find.folder.start(ui.ctx(), &query, case_sensitive, whole_words);
+            }
+            return crate::search_folder::section(ui, t, &mut find.folder, &query, case_sensitive, whole_words);
+        }
+    }
     if find.query != find.case_query {
         view.rerun_find();
     }
-    let Some(find) = view.find.as_ref() else { return };
+    let find = view.find.as_ref()?;
     ui.add_space(6.0);
     let status = if find.query.trim().is_empty() {
         String::new()
@@ -98,4 +120,5 @@ pub(crate) fn panel(ui: &mut egui::Ui, t: &Tokens, view: &mut DocView, pages: us
     if let Some(i) = go {
         view.go_to_match(i);
     }
+    None
 }
