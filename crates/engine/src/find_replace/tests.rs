@@ -648,3 +648,99 @@ fn a_paragraph_that_gains_rows_is_reported_as_grown() {
     assert_eq!((plan.replaced, plan.grown, plan.grown_rows), (1, 0, 0));
     assert_eq!(plan.grown_by, 0.0);
 }
+
+/// `text` broken greedily into rows no wider than `measure` points in 10 pt Helvetica, the way a
+/// word processor sets ragged-right text, and drawn with no word spacing and no marks: each row
+/// ends because the next word would not have fitted, and none reaches a common edge but the longest.
+fn ragged_paragraph(text: &str, measure: f64) -> String {
+    let width = |t: &str| {
+        let (s, id) = open(pdf(&format!("BT /F1 10 Tf 72 700 Td ({t}) Tj ET")));
+        let rect = s.get(id).unwrap().text_lines(0)[0].rect;
+        rect[2] - rect[0]
+    };
+    let mut rows: Vec<String> = Vec::new();
+    for word in text.split(' ') {
+        match rows.last_mut() {
+            Some(row) if width(&format!("{row} {word}")) <= measure => {
+                row.push(' ');
+                row.push_str(word);
+            }
+            _ => rows.push(word.to_owned()),
+        }
+    }
+    lines_page(&rows.iter().map(String::as_str).collect::<Vec<_>>())
+}
+
+/// One unmarked 10 pt row per entry, at 12 pt leading from the left margin 72.
+fn lines_page(rows: &[&str]) -> String {
+    rows.iter().enumerate().map(|(i, row)| format!("BT /F1 10 Tf 72 {} Td ({row}) Tj ET\n", 700.0 - 12.0 * i as f64)).collect()
+}
+
+const RAGGED: &str = "The committee reviewed the proposal and agreed that the schedule for the new building would depend on \
+the weather during the autumn months so the contractor was asked to prepare a second plan that avoids the lowest field";
+
+/// Ragged-right text from a word processor (rows of different lengths, each ended because the next
+/// word would not have fitted, none marked) reflows around a longer replacement like any other
+/// paragraph: no short row is left in the middle of it.
+#[test]
+fn a_longer_replacement_reflows_ragged_right_text_without_an_orphan_row() {
+    let content = ragged_paragraph(RAGGED, 250.0);
+    let (s0, id0) = open(pdf(&content));
+    let before = s0.get(id0).unwrap().text_blocks(0);
+    assert_eq!(before.len(), 1, "one paragraph");
+    assert!(before[0].rows.len() >= 5, "{:?}", before[0].rows);
+    assert!(before[0].joins.iter().all(Option::is_some), "the rows are wraps: {:?}", before[0].joins);
+    let (mut s, id) = open(pdf(&content));
+    let plan = replace_all(&mut s, id, &query("proposal", "proposal and its long, detailed budget"));
+    assert_eq!((plan.replaced, plan.skipped_total()), (1, 0));
+    let rows = rows_of(&s, id);
+    let widest = rows.iter().map(|r| r.1).fold(0.0, f64::max);
+    assert!(widest <= 250.0 + 6.0, "the rows keep the paragraph's width: {rows:?}");
+    for (text, width) in &rows[..rows.len() - 1] {
+        assert!(*width >= 250.0 * 0.8, "orphan row {text:?} ({width} pt) in {rows:?}");
+    }
+    let words = texts(&s, id, 0).concat();
+    let expected = RAGGED.replace("proposal", "proposal and its long, detailed budget");
+    assert_eq!(words.split_whitespace().collect::<Vec<_>>(), expected.split_whitespace().collect::<Vec<_>>());
+}
+
+/// Items and lines of verse that are shorter than the measure keep their rows, even though one of
+/// them is long: the next word would have fitted on the others.
+#[test]
+fn a_longer_replacement_keeps_the_rows_of_a_list_and_of_a_poem() {
+    let list = ["Apples", "Pears and plums", "Oranges, lemons and a great many other kinds of citrus fruit", "Figs"];
+    let (mut s, id) = open(pdf(&lines_page(&list)));
+    let plan = replace_all(&mut s, id, &query("Pears", "Green pears and ripe pears"));
+    assert_eq!(plan.replaced, 1);
+    let rows: Vec<String> = rows_of(&s, id).into_iter().map(|r| r.0).collect();
+    assert_eq!(rows.first().map(String::as_str), Some("Apples"), "{rows:?}");
+    assert_eq!(rows.last().map(String::as_str), Some("Figs"), "{rows:?}");
+    assert!(rows.iter().any(|r| r.starts_with("Oranges, lemons and a great many")), "the long item keeps its row: {rows:?}");
+
+    let poem = [
+        "Shall I compare thee to a summer's day thou art more",
+        "Lovely and more temperate rough winds do shake the darling",
+        "Buds of May and summer's lease hath all too short a date",
+        "Sometime too hot the eye of heaven shines and often is his",
+    ];
+    let (mut s, id) = open(pdf(&lines_page(&poem)));
+    let plan = replace_all(&mut s, id, &query("Lovely", "Lovely and ever so gentle"));
+    assert_eq!(plan.replaced, 1);
+    let rows: Vec<String> = rows_of(&s, id).into_iter().map(|r| r.0).collect();
+    for line in [poem[0], poem[2], poem[3]] {
+        assert!(rows.iter().any(|r| r == line), "{line:?} lost its row: {rows:?}");
+    }
+}
+
+/// A two-line address is two lines: the break after its widest row has no room left whatever
+/// follows, which is no sign of a wrap, so a longer street name must not pull the city up.
+#[test]
+fn a_longer_replacement_keeps_the_rows_of_a_two_line_address() {
+    let (s0, id0) = open(pdf(&lines_page(&["1600 Pennsylvania Avenue NW", "Washington, DC 20500"])));
+    assert!(s0.get(id0).unwrap().text_blocks(0)[0].joins.iter().all(Option::is_none));
+    let (mut s, id) = open(pdf(&lines_page(&["1600 Pennsylvania Avenue NW", "Washington, DC 20500"])));
+    let plan = replace_all(&mut s, id, &query("Avenue", "Boulevard of the Americas"));
+    assert_eq!(plan.replaced, 1);
+    let rows: Vec<String> = rows_of(&s, id).into_iter().map(|r| r.0).collect();
+    assert_eq!(rows.last().map(String::as_str), Some("Washington, DC 20500"), "{rows:?}");
+}

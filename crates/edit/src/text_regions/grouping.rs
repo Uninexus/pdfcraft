@@ -414,7 +414,8 @@ fn group_layout(lines: &[TextLine], mixed: bool) -> Vec<TextBlock> {
     }
     for block in &mut blocks {
         block.reflow_text = reflow_text(block, lines);
-        block.joins = (1..block.rows.len()).map(|row| break_gap(block, lines, row, true)).collect();
+        let ragged = ragged_breaks(block, lines);
+        block.joins = (1..block.rows.len()).map(|row| break_gap(block, lines, row, Some(&ragged))).collect();
     }
     for block in blocks.iter_mut().filter(|block| block.invisible && block.lines.len() > 1) {
         // Each word counts once: neighbouring words OCR sized alike share a run.
@@ -442,7 +443,7 @@ fn reflow_text(block: &TextBlock, lines: &[TextLine]) -> String {
     let mut out = String::new();
     for (index, part) in parts.iter().enumerate() {
         if index > 0 {
-            match break_gap(block, lines, index, false) {
+            match break_gap(block, lines, index, None) {
                 Some(_) if out.ends_with('-') => {
                     out.pop();
                 }
@@ -465,12 +466,15 @@ fn reflow_text(block: &TextBlock, lines: &[TextLine]) -> String {
 /// app did not mark (a file written elsewhere, or an older save), a single space when the
 /// geometry looks like an ordinary wrapped body line (`#2529`).
 ///
-/// `strict` is for a rewrite that rejoins rows around a replacement ([`TextBlock::joins`]), where
-/// a wrong guess changes text the replacement does not touch, so an unmarked row is a wrap only
-/// when (a) at least two rows of the paragraph reach the measure (the widest row of an address or
-/// a poem always "reaches" its own right edge, so one alone proves nothing) and (b) it does not
-/// end in a hyphen, which may be a real one ("well-" "known") that joining would delete.
-fn break_gap(block: &TextBlock, lines: &[TextLine], row_index: usize, strict: bool) -> Option<usize> {
+/// `ragged` is `Some` for a rewrite that rejoins rows around a replacement ([`TextBlock::joins`]),
+/// where a wrong guess changes text the replacement does not touch; it holds the verdict of
+/// [`ragged_breaks`] for each break of the block. A row that ends in a hyphen is never rejoined
+/// then: it may be a real one ("well-" "known") that joining would delete. An unmarked row is a
+/// wrap when either (a) at least two rows of the paragraph reach the measure (the widest row of an
+/// address or a poem always "reaches" its own right edge, so one alone proves nothing) and this one
+/// does too, as in justified text; or (b) the paragraph is ragged-right text that flows and
+/// [`ragged_breaks`] says so of this break.
+fn break_gap(block: &TextBlock, lines: &[TextLine], row_index: usize, ragged: Option<&[bool]>) -> Option<usize> {
     let line = block.rows.get(row_index).and_then(|row| row.first()).and_then(|i| lines.get(*i))?;
     if line.hard_break {
         return None;
@@ -484,21 +488,186 @@ fn break_gap(block: &TextBlock, lines: &[TextLine], row_index: usize, strict: bo
     let slack = block.rect[2] - prev[2];
     let width = prev[2] - prev[0];
     let reaches = |rect: [f64; 4]| block.rect[2] - rect[2] <= size * 0.75 && rect[2] - rect[0] >= size * 8.0;
-    if strict {
+    let mut justified = true;
+    if ragged.is_some() {
         let full = block.rows.iter().filter_map(|row| row_rect(row, lines)).filter(|rect| reaches(*rect)).count();
-        let hyphen = row_text(block, lines, row_index.saturating_sub(1)).trim_end().ends_with(['-', '\u{2010}', '\u{00AD}']);
-        if full < 2 || hyphen {
+        if ends_in_hyphen(&row_text(block, lines, row_index.saturating_sub(1))) {
             return None;
         }
+        justified = full >= 2;
     }
     // Short rows define the right edge by their own letters. A body line that fills the
     // measure leaves almost no room for the next word.
-    if !(slack <= size * 0.75 && width >= size * 8.0 && (next[2] - next[0]) + size * 0.25 > slack) {
+    let fills = slack <= size * 0.75 && width >= size * 8.0 && (next[2] - next[0]) + size * 0.25 > slack;
+    if !(justified && fills) && !ragged.is_some_and(|r| r.get(row_index).copied().unwrap_or(false)) {
         return None;
     }
     let before = row_text(block, lines, row_index.saturating_sub(1)).trim_end().chars().next_back();
     let after = row_text(block, lines, row_index).trim_start().chars().next();
     Some(wrap_gap(before, after))
+}
+
+/// How much of an em the slack may exceed the next word's room by and still be a wrap. Rows of
+/// ragged text end a little short of the right edge of the widest one, which stands in for the
+/// measure, so a word that only just fits is taken to have been pushed down.
+const WRAP_TOLERANCE: f64 = 0.1;
+
+/// Would the first word of the next row, with the space before it, not have fitted in the `slack`
+/// that is left at the end of a row set at `size`? Then the row ended because it was full, which is
+/// what a wrap is; with room to spare it ended on purpose.
+fn word_would_not_fit(slack: f64, space: f64, word: f64, size: f64) -> bool {
+    slack < space + word + size * WRAP_TOLERANCE
+}
+
+/// Does a row's text end in a hyphen: possibly a hyphenation, possibly a real one?
+fn ends_in_hyphen(text: &str) -> bool {
+    text.trim_end().ends_with(['-', '\u{2010}', '\u{00AD}'])
+}
+
+/// Does a row end a sentence or introduce what follows? Closing quotes and brackets after the
+/// mark are looked through.
+fn ends_sentence(text: &str) -> bool {
+    text.trim_end()
+        .trim_end_matches(['"', '\'', ')', ']', '\u{201D}', '\u{2019}', '\u{00BB}'])
+        .ends_with(['.', '!', '?', ':', '\u{2026}', '\u{3002}', '\u{FF01}', '\u{FF1F}'])
+}
+
+/// The width of the first word of row `row` and of the space that would precede it. The word is
+/// measured from the ink boxes of the row (those of runs that touch are one word); when the row
+/// has none it is the row's average advance per character times the word's length, an
+/// approximation good enough to tell a word wider than the slack from one that is not. The space
+/// is the gap after that word when the row has a second word, else a quarter em (0.6 em in a
+/// monospaced face). A script written without spaces has no word to move: its "word" is the one
+/// character that would have to fit, with no space before it.
+fn next_word_width(block: &TextBlock, lines: &[TextLine], row: usize, text: &str, before: Option<char>) -> Option<(f64, f64)> {
+    let rect = row_rect(block.rows.get(row)?, lines)?;
+    let first = lines.get(*block.rows.get(row)?.first()?)?;
+    let size = first.size.max(1.0);
+    let text = text.trim_start();
+    let after = text.chars().next()?;
+    if before.is_some_and(no_space_script) && no_space_script(after) {
+        let per_char = (rect[2] - rect[0]) / text.trim_end().chars().count().max(1) as f64;
+        return (per_char.is_finite() && per_char > 0.0).then_some((per_char, 0.0));
+    }
+    let mono = first.base_font.to_ascii_lowercase().contains("courier") || first.base_font.to_ascii_lowercase().contains("mono");
+    let default_space = size * if mono { 0.6 } else { 0.25 };
+    let mut boxes = block.rows.get(row)?.iter().filter_map(|i| lines.get(*i)).flat_map(|l| l.ink.iter().copied());
+    let (mut word, mut space) = (None::<f64>, default_space);
+    if let Some(open) = boxes.next() {
+        let (left, mut right) = (open[0], open[2]);
+        for b in boxes {
+            let gap = b[0] - right;
+            if gap < size * 0.12 {
+                right = right.max(b[2]);
+            } else {
+                if gap < size * 0.8 {
+                    space = gap;
+                }
+                break;
+            }
+        }
+        word = Some(right - left);
+    }
+    let word = word.filter(|w| w.is_finite() && *w > 0.0).or_else(|| {
+        let per_char = (rect[2] - rect[0]) / text.trim_end().chars().count().max(1) as f64;
+        let chars = text.split_whitespace().next().map_or(0, |w| w.chars().count());
+        Some(per_char * chars as f64).filter(|w| w.is_finite() && *w > 0.0)
+    })?;
+    Some((word, space))
+}
+
+/// What one break of an unmarked paragraph says about ragged-right flow.
+#[derive(Clone, Copy, PartialEq)]
+enum Break {
+    /// Not a break to judge: it has its own rule (a hyphen, a mark, a new paragraph's indent), or
+    /// ends a sentence with room to spare, or follows a row too short to be a measure.
+    Apart,
+    /// The row before it is the widest, so it has no room left whatever follows: no evidence.
+    Widest,
+    /// The next word would not have fitted in the room left on a row that is not the widest.
+    Proof,
+    /// The next word would have fitted, or could not be measured: these are lines of their own.
+    Lines,
+}
+
+/// For each break of `block` (index 0, the first row, has none), whether it is a wrap of ragged-right
+/// text, judged once for the whole paragraph. The test is the classic one, "would the next word have
+/// fitted?", against the right edge of the widest row. That row's own break proves nothing (it has
+/// no room left whatever follows), so a paragraph needs two breaks after rows that are not the
+/// widest where the word would not have fitted, and no break where it would have: one row that
+/// ended early shows the lines are the author's own. Rows must share a left edge, but for a first
+/// line's indent or a hanging indent after a list marker, which also rules out centred and
+/// right-aligned text, whose rows look ragged by half of the slack; a later row that starts most of an em
+/// or more to the right opens a new paragraph.
+fn ragged_breaks(block: &TextBlock, lines: &[TextLine]) -> Vec<bool> {
+    let rows = block.rows.len();
+    let none = vec![false; rows];
+    if rows < 3 {
+        return none;
+    }
+    let rects: Vec<[f64; 4]> = block.rows.iter().filter_map(|row| row_rect(row, lines)).collect();
+    let texts: Vec<String> = (0..rows).map(|row| row_text(block, lines, row)).collect();
+    if rects.len() != rows {
+        return none;
+    }
+    let size = block.size.max(1.0);
+    let Some(left) = rects.iter().skip(1).map(|r| r[0]).reduce(f64::min) else { return none };
+    let marker = texts.first().is_some_and(|t| opens_with_marker(t.trim_start()));
+    let first_ok = rects.first().is_some_and(|r| {
+        (r[0] - left).abs() < size * 0.25 || (r[0] > left && r[0] - left <= size * 4.0) || (marker && r[0] < left && left - r[0] <= size * 4.0)
+    });
+    let mut indented = vec![false; rows];
+    for (i, r) in rects.iter().enumerate().skip(1) {
+        if r[0] - left >= size * 0.75 && r[0] - left <= size * 4.0 {
+            if let Some(slot) = indented.get_mut(i) {
+                *slot = true;
+            }
+        } else if r[0] - left >= size * 0.25 {
+            return none;
+        }
+    }
+    if !first_ok {
+        return none;
+    }
+    let widest = rects.iter().map(|r| r[2]).fold(f64::MIN, f64::max);
+    let mut kinds = vec![Break::Apart; rows];
+    let mut proofs = 0;
+    for i in 1..rows {
+        let above = i.saturating_sub(1);
+        let (Some(prev), Some(prev_text), Some(text), Some(lead)) =
+            (rects.get(above), texts.get(above), texts.get(i), block.rows.get(i).and_then(|r| r.first()).and_then(|n| lines.get(*n)))
+        else {
+            return none;
+        };
+        let slack = widest - prev[2];
+        let kind = if lead.hard_break || lead.soft_break || indented.get(i).copied().unwrap_or(false) || ends_in_hyphen(prev_text) {
+            Break::Apart
+        } else {
+            let before = prev_text.trim_end().chars().next_back();
+            match next_word_width(block, lines, i, text, before) {
+                None => Break::Lines,
+                Some((word, space)) => {
+                    if !word_would_not_fit(slack, space, word, size) {
+                        Break::Lines
+                    } else if prev[2] - prev[0] < size * 8.0 || (ends_sentence(prev_text) && slack > size) {
+                        Break::Apart
+                    } else if slack <= size * 0.25 {
+                        Break::Widest
+                    } else {
+                        Break::Proof
+                    }
+                }
+            }
+        };
+        proofs += usize::from(kind == Break::Proof);
+        if let Some(slot) = kinds.get_mut(i) {
+            *slot = kind;
+        }
+    }
+    if proofs < 2 || kinds.contains(&Break::Lines) {
+        return none;
+    }
+    kinds.into_iter().map(|k| matches!(k, Break::Proof | Break::Widest)).collect()
 }
 
 /// The separators a wrap stood for between the characters `before` and `after`: none between two
@@ -531,7 +700,79 @@ fn median_size(sizes: impl Iterator<Item = f64>) -> Option<f64> {
 
 #[cfg(test)]
 mod wrap_tests {
-    use super::{no_space_script, wrap_gap};
+    use std::sync::Arc;
+
+    use super::{ends_sentence, group_layout, no_space_script, word_would_not_fit, wrap_gap};
+
+    fn page(content: &str) -> pdfcraft_cos::Document {
+        let objs: Vec<String> = vec![
+            "<< /Type /Catalog /Pages 2 0 R >>".into(),
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".into(),
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>".into(),
+            format!("<< /Length {} >>\nstream\n{content}\nendstream", content.len()),
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".into(),
+        ];
+        let mut out = b"%PDF-1.7\n".to_vec();
+        let mut offs = Vec::new();
+        for (i, o) in objs.iter().enumerate() {
+            offs.push(out.len());
+            out.extend_from_slice(format!("{} 0 obj\n{o}\nendobj\n", i + 1).as_bytes());
+        }
+        let x = out.len();
+        out.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1).as_bytes());
+        for o in offs {
+            out.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+        }
+        out.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{x}\n%%EOF\n", objs.len() + 1).as_bytes());
+        pdfcraft_cos::Document::open(Arc::new(out)).unwrap()
+    }
+
+    /// Without ink boxes the first word of a row is measured by the row's average advance, which
+    /// still tells ragged-right flow from lines (the rows here are cut so each next word is wider
+    /// than the room left).
+    #[test]
+    fn a_row_without_ink_boxes_is_measured_by_its_average_advance() {
+        let rows = [
+            "The committee reviewed the proposal and agreed that the",
+            "schedule for the new building would depend on the weather",
+            "during the autumn months so the contractor was asked to",
+            "prepare a second plan that avoids the lowest field and the",
+            "river bank",
+        ];
+        let content: String = rows.iter().enumerate().map(|(i, r)| format!("BT /F1 10 Tf 72 {} Td ({r}) Tj ET\n", 700.0 - 12.0 * i as f64)).collect();
+        let mut lines = crate::text_lines(&page(&content), 0).unwrap();
+        let with_ink = group_layout(&lines, false);
+        lines.iter_mut().for_each(|l| l.ink.clear());
+        let without = group_layout(&lines, false);
+        assert_eq!(with_ink.len(), 1);
+        assert_eq!(with_ink[0].joins, without[0].joins);
+        assert!(without[0].joins.iter().all(|j| *j == Some(1)), "{:?}", without[0].joins);
+    }
+
+    #[test]
+    fn a_sentence_end_looks_through_closing_marks() {
+        assert!(ends_sentence("it ended.\u{201D} "));
+        assert!(ends_sentence("(see below.)"));
+        assert!(ends_sentence("as follows:"));
+        assert!(!ends_sentence("and then"));
+        assert!(!ends_sentence("well-"));
+    }
+
+    /// A 10 pt row with the space and a 30 pt word to place: 2.5 + 30 = 32.5 pt of room needed.
+    #[test]
+    fn the_next_word_decides_whether_a_row_was_full() {
+        // Fits with room to spare: a deliberate break.
+        assert!(!word_would_not_fit(40.0, 2.5, 30.0, 10.0));
+        // Does not fit: a wrap.
+        assert!(word_would_not_fit(20.0, 2.5, 30.0, 10.0));
+        assert!(word_would_not_fit(0.0, 2.5, 30.0, 10.0));
+        // The tolerance (a tenth of an em) forgives a word that only just fits, not more.
+        assert!(word_would_not_fit(33.0, 2.5, 30.0, 10.0));
+        assert!(!word_would_not_fit(33.6, 2.5, 30.0, 10.0));
+        // A script without spaces needs no space: one character of 10 pt against 5 pt of slack.
+        assert!(word_would_not_fit(5.0, 0.0, 10.0, 10.0));
+        assert!(!word_would_not_fit(15.0, 0.0, 10.0, 10.0));
+    }
 
     #[test]
     fn rows_of_unspaced_scripts_wrap_without_a_space() {

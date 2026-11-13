@@ -149,3 +149,228 @@ fn rows_of_unspaced_scripts_rejoin_without_a_space() {
     let (text, _) = block.replaced_reflowing(std::slice::from_ref(&(at..at + 6)), "手紙").unwrap();
     assert_eq!(text, "日本語の手紙です");
 }
+
+/// Width in points of `text` in 10 pt Helvetica.
+fn width(text: &str) -> f64 {
+    let rect = crate::text_lines(&page(&format!("BT /F1 10 Tf 72 700 Td ({text}) Tj ET")), 0).unwrap()[0].rect;
+    rect[2] - rect[0]
+}
+
+/// `text` broken greedily into rows no wider than `measure` points, the way a word processor sets
+/// ragged-right text: each row ends because the next word would not have fitted.
+fn greedy_rows(text: &str, measure: f64) -> Vec<String> {
+    let mut rows: Vec<String> = Vec::new();
+    for word in text.split(' ') {
+        match rows.last_mut() {
+            Some(row) if width(&format!("{row} {word}")) <= measure => {
+                row.push(' ');
+                row.push_str(word);
+            }
+            _ => rows.push(word.to_owned()),
+        }
+    }
+    rows
+}
+
+/// One unmarked 10 pt row per entry of `rows`, at 12 pt leading from x = 72, with no word spacing.
+fn ragged_rows(rows: &[String]) -> Document {
+    let mut content = String::new();
+    for (i, row) in rows.iter().enumerate() {
+        content.push_str(&format!("BT /F1 10 Tf 72 {} Td ({row}) Tj ET\n", 700.0 - 12.0 * i as f64));
+    }
+    page(&content)
+}
+
+const FLOWING: &str = "The committee reviewed the proposal and agreed that the schedule for the new building would depend on \
+the weather during the autumn months so the contractor was asked to prepare a second plan that avoids the lowest field";
+
+/// Ragged-right rows (none marked, none reaching a common edge but the longest) are wraps because
+/// the next word would not have fitted: that is what a word processor's rows look like.
+#[test]
+fn ragged_right_rows_are_wraps_when_the_next_word_would_not_fit() {
+    let rows = greedy_rows(FLOWING, 250.0);
+    assert!(rows.len() >= 5, "{rows:?}");
+    let doc = ragged_rows(&rows);
+    let block = text_blocks(&doc, 0).unwrap().swap_remove(0);
+    assert_eq!(block.rows.len(), rows.len());
+    assert!(block.joins.iter().all(|j| *j == Some(1)), "{:?} in {rows:?}", block.joins);
+    let at = block.editor_text.find("proposal").unwrap();
+    let (text, _) = block.replaced_reflowing(std::slice::from_ref(&(at..at + 8)), "proposal and the long budget").unwrap();
+    assert_eq!(text, FLOWING.replace("proposal", "proposal and the long budget"));
+}
+
+/// Rows that are lines of their own keep their breaks even when most of them are long: the next
+/// word would have fitted on at least one of them.
+#[test]
+fn lines_the_next_word_would_have_fitted_on_stay_lines() {
+    let poem: Vec<String> = [
+        "Shall I compare thee to a summer's day thou art more",
+        "Lovely and more temperate rough winds do shake the darling",
+        "Buds of May and summer's lease hath all too short a date",
+        "Sometime too hot the eye of heaven shines and often is his",
+    ]
+    .map(String::from)
+    .to_vec();
+    let block = text_blocks(&ragged_rows(&poem), 0).unwrap().swap_remove(0);
+    assert_eq!(block.rows.len(), 4);
+    assert!(block.joins.iter().all(Option::is_none), "{:?}", block.joins);
+    // A list of short items with one long one.
+    let items: Vec<String> =
+        ["Apples", "Pears and plums", "Oranges, lemons and a great many other kinds of citrus fruit", "Figs"].map(String::from).to_vec();
+    let block = text_blocks(&ragged_rows(&items), 0).unwrap().swap_remove(0);
+    assert!(block.joins.iter().all(Option::is_none), "{:?}", block.joins);
+    let at = block.editor_text.find("Pears").unwrap();
+    let (text, _) = block.replaced_reflowing(std::slice::from_ref(&(at..at + 5)), "Green pears").unwrap();
+    assert_eq!(text.matches('\n').count(), 3, "{text:?}");
+}
+
+/// A sentence that ends a row with more than an em to spare ends a paragraph or an item, even
+/// though the next word is wider than the room left; the rest of the paragraph still flows.
+#[test]
+fn a_sentence_end_with_room_to_spare_is_a_break() {
+    let rows = [
+        "The committee reviewed the proposal and agreed that the schedule for",
+        "construction would depend on the weather during the autumn.",
+        "Extraordinarily wide words open this row and the weather during the autumn",
+        "the contractor was asked to prepare a second plan that avoids the lowest",
+        "field and the river bank",
+    ];
+    let room = width(rows[2]) - width(rows[1]);
+    assert!(room > 10.0 && room < width("Extraordinarily"), "{room}");
+    let doc = ragged_rows(&rows.map(String::from));
+    assert_eq!(joins_of(&doc), [Some(1), None, Some(1), Some(1)]);
+}
+
+/// One text object per row: its x position and the operators that show it.
+fn placed_rows(rows: &[(f64, String)]) -> Document {
+    let mut content = String::new();
+    for (i, (x, ops)) in rows.iter().enumerate() {
+        content.push_str(&format!("BT /F1 10 Tf {x} {} Td {ops} ET\n", 700.0 - 12.0 * i as f64));
+    }
+    page(&content)
+}
+
+fn shown(row: &str) -> String {
+    format!("({row}) Tj")
+}
+
+/// `text` broken greedily, the first row no wider than `first` points and the others `rest`.
+fn greedy_rows_in(text: &str, first: f64, rest: f64) -> Vec<String> {
+    let mut rows: Vec<String> = Vec::new();
+    for word in text.split(' ') {
+        let cap = if rows.len() <= 1 { if rows.is_empty() { first } else { first.max(0.0) * 0.0 + rest } } else { rest };
+        match rows.last_mut() {
+            Some(row) if width(&format!("{row} {word}")) <= cap => {
+                row.push(' ');
+                row.push_str(word);
+            }
+            _ => rows.push(word.to_owned()),
+        }
+    }
+    rows
+}
+
+fn joins_of(doc: &Document) -> Vec<Option<usize>> {
+    let blocks = text_blocks(doc, 0).unwrap();
+    assert_eq!(blocks.len(), 1, "one block: {:?}", blocks.iter().map(|b| b.editor_text.clone()).collect::<Vec<_>>());
+    blocks.into_iter().next().map(|b| b.joins).unwrap_or_default()
+}
+
+fn at_margin(rows: &[&str]) -> Document {
+    placed_rows(&rows.iter().map(|r| (72.0, shown(r))).collect::<Vec<_>>())
+}
+
+/// Rows that are lines of their own keep their breaks. The break after the widest row of a block
+/// has no room left whatever follows, so it is no evidence of a wrap: two rows (or three, one of
+/// them the widest) never are flow, and a few rows of similar width are not either.
+#[test]
+fn lines_of_similar_width_are_not_flow() {
+    let cases: [(&str, Vec<&str>); 7] = [
+        ("two-line address", vec!["1600 Pennsylvania Avenue NW", "Washington, DC 20500"]),
+        ("three-line address", vec!["Department of Computer Science", "University of Somewhere Large", "Springfield, Illinois 62704"]),
+        ("code listing", vec!["total = first + second;", "while (total < limit) { total = total * 2 + offset; }", "print(total);", "return total;"]),
+        ("two-line code", vec!["let total = first + second + third;", "return total;"]),
+        ("table column", vec!["Alice Johnson", "Bob Smith", "Carol Williams", "Dan Lee"]),
+        ("couplet", vec!["Shall I compare thee to a summer's day", "Thou art more lovely and more temperate"]),
+        ("signature block", vec!["Yours sincerely", "Jane Doe", "Chief Executive Officer, Acme Corporation"]),
+    ];
+    for (name, rows) in cases {
+        let joins = joins_of(&at_margin(&rows));
+        assert!(joins.iter().all(Option::is_none), "{name}: {joins:?}");
+    }
+}
+
+/// Centred rows look ragged on the right by half of their slack: they are not ragged-right flow.
+#[test]
+fn centred_rows_are_not_ragged_right_flow() {
+    let rows = greedy_rows(FLOWING, 130.0);
+    let widest = rows.iter().map(|r| width(r)).fold(0.0, f64::max);
+    let placed: Vec<(f64, String)> = rows.iter().map(|r| (72.0 + (widest - width(r)) / 2.0, shown(r))).collect();
+    let doc = placed_rows(&placed);
+    let blocks = text_blocks(&doc, 0).unwrap();
+    assert_eq!(blocks.len(), 1);
+    // The rows near the widest one end near the right edge too, which the full-measure rule has
+    // always taken for justified text; the ragged rule adds no wrap to what it takes.
+    let by_full_measure = blocks[0].editor_text.matches('\n').count() - blocks[0].reflow_text.matches('\n').count();
+    let wraps = blocks[0].joins.iter().filter(|j| j.is_some()).count();
+    assert!(wraps <= by_full_measure && wraps < blocks[0].joins.len(), "{:?}", blocks[0].joins);
+}
+
+/// An item with a hanging indent (its wrapped rows start further right than its marker) flows.
+#[test]
+fn a_hanging_indent_item_is_ragged_right_flow() {
+    let rows = greedy_rows_in(&format!("1. {FLOWING}"), 250.0, 238.0);
+    let placed: Vec<(f64, String)> = rows.iter().enumerate().map(|(i, r)| (if i == 0 { 72.0 } else { 84.0 }, shown(r))).collect();
+    let joins = joins_of(&placed_rows(&placed));
+    assert!(rows.len() >= 4 && joins.iter().all(|j| *j == Some(1)), "{joins:?} in {rows:?}");
+}
+
+/// A first line's indent is no reason to take a paragraph for lines; a later row indented that
+/// way opens the next paragraph, whose break stays.
+#[test]
+fn a_first_line_indent_flows_and_an_indented_row_is_a_paragraph_boundary() {
+    let rows = greedy_rows_in(FLOWING, 238.0, 250.0);
+    let placed: Vec<(f64, String)> = rows.iter().enumerate().map(|(i, r)| (if i == 0 { 84.0 } else { 72.0 }, shown(r))).collect();
+    let joins = joins_of(&placed_rows(&placed));
+    assert!(rows.len() >= 4 && joins.iter().all(|j| *j == Some(1)), "{joins:?} in {rows:?}");
+
+    let second = greedy_rows_in("Meanwhile the contractor ordered the steel and the glass for the new building from two suppliers", 238.0, 250.0);
+    let mut placed: Vec<(f64, String)> = rows.iter().map(|r| (72.0, shown(r))).collect();
+    let boundary = placed.len() - 1;
+    placed.extend(second.iter().enumerate().map(|(i, r)| (if i == 0 { 81.0 } else { 72.0 }, shown(r))));
+    let doc = placed_rows(&placed);
+    let blocks = text_blocks(&doc, 0).unwrap();
+    assert_eq!(blocks.len(), 1, "one block for the test to mean anything");
+    let joins = &blocks[0].joins;
+    assert_eq!(joins.get(boundary).copied().flatten(), None, "{joins:?}");
+    assert!(joins.iter().enumerate().all(|(i, j)| i == boundary || *j == Some(1)), "{joins:?}");
+}
+
+/// One row much longer than the rest makes the others short of it by far more than a word.
+#[test]
+fn an_outlier_long_row_keeps_the_rows() {
+    let mut rows = greedy_rows(FLOWING, 250.0);
+    rows[2] = format!("{} and a great deal more text that makes this row far wider than the rest", rows[2]);
+    let joins = joins_of(&ragged_rows(&rows));
+    assert!(joins.iter().all(Option::is_none), "{joins:?}");
+}
+
+/// The first word of a row may be drawn in several runs (here two colours): it is measured whole.
+#[test]
+fn a_first_word_drawn_in_two_runs_is_measured_whole() {
+    // The room left on the second row (46 pt) holds "Extra" but not the whole word.
+    let rows = [
+        "The committee reviewed the proposal and agreed that the schedule for",
+        "construction would depend on the weather during the autumn rain",
+        "Extraordinarily wide words open this row and the weather during the autumn",
+        "the contractor was asked to prepare a second plan that avoids the lowest",
+        "field and the river bank",
+    ];
+    let mut placed: Vec<(f64, String)> = rows.iter().map(|r| (72.0, shown(r))).collect();
+    let whole = joins_of(&placed_rows(&placed));
+    assert!(whole.iter().all(|j| *j == Some(1)), "{whole:?}");
+    let rest = rows[2].strip_prefix("Extraordinarily").unwrap();
+    placed[2].1 = format!("(Extra) Tj 1 0 0 rg (ordinarily) Tj 0 g ({rest}) Tj");
+    let split = joins_of(&placed_rows(&placed));
+    assert_eq!(split, whole, "the runs of the word are one word");
+}
