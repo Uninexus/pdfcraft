@@ -18,7 +18,14 @@ const MAX_PAGES: usize = 200;
 impl Automation {
     fn ai_config(&self, a: &Args) -> Result<AiConfig> {
         let given = |key: &str| -> Result<Option<String>> { Ok(a.opt_str(key)?.map(|s| s.trim().to_owned()).filter(|s| !s.is_empty())) };
+        let provider = match given("provider")? {
+            Some(p) => pdfcraft_ai::Provider::parse(&p).ok_or_else(|| failed("provider must be \"endpoint\" or \"chatgpt\""))?,
+            None => pdfcraft_ai::Provider::default(),
+        };
+        let chatgpt_session = given("chatgpt_session")?.map(|p| self.resolve(&p, false)).transpose()?;
         let direct = AiConfig {
+            provider,
+            chatgpt_session,
             base_url: given("base_url")?.unwrap_or_default(),
             api_key: given("api_key")?,
             model: given("model")?.unwrap_or_default(),
@@ -36,6 +43,7 @@ impl Automation {
         let check = config.check();
         let mut out = json!({
             "configured": check.is_ok(),
+            "provider": config.provider.as_str(),
             "base_url": config.base_url,
             "model": config.model,
             "api_key_set": config.api_key.is_some(),

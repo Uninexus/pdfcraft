@@ -4310,7 +4310,9 @@ dependencies = [
 name = "pdfcraft-ai"
 version = "0.21.3"
 dependencies = [
+ "getrandom 0.4.3",
  "serde_json",
+ "sha2 0.11.1",
  "tempfile",
  "thiserror 2.0.21",
  "ureq",
