@@ -177,6 +177,8 @@ pub(crate) fn body(ui: &mut egui::Ui, app: &mut PdfCraftApp) -> bool {
             pdfcraft_ai::chat(&config, &pdfcraft_ai::document_messages(&question, &texts)).map(|reply| reply.content).map_err(|e| e.to_string())
         });
     }
+    let page_count = app.views[view].page_count();
+    let mut jump = None;
     match app.ai.ask.result() {
         Some(Ok(answer)) => {
             ui.separator();
@@ -184,7 +186,7 @@ pub(crate) fn body(ui: &mut egui::Ui, app: &mut PdfCraftApp) -> bool {
                 ui.label(egui::RichText::new(format!("{question} ({pages})")).weak());
             }
             egui::ScrollArea::vertical().id_salt("ai-answer").max_height(280.0).auto_shrink([false, true]).show(ui, |ui| {
-                ui.add(egui::Label::new(answer.as_str()).selectable(true));
+                jump = answer_with_links(ui, answer, page_count);
             });
             if ui.button(tl!("Copy answer")).clicked() {
                 ui.ctx().copy_text(answer.clone());
@@ -196,7 +198,39 @@ pub(crate) fn body(ui: &mut egui::Ui, app: &mut PdfCraftApp) -> bool {
         }
         None => {}
     }
+    if let Some(page) = jump {
+        app.views[view].go_to_page(page.saturating_sub(1));
+    }
     false
+}
+
+/// The answer's text, with each page it cites ("(p. 20)", "pages 3 and 5") as a link. Returns the
+/// 1-based page that was clicked. Without citations it is one selectable label.
+fn answer_with_links(ui: &mut egui::Ui, answer: &str, page_count: usize) -> Option<usize> {
+    use pdfcraft_ai::refs::{Segment, split_page_references};
+    let segments = split_page_references(answer, page_count);
+    if !segments.iter().any(|s| matches!(s, Segment::Page(_))) {
+        ui.add(egui::Label::new(answer).selectable(true));
+        return None;
+    }
+    let mut clicked = None;
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing.x = 0.0;
+        for segment in &segments {
+            match segment {
+                Segment::Text(text) => {
+                    ui.add(egui::Label::new(text.as_str()).selectable(true));
+                }
+                Segment::Page(page) => {
+                    let hint = crate::i18n::fmt(tl!("Go to page {n}"), &[("n", &page.to_string())]);
+                    if ui.link(page.to_string()).on_hover_text(hint).clicked() {
+                        clicked = Some(*page);
+                    }
+                }
+            }
+        }
+    });
+    clicked
 }
 
 #[cfg(test)]

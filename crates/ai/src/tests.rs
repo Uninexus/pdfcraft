@@ -177,3 +177,57 @@ fn the_chatgpt_provider_is_saved_and_needs_a_model_but_no_address_or_key() {
     assert_eq!(Provider::parse("ChatGPT"), Some(Provider::ChatGpt));
     assert_eq!(Provider::parse("bogus"), None);
 }
+
+mod page_references {
+    use crate::refs::{Segment, split_page_references};
+
+    fn t(s: &str) -> Segment {
+        Segment::Text(s.into())
+    }
+
+    fn rejoin(segments: &[Segment]) -> String {
+        segments
+            .iter()
+            .map(|s| match s {
+                Segment::Text(t) => t.clone(),
+                Segment::Page(p) => p.to_string(),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_citation_style_the_prompt_asks_for_is_found() {
+        assert_eq!(split_page_references("The answer is on (p. 20).", 30), vec![t("The answer is on (p. "), Segment::Page(20), t(").")]);
+        assert_eq!(split_page_references("see p.3", 5), vec![t("see p."), Segment::Page(3)]);
+    }
+
+    #[test]
+    fn lists_and_ranges_link_each_number() {
+        assert_eq!(
+            split_page_references("pp. 3-5, 9 and 11", 20),
+            vec![t("pp. "), Segment::Page(3), t("-"), Segment::Page(5), t(", "), Segment::Page(9), t(" and "), Segment::Page(11)]
+        );
+        assert_eq!(split_page_references("Pages 2 & 4", 9), vec![t("Pages "), Segment::Page(2), t(" & "), Segment::Page(4)]);
+        assert_eq!(split_page_references("--- Page 3 ---", 9), vec![t("--- Page "), Segment::Page(3), t(" ---")]);
+    }
+
+    #[test]
+    fn pages_outside_the_document_and_lookalikes_stay_text() {
+        assert_eq!(split_page_references("on page 40", 30), vec![t("on page 40")]);
+        assert_eq!(split_page_references("page 0", 30), vec![t("page 0")]);
+        // Only the in-range number of a list becomes a link.
+        assert_eq!(split_page_references("pp. 5, 99", 10), vec![t("pp. "), Segment::Page(5), t(", 99")]);
+        for plain in ["a homepage 3 times", "top 3", "http://x/p.3", "page", "page x", "p.3rd", "page 1234567", "a sleep. 3 more"] {
+            assert_eq!(split_page_references(plain, 2_000_000), vec![t(plain)], "{plain}");
+        }
+        assert!(split_page_references("", 5).is_empty());
+    }
+
+    #[test]
+    fn words_are_never_lost_or_split_inside_a_character() {
+        let text = "é page 2 – ünï p. 3, naïve pp. 1–2 \u{1F600} page 4";
+        let segs = split_page_references(text, 10);
+        assert_eq!(rejoin(&segs), text);
+        assert_eq!(segs.iter().filter(|s| matches!(s, Segment::Page(_))).count(), 5);
+    }
+}
