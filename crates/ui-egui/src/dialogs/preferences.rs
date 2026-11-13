@@ -946,17 +946,63 @@ fn card_ai(ui: &mut egui::Ui, app: &mut PdfCraftApp, t: &Tokens, ctx: &mut PrefS
         ui.add(widgets::line(&mut app.ai.base_url).desired_width(300.0).hint_text("http://localhost:11434/v1").char_limit(MAX_AI_FIELD_CHARS))
             .labelled_by(label.id);
     });
+    // A model server on this computer: the port, then the models it has loaded to pick from.
+    if app.ai_draft.port.is_empty()
+        && let Some(port) = crate::ai_ui::port_of(&app.ai.base_url)
+    {
+        app.ai_draft.port = port;
+    }
+    app.ai.test.poll();
+    ui.horizontal(|ui| {
+        let label = ctx.label_primary(ui, tl!("Local server port"), t);
+        ui.add(widgets::line(&mut app.ai_draft.port).desired_width(70.0).hint_text("11434").char_limit(5)).labelled_by(label.id);
+        let url = crate::ai_ui::local_base_url(&app.ai_draft.port);
+        let running = app.ai.test.is_running();
+        if ui.add_enabled_ui(url.is_some() && !running, |ui| ctx.button(ui, tl!("Find models"), t)).inner.clicked()
+            && let Some(url) = url
+        {
+            app.ai.base_url = url;
+            let config = app.ai.effective();
+            app.ai.test.start(ui.ctx(), app.run_inline, move || pdfcraft_ai::list_models(&config).map_err(|e| e.to_string()));
+        }
+        if running {
+            ui.spinner();
+        }
+    });
     ui.horizontal(|ui| {
         let label = ctx.label_primary(ui, tl!("Model"), t);
-        ui.add(widgets::line(&mut app.ai.model).desired_width(300.0).char_limit(MAX_AI_FIELD_CHARS)).labelled_by(label.id);
+        let found: Vec<String> = match app.ai.test.result() {
+            Some(Ok(models)) => models.clone(),
+            _ => Vec::new(),
+        };
+        if !found.is_empty() {
+            let selected = if app.ai.model.trim().is_empty() { tl!("Choose a model").to_owned() } else { app.ai.model.clone() };
+            craft_ui::ComboBox::from_id_salt("ai-model")
+                .selected_text(selected)
+                .width(300.0)
+                .show_ui(ui, |ui| {
+                    for name in &found {
+                        if ui.selectable_label(app.ai.model == *name, name).clicked() {
+                            app.ai.model = name.clone();
+                            ui.close();
+                        }
+                    }
+                })
+                .response
+                .labelled_by(label.id);
+        } else {
+            ui.add(widgets::line(&mut app.ai.model).desired_width(300.0).char_limit(MAX_AI_FIELD_CHARS)).labelled_by(label.id);
+        }
     });
+    if !matches!(app.ai.test.result(), Some(Ok(m)) if !m.is_empty()) {
+        ctx.label_secondary(ui, tl!("Type a port and press Find models to pick from what the server has loaded, or type a model name."), t);
+    }
     ui.horizontal(|ui| {
         let label = ctx.label_primary(ui, tl!("API key"), t);
         ui.add(widgets::line(&mut app.ai.api_key).password(true).desired_width(300.0).char_limit(MAX_AI_FIELD_CHARS)).labelled_by(label.id);
     });
     ctx.label_secondary(ui, tl!("A local server usually needs no key. Empty fields use the PDFCRAFT_AI_BASE_URL, PDFCRAFT_AI_MODEL and PDFCRAFT_AI_API_KEY environment variables."), t);
     ui.add_space(6.0);
-    app.ai.test.poll();
     ui.horizontal(|ui| {
         let running = app.ai.test.is_running();
         if ui.add_enabled_ui(!running, |ui| ctx.button(ui, tl!("Test connection"), t)).inner.clicked() {
