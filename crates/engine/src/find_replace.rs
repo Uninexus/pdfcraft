@@ -9,9 +9,11 @@
 //! A longer replacement changes the paragraph only, measured with its own fonts' widths, and
 //! nothing is shrunk or hyphenated to fit. A paragraph of one row grows to the right, up to 36 pt
 //! from the crop box (a centred line stays in its own box), then wraps; a paragraph of several rows
-//! keeps its width and rewraps at spaces. New rows go below the last one at the paragraph's line
-//! spacing and nothing else on the page moves, so they can run over what is below, or off the page,
-//! without being reported. A word wider than the width stays whole, past the box.
+//! keeps its width and rewraps at spaces: its wrapped rows are rejoined first, so the text flows as
+//! one paragraph (the rows that ended in a typed break, or are short lines of their own, stay).
+//! New rows go below the last one at the paragraph's line spacing and nothing else on the page
+//! moves, so they can run over what is below, or off the page; [`Replacement::grown`] counts such
+//! paragraphs so that an interface can warn. A word wider than the width stays whole, past the box.
 //!
 //! A match is left alone, and counted, when it runs from one paragraph into the next, lies in
 //! invisible text over a scan, would need another font (the paragraph's own can't draw the new
@@ -138,6 +140,13 @@ pub struct Replacement {
     /// [`pdfcraft_edit::LineEdit::substituted`] does, without a " Type3" suffix, de-duplicated,
     /// in the order met.
     pub substitute_fonts: Vec<String>,
+    /// Paragraphs that now have more rows than they had. New rows go below the last one and
+    /// nothing else moves, so each may now overlap what is below it (or run off the page).
+    pub grown: usize,
+    /// The rows those paragraphs gained in all.
+    pub grown_rows: usize,
+    /// How far lower, in points, the paragraph that grew most now ends.
+    pub grown_by: f64,
 }
 
 /// Refusal messages kept in a [`Replacement`].
@@ -256,10 +265,50 @@ impl Document {
                 }
                 let style = pdfcraft_edit::BlockStyle { sources, ..Default::default() };
                 let mut trial = work.clone();
-                match guard(|| pdfcraft_edit::rewrite_block(&mut trial, page, k, Some(&text), &style)) {
+                let mut text = text;
+                let mut style = style;
+                let mut outcome = guard(|| pdfcraft_edit::rewrite_block(&mut trial, page, k, Some(&text), &style));
+                // Every original row start is held in place by the newline between rows, so a
+                // longer replacement that overflows its row leaves its last word alone on a row
+                // and the next row below it short. When rows were added, try the paragraph as one
+                // flow (only the breaks that are not wraps stay). Not for turned text, whose rows
+                // the flow measures along another axis; not when the row-by-row rewrite already
+                // needs a substitute font that is not allowed (that match is skipped below).
+                let upright = (block.rotation.rem_euclid(360.0)).min(360.0 - block.rotation.rem_euclid(360.0)) < 1e-3;
+                if let Ok(Ok(grown)) = &outcome
+                    && grown.grew()
+                    && upright
+                    && (grown.substituted.is_none() || query.substitute_font)
+                    && let Some((flowed, flowed_sources)) = block.replaced_reflowing(&ranges, &query.with)
+                    && flowed != text
+                {
+                    let mut flow_trial = work.clone();
+                    let flow_style = pdfcraft_edit::BlockStyle { sources: flowed_sources, ..Default::default() };
+                    // Kept when it needs no more rows (a paragraph that needed N rows either way
+                    // is better off with its rows filled than with one left short in the middle),
+                    // and when it does not bring in a substitute font the row-by-row text avoided
+                    // (the rejoining spaces may be glyphs the paragraph's font lacks).
+                    if let Ok(Ok(better)) = guard(|| pdfcraft_edit::rewrite_block(&mut flow_trial, page, k, Some(&flowed), &flow_style))
+                        && better.rows_after <= grown.rows_after
+                        && (better.substituted.is_none() || grown.substituted.is_some())
+                    {
+                        trial = flow_trial;
+                        text = flowed;
+                        style = flow_style;
+                        outcome = Ok(Ok(better));
+                    }
+                }
+                match outcome {
                     // `trial` already holds the paragraph rewritten in the substitute font, so
                     // accepting it is what the returned edit will do again on the document.
-                    Ok(Ok(pdfcraft_edit::LineEdit { substituted })) if substituted.is_none() || query.substitute_font => {
+                    Ok(Ok(pdfcraft_edit::LineEdit { substituted, rows_before, rows_after, extends_by }))
+                        if substituted.is_none() || query.substitute_font =>
+                    {
+                        if rows_after > rows_before {
+                            out.grown = out.grown.saturating_add(1);
+                            out.grown_rows = out.grown_rows.saturating_add(rows_after - rows_before);
+                            out.grown_by = out.grown_by.max(extends_by);
+                        }
                         if let Some(font) = substituted {
                             out.substituted = out.substituted.saturating_add(count);
                             out.substituted_paragraphs = out.substituted_paragraphs.saturating_add(1);

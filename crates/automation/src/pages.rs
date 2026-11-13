@@ -453,6 +453,20 @@ impl Automation {
         if !plan.substitute_fonts.is_empty() {
             out["substitute_font_names"] = json!(plan.substitute_fonts);
         }
+        out["grown"] = json!(plan.grown);
+        out["grown_rows"] = json!(plan.grown_rows);
+        out["grown_by"] = json!(plan.grown_by);
+        if plan.grown > 0 {
+            let by = if plan.grown_by > 0.0 { format!(" (the longest ends {:.1} pt lower)", plan.grown_by) } else { String::new() };
+            let warning = json!(format!(
+                "{} paragraph(s) grew by {} row(s){by} and may overlap what follows; nothing was moved out of the way. Undo to restore.",
+                plan.grown, plan.grown_rows
+            ));
+            match out.get_mut("warnings").and_then(Value::as_array_mut) {
+                Some(list) => list.push(warning),
+                None => out["warnings"] = json!([warning]),
+            }
+        }
         if !plan.refusals.is_empty() {
             out["refusals"] = json!(plan.refusals);
         }

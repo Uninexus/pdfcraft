@@ -128,6 +128,7 @@ fn stretch(phrase: &TextBlock, lines: &[TextLine], indices: &[usize]) -> Result<
     }
     Ok(TextBlock {
         reflow_text: text.clone(),
+        joins: Vec::new(),
         editor_text: text.clone(),
         text,
         spans,
@@ -321,7 +322,7 @@ pub(crate) fn rewrite_changed_words(
         }
         if !again {
             *doc = trial;
-            return Some(LineEdit { substituted });
+            return Some(LineEdit { substituted, ..Default::default() });
         }
     }
     None

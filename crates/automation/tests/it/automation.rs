@@ -4596,6 +4596,30 @@ fn subset_font_pdf() -> Vec<u8> {
     out
 }
 
+/// A replacement that makes a paragraph gain rows says so, with how far lower it now ends, since
+/// nothing below it moves; one that adds no row reports none.
+#[test]
+fn text_replace_warns_when_a_paragraph_grew() {
+    let dir = workdir("replace-grown");
+    std::fs::write(dir.join("subset.pdf"), subset_font_pdf()).unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "subset.pdf" }))["doc"].as_u64().unwrap();
+    // The same length, a different word: it is replaced, and grows nothing.
+    let r = ok(&mut a, "text_replace", json!({ "doc": doc, "find": "Helvetica", "replace": "Helveticx" }));
+    assert_eq!(r["replaced"].as_u64(), Some(1), "{r}");
+    assert_eq!(
+        (r["grown"].as_u64(), r["grown_rows"].as_u64(), r["grown_by"].as_f64(), r.get("warnings")),
+        (Some(0), Some(0), Some(0.0), None),
+        "{r}"
+    );
+    ok(&mut a, "edit_undo", json!({ "doc": doc }));
+    let r = ok(&mut a, "text_replace", json!({ "doc": doc, "find": "Helvetica", "replace": "many words in a row ".repeat(40) }));
+    assert_eq!(r["replaced"].as_u64(), Some(1), "{r}");
+    assert_eq!(r["grown"].as_u64(), Some(1), "{r}");
+    assert!(r["grown_rows"].as_u64().unwrap_or(0) >= 1 && r["grown_by"].as_f64().unwrap_or(0.0) > 0.0, "{r}");
+    assert!(r["warnings"][0].as_str().is_some_and(|w| w.contains("may overlap what follows") && w.contains("Undo")), "{r}");
+}
+
 /// A font that lacks a letter of the new text skips the match (default), or substitutes another
 /// font and says so (`substitute_fonts`), one undo step.
 #[test]

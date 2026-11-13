@@ -84,6 +84,19 @@ fn outcome(plan: &Replacement, all: bool, substitute_font: bool) -> Option<Strin
         );
         hint = crate::i18n::fmt(&sentence, &[("font", &plan.substitute_fonts.join(", "))]);
     }
+    // New rows go below the paragraph and nothing else moves, so say where that can matter.
+    if plan.grown > 0 {
+        let sentence = crate::i18n::trn(
+            crate::i18n::current(),
+            plan.grown as u64,
+            "{n} paragraph grew and may overlap what follows; Undo to restore",
+            "{n} paragraphs grew and may overlap what follows; Undo to restore",
+        );
+        if !hint.is_empty() {
+            hint.push_str(". ");
+        }
+        hint.push_str(&crate::i18n::fmt(&sentence, &[("n", &plan.grown.to_string())]));
+    }
     // Where a font lacked letters and the option was off, say it exists.
     let offer = !substitute_font && plan.skipped.contains_key(&pdfcraft_engine::find_replace::Skip::MissingGlyphs);
     if !all {

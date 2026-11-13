@@ -1623,7 +1623,7 @@ pub(crate) fn rewrite_styled_block(
     let first = block.lines.first().and_then(|i| lines.get(*i)).ok_or_else(|| EditError::Invalid("the paragraph has no source runs".into()))?;
     let draft = replacement_text(block, text)?;
     if has_no_effective_style_change(block, draft, style) {
-        return Ok(LineEdit { substituted: None });
+        return Ok(LineEdit::default());
     }
     let ranges = validated_ranges(draft, style)?;
     let source_count = lines.len();
@@ -1790,6 +1790,7 @@ pub(crate) fn rewrite_styled_block(
     // At least one line of the largest glyphs, so a larger range reaches up as far as it draws.
     const LINE_EM: f64 = 1.2;
     let pitch = source_leading.max(row_step(style, largest, source_leading)).max(largest * LINE_EM);
+    let rows_after = rows.len();
     let widest = measured.iter().copied().fold(width, f64::max);
     // This path lays rows out along user-space baselines, so the paragraph is upright here.
     let reach = crate::Reach { rect: block.rect, offset: [dx, dy], width: widest, rows: rows.len(), pitch, upright: true };
@@ -1941,7 +1942,7 @@ pub(crate) fn rewrite_styled_block(
         d.set(b"Resources".to_vec(), Object::Dict(res));
     })?;
     crate::draw_on_top(doc, &p, o.ctm, &on_top)?;
-    Ok(LineEdit { substituted })
+    Ok(LineEdit::rows(substituted, block.rows.len(), rows_after, pitch))
 }
 
 #[cfg(test)]

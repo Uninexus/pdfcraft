@@ -15,10 +15,31 @@ use super::{
 };
 
 /// What replacing a line did.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct LineEdit {
     /// `Some(font)` when the line's font couldn't show the new text and Helvetica was used.
     pub substituted: Option<String>,
+    /// Rows the paragraph had, and has now (0 for both when the edit isn't a paragraph rewrite).
+    pub rows_before: usize,
+    pub rows_after: usize,
+    /// How far lower, in points, the paragraph's last row sits than before: new rows go below and
+    /// nothing else on the page moves, so what is below may now be under them. 0 when no row was
+    /// added.
+    pub extends_by: f64,
+}
+
+impl LineEdit {
+    /// A paragraph that went from `before` rows to `after`, rows `pitch` points apart.
+    pub(crate) fn rows(substituted: Option<String>, before: usize, after: usize, pitch: f64) -> Self {
+        let added = after.saturating_sub(before);
+        let extends_by = if pitch.is_finite() && pitch > 0.0 { (added as f64 * pitch).min(1e6) } else { 0.0 };
+        Self { substituted, rows_before: before, rows_after: after, extends_by }
+    }
+
+    /// Whether the paragraph now reaches lower than it did.
+    pub fn grew(&self) -> bool {
+        self.rows_after > self.rows_before
+    }
 }
 
 /// Replace the text of line `line` (an index into [`text_lines`]) on `page` with `text`.
@@ -158,7 +179,7 @@ pub(crate) fn replace_line_with_limit(doc: &mut Document, page: usize, line: usi
             d.set(b"Resources".to_vec(), Object::Dict(res));
         }
     })?;
-    Ok(LineEdit { substituted })
+    Ok(LineEdit { substituted, ..Default::default() })
 }
 
 /// The size of the last `Tf` before operator `at`.
@@ -1080,7 +1101,7 @@ pub(crate) fn rewrite_block_from(
         }
     })?;
     crate::draw_on_top(doc, &p, emit.ctm, &on_top)?;
-    Ok(LineEdit { substituted: font.substituted })
+    Ok(LineEdit::rows(font.substituted, b.rows.len(), wrapped.len(), lead * k))
 }
 
 /// The cover (when [`BlockStyle::cover`] asks for one) and visible rendering that start a
