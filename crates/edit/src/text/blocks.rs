@@ -28,6 +28,11 @@ pub struct TextBlock {
     /// What a width change reflows. A wrap rejoins with a space; a break that was typed, or a
     /// short line that still had room for the next word, stays a newline.
     pub reflow_text: String,
+    /// For each break between two rows of `editor_text` (in order): `None` when it is a hard break
+    /// (typed, or a short row that is a line of its own), `Some(gap)` when the row wrapped, with
+    /// `gap` the separators the wrap consumed. [`TextBlock::reflow_text`] is `editor_text` with
+    /// the wraps rejoined; [`TextBlock::replaced_reflowing`] does the same around a replacement.
+    pub joins: Vec<Option<usize>>,
     /// Byte ranges in `editor_text` and their source line indexes.
     pub spans: Vec<(std::ops::Range<usize>, usize)>,
     /// Every line is invisible text (rendering mode 3): an OCR layer over a scanned image, whose
@@ -250,6 +255,19 @@ impl TextBlock {
     /// paragraph already had stays, since the rewrite keeps every space typed. `None` when a
     /// range is out of order, overlaps another or does not fall on character boundaries.
     pub fn replaced(&self, ranges: &[std::ops::Range<usize>], with: &str) -> Option<(String, RunSources)> {
+        self.replaced_with(ranges, with, false)
+    }
+
+    /// [`TextBlock::replaced`] with the paragraph's wrapped rows rejoined ([`TextBlock::joins`]):
+    /// only the breaks that are hard stay newlines, so a rewrite wraps the paragraph as one flow
+    /// instead of holding every original row start in place.
+    pub fn replaced_reflowing(&self, ranges: &[std::ops::Range<usize>], with: &str) -> Option<(String, RunSources)> {
+        self.replaced_with(ranges, with, true)
+    }
+
+    fn replaced_with(&self, ranges: &[std::ops::Range<usize>], with: &str, reflow: bool) -> Option<(String, RunSources)> {
+        // The joins are indexed by row break; with a break unaccounted for they can't be trusted.
+        let reflow = reflow && self.editor_text.matches('\n').count() == self.joins.len();
         let mut end = 0;
         for r in ranges {
             if r.start < end || r.start >= r.end || self.editor_text.get(r.clone()).is_none() {
@@ -271,7 +289,12 @@ impl TextBlock {
         // Right after a replacement: a space here would join one the draft ends with.
         let mut joined = false;
         let spacing = |c: char| c != '\n' && c != '\r' && paragraph_separator(c);
+        let mut breaks = 0usize;
         for ((byte, ch), source) in self.editor_text.char_indices().zip(self.char_sources()) {
+            let row_break_at = (ch == '\n').then(|| {
+                breaks = breaks.saturating_add(1);
+                breaks.saturating_sub(1)
+            });
             if let Some(r) = next.peek()
                 && byte >= r.start
             {
@@ -285,7 +308,29 @@ impl TextBlock {
                 }
                 continue;
             }
-            if std::mem::take(&mut joined) && spacing(ch) && draft.chars().next_back().is_some_and(spacing) {
+            let after_replacement = std::mem::take(&mut joined);
+            if after_replacement && spacing(ch) && draft.chars().next_back().is_some_and(spacing) {
+                continue;
+            }
+            let wrap = row_break_at.filter(|_| reflow).and_then(|i| self.joins.get(i).copied().flatten());
+            if let Some(gap) = wrap {
+                // A wrap rejoins as `reflow_text` does: a hyphen that ended the row goes, and
+                // otherwise the separators the wrap consumed come back.
+                // Never one the replacement itself ends in.
+                if draft.ends_with('-') && !after_replacement {
+                    draft.pop();
+                    if let Some((range, _)) = spans.last_mut() {
+                        range.end = range.end.saturating_sub(1);
+                    }
+                    if spans.last().is_some_and(|(range, _)| range.is_empty()) {
+                        spans.pop();
+                    }
+                } else if !draft.ends_with(char::is_whitespace) {
+                    for _ in 0..gap {
+                        extend(&mut spans, draft.len(), 1, source);
+                        draft.push(' ');
+                    }
+                }
                 continue;
             }
             extend(&mut spans, draft.len(), ch.len_utf8(), source);

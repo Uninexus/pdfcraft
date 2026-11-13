@@ -523,3 +523,128 @@ fn substituted_paragraphs_on_two_pages_are_counted_and_undone_together() {
     assert_eq!((texts(&s, id, 0), texts(&s, id, 1)), (vec!["ab ba".to_string()], vec!["ba cb".to_string()]));
     assert_eq!(s.get(id).unwrap().can_undo(), Some("Edit text"));
 }
+
+const BODY: [&str; 4] = [
+    "The committee reviewed the proposal and agreed that the schedule",
+    "for the new building would depend on the weather during the autumn",
+    "months, so the contractor was asked to prepare a second plan that",
+    "avoids the lowest field. Work starts in spring.",
+];
+
+/// A paragraph of `rows` set in 10 pt Helvetica at 12 pt leading from the left margin 72: every row
+/// but the last is spread to `measure` points with word spacing, as a justified paragraph from
+/// another producer is, so none of its rows is marked as a wrap or a break.
+fn body_paragraph(rows: &[&str], measure: f64) -> String {
+    let mut out = String::new();
+    for (i, row) in rows.iter().enumerate() {
+        let (s, id) = open(pdf(&format!("BT /F1 10 Tf 72 700 Td ({row}) Tj ET")));
+        let rect = s.get(id).unwrap().text_lines(0)[0].rect;
+        let spaces = row.matches(' ').count().max(1) as f64;
+        let tw = if i + 1 < rows.len() { (measure - (rect[2] - rect[0])) / spaces } else { 0.0 };
+        let y = 700.0 - 12.0 * i as f64;
+        out.push_str(&format!("BT /F1 10 Tf {tw:.4} Tw 72 {y} Td ({row}) Tj ET\n"));
+    }
+    out
+}
+
+/// Each row of the page: its text and width.
+fn rows_of(s: &Session, id: DocId) -> Vec<(String, f64)> {
+    let mut lines = s.get(id).unwrap().text_lines(0);
+    lines.sort_by(|a, b| b.rect[1].total_cmp(&a.rect[1]));
+    lines.into_iter().map(|l| (l.text.trim().to_owned(), l.rect[2] - l.rect[0])).collect()
+}
+
+/// A longer replacement in a wrapped paragraph reflows it as one text: no row but the last is left
+/// short, and the words keep their order (the rows used to keep their starts, so the word that
+/// overflowed row 2 stood alone on a row of its own above the unchanged row 3).
+#[test]
+fn a_longer_replacement_reflows_a_wrapped_paragraph_without_an_orphan_row() {
+    let (s0, id0) = open(pdf(&body_paragraph(&BODY, 330.0)));
+    let before = s0.get(id0).unwrap().text_blocks(0);
+    assert_eq!(before.len(), 1, "one paragraph");
+    assert!(before[0].joins.iter().all(Option::is_some), "the rows are wraps: {:?}", before[0].joins);
+    let (mut s, id) = open(pdf(&body_paragraph(&BODY, 330.0)));
+    let plan = replace_all(&mut s, id, &query("weather", "unpredictable and often very wet weather conditions"));
+    assert_eq!((plan.replaced, plan.skipped_total()), (1, 0));
+    let rows = rows_of(&s, id);
+    let widest = rows.iter().map(|r| r.1).fold(0.0, f64::max);
+    assert!(widest <= 330.0 + 6.0, "the rows keep the paragraph's width: {rows:?}");
+    for (text, width) in &rows[..rows.len() - 1] {
+        assert!(*width >= 330.0 * 0.8, "orphan row {text:?} ({width} pt) in {rows:?}");
+    }
+    let text = texts(&s, id, 0).concat();
+    let words: Vec<&str> = text.split_whitespace().collect();
+    let expected = BODY.join(" ").replace("weather", "unpredictable and often very wet weather conditions");
+    assert_eq!(words, expected.split_whitespace().collect::<Vec<_>>());
+}
+
+/// Rows that are lines of their own (an address, a poem) stay lines of their own, even when the
+/// widest of them reaches the paragraph's right edge: "London" must not be pulled up onto the
+/// street's row, which a row that "reaches the measure" would otherwise suggest.
+#[test]
+fn a_longer_replacement_keeps_the_rows_of_short_lines() {
+    let content = "BT /F1 10 Tf 12 TL 72 700 Td (12 Analytical Street) Tj T* (London) Tj T* (United Kingdom) Tj ET";
+    let (mut s, id) = open(pdf(content));
+    let plan = replace_all(&mut s, id, &query("Analytical", "Analytical Engine Works"));
+    assert_eq!(plan.replaced, 1);
+    let rows: Vec<String> = rows_of(&s, id).into_iter().map(|r| r.0).collect();
+    assert!(rows.iter().any(|r| r == "London"), "London lost its row: {rows:?}");
+    assert_eq!(rows.last().map(String::as_str), Some("United Kingdom"), "{rows:?}");
+    assert_eq!(plan.grown, 1, "the added rows are still reported");
+}
+
+/// Hyphens the paragraph really has, at the end of a full row, are not outside text to delete: a
+/// reflow would join "well-" and "known" as "wellknown".
+#[test]
+fn a_hyphen_at_a_row_end_survives_a_replacement_elsewhere() {
+    let rows = [
+        "The committee reviewed the proposal and agreed that the schedule",
+        "for the new building would depend on the weather and on a well-",
+        "known author who had promised to prepare a second plan that",
+        "avoids the lowest field. Work starts in spring.",
+    ];
+    let (mut s, id) = open(pdf(&body_paragraph(&rows, 330.0)));
+    let plan = replace_all(&mut s, id, &query("committee", "committee of the whole board and all of its many members"));
+    assert_eq!((plan.replaced, plan.skipped_total()), (1, 0));
+    // (The paragraph's `text` joins a hyphenated row end without it; the rows show what is drawn.)
+    let drawn: Vec<String> = rows_of(&s, id).into_iter().map(|r| r.0).collect();
+    assert!(drawn.concat().contains("well-") && !drawn.join(" ").contains("wellknown"), "{drawn:?}");
+    assert!(drawn.iter().any(|r| r.ends_with("well-")), "the hyphen still ends its row: {drawn:?}");
+}
+
+/// A reflow must not bring in a substitute font that the row-by-row rewrite avoided. (Today the
+/// spaces a reflow puts back are never what a subset font lacks, since `source_encodes` splits
+/// them out, so this pins the invariant rather than a reachable flip; the guard in
+/// `plan_replace` is what keeps it if that changes.)
+#[test]
+fn a_reflow_that_would_need_a_substitute_font_is_not_taken() {
+    let row = |s: &str| format!("({s}) Tj");
+    let content = format!(
+        "BT /F3 12 Tf 14 TL 72 700 Td {} T* {} T* {} T* {} ET",
+        row("ababababababababababab"),
+        row("ababababbababababababa"),
+        row("ababababababababababab"),
+        row("abab")
+    );
+    let (mut s, id) = open(pdf(&content));
+    assert_eq!(s.get(id).unwrap().text_blocks(0)[0].joins, [Some(1), Some(1), Some(1)], "the rows are wraps");
+    let with = "ab".repeat(24);
+    let plan = replace_all(&mut s, id, &query("bb", &with));
+    assert_eq!((plan.replaced, plan.substituted, plan.skipped_total()), (1, 0, 0), "{plan:?}");
+}
+
+/// A paragraph that gained rows says so, and by how much, since what is below it did not move.
+#[test]
+fn a_paragraph_that_gains_rows_is_reported_as_grown() {
+    let (mut s, id) = open(pdf(&body_paragraph(&BODY, 330.0)));
+    let plan = replace_all(&mut s, id, &query("weather", &"very wet and windy ".repeat(12)));
+    assert_eq!(plan.replaced, 1);
+    assert_eq!(plan.grown, 1);
+    assert!(plan.grown_rows >= 2, "{plan:?}");
+    assert!(plan.grown_by >= 20.0 && plan.grown_by.is_finite(), "{plan:?}");
+    // A same-size replacement does not grow it.
+    let (mut s, id) = open(pdf(&body_paragraph(&BODY, 330.0)));
+    let plan = replace_all(&mut s, id, &query("weather", "climate"));
+    assert_eq!((plan.replaced, plan.grown, plan.grown_rows), (1, 0, 0));
+    assert_eq!(plan.grown_by, 0.0);
+}

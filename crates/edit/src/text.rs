@@ -233,6 +233,7 @@ mod tests {
             rows: Vec::new(),
             editor_text: text.into(),
             reflow_text: text.into(),
+            joins: Vec::new(),
             spans: Vec::new(),
             invisible: false,
         }

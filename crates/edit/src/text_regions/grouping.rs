@@ -360,6 +360,7 @@ fn group_layout(lines: &[TextLine], mixed: bool) -> Vec<TextBlock> {
                 text: String::new(),
                 editor_text: String::new(),
                 reflow_text: String::new(),
+                joins: Vec::new(),
                 spans: Vec::new(),
                 rect,
                 base_font: first.base_font.clone(),
@@ -413,6 +414,7 @@ fn group_layout(lines: &[TextLine], mixed: bool) -> Vec<TextBlock> {
     }
     for block in &mut blocks {
         block.reflow_text = reflow_text(block, lines);
+        block.joins = (1..block.rows.len()).map(|row| break_gap(block, lines, row, true)).collect();
     }
     for block in blocks.iter_mut().filter(|block| block.invisible && block.lines.len() > 1) {
         // Each word counts once: neighbouring words OCR sized alike share a run.
@@ -440,7 +442,7 @@ fn reflow_text(block: &TextBlock, lines: &[TextLine]) -> String {
     let mut out = String::new();
     for (index, part) in parts.iter().enumerate() {
         if index > 0 {
-            match break_gap(block, lines, index) {
+            match break_gap(block, lines, index, false) {
                 Some(_) if out.ends_with('-') => {
                     out.pop();
                 }
@@ -462,7 +464,13 @@ fn reflow_text(block: &TextBlock, lines: &[TextLine]) -> String {
 /// spaces — the count a `/PCSoft` marker recorded ([`TextLine::soft_gap`]), or, for a line this
 /// app did not mark (a file written elsewhere, or an older save), a single space when the
 /// geometry looks like an ordinary wrapped body line (`#2529`).
-fn break_gap(block: &TextBlock, lines: &[TextLine], row_index: usize) -> Option<usize> {
+///
+/// `strict` is for a rewrite that rejoins rows around a replacement ([`TextBlock::joins`]), where
+/// a wrong guess changes text the replacement does not touch, so an unmarked row is a wrap only
+/// when (a) at least two rows of the paragraph reach the measure (the widest row of an address or
+/// a poem always "reaches" its own right edge, so one alone proves nothing) and (b) it does not
+/// end in a hyphen, which may be a real one ("well-" "known") that joining would delete.
+fn break_gap(block: &TextBlock, lines: &[TextLine], row_index: usize, strict: bool) -> Option<usize> {
     let line = block.rows.get(row_index).and_then(|row| row.first()).and_then(|i| lines.get(*i))?;
     if line.hard_break {
         return None;
@@ -475,9 +483,39 @@ fn break_gap(block: &TextBlock, lines: &[TextLine], row_index: usize) -> Option<
     let size = line.size.max(1.0);
     let slack = block.rect[2] - prev[2];
     let width = prev[2] - prev[0];
+    let reaches = |rect: [f64; 4]| block.rect[2] - rect[2] <= size * 0.75 && rect[2] - rect[0] >= size * 8.0;
+    if strict {
+        let full = block.rows.iter().filter_map(|row| row_rect(row, lines)).filter(|rect| reaches(*rect)).count();
+        let hyphen = row_text(block, lines, row_index.saturating_sub(1)).trim_end().ends_with(['-', '\u{2010}', '\u{00AD}']);
+        if full < 2 || hyphen {
+            return None;
+        }
+    }
     // Short rows define the right edge by their own letters. A body line that fills the
     // measure leaves almost no room for the next word.
-    (slack <= size * 0.75 && width >= size * 8.0 && (next[2] - next[0]) + size * 0.25 > slack).then_some(1)
+    if !(slack <= size * 0.75 && width >= size * 8.0 && (next[2] - next[0]) + size * 0.25 > slack) {
+        return None;
+    }
+    let before = row_text(block, lines, row_index.saturating_sub(1)).trim_end().chars().next_back();
+    let after = row_text(block, lines, row_index).trim_start().chars().next();
+    Some(wrap_gap(before, after))
+}
+
+/// The separators a wrap stood for between the characters `before` and `after`: none between two
+/// of a script written without spaces, one otherwise.
+fn wrap_gap(before: Option<char>, after: Option<char>) -> usize {
+    usize::from(!(before.is_some_and(no_space_script) && after.is_some_and(no_space_script)))
+}
+
+/// The text of row `row` of `block`, its runs joined.
+fn row_text(block: &TextBlock, lines: &[TextLine], row: usize) -> String {
+    block.rows.get(row).into_iter().flatten().filter_map(|i| lines.get(*i)).map(|l| l.text.as_str()).collect()
+}
+
+/// Scripts written without a space between words: Han, Hiragana, Katakana, their punctuation and
+/// the full-width forms, and Thai. A row that wraps between two of them gets no space back.
+pub(crate) fn no_space_script(c: char) -> bool {
+    matches!(c, '\u{0E00}'..='\u{0E7F}' | '\u{3000}'..='\u{30FF}' | '\u{3400}'..='\u{4DBF}' | '\u{4E00}'..='\u{9FFF}' | '\u{F900}'..='\u{FAFF}' | '\u{FF00}'..='\u{FFEF}')
 }
 
 /// The size an OCR phrase is set in. Recognize text sizes each word from its own box and a guess
@@ -489,4 +527,20 @@ fn median_size(sizes: impl Iterator<Item = f64>) -> Option<f64> {
     let middle = sizes.len() / 2;
     let upper = sizes.get(middle).copied()?;
     if sizes.len().is_multiple_of(2) { sizes.get(middle.saturating_sub(1)).map(|lower| (lower + upper) / 2.0) } else { Some(upper) }
+}
+
+#[cfg(test)]
+mod wrap_tests {
+    use super::{no_space_script, wrap_gap};
+
+    #[test]
+    fn rows_of_unspaced_scripts_wrap_without_a_space() {
+        assert!(['日', '本', 'あ', 'カ', '。', 'ก', 'ａ'].into_iter().all(no_space_script));
+        assert!(!['a', 'é', '한', '1', ' '].into_iter().any(no_space_script));
+        assert_eq!(wrap_gap(Some('語'), Some('文')), 0);
+        assert_eq!(wrap_gap(Some('ก'), Some('ข')), 0);
+        assert_eq!(wrap_gap(Some('d'), Some('e')), 1);
+        assert_eq!(wrap_gap(Some('語'), Some('e')), 1, "a space belongs between a word of each");
+        assert_eq!(wrap_gap(None, Some('e')), 1);
+    }
 }

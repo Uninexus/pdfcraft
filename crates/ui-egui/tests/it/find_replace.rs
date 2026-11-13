@@ -206,3 +206,62 @@ fn the_find_options_can_replace_in_a_substitute_font() {
     let s = h.state();
     assert_eq!(s.session.get(s.views[0].id).unwrap().can_undo(), Some("Replace all"));
 }
+
+/// One page: a two-row paragraph of Helvetica, with another line close below it.
+fn grow_fixture() -> Vec<u8> {
+    let content = "BT /F1 12 Tf 14 TL 20 150 Td (alpha beta gamma delta) Tj T* (epsilon zeta eta theta) Tj ET BT /F1 12 Tf 20 110 Td (next) Tj ET";
+    let objs: Vec<String> = vec![
+        "<< /Type /Catalog /Pages 2 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 300 200] >>".into(),
+        "<< /Type /Page /Parent 2 0 R /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>".into(),
+        format!("<< /Length {} >>\nstream\n{content}\nendstream", content.len()),
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".into(),
+    ];
+    let mut out = b"%PDF-1.7\n".to_vec();
+    let mut offsets = Vec::new();
+    for (i, o) in objs.iter().enumerate() {
+        offsets.push(out.len());
+        out.extend_from_slice(format!("{} 0 obj\n{o}\nendobj\n", i + 1).as_bytes());
+    }
+    let xref = out.len();
+    out.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1).as_bytes());
+    for o in offsets {
+        out.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+    }
+    out.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objs.len() + 1).as_bytes());
+    out
+}
+
+/// A paragraph that gains rows is replaced, and the notice says it grew and may overlap what
+/// follows (nothing moves out of its way); a replacement that adds no row says nothing of it.
+#[test]
+fn the_notice_warns_when_a_paragraph_grew_past_its_bottom() {
+    let run = |with: &str| {
+        let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(|_cc| {
+            let mut app = PdfCraftApp::new();
+            app.set_option("language", "en").unwrap();
+            app.open_bytes("grow.pdf", None, grow_fixture()).expect("opens");
+            app
+        });
+        h.run_steps(4);
+        assert!(h.state_mut().execute("edit.replace"));
+        h.run_steps(3);
+        h.query_by(|n| n.placeholder() == Some("Find text")).expect("find field").type_text("beta");
+        for _ in 0..400 {
+            h.run_steps(1);
+            if h.state().views[0].find.as_ref().is_some_and(|f| f.matches.len() == 1) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        h.state_mut().views[0].find.as_mut().unwrap().replacement = with.into();
+        h.run_steps(8);
+        h.get_by_label("Replace all").click();
+        h.run_steps(4);
+        h.state().toast.as_ref().map(|t| t.0.clone()).unwrap_or_default()
+    };
+    let note = run("a much longer replacement that takes several more rows than the paragraph has");
+    assert!(note.contains("Replaced 1 on 1 page") && note.contains("1 paragraph grew and may overlap what follows; Undo to restore"), "{note}");
+    let note = run("b");
+    assert!(note.contains("Replaced 1 on 1 page") && !note.contains("grew"), "{note}");
+}
