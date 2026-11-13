@@ -15,14 +15,67 @@ pub struct Combined {
     pub renamed_fields: Vec<(String, String)>,
 }
 
+/// Where to find LibreOffice: its program, or `None` when it isn't installed. The default looks
+/// where `pdfcraft_create::libreoffice` does; a session can be given another (a fake, in tests).
+pub type OfficeLocator = Arc<dyn Fn() -> Option<std::path::PathBuf> + Send + Sync>;
+
+/// What converting a batch of Office documents made: each document's PDF, or why it failed.
+pub type OfficeBatch = Vec<Result<Arc<Vec<u8>>, EditError>>;
+
+/// Converts Office documents to PDF with a LibreOffice found through its [`OfficeLocator`]. It is
+/// cheap to clone and `Send`, so a worker thread can hold one while the frame thread goes on.
+#[derive(Clone, Default)]
+pub struct OfficeRunner(Option<OfficeLocator>);
+
+impl OfficeRunner {
+    /// A runner that finds LibreOffice with `locator`.
+    pub fn with_locator(locator: OfficeLocator) -> Self {
+        Self(Some(locator))
+    }
+
+    fn locate(&self) -> Option<std::path::PathBuf> {
+        match &self.0 {
+            Some(locator) => locator(),
+            #[cfg(not(target_arch = "wasm32"))]
+            None => pdfcraft_create::libreoffice(),
+            #[cfg(target_arch = "wasm32")]
+            None => None,
+        }
+    }
+
+    /// Whether a LibreOffice can be found now.
+    pub fn is_available(&self) -> bool {
+        self.locate().is_some()
+    }
+
+    /// Convert the Office document `bytes` named `name` (Word, Excel, PowerPoint, OpenDocument,
+    /// RTF) to PDF with LibreOffice, and check the result opens. It runs a separate process for
+    /// seconds, so callers keep it off the frame thread. Desktop only: on the web it returns an
+    /// error.
+    pub fn convert(&self, name: &str, bytes: &Arc<Vec<u8>>) -> Result<Arc<Vec<u8>>, EditError> {
+        let pdf = Arc::new(pdfcraft_create::office_to_pdf_located(&|| self.locate(), name, bytes)?);
+        open_source(name, &pdf)?;
+        Ok(pdf)
+    }
+
+    /// Convert every file, in order. All or nothing on what is missing: when LibreOffice can't be
+    /// found, that is the one error and nothing is converted. A file that fails to convert is its
+    /// own `Err` in the list.
+    pub fn convert_all(&self, files: &[(String, Arc<Vec<u8>>)]) -> Result<OfficeBatch, EditError> {
+        if !files.is_empty() && !self.is_available() {
+            let name = files.first().map_or("", |(name, _)| name.as_str());
+            return Err(pdfcraft_create::libreoffice_missing(name).into());
+        }
+        Ok(files.iter().map(|(name, bytes)| self.convert(name, bytes)).collect())
+    }
+}
+
 /// Convert the Office document `bytes` named `name` (Word, Excel, PowerPoint, OpenDocument,
 /// RTF) to PDF with an installed LibreOffice, and check the result opens. It runs a separate
 /// process for seconds, so callers keep it off the frame thread. Desktop only: on the web it
 /// returns an error.
 pub fn office_to_pdf(name: &str, bytes: &Arc<Vec<u8>>) -> Result<Arc<Vec<u8>>, EditError> {
-    let pdf = Arc::new(pdfcraft_create::office_to_pdf(name, bytes)?);
-    open_source(name, &pdf)?;
-    Ok(pdf)
+    OfficeRunner::default().convert(name, bytes)
 }
 
 /// Parse another PDF to copy pages from.

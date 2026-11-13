@@ -1285,10 +1285,15 @@ fn inserting_pictures_makes_one_undoable_step_and_refuses_other_files() {
     std::fs::write(dir.join("broken.png"), b"\x89PNG\r\n\x1a\nbroken").unwrap();
     std::fs::write(dir.join("notes.txt"), "Some notes").unwrap();
     std::fs::write(dir.join("report.docx"), b"PK\x03\x04").unwrap();
+    std::fs::write(dir.join("data.bin"), b"not a document").unwrap();
     let mut a = auto(&dir);
     let doc = ok(&mut a, "doc_open", json!({ "path": "a.pdf" }))["doc"].as_u64().unwrap();
-    // Nothing but a PDF, a picture or a text file; a refused call changes nothing and names the file.
-    for (bad, said) in [("report.docx", "can't be inserted"), ("broken.png", "broken.png"), ("missing.png", "missing.png")] {
+    // Nothing but a PDF, a picture, a text file or an Office document (a Word file with no
+    // package behind it fails to convert, or LibreOffice is missing: either way it is named); a
+    // refused call changes nothing and names the file.
+    for (bad, said) in
+        [("data.bin", "can't be inserted"), ("report.docx", "report.docx"), ("broken.png", "broken.png"), ("missing.png", "missing.png")]
+    {
         let refused = err(&mut a, "page_insert_image", json!({ "doc": doc, "paths": ["one.png", bad], "at": 2 }));
         assert!(refused.to_string().contains(said), "{bad}: {refused}");
         assert_eq!(page_text(&mut a, doc), ["Page 1", "Page 2", "Page 3"], "{bad}");

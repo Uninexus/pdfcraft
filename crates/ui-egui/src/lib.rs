@@ -221,6 +221,7 @@ use workflows::ocr_ui;
 use workflows::ocr_verify;
 #[cfg(target_arch = "wasm32")]
 use workflows::ocr_web;
+use workflows::office_batch;
 use workflows::optimize_ui;
 use workflows::print_paper;
 use workflows::print_ui;
@@ -540,6 +541,9 @@ pub struct PdfCraftApp {
     /// Failures of the Reveal worker, taken each frame and shown as a notification.
     #[cfg(not(target_arch = "wasm32"))]
     reveal_errors: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+    /// Office documents LibreOffice is converting for Insert, Combine and Create ▸ Multiple files.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) office_jobs: Vec<workflows::office_batch::OfficeJob>,
     /// Tools pinned to Home, in user-defined order.
     pub pinned_tools: Vec<String>,
     /// Search query for the Pin a tool selection dialog.

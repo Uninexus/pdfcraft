@@ -190,10 +190,11 @@ impl Automation {
         self.apply(a, Edit::InsertPagesFrom { name, bytes: Arc::new(bytes), pages, at, field_conflicts: pdfcraft_organize::FieldConflicts::Rename })
     }
 
-    /// `page_insert_image`: PDFs, pictures and text files as new pages from position `at`, in
-    /// order and as one undo step (the headless Insert pages from the clipboard). A file of
-    /// another kind (Word, Excel, PowerPoint, anything else) or one that can't be read fails the
-    /// call and changes nothing.
+    /// `page_insert_image`: PDFs, pictures, text files and Office documents (converted with
+    /// LibreOffice, one after another in the order given) as new pages from position `at`, in
+    /// order and as one undo step (the headless Insert pages). A file of another kind or one
+    /// that can't be read or converted (LibreOffice missing, say) fails the call and changes
+    /// nothing; so does a failure part-way, and the files after it are not converted.
     pub(crate) fn insert_image(&mut self, a: &Args) -> Result<Value> {
         /// Most files one call inserts.
         const MAX_FILES: usize = 100;
@@ -226,15 +227,15 @@ impl Automation {
                 return Err(too_much());
             }
             let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-            use pdfcraft_engine::SourceKind::{Image, Pdf, Text};
-            if !matches!(pdfcraft_engine::source_kind(&name, &bytes), Some(Pdf | Image | Text)) {
+            use pdfcraft_engine::SourceKind::{Image, Office, Pdf, Text};
+            if !matches!(pdfcraft_engine::source_kind(&name, &bytes), Some(Pdf | Image | Text | Office)) {
                 return Err(ToolError::InvalidArgs(format!(
-                    "{p} can't be inserted: use a PDF, a picture (PNG, JPEG, JPEG 2000, TIFF, GIF or BMP) or a .txt file"
+                    "{p} can't be inserted: use a PDF, a picture (PNG, JPEG, JPEG 2000, TIFF, GIF or BMP), a .txt file or a Word, Excel, PowerPoint, OpenDocument or RTF file"
                 )));
             }
             sources.push((name, Arc::new(bytes)));
         }
-        let plan = self.session.plan_insert(id, at, sources);
+        let plan = self.session.plan_insert_converting(id, at, sources);
         if let Some((name, why)) = plan.skipped.first() {
             return Err(failed(format!("{name}: {why}; the document was not changed")));
         }

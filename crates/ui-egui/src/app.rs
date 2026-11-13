@@ -180,6 +180,8 @@ impl PdfCraftApp {
             recent_check: Default::default(),
             #[cfg(not(target_arch = "wasm32"))]
             reveal_errors: Default::default(),
+            #[cfg(not(target_arch = "wasm32"))]
+            office_jobs: Vec::new(),
             pinned_tools: Vec::new(),
             pin_tool_search: String::new(),
             toast: None,
@@ -614,6 +616,7 @@ impl PdfCraftApp {
                 worker.set_context(ctx);
             }
             self.poll_pending_opens();
+            self.poll_office_jobs();
             self.show_reveal_errors();
             self.poll_pending_destinations();
         }

@@ -585,7 +585,12 @@ fn empty_state(app: &mut PdfCraftApp, ui: &mut egui::Ui, t: &Tokens, files_hover
         ui.add_space(10.0);
         ui.label(egui::RichText::new(tl!("Add the files to combine")).font(theme::medium(15.0)));
         ui.add_space(4.0);
-        ui.label(egui::RichText::new(tl!("Drop PDFs, images, text files or folders here, or choose them.")).color(t.text_faint));
+        let drop_hint = if cfg!(target_arch = "wasm32") {
+            tl!("Drop PDFs, images, text files or folders here, or choose them.")
+        } else {
+            tl!("Drop PDFs, images, text files, Office documents or folders here, or choose them.")
+        };
+        ui.label(egui::RichText::new(drop_hint).color(t.text_faint));
         ui.add_space(12.0);
         let folders = cfg!(not(target_arch = "wasm32"));
         // Centre the buttons: measure them first.

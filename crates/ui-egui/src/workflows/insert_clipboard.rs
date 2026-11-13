@@ -147,6 +147,39 @@ impl PdfCraftApp {
     /// is what could not be read already. Says what was left out.
     fn insert_sources_as_one_step(&mut self, sources: Vec<Source>, mut left_out: Vec<Skipped>) {
         let Some(view) = self.active.and_then(|i| self.views.get_mut(i)) else { return };
+        // Word, Excel, PowerPoint, OpenDocument and RTF files convert with LibreOffice on a
+        // worker first; the pages go in when they are ready (one that fails is left out and named).
+        if sources.iter().any(|(name, bytes)| crate::office_batch::is_office(name, bytes)) {
+            let id = view.id;
+            // Said if nothing can be converted, so what was already left out isn't lost.
+            let note = if left_out.is_empty() {
+                String::new()
+            } else {
+                let (list, more) = left_out_list(&left_out);
+                let names = if more > 0 { format!("{list}, +{more}") } else { list };
+                crate::i18n::fmt(tl!("Left out: {names}"), &[("names", &names)])
+            };
+            let files =
+                sources.into_iter().map(|(name, bytes)| Ok((name, Arc::try_unwrap(bytes).unwrap_or_else(|shared| shared.to_vec())))).collect();
+            self.convert_office_files(
+                files,
+                Box::new(move |app, files, _| {
+                    if !app.active.and_then(|i| app.views.get(i)).is_some_and(|v| v.id == id) {
+                        return app.notify_tr("Another document came to the front while the files were being converted, so nothing was inserted.");
+                    }
+                    let mut sources = Vec::new();
+                    for file in files {
+                        match file {
+                            Ok((name, bytes)) => sources.push((name, Arc::new(bytes))),
+                            Err(skipped) => left_out.push(skipped),
+                        }
+                    }
+                    app.insert_sources_as_one_step(sources, left_out);
+                }),
+                note,
+            );
+            return;
+        }
         // The selection decides where: a gap a "+" chose earlier is not this gesture's.
         let id = view.id;
         let after = view.target_pages().last().map_or(0, |p| p.saturating_add(1));

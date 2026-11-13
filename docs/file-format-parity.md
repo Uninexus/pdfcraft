@@ -68,13 +68,13 @@ features total).
 | Plain text | yes | yes | good | `create.from-text` |
 | Clipboard (image or text) | yes | yes | good | `create.from-clipboard` |
 | Screenshot | yes | no | none | `create.from-screenshot` planned |
-| Word, Excel, PowerPoint (and Visio, Publisher on Windows) | yes | yes, desktop only, through an installed LibreOffice (File ▸ Open); not Visio or Publisher | good where LibreOffice is (its layout, not measured against Acrobat) | `create.from-office` partial |
+| Word, Excel, PowerPoint (and Visio, Publisher on Windows) | yes | yes, desktop only, through an installed LibreOffice (File ▸ Open, Insert pages, Combine files, Create ▸ Multiple files); not Visio or Publisher | good where LibreOffice is (its layout, not measured against Acrobat) | `create.from-office` partial |
 | HTML file, web page URL | yes | no | none | `create.from-html`, `create.from-web-page` planned |
 | RTF | yes | yes, through LibreOffice (as Office documents) | good where LibreOffice is | `create.from-office` partial |
 | PostScript / EPS (Distiller) | yes | no | none | `create.distiller` planned (P3) |
 | Markdown | no | no | none | `create.from-markdown` planned (P2; not an Acrobat feature) |
 | Scanner | yes | no | none | `ocr.scanner-acquire` planned |
-| Several files at once | yes | yes: combine PDFs, images and text into one document, or create a separate PDF for each non-PDF source (GUI and `doc_create_multiple mode=separate`); existing outputs get numbered names | good for supported source types | `create.create-multiple`, `separate_batch_creates_one_pdf_per_source_without_replacing_existing_files` |
+| Several files at once | yes | yes: combine PDFs, images, text and (through LibreOffice) Office documents into one document, or create a separate PDF for each non-PDF source (GUI and `doc_create_multiple mode=separate`); existing outputs get numbered names | good for supported source types | `create.create-multiple`, `separate_batch_creates_one_pdf_per_source_without_replacing_existing_files` |
 
 ## Export PDF to
 
@@ -110,6 +110,7 @@ features total).
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-13 | minor | Insert pages, Combine files and Create ▸ Multiple files take Office documents through the installed LibreOffice (converted on a worker thread in the app); `create.from-office` stays partial. |
 | 2026-10-22 | minor | Office documents (Word, Excel, PowerPoint, OpenDocument, RTF) open from File ▸ Open as new PDFs, converted by an installed LibreOffice; `create.from-office` partial. |
 | 2026-10-19 | patch | Certificates row: `.p7b`/`.p7c` bundles (DER or PEM `PKCS7`/`CMS`) are read for trust import. |
 | 2026-10-12 | minor | XDP split into data (read and write for XFA forms, already shipped under `form.xfa-data`) and opening `.xdp` as a document (none). Create PDF reads BigTIFF; malformed GIF headers are no longer detected as images. |

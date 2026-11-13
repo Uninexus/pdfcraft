@@ -43,20 +43,37 @@ pub fn is_office(name: &str, bytes: &[u8]) -> bool {
 }
 
 /// Convert the Office document `bytes` named `name` to PDF bytes with LibreOffice.
-#[cfg(target_arch = "wasm32")]
-pub fn office_to_pdf(name: &str, _bytes: &[u8]) -> Result<Vec<u8>, CreateError> {
-    Err(CreateError::Office(format!("{name}: Office documents open only in the desktop app, which converts them with LibreOffice")))
+pub fn office_to_pdf(name: &str, bytes: &[u8]) -> Result<Vec<u8>, CreateError> {
+    #[cfg(not(target_arch = "wasm32"))]
+    let locate = libreoffice;
+    #[cfg(target_arch = "wasm32")]
+    let locate = || None;
+    office_to_pdf_located(&locate, name, bytes)
 }
 
-/// Convert the Office document `bytes` named `name` to PDF bytes with LibreOffice.
-#[cfg(not(target_arch = "wasm32"))]
-pub fn office_to_pdf(name: &str, bytes: &[u8]) -> Result<Vec<u8>, CreateError> {
-    let program = native::libreoffice().ok_or_else(|| {
-        CreateError::Office(format!(
-            "{name}: opening Word, Excel and PowerPoint files needs LibreOffice, which isn't installed (get it free from libreoffice.org)"
-        ))
-    })?;
-    native::convert_with(&program, name, bytes, TIMEOUT)
+/// The error for an Office document when no LibreOffice can be found: it names what is missing
+/// and what to do about it.
+pub fn libreoffice_missing(name: &str) -> CreateError {
+    CreateError::Office(format!(
+        "{name}: converting Word, Excel and PowerPoint files needs LibreOffice, which isn't installed (install it free from libreoffice.org, or set PDFCRAFT_SOFFICE to its soffice program)"
+    ))
+}
+
+/// [`office_to_pdf`] with the place to find LibreOffice given (`locate` returns its program, or
+/// `None` when it isn't installed), so a caller can stand a fake in for it. Everything else
+/// (the private temporary folder, the fresh profile with macros and link updates off, the time
+/// and size limits, the cleanup) is the same.
+pub fn office_to_pdf_located(locate: &dyn Fn() -> Option<std::path::PathBuf>, name: &str, bytes: &[u8]) -> Result<Vec<u8>, CreateError> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = (locate, bytes);
+        Err(CreateError::Office(format!("{name}: Office documents open only in the desktop app, which converts them with LibreOffice")))
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let program = locate().ok_or_else(|| libreoffice_missing(name))?;
+        native::convert_with(&program, name, bytes, TIMEOUT)
+    }
 }
 
 /// Where LibreOffice is installed, if it is: `PDFCRAFT_SOFFICE`, then the `PATH`, then the
@@ -582,6 +599,95 @@ mod tests {
             std::fs::write(dir.join("document.docx"), DOCX_HEAD).unwrap();
             drop(work);
             assert!(!dir.exists());
+        }
+
+        /// A stand-in for `soffice`: a shell script that records the folder it was given and the
+        /// profile settings it would run with, then writes `pdf` where LibreOffice would.
+        /// Returns the script's path; `record` is where it writes what it saw.
+        #[cfg(unix)]
+        fn fake_soffice(dir: &Path, record: &Path, pdf: Option<&Path>) -> PathBuf {
+            use std::io::Write;
+            use std::os::unix::fs::PermissionsExt;
+            let copy = pdf.map_or_else(|| "exit 3".to_string(), |p| format!("cp '{}' \"$out/document.pdf\"", p.display()));
+            let script = format!(
+                "#!/bin/sh\nfor input; do :; done\nwhile [ $# -gt 0 ]; do case \"$1\" in --outdir) out=\"$2\";; -env:UserInstallation=*) profile=\"${{1#-env:UserInstallation=file://}}\";; esac; shift; done\n\
+                 echo \"$input\" > '{rec}'\ncat \"$profile/user/registrymodifications.xcu\" >> '{rec}'\n{copy}\n",
+                rec = record.display()
+            );
+            let path = dir.join("soffice");
+            let mut file = std::fs::File::create(&path).unwrap();
+            file.write_all(script.as_bytes()).unwrap();
+            file.set_permissions(std::fs::Permissions::from_mode(0o755)).unwrap();
+            file.sync_all().unwrap();
+            path
+        }
+
+        /// [`office_to_pdf_located`] with `program` as the LibreOffice, trying again while the
+        /// freshly written script is still held open by another thread's `fork` (Linux
+        /// reports that as "Text file busy").
+        #[cfg(unix)]
+        fn convert_with_fake(program: &Path, name: &str) -> Result<Vec<u8>, crate::CreateError> {
+            let mut attempt = 0;
+            loop {
+                let result = super::super::office_to_pdf_located(&|| Some(program.to_path_buf()), name, DOCX_HEAD);
+                attempt += 1;
+                match &result {
+                    Err(e) if e.to_string().contains("Text file busy") && attempt < 20 => std::thread::sleep(Duration::from_millis(50)),
+                    _ => return result,
+                }
+            }
+        }
+
+        /// The folder the fake saw its input in, from what it recorded.
+        #[cfg(unix)]
+        fn recorded_work_dir(record: &Path) -> (PathBuf, String) {
+            let text = std::fs::read_to_string(record).unwrap();
+            let input = PathBuf::from(text.lines().next().unwrap());
+            (input.parent().unwrap().to_path_buf(), text)
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn a_located_converter_runs_with_the_safe_profile_and_its_temporary_folder_is_removed() {
+            let dir = WorkDir::new().unwrap();
+            let (record, fixture) = (dir.0.join("record"), dir.0.join("fixture.pdf"));
+            std::fs::write(&fixture, b"%PDF-1.4\n%fake\n").unwrap();
+            let program = fake_soffice(&dir.0, &record, Some(&fixture));
+            let pdf = convert_with_fake(&program, "Quarterly Report.DOCX").unwrap();
+            assert_eq!(pdf, b"%PDF-1.4\n%fake\n");
+            let (work, seen) = recorded_work_dir(&record);
+            assert!(work.file_name().unwrap().to_string_lossy().starts_with("pdfcraft-office-"), "{work:?}");
+            assert!(seen.lines().next().unwrap().ends_with("document.docx"), "the document's own name never reaches the command line: {seen}");
+            assert!(seen.contains("DisableMacrosExecution") && seen.contains("MacroSecurityLevel"), "macros were off: {seen}");
+            assert!(seen.contains("/org.openoffice.Office.Writer/Content/Update"), "link updates were off: {seen}");
+            assert!(!work.exists(), "the temporary folder is removed after a conversion");
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn a_located_converter_that_fails_is_reported_and_leaves_no_temporary_folder() {
+            let dir = WorkDir::new().unwrap();
+            let record = dir.0.join("record");
+            let program = fake_soffice(&dir.0, &record, None);
+            let error = convert_with_fake(&program, "Broken.xlsx").unwrap_err().to_string();
+            assert!(error.starts_with("Broken.xlsx: ") && error.contains("LibreOffice couldn't convert it"), "{error}");
+            let (work, _) = recorded_work_dir(&record);
+            assert!(!work.exists(), "the temporary folder is removed after a failure");
+        }
+
+        #[test]
+        fn a_missing_libreoffice_says_what_is_missing_and_how_to_get_it() {
+            let error = super::super::office_to_pdf_located(&|| None, "Report.docx", DOCX_HEAD).unwrap_err().to_string();
+            assert!(error.starts_with("Report.docx: "), "{error}");
+            assert!(error.contains("needs LibreOffice, which isn't installed"), "{error}");
+            assert!(error.contains("libreoffice.org") && error.contains("PDFCRAFT_SOFFICE"), "{error}");
+        }
+
+        #[test]
+        fn a_name_that_is_not_an_office_file_is_refused_before_anything_runs() {
+            let program = std::env::temp_dir().join("pdfcraft-no-such-soffice").join("soffice");
+            let error = super::super::office_to_pdf_located(&|| Some(program.clone()), "photo.png", DOCX_HEAD).unwrap_err().to_string();
+            assert!(error.contains("isn't a Word, Excel or PowerPoint file"), "{error}");
         }
 
         /// A real conversion, when LibreOffice is installed (skipped otherwise).

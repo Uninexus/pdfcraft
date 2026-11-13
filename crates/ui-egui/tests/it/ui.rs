@@ -1253,7 +1253,7 @@ fn a_file_combine_does_not_take_is_left_out_of_a_drop_and_named() {
     let path = std::env::temp_dir().join(format!("pdfcraft-combine-drop-{}.zip", std::process::id()));
     std::fs::write(&path, b"PK\x03\x04").unwrap();
     let dropped: [egui::DroppedFileHandle; 4] = [
-        std::sync::Arc::new(Dropped { path: "report.docx".into(), bytes: b"PK\x03\x04".to_vec() }),
+        std::sync::Arc::new(Dropped { path: "movie.mp4".into(), bytes: b"PK\x03\x04".to_vec() }),
         std::sync::Arc::new(Dropped { path: "one.pdf".into(), bytes: FIXTURE.to_vec() }),
         std::sync::Arc::new(Dropped { path: path.clone(), bytes: Vec::new() }),
         // A PDF without the name of one is still a PDF.
@@ -1264,7 +1264,9 @@ fn a_file_combine_does_not_take_is_left_out_of_a_drop_and_named() {
     std::fs::remove_file(&path).ok();
     assert_eq!(combine_names(&h), ["first.pdf", "one.pdf", "scan"]);
     let zip = path.file_name().unwrap().to_string_lossy().into_owned();
-    h.get_by_label(&format!("Not added: report.docx, {zip}. Combine takes PDFs, images and text files."));
+    h.get_by_label(&format!(
+        "Not added: movie.mp4, {zip}. Combine takes PDFs, images, text files and Word, Excel, PowerPoint, OpenDocument and RTF files."
+    ));
 }
 
 #[test]

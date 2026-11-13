@@ -32,19 +32,20 @@ pub(super) fn combinable_in(dir: &std::path::Path, recursive: bool) -> (Vec<std:
     (found, more)
 }
 
-/// Whether a file with extension `ext` can join the list: a PDF, or an image or text file that
-/// becomes one.
+/// Whether a file with extension `ext` can join the list: a PDF, an image or text file that
+/// becomes one, or an Office document LibreOffice converts to one.
 fn combinable(ext: &str) -> bool {
-    std::iter::once("pdf").chain(pdfcraft_engine::CONVERTIBLE).any(|c| ext.eq_ignore_ascii_case(c))
+    let office = if cfg!(target_arch = "wasm32") { &[][..] } else { pdfcraft_engine::OFFICE_EXTENSIONS };
+    std::iter::once("pdf").chain(pdfcraft_engine::CONVERTIBLE).chain(office.iter().copied()).any(|c| ext.eq_ignore_ascii_case(c))
 }
 
-/// Whether Combine takes a file by what it is: a PDF (by its header or its name) or an image or
-/// text file it converts, as `Session::as_pdf_inline` tells them apart. Not an Office document:
-/// converting one runs LibreOffice for seconds, which Combine can't do on the frame thread, so
-/// it is left out and named rather than listed as a file that can't be read.
+/// Whether Combine takes a file by what it is: a PDF (by its header or its name), or an image,
+/// text or Office file it converts, as `Session::as_pdf` tells them apart. An Office document is
+/// converted by LibreOffice on a worker as it joins the list (`stage_combine_with`).
 pub(super) fn takes(name: &str, bytes: &[u8]) -> bool {
     match pdfcraft_engine::source_kind(name, bytes) {
-        Some(pdfcraft_engine::SourceKind::Office) => false,
+        // No LibreOffice on the web: an Office document is a file of a kind Combine doesn't take.
+        Some(pdfcraft_engine::SourceKind::Office) => !cfg!(target_arch = "wasm32"),
         Some(_) => true,
         None => name.to_ascii_lowercase().ends_with(".pdf"),
     }
