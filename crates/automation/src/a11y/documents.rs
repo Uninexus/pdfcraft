@@ -250,7 +250,8 @@ impl Automation {
 
     pub(crate) fn doc_compare_report(&self, a: &Args) -> Result<Value> {
         let (old, new) = self.compare_ids(a)?;
-        let bytes = self.session.compare_report(old, new).map_err(failed)?;
+        let (old_range, new_range) = (self.compare_range(a, "other", old)?, self.compare_range(a, "doc", new)?);
+        let bytes = self.session.compare_report_in(old, new, old_range, new_range).map_err(failed)?;
         let path = self.resolve(a.str("path")?, true)?;
         write_atomic(&path, &bytes)?;
         Ok(json!({ "path": path.to_string_lossy(), "bytes": bytes.len() }))
@@ -258,7 +259,8 @@ impl Automation {
 
     pub(crate) fn doc_compare_mark(&mut self, a: &Args) -> Result<Value> {
         let (old, new) = self.compare_ids(a)?;
-        let (n, out) = self.session.with_own_js_output(new, |s| s.mark_differences(old, new)).map_err(failed)?;
+        let (old_range, new_range) = (self.compare_range(a, "other", old)?, self.compare_range(a, "doc", new)?);
+        let (n, out) = self.session.with_own_js_output(new, |s| s.mark_differences_in(old, new, old_range, new_range)).map_err(failed)?;
         Ok(with_warnings(json!({ "comments": n }), out.errors))
     }
 }

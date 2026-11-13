@@ -10121,6 +10121,50 @@ fn comparing_documents_through_tools_within_page_ranges() {
     assert_eq!((r["old_words"].as_u64(), r["new_words"].as_u64()), (Some(2), Some(4)), "{r}");
 }
 
+/// The report and Mark as comments take the same page ranges as `doc_compare`: only the changes
+/// between the ranges are listed or marked, and each lists the documents' own pages.
+#[test]
+fn compare_report_and_mark_honour_page_ranges() {
+    let dir = workdir("compare-report-mark-ranges");
+    let mut a = auto(&dir);
+    let old = "one first\u{c}two alpha\u{c}three third\u{c}four delta";
+    let new = "one first\u{c}two ALPHA\u{c}three third\u{c}four DELTA";
+    let v1 = ok(&mut a, "doc_create", json!({ "from": "text", "text": old }))["doc"].as_u64().unwrap();
+    let v2 = ok(&mut a, "doc_create", json!({ "from": "text", "text": new }))["doc"].as_u64().unwrap();
+    let report = |a: &mut Automation, name: &str, extra: serde_json::Value| -> String {
+        let mut args = json!({ "doc": v2, "other": v1, "path": name });
+        for (k, v) in extra.as_object().unwrap() {
+            args[k] = v.clone();
+        }
+        ok(a, "doc_compare_report", args);
+        let d = ok(a, "doc_open", json!({ "path": name }))["doc"].as_u64().unwrap();
+        page_text(a, d).join(" ")
+    };
+    // Whole documents: both changes.
+    let t = report(&mut a, "all.pdf", json!({}));
+    assert!(t.contains("2 changes") && t.contains("ALPHA") && t.contains("DELTA"), "{t}");
+    // Pages 3 to 4 of each: only DELTA, on its own page 4, and the report names the ranges.
+    let t = report(&mut a, "late.pdf", json!({ "doc_from": 3, "doc_to": 4, "other_from": 3, "other_to": 4 }));
+    assert!(t.contains("1 changes") && t.contains("DELTA") && !t.contains("ALPHA"), "{t}");
+    assert!(t.contains("old page 4, new page 4") && t.contains("(pages 3 to 4)"), "{t}");
+    // Different ranges: old page 4 against new pages 3 to 4; both document's own pages are shown.
+    let t = report(&mut a, "skew.pdf", json!({ "doc_from": 3, "doc_to": 4, "other_from": 4 }));
+    assert!(t.contains("old page 4, new page 3") && t.contains("old page 4, new page 4"), "{t}");
+    assert!(a.call("doc_compare_report", &json!({ "doc": v2, "other": v1, "path": "x.pdf", "doc_to": 9 })).is_err());
+    // Mark: the comments follow the ranges.
+    assert_eq!(
+        ok(&mut a, "doc_compare_mark", json!({ "doc": v2, "other": v1, "doc_from": 1, "doc_to": 1, "other_from": 1, "other_to": 1 }))["comments"],
+        0
+    );
+    assert_eq!(
+        ok(&mut a, "doc_compare_mark", json!({ "doc": v2, "other": v1, "doc_from": 3, "doc_to": 4, "other_from": 3, "other_to": 4 }))["comments"],
+        1
+    );
+    assert_eq!(ok(&mut a, "doc_compare_mark", json!({ "doc": v2, "other": v1, "doc_from": 3, "doc_to": 4, "other_from": 4 }))["comments"], 2);
+    let e = a.call("doc_compare_mark", &json!({ "doc": v2, "other": v1, "other_from": 3, "other_to": 2 })).unwrap_err();
+    assert!(matches!(e, ToolError::InvalidArgs(_)), "{e:?}");
+}
+
 /// Visual differences with page ranges pair the ranges' pages by position and report both pages.
 #[test]
 fn comparing_documents_visually_within_page_ranges() {
