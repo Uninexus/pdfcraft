@@ -10,7 +10,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::{OnceLock, mpsc};
 
-use pdfcraft_ai::AiConfig;
+use pdfcraft_ai::{AiConfig, Provider};
 
 static SETTINGS_DIR: OnceLock<PathBuf> = OnceLock::new();
 
@@ -22,6 +22,11 @@ pub fn set_settings_dir(dir: PathBuf) {
 
 fn default_path() -> Option<PathBuf> {
     SETTINGS_DIR.get().map(|d| d.join("ai.json"))
+}
+
+/// Where the ChatGPT sign-in (tokens) is kept: beside `ai.json`, in its own owner-only file.
+fn chatgpt_path_for(ai_json: &Path) -> PathBuf {
+    ai_json.with_file_name("chatgpt.json")
 }
 
 /// A request run once on a background thread. Dropping or [`Task::cancel`]ling it forgets the
@@ -89,6 +94,7 @@ impl<T: Send + 'static> Task<T> {
 
 /// The edited settings, what was last saved, and the requests that use them.
 pub struct AiSettings {
+    pub provider: Provider,
     pub base_url: String,
     pub model: String,
     pub api_key: String,
@@ -99,6 +105,23 @@ pub struct AiSettings {
     pub(crate) problem: Option<String>,
     pub(crate) test: Task<Vec<String>>,
     pub(crate) ask: Task<String>,
+    /// The ChatGPT sign-in in progress (the browser is open), and the flag that cancels it.
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code, reason = "signing in needs a browser and a loopback listener, which the web build lacks"))]
+    pub(crate) sign_in: Task<()>,
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code, reason = "signing in needs a browser and a loopback listener, which the web build lacks"))]
+    pub(crate) sign_in_error: Option<String>,
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code, reason = "signing in needs a browser and a loopback listener, which the web build lacks"))]
+    pub(crate) sign_in_cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// What the ChatGPT sign-in file says, read at start and after each sign-in or sign-out.
+    pub(crate) chatgpt: ChatGptStatus,
+}
+
+/// Whether, and as whom, the user is signed in to ChatGPT.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct ChatGptStatus {
+    pub signed_in: bool,
+    pub plan_usage: bool,
+    pub email: String,
 }
 
 impl Default for AiSettings {
@@ -115,7 +138,8 @@ impl AiSettings {
             Some(Err(e)) => (AiConfig::default(), Some(e.to_string())),
             None => (AiConfig::default(), None),
         };
-        AiSettings {
+        let mut settings = AiSettings {
+            provider: stored.provider,
             base_url: stored.base_url.clone(),
             model: stored.model.clone(),
             api_key: stored.api_key.clone().unwrap_or_default(),
@@ -125,13 +149,81 @@ impl AiSettings {
             problem,
             test: Task::Idle,
             ask: Task::Idle,
+            sign_in: Task::Idle,
+            sign_in_error: None,
+            sign_in_cancel: Default::default(),
+            chatgpt: ChatGptStatus::default(),
+        };
+        settings.saved.chatgpt_session = settings.chatgpt_path();
+        settings.reload_chatgpt();
+        settings
+    }
+
+    /// Where the ChatGPT sign-in is kept, when there is a place to keep it.
+    pub fn chatgpt_path(&self) -> Option<PathBuf> {
+        self.path.as_deref().map(chatgpt_path_for)
+    }
+
+    /// Reads the ChatGPT sign-in file again.
+    pub(crate) fn reload_chatgpt(&mut self) {
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(path) = self.chatgpt_path() {
+            match pdfcraft_ai::chatgpt::Session::load(&path) {
+                Ok(s) => self.chatgpt = ChatGptStatus { signed_in: s.signed_in(), plan_usage: s.plan_usage(), email: s.email.clone() },
+                Err(e) => {
+                    self.chatgpt = ChatGptStatus::default();
+                    self.problem = Some(e.to_string());
+                }
+            }
         }
+    }
+
+    /// Opens the browser for a ChatGPT sign-in; the answer is the signed-in email.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn start_chatgpt_sign_in(&mut self, ctx: &egui::Context, inline: bool) {
+        let Some(path) = self.chatgpt_path() else {
+            self.sign_in = Task::Done(Err("there is nowhere to keep a ChatGPT sign-in in this build".to_owned()));
+            return;
+        };
+        self.sign_in_error = None;
+        let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        self.sign_in_cancel = cancel.clone();
+        let opener = ctx.clone();
+        self.sign_in.start(ctx, inline, move || {
+            let open = |url: &str| opener.open_url(egui::OpenUrl::new_tab(url));
+            let session = pdfcraft_ai::chatgpt::sign_in(&path, &open, &cancel).map_err(|e| e.to_string())?;
+            // The file holds tokens: on Windows only the user and SYSTEM may read it (Unix gets 0600).
+            #[cfg(windows)]
+            if let Err(e) =
+                pdfcraft_platform::owner_only::current_user_sid().and_then(|me| pdfcraft_platform::owner_only::restrict_to_owner(&path, &me))
+            {
+                return Err(format!("cannot restrict the ChatGPT sign-in file to your account: {e}"));
+            }
+            let _ = session;
+            Ok(())
+        });
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn cancel_chatgpt_sign_in(&mut self) {
+        self.sign_in_cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+        self.sign_in.cancel();
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn chatgpt_sign_out(&mut self) {
+        if let Some(path) = self.chatgpt_path() {
+            self.problem = pdfcraft_ai::chatgpt::sign_out(&path).err().map(|e| e.to_string());
+        }
+        self.reload_chatgpt();
     }
 
     /// The settings as typed, without the environment's.
     pub fn stored(&self) -> AiConfig {
         let key = self.api_key.trim();
         AiConfig {
+            provider: self.provider,
+            chatgpt_session: self.chatgpt_path(),
             base_url: self.base_url.trim().to_owned(),
             api_key: (!key.is_empty()).then(|| key.to_owned()),
             model: self.model.trim().to_owned(),
@@ -146,11 +238,14 @@ impl AiSettings {
 
     /// Whether a question can be sent: an address and a model are set.
     pub fn is_configured(&self) -> bool {
-        self.effective().check().is_ok()
+        self.problem_with_config().is_none()
     }
 
     /// Why the settings are not usable yet, in the words [`AiConfig::check`] gives.
     pub fn problem_with_config(&self) -> Option<String> {
+        if self.effective().provider == Provider::ChatGpt && !(self.chatgpt.signed_in && self.chatgpt.plan_usage) {
+            return Some("not signed in to ChatGPT".to_owned());
+        }
         self.effective().check().err().map(|e| e.to_string())
     }
 

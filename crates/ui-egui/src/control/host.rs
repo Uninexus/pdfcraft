@@ -147,7 +147,7 @@ impl Host for crate::PdfCraftApp {
             "hotbar": self.hotbar,
             "comment_tool_pinned": self.comment_prefs.pinned,
             // The key itself is never reported, only whether one is set.
-            "ai": json!({ "configured": self.ai.is_configured(), "base_url": self.ai.effective().base_url, "model": self.ai.effective().model, "api_key_set": self.ai.effective().api_key.is_some() }),
+            "ai": json!({ "configured": self.ai.is_configured(), "provider": self.ai.effective().provider.as_str(), "base_url": self.ai.effective().base_url, "model": self.ai.effective().model, "api_key_set": self.ai.effective().api_key.is_some() }),
             "units": self.units.label(),
             "blank_paper": self.blank_paper.token(),
             // Home's pinned folders, in order, and whether each is folded down to its heading.

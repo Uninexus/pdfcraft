@@ -37,7 +37,7 @@ fn serve_once(status: &'static str, body: &'static str) -> (String, std::thread:
 }
 
 fn cfg(url: &str) -> AiConfig {
-    AiConfig { base_url: url.into(), api_key: Some("sk-secret".into()), model: "m1".into(), timeout_secs: 10 }
+    AiConfig { base_url: url.into(), api_key: Some("sk-secret".into()), model: "m1".into(), timeout_secs: 10, ..Default::default() }
 }
 
 #[test]
@@ -160,4 +160,20 @@ fn translate_question_names_the_language_and_refuses_junk() {
         assert_eq!(translate_question(bad), None, "{bad:?}");
     }
     assert!(SUMMARY_QUESTION.contains("Summarize"));
+}
+
+#[test]
+fn the_chatgpt_provider_is_saved_and_needs_a_model_but_no_address_or_key() {
+    let dir = tempfile::tempdir().expect("dir");
+    let path = dir.path().join("ai.json");
+    let chatgpt = AiConfig { provider: Provider::ChatGpt, model: "m".into(), ..Default::default() };
+    chatgpt.save(&path).expect("save");
+    assert_eq!(AiConfig::load(&path).expect("load").provider, Provider::ChatGpt);
+    assert!(chatgpt.check().is_ok());
+    assert!(AiConfig { model: String::new(), ..chatgpt.clone() }.check().is_err());
+    // The default stays the endpoint provider, which still needs an address.
+    assert_eq!(AiConfig::default().provider, Provider::Endpoint);
+    assert!(AiConfig { model: "m".into(), ..Default::default() }.check().is_err());
+    assert_eq!(Provider::parse("ChatGPT"), Some(Provider::ChatGpt));
+    assert_eq!(Provider::parse("bogus"), None);
 }
