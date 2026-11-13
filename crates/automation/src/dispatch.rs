@@ -624,6 +624,9 @@ impl Automation {
                     char_spacing: a.opt_num("char_spacing")?,
                     scale: a.opt_num("scale")?,
                     width,
+                    // `substitute_fonts: false` keeps the paragraph as it is rather than redraw it in
+                    // a stand-in font when its own font lacks a letter of the new text.
+                    refuse_substitute: a.opt_bool("substitute_fonts")? == Some(false),
                     ..Default::default()
                 };
                 let (dx, dy) = (a.opt_num("dx")?, a.opt_num("dy")?);
@@ -684,6 +687,11 @@ impl Automation {
                     return Err(ToolError::InvalidArgs(format!("line {line} is out of range: page {} has {n} lines", page + 1)));
                 }
                 let text = a.str("text")?.to_owned();
+                if a.opt_bool("substitute_fonts")? == Some(false) {
+                    return Err(ToolError::InvalidArgs(
+                        "substitute_fonts: false is for paragraph edits (paragraph, from text_paragraphs); a line edit always uses a stand-in font for letters its font lacks".into(),
+                    ));
+                }
                 let mut out = self.apply(&a, Edit::EditTextLine { page, line: line as usize - 1, text })?;
                 let after = self.doc(&a)?.text_lines(page);
                 if let Some(l) = after.get(line as usize - 1) {

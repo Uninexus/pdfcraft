@@ -3518,6 +3518,127 @@ fn missing_glyphs_substitute_helvetica_and_impossible_text_is_refused() {
     assert!(text::replace_line(&mut doc, 0, 5, "x").is_err(), "no such line");
 }
 
+/// A tester's subset font lacks the letter being typed. Edit text redraws the paragraph in a
+/// standard face and now says which letters forced it (`LineEdit::missing`), for a paragraph and
+/// for a line; a writer who turns substitution off (`BlockStyle::refuse_substitute`) gets a
+/// refusal that names the letters and the font and leaves the page as it was; choosing the subset
+/// itself names the letter and what to do.
+#[test]
+fn a_subset_missing_a_letter_names_it_and_substitution_can_be_refused() {
+    let content = "BT /F2 10 Tf 72 600 Td (ab) Tj ET";
+    // Paragraph and line rewrites report the letters the subset lacked.
+    let mut doc = text_page(content);
+    let edit = text::rewrite_block(&mut doc, 0, 0, Some("abc"), &text::BlockStyle::default()).unwrap();
+    assert_eq!((edit.substituted.as_deref(), edit.missing.as_slice()), (Some("Helvetica"), ['c'].as_slice()));
+    let mut doc = text_page(content);
+    let edit = text::replace_line(&mut doc, 0, 0, "abc").unwrap();
+    assert_eq!((edit.substituted.as_deref(), edit.missing.as_slice()), (Some("Helvetica"), ['c'].as_slice()));
+    // Text the subset can show substitutes nothing and names nothing.
+    let mut doc = text_page(content);
+    let edit = text::rewrite_block(&mut doc, 0, 0, Some("ba"), &text::BlockStyle::default()).unwrap();
+    assert_eq!((edit.substituted, edit.missing), (None, Vec::new()));
+
+    // With substitution off the edit is refused, naming the letter and the font, and changes nothing.
+    let mut doc = text_page(content);
+    let before = page_content_bytes(&doc, 0);
+    let strict = text::BlockStyle { refuse_substitute: true, ..Default::default() };
+    let Err(EditError::Invalid(msg)) = text::rewrite_block(&mut doc, 0, 0, Some("abcd"), &strict) else { panic!("expected a refusal") };
+    assert!(msg.contains("c (U+0063)") && msg.contains("Arial") && msg.contains("substitute fonts are off"), "{msg}");
+    assert_eq!(page_content_bytes(&doc, 0), before);
+    // The same text the subset can show is fine with substitution off.
+    assert_eq!(text::rewrite_block(&mut doc, 0, 0, Some("ba"), &strict).unwrap().substituted, None);
+
+    // The same refusal on the paragraph path that handles mixed runs.
+    let mut doc = text_page("BT /F2 10 Tf 72 600 Td (ab) Tj /F1 10 Tf ( ab) Tj ET");
+    let before = page_content_bytes(&doc, 0);
+    let Err(EditError::Invalid(msg)) = text::rewrite_block(&mut doc, 0, 0, Some("abc ab"), &strict) else { panic!("expected a refusal") };
+    assert!(msg.contains("c (U+0063)") && msg.contains("substitute fonts are off"), "{msg}");
+    assert_eq!(page_content_bytes(&doc, 0), before);
+
+    // Choosing the subset itself for a letter it lacks says which letter, which font and what to do.
+    let mut doc = text_page(content);
+    let chosen = text::BlockStyle { resource: Some("F2".into()), ..Default::default() };
+    let Err(EditError::Invalid(msg)) = text::rewrite_block(&mut doc, 0, 0, Some("abc"), &chosen) else { panic!("expected an error") };
+    assert!(msg.contains("Arial") && msg.contains("c (U+0063)") && msg.contains("Clear the font choice") && msg.contains("Load font"), "{msg}");
+}
+
+/// A weight change is not a missing letter: bold-only on text the subset can show reports nothing
+/// missing and is not refused with substitution off. A no-break space the subset lacks is a missing
+/// character like any other (only U+0020 and row breaks are exempt), reported and refusable.
+#[test]
+fn a_bold_change_is_not_a_missing_letter_and_a_thin_space_is_one() {
+    let content = "BT /F2 10 Tf 72 600 Td (ab) Tj ET";
+    for refuse_substitute in [false, true] {
+        let mut doc = text_page(content);
+        let style = text::BlockStyle { bold: Some(true), refuse_substitute, ..Default::default() };
+        let edit = text::rewrite_block(&mut doc, 0, 0, Some("ab"), &style).unwrap();
+        assert!(edit.missing.is_empty(), "{edit:?}");
+    }
+    // Mixed runs take the styled path, which keeps the thin space as typed.
+    let mixed = "BT /F2 10 Tf 72 600 Td (ab) Tj /F1 10 Tf ( ab) Tj ET";
+    let mut doc = text_page(mixed);
+    let edit = text::rewrite_block(&mut doc, 0, 0, Some("a\u{2009}b ab"), &text::BlockStyle::default()).unwrap();
+    assert_eq!((edit.substituted.is_some(), edit.missing.as_slice()), (true, ['\u{2009}'].as_slice()));
+    {
+        let mut doc = text_page(mixed);
+        let before = page_content_bytes(&doc, 0);
+        let strict = text::BlockStyle { refuse_substitute: true, ..Default::default() };
+        let Err(EditError::Invalid(msg)) = text::rewrite_block(&mut doc, 0, 0, Some("a\u{2009}b ab"), &strict) else { panic!("expected a refusal") };
+        assert!(msg.contains("U+2009"), "{msg}");
+        assert_eq!(page_content_bytes(&doc, 0), before);
+    }
+}
+
+/// A justified edit of a single-run paragraph keeps working where a complete same-family face is on
+/// the page: the sibling-font route must not send it to the styled path, which refuses justification.
+#[test]
+fn a_justified_edit_still_works_beside_a_complete_same_family_face() {
+    let font = |tag: &str, widths: &str| {
+        format!("<< /Type /Font /Subtype /TrueType /BaseFont /{tag}Arial /FirstChar 97 /LastChar 99 /Widths [{widths}] /Encoding /WinAnsiEncoding >>")
+    };
+    let (subset, full) = (font("ABCDEF+", "500 520 0"), font("", "500 520 510"));
+    let content = stream("", "BT /F1 12 Tf 72 700 Td (ab) Tj ET");
+    let mut doc = build(&[
+        "<< /Type /Catalog /Pages 2 0 R >>",
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] /Contents 4 0 R /Resources << /Font << /F1 5 0 R /F2 6 0 R >> >> >>",
+        &content,
+        &subset,
+        &full,
+    ]);
+    let style = text::BlockStyle { align: Some(crate::added::Align::Justify), ..Default::default() };
+    text::rewrite_block(&mut doc, 0, 0, Some("abc ab"), &style).unwrap();
+}
+
+/// A complete face of the same family on the page (not a subset) completes the letters a subset
+/// lacks: nothing is substituted and nothing is reported missing (docs/gaps.md gap 3).
+#[test]
+fn a_full_face_of_the_same_family_on_the_page_completes_a_subset() {
+    let font = |tag: &str, last: u32, widths: &str| {
+        format!(
+            "<< /Type /Font /Subtype /TrueType /BaseFont /{tag}Arial /FirstChar 97 /LastChar {last} /Widths [{widths}] /Encoding /WinAnsiEncoding >>"
+        )
+    };
+    let (subset, full) = (font("ABCDEF+", 99, "500 520 0"), font("", 99, "500 520 510"));
+    let content = stream("", "BT /F1 12 Tf 72 700 Td (ab) Tj ET");
+    let doc = build(&[
+        "<< /Type /Catalog /Pages 2 0 R >>",
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] /Contents 4 0 R /Resources << /Font << /F1 5 0 R /F2 6 0 R >> >> >>",
+        &content,
+        &subset,
+        &full,
+    ]);
+    for strict in [false, true] {
+        let mut doc = doc.clone();
+        let style = text::BlockStyle { refuse_substitute: strict, ..Default::default() };
+        let edit = text::rewrite_block(&mut doc, 0, 0, Some("abc"), &style).unwrap();
+        assert_eq!((edit.substituted, edit.missing), (None, Vec::new()), "strict {strict}");
+        let lines = text::text_lines(&reopen(&doc), 0).unwrap();
+        assert_eq!(lines.iter().map(|l| l.text.as_str()).collect::<String>(), "abc");
+    }
+}
+
 /// #4280: two paragraphs in subsets without Ç or Ã, one regular and one bold. Each edit that adds
 /// an accent sets the paragraph in a standard font of its own weight. Editing the bold one must
 /// not turn the regular one, set in its stand-in earlier, bold too, and the editor's frame for the

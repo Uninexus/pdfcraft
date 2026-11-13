@@ -14,7 +14,9 @@ fn prepare_ocr_text_edit(editor: &mut crate::history::Editor, info: &pdfcraft_re
     // in the paper's colour and draw the new text in the ink's.
     Some(match edit {
         Edit::EditTextBlock { page, block, text, mut style } => {
-            let plain = style == pdfcraft_edit::BlockStyle::default();
+            // Whether refusing a stand-in font was asked for doesn't make it a formatting change. (An OCR
+            // word edit that would need a stand-in falls back to the whole phrase, which refuses.)
+            let plain = pdfcraft_edit::BlockStyle { refuse_substitute: false, ..style.clone() } == pdfcraft_edit::BlockStyle::default();
             // Only invisible text is sampled; the blocks are usually cached from opening it.
             if style.cover.is_none()
                 && let Some(info) = info.pages.get(page)
@@ -335,6 +337,7 @@ impl Session {
         if cx.redaction_identification != pdfcraft_redact::Identification::default() {
             notices.push(EditNotice::RedactionIdentification(cx.redaction_identification));
         }
+        notices.extend(substitute_notice(&cx));
         let previous = std::mem::replace(&mut editor.cos, next);
         let keys = keys_after(&edit).unwrap_or_else(|| editor.keys.clone());
         let previous_keys = std::mem::replace(&mut editor.keys, keys);
@@ -742,6 +745,28 @@ fn take_xfa_output(doc: &mut Document, out: js::JsOutput, ran_away: bool) {
         doc.xfa_scripts_off = true;
         doc.js_output.errors.push(XFA_SCRIPTS_OFF.into());
     }
+}
+
+/// The notice for text edits that drew a paragraph in a stand-in font (one for the whole edit,
+/// batches included): the stand-ins once each, and the letters their paragraphs' fonts lacked.
+fn substitute_notice(cx: &EditCtx) -> Option<EditNotice> {
+    if cx.substituted.is_empty() {
+        return None;
+    }
+    let mut fonts: Vec<String> = Vec::new();
+    let mut missing: Vec<char> = Vec::new();
+    for (font, letters) in &cx.substituted {
+        if !fonts.contains(font) {
+            fonts.push(font.clone());
+        }
+        for letter in letters {
+            if !missing.contains(letter) {
+                missing.push(*letter);
+            }
+        }
+    }
+    missing.truncate(pdfcraft_edit::text::MAX_MISSING_REPORTED);
+    Some(EditNotice::SubstituteFont { fonts, missing })
 }
 
 /// What `edit`, taking `prev` to `next`, wants said: never silent (AGENTS.md §4).

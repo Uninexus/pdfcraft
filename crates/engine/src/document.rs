@@ -101,6 +101,11 @@ pub enum EditNotice {
     /// said the file conforms to PDF/A or PDF/UA: each claim was written back in a packet of its
     /// own, or lost (see [`RedactionIdentification`](crate::RedactionIdentification)).
     RedactionIdentification(pdfcraft_redact::Identification),
+    /// Text edits drew paragraphs in a stand-in font because their own font (usually a subset that
+    /// holds only the letters the document used) lacked letters of the new text. `fonts` are the
+    /// stand-ins, de-duplicated; `missing` the letters the paragraphs' fonts lacked, when known.
+    /// Undo restores the original font; a font with the letters avoids it.
+    SubstituteFont { fonts: Vec<String>, missing: Vec<char> },
 }
 
 /// The standards whose identification `id` has as `claim`: "PDF/A", "PDF/UA" or both, joined.
@@ -122,6 +127,15 @@ impl std::fmt::Display for EditNotice {
                 )
             }
             EditNotice::RedactionElsewhere(e) => elsewhere_text(e, f),
+            EditNotice::SubstituteFont { fonts, missing } => {
+                let letters: Vec<String> = missing.iter().map(|c| format!("{c} (U+{:04X})", u32::from(*c))).collect();
+                write!(
+                    f,
+                    "a font lacks {}: they, and where its font can't be mixed with the stand-in the rest of the paragraph, were drawn in {}; Undo restores the original, or choose a font that has the letters (Load font…)",
+                    letters.join(", "),
+                    fonts.join(", ")
+                )
+            }
             EditNotice::RedactionIdentification(id) => {
                 use pdfcraft_redact::Claim;
                 write!(f, "the document's XMP metadata held the redacted text and was removed")?;

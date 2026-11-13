@@ -183,6 +183,9 @@ fn drawn_right(before: &[TextLine], indices: &[usize], after: &[TextLine]) -> Re
     Ok(drawn.iter().map(|line| line.rect[2]).reduce(f64::max))
 }
 
+/// Where each change's words end now, the stand-in font used, and the letters it was needed for.
+type Applied = (Vec<Option<f64>>, Option<String>, Vec<char>);
+
 /// Rewrite each change of `plan` in `doc`, last first: a rewrite goes where its words were or at
 /// the end of the page, so the words before it keep their indexes (an error if they don't). Gives
 /// how far right each drew.
@@ -194,12 +197,13 @@ fn apply(
     plan: &[Change],
     style: &BlockStyle,
     max_glyphs: usize,
-) -> Result<(Vec<Option<f64>>, Option<String>), EditError> {
+) -> Result<Applied, EditError> {
     // The stretch starts where its words did. Its own box would centre a word that happens to
     // sit in the middle of the page.
     let mut style = BlockStyle { align: Some(crate::added::Align::Left), changed_words_only: false, ..style.clone() };
     let mut rights = vec![None; plan.len()];
     let mut substituted = None;
+    let mut missing: Vec<char> = Vec::new();
     let original = word_lines(doc, page)?;
     for (at, change) in plan.iter().enumerate().rev() {
         let indices = members.get(change.runs.clone()).ok_or_else(|| EditError::Invalid("the phrase has no such words".into()))?;
@@ -223,6 +227,11 @@ fn apply(
         ]);
         let edit = rewrite_styled_block(doc, page, &part, &before, Some(&change.text), &style, max_glyphs)?;
         substituted = substituted.or(edit.substituted);
+        for ch in edit.missing {
+            if !missing.contains(&ch) && missing.len() < crate::text::MAX_MISSING_REPORTED {
+                missing.push(ch);
+            }
+        }
         let right = drawn_right(&before, indices, &word_lines(doc, page)?)?;
         if right.is_none() && !change.text.is_empty() {
             return Err(EditError::Invalid("the new words were not drawn".into()));
@@ -231,7 +240,7 @@ fn apply(
             *slot = right;
         }
     }
-    Ok((rights, substituted))
+    Ok((rights, substituted, missing))
 }
 
 /// Whether a change that drew as far as `right` needs another try. It should end by the middle of
@@ -313,7 +322,7 @@ pub(crate) fn rewrite_changed_words(
             change.squeeze = squeezes.get(&change.runs.start).copied();
         }
         let mut trial = doc.clone();
-        let (rights, substituted) = apply(&mut trial, page, phrase, &members, &plan, style, max_glyphs).ok()?;
+        let (rights, substituted, missing) = apply(&mut trial, page, phrase, &members, &plan, style, max_glyphs).ok()?;
         let mut again = false;
         for (change, right) in plan.iter().zip(&rights) {
             if let Some(right) = right {
@@ -322,7 +331,7 @@ pub(crate) fn rewrite_changed_words(
         }
         if !again {
             *doc = trial;
-            return Some(LineEdit { substituted, ..Default::default() });
+            return Some(LineEdit { substituted, missing, ..Default::default() });
         }
     }
     None

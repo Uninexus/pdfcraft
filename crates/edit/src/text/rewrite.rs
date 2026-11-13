@@ -1,8 +1,9 @@
 use super::blocks::{BlockStyle, TextBlock, paragraph_separator, row_break, wrap};
+use super::fallback::strip_subset_tag;
 use super::fallback::{
     Encoder, MAX_TYPE3_GLYPHS, Type3Fallback, Type3Run, drop_unused_fallback_fonts, is_variation_selector, needs_type3, no_japanese_font,
-    source_character_advance, source_encodes, source_fallback_runs, source_family, source_program_completes, source_show, source_space, source_width,
-    type3_encode, type3_font,
+    sibling_font_completes, source_character_advance, source_encodes, source_fallback_runs, source_family, source_program_completes, source_show,
+    source_space, source_width, type3_encode, type3_font,
 };
 use super::interp::{Carry, Origin, TextState, interpret};
 use super::lines::{
@@ -26,14 +27,27 @@ pub struct LineEdit {
     /// nothing else on the page moves, so what is below may now be under them. 0 when no row was
     /// added.
     pub extends_by: f64,
+    /// The characters of the new text the paragraph's own font could not show, in order of first
+    /// appearance (at most [`MAX_MISSING_REPORTED`]): what `substituted` stood in for. Empty when
+    /// nothing was substituted, and for rewrites that don't say.
+    pub missing: Vec<char>,
 }
+
+/// How many missing characters a [`LineEdit`] names.
+pub const MAX_MISSING_REPORTED: usize = 24;
 
 impl LineEdit {
     /// A paragraph that went from `before` rows to `after`, rows `pitch` points apart.
     pub(crate) fn rows(substituted: Option<String>, before: usize, after: usize, pitch: f64) -> Self {
         let added = after.saturating_sub(before);
         let extends_by = if pitch.is_finite() && pitch > 0.0 { (added as f64 * pitch).min(1e6) } else { 0.0 };
-        Self { substituted, rows_before: before, rows_after: after, extends_by }
+        Self { substituted, rows_before: before, rows_after: after, extends_by, missing: Vec::new() }
+    }
+
+    /// This edit, naming the characters the paragraph's font lacked.
+    pub(crate) fn lacking(mut self, missing: Vec<char>) -> Self {
+        self.missing = missing;
+        self
     }
 
     /// Whether the paragraph now reaches lower than it did.
@@ -92,6 +106,7 @@ pub(crate) fn replace_line_with_limit(doc: &mut Document, page: usize, line: usi
     let shown = crate::bidi::to_visual(&indic_text);
     let reused = font.as_ref().filter(|m| source_encodes(m, &shown));
     let mut substituted = None;
+    let mut missing: Vec<char> = Vec::new();
     let mut replacement: Vec<Op> = Vec::new();
     // ' and " also move to the next line (and " sets the spacing); keep that.
     replacement.extend(ops.get(first).map(show_side_effects).unwrap_or_default());
@@ -106,6 +121,7 @@ pub(crate) fn replace_line_with_limit(doc: &mut Document, page: usize, line: usi
         )?),
         None => {
             let fallback_shown = crate::bidi::to_visual(&text);
+            missing = font.as_ref().map(|m| missing_characters(m, &shown)).unwrap_or_default();
             if needs_type3(&text) {
                 let fallback = type3_font(doc, &mut fonts_res, &text, source_family(&target.base_font), target.bold, max_glyphs)?;
                 let runs = type3_encode(&fallback, &fallback_shown)
@@ -179,7 +195,37 @@ pub(crate) fn replace_line_with_limit(doc: &mut Document, page: usize, line: usi
             d.set(b"Resources".to_vec(), Object::Dict(res));
         }
     })?;
-    Ok(LineEdit { substituted, ..Default::default() })
+    Ok(LineEdit { substituted, missing, ..Default::default() })
+}
+
+/// The refusal when substitution is off ([`BlockStyle::refuse_substitute`](super::BlockStyle::refuse_substitute)) and the paragraph's
+/// font lacks letters of the new text.
+pub(crate) fn refused_substitution(base_font: &str, missing: &[char]) -> EditError {
+    let letters: Vec<String> = missing.iter().map(|c| format!("{c} (U+{:04X})", u32::from(*c))).collect();
+    let letters = if letters.is_empty() { "some letters of the new text".to_owned() } else { letters.join(", ") };
+    EditError::Invalid(format!(
+        "the paragraph's font {} has no glyph for {}, and substitute fonts are off, so it was left as it was; \
+         allow a substitute font (the letters (or the whole paragraph, when its font can't be mixed with one) are then drawn in the nearest standard or bundled face and the result says which), \
+         or choose a font that has the letters (Load font…)",
+        strip_subset_tag(base_font),
+        letters
+    ))
+}
+
+/// The characters of `text` that `metrics`' font can't show, once each, in order, up to
+/// [`MAX_MISSING_REPORTED`]. U+0020 and row breaks are never reported (a font need not have them);
+/// other white space such as U+2009 is a character like any other.
+pub(crate) fn missing_characters(metrics: &Metrics, text: &str) -> Vec<char> {
+    let mut out: Vec<char> = Vec::new();
+    for ch in text.chars().filter(|c| *c != ' ' && !row_break(*c)) {
+        if out.len() >= MAX_MISSING_REPORTED {
+            break;
+        }
+        if !out.contains(&ch) && metrics.encode(ch.encode_utf8(&mut [0; 4])).is_none() {
+            out.push(ch);
+        }
+    }
+    out
 }
 
 /// The size of the last `Tf` before operator `at`.
@@ -287,8 +333,13 @@ fn choose_rewrite_path(
     });
     let has_multiple_runs = block.rows.iter().any(|row| row.len() > 1)
         || members.iter().any(|line| line.font != first.font || line.size != first.size || line.color != first.color);
-    let source_requires_styled_path =
-        has_special_text || registered_face || text.is_some_and(|draft| source_program_completes(doc, fonts, first, draft)) || has_multiple_runs;
+    let source_requires_styled_path = has_special_text
+        || registered_face
+        || text.is_some_and(|draft| {
+            source_program_completes(doc, fonts, first, draft)
+                || (style.align != Some(crate::added::Align::Justify) && sibling_font_completes(doc, fonts, first, draft))
+        })
+        || has_multiple_runs;
     let explicit_styled_text = !style.ranges.is_empty() || style.resource.is_some();
     Ok(RewriteDispatch {
         upright,
@@ -936,6 +987,11 @@ pub(crate) fn rewrite_block_from(
     let (font_name, ParaStyle { state: o_state, size, old_size, k }) = paragraph_style(o, style, b.phrase_size())?;
     let source = source_font(doc, &fonts_res, &font_name, first, &flat, style);
     let reuse = source.reuse;
+    // A requested family or weight change is not about missing letters: it is never refused here.
+    if style.refuse_substitute && !reuse && style.family.is_none() && style.bold.is_none() {
+        let missing = source.metrics.as_ref().map(|m| missing_characters(m, &flat)).unwrap_or_default();
+        return Err(refused_substitution(&b.base_font, &missing));
+    }
     // Preserve every drawable source glyph; cache missing-glyph lookups as well.
     let visual_indic = source.metrics.as_ref().is_some_and(|m| m.visual_order) || first.visual_order;
     let hebrew = flat.chars().any(crate::bidi::is_hebrew);
@@ -1101,7 +1157,11 @@ pub(crate) fn rewrite_block_from(
         }
     })?;
     crate::draw_on_top(doc, &p, emit.ctm, &on_top)?;
-    Ok(LineEdit::rows(font.substituted, b.rows.len(), wrapped.len(), lead * k))
+    let missing = match (&font.substituted, &source.metrics) {
+        (Some(_), Some(metrics)) if style.family.is_none() && style.bold.is_none() => missing_characters(metrics, &flat),
+        _ => Vec::new(),
+    };
+    Ok(LineEdit::rows(font.substituted, b.rows.len(), wrapped.len(), lead * k).lacking(missing))
 }
 
 /// The cover (when [`BlockStyle::cover`] asks for one) and visible rendering that start a

@@ -432,6 +432,39 @@ fn a_substitute_font_replaces_where_the_subset_lacks_a_letter_when_asked() {
     assert_eq!(s.get(id).unwrap().bytes, before);
 }
 
+/// Edit text on a paragraph whose subset font lacks a letter redraws it in a stand-in font and the
+/// session says so (`EditNotice::SubstituteFont`, named letters and font), never silently; text
+/// the subset can draw says nothing; one undo clears the notice's cause.
+#[test]
+fn editing_a_paragraph_in_a_subset_says_which_letters_forced_a_substitute() {
+    let (mut s, id) = open(skia_subset_pdf());
+    let edit = |text: &str| crate::Edit::EditTextBlock { page: 0, block: 0, text: text.into(), style: Default::default() };
+    s.apply(id, edit("Germany")).unwrap();
+    assert!(s.get(id).unwrap().edit_notices.is_empty(), "{:?}", s.get(id).unwrap().edit_notices);
+    s.undo(id).unwrap();
+    s.apply(id, edit("Graz")).unwrap();
+    let notices = s.get(id).unwrap().edit_notices.clone();
+    let [crate::EditNotice::SubstituteFont { fonts, missing }] = notices.as_slice() else { panic!("{notices:?}") };
+    assert_eq!(fonts.len(), 1, "{notices:?}");
+    assert!(!fonts[0].is_empty() && !fonts[0].ends_with("Type3"), "{notices:?}");
+    assert!(!missing.is_empty() && missing.iter().all(|c| "Graz".contains(*c)), "{notices:?}");
+    let text = notices[0].to_string();
+    assert!(text.contains("U+") && text.contains(&fonts[0]) && text.contains("Undo"), "{text}");
+    // A weight change alone names no lost letter: no notice, and not refused with substitution off.
+    s.undo(id).unwrap();
+    for refuse_substitute in [false, true] {
+        let style = pdfcraft_edit::BlockStyle { bold: Some(true), refuse_substitute, ..Default::default() };
+        s.apply(id, crate::Edit::EditTextBlock { page: 0, block: 0, text: "Poland".into(), style }).unwrap();
+        assert!(s.get(id).unwrap().edit_notices.is_empty(), "{:?}", s.get(id).unwrap().edit_notices);
+        s.undo(id).unwrap();
+    }
+    // Refused with substitution off: the paragraph is as it was.
+    let strict = pdfcraft_edit::BlockStyle { refuse_substitute: true, ..Default::default() };
+    let refused = s.apply(id, crate::Edit::EditTextBlock { page: 0, block: 0, text: "Graz".into(), style: strict });
+    assert!(refused.is_err_and(|e| e.to_string().contains("substitute fonts are off")));
+    assert_eq!(texts(&s, id, 0), ["Poland", "Germany and more"]);
+}
+
 /// Letters the subset has are replaced in its own font in both modes, and nothing is substituted.
 #[test]
 fn a_replacement_the_subset_can_draw_never_uses_a_substitute_font() {

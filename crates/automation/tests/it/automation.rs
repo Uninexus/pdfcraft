@@ -4681,6 +4681,42 @@ fn text_replace_uses_a_substitute_font_only_when_asked() {
     ));
 }
 
+/// Edit text on a paragraph whose subset font lacks the typed letter: the result names the stand-in
+/// font and the letters (and warns), and `substitute_fonts: false` refuses instead, naming the
+/// letters and leaving the page and the undo history alone.
+#[test]
+fn text_edit_reports_a_substitute_font_and_can_refuse_it() {
+    let dir = workdir("edit-substitute");
+    std::fs::write(dir.join("subset.pdf"), subset_font_pdf()).unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "subset.pdf" }))["doc"].as_u64().unwrap();
+    let args = |extra: Value| {
+        let mut v = json!({ "doc": doc, "page": 1, "paragraph": 1, "text": "cb ba" });
+        v.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        v
+    };
+    // Refused, with the letters named; nothing changed.
+    let e = err(&mut a, "text_edit", args(json!({ "substitute_fonts": false })));
+    assert!(e.to_string().contains("c (U+0063)") && e.to_string().contains("substitute fonts are off"), "{e}");
+    assert_eq!(page_text(&mut a, doc), ["ab ba\nab in Helvetica"]);
+    assert!(a.call("edit_undo", &json!({ "doc": doc })).is_err(), "the refused edit left nothing to undo");
+    // Letters the subset has need no stand-in, whichever way the flag is set.
+    let r = ok(&mut a, "text_edit", args(json!({ "text": "ba ab", "substitute_fonts": false })));
+    assert!(r.get("substituted_fonts").is_none() && r.get("warnings").is_none(), "{r}");
+    ok(&mut a, "edit_undo", json!({ "doc": doc }));
+    // The default redraws the paragraph in the stand-in font and says so.
+    let r = ok(&mut a, "text_edit", args(json!({})));
+    assert_eq!(r["missing_letters"], "c", "{r}");
+    assert_eq!(r["substituted_fonts"], json!(["Helvetica"]), "{r}");
+    assert!(r["warnings"][0].as_str().is_some_and(|w| w.contains("c (U+0063)") && w.contains("Helvetica") && w.contains("Undo")), "{r}");
+    assert_eq!(page_text(&mut a, doc)[0], "cb ba\nab in Helvetica");
+    // The flag applies to paragraphs only.
+    assert!(matches!(
+        a.call("text_edit", &json!({ "doc": doc, "page": 1, "line": 1, "text": "x", "substitute_fonts": false })),
+        Err(ToolError::InvalidArgs(_))
+    ));
+}
+
 #[test]
 fn editing_existing_text_through_tools() {
     let dir = workdir("edit-text");

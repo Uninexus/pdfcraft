@@ -264,6 +264,7 @@ impl PdfCraftApp {
                     self.notify(match &n {
                         pdfcraft_engine::EditNotice::Undrawn(t) => crate::content_ui::undrawn_message(t),
                         pdfcraft_engine::EditNotice::BackdropsLeftOff { pages } => crate::marks_ui::backdrops_left_off_message(pages),
+                        pdfcraft_engine::EditNotice::SubstituteFont { fonts, missing } => substitute_font_message(fonts, missing),
                         pdfcraft_engine::EditNotice::RedactionElsewhere(e) => crate::dialogs::still_holding_note(e).unwrap_or_else(|| n.to_string()),
                         pdfcraft_engine::EditNotice::RedactionIdentification(id) => {
                             crate::dialogs::identification_note(id).unwrap_or_else(|| n.to_string())
@@ -1403,6 +1404,19 @@ fn typing_step(ctx: &egui::Context, id: egui::Id, text: &str, undo: bool) -> Opt
     Some(stepped)
 }
 
+/// After Edit text drew a paragraph in a stand-in font, because the paragraph's own (usually a
+/// subset holding only the letters the document used) lacked letters of the new text: which
+/// letters, which font, and what to do. Never left silent.
+pub(crate) fn substitute_font_message(fonts: &[String], missing: &[char]) -> String {
+    let letters = missing.iter().map(|c| format!("{c} (U+{:04X})", u32::from(*c))).collect::<Vec<_>>().join(", ");
+    crate::i18n::fmt(
+        tl!(
+            "A font lacks {letters}: they (and, where the font can't be mixed with the stand-in, the rest of the paragraph) were drawn in {font}. Undo to restore the original, or choose a font that has the letters."
+        ),
+        &[("letters", &letters), ("font", &fonts.join(", "))],
+    )
+}
+
 #[cfg(test)]
 mod tests;
 
@@ -1721,6 +1735,54 @@ mod revert_draft_tests {
         );
         assert_eq!(app.active_ids(), Some((0, source)));
         assert_eq!(app.toast.as_ref().unwrap().0, pdfcraft_engine::EditError::NoDocument.to_string());
+    }
+}
+
+#[cfg(test)]
+mod substitute_notice_tests {
+    use pdfcraft_engine::Edit;
+
+    /// A one-page PDF whose paragraph "ab" is set in a subset (glyphs for a and b only) of a face no
+    /// computer has.
+    fn subset_pdf() -> Vec<u8> {
+        let content = "BT /F1 12 Tf 72 700 Td (ab) Tj ET";
+        let objs = [
+            "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>".to_string(),
+            format!("<< /Length {} >>\nstream\n{content}\nendstream", content.len()),
+            "<< /Type /Font /Subtype /TrueType /BaseFont /ABCDEF+NoSuchFace /FirstChar 97 /LastChar 99 /Widths [500 520 0] /Encoding /WinAnsiEncoding >>"
+                .to_string(),
+        ];
+        let mut out = b"%PDF-1.7\n".to_vec();
+        let mut offsets = Vec::new();
+        for (i, o) in objs.iter().enumerate() {
+            offsets.push(out.len());
+            out.extend_from_slice(format!("{} 0 obj\n{o}\nendobj\n", i + 1).as_bytes());
+        }
+        let xref = out.len();
+        out.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1).as_bytes());
+        for o in offsets {
+            out.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+        }
+        out.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objs.len() + 1).as_bytes());
+        out
+    }
+
+    /// Retyping a word with a letter the subset lacks redraws the paragraph in a stand-in font, and
+    /// the interface says which letter and which font (never silent); text the subset can draw says
+    /// nothing.
+    #[test]
+    fn a_stand_in_font_is_named_in_the_notice() {
+        let mut app = crate::PdfCraftApp::new();
+        app.open_bytes("subset.pdf", None, subset_pdf()).unwrap();
+        app.active = Some(0);
+        let edit = |text: &str| Edit::EditTextBlock { page: 0, block: 0, text: text.into(), style: Default::default() };
+        assert!(app.apply_edit(edit("ba")));
+        assert!(app.toast.is_none(), "{:?}", app.toast);
+        assert!(app.apply_edit(edit("abc")));
+        let toast = app.toast.as_ref().map(|t| t.0.clone()).unwrap_or_default();
+        assert!(toast.contains("c (U+0063)") && toast.contains("Helvetica") && toast.contains("Undo"), "{toast}");
     }
 }
 
