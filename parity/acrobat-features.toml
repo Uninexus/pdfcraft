@@ -7472,11 +7472,11 @@ title = "Translate documents"
 area = "J"
 tier = "P3"
 milestone = "M13"
-status = "planned"
-commands = []
-tools = []
-evidence = []
-notes = "through an optional AiProvider; never Adobe's cloud"
+status = "partial"
+commands = ["ai.translate"]
+tools = ["ai_translate"]
+evidence = ["crates/automation/tests/it/ai.rs::summarize_and_translate_send_their_instruction_with_the_page_text", "crates/ai/src/tests.rs::translate_question_names_the_language_and_refuses_junk"]
+notes = "File > Translate with AI Assistant… and ai_translate send the page text and a target language to the endpoint set in Preferences > AI Assistant (your own model, never Adobe's cloud) and show the translation as text. Missing: writing the translation back into a new PDF with the original layout."
 
 [[feature]]
 id = "create.cloud-office-conversion"
@@ -9843,11 +9843,11 @@ title = "Summarize a document"
 area = "N"
 tier = "P2"
 milestone = "M13"
-status = "planned"
-commands = []
-tools = []
-evidence = []
-notes = ""
+status = "partial"
+commands = ["ai.summary"]
+tools = ["ai_summarize"]
+evidence = ["crates/automation/tests/it/ai.rs::summarize_and_translate_send_their_instruction_with_the_page_text", "crates/ui-egui/src/dialogs/ai_ui.rs::each_mode_builds_its_instruction_or_waits_for_its_text"]
+notes = "File > Summarize with AI Assistant… (the Summarize tab of the AI Assistant dialog) and ai_summarize send the page text to the endpoint set in Preferences > AI Assistant and show a short summary with key points and page numbers. Missing: summaries by section, adjustable length, streaming."
 
 [[feature]]
 id = "misc.ai-ask"
@@ -9855,11 +9855,11 @@ title = "Ask questions with citations to pages"
 area = "N"
 tier = "P2"
 milestone = "M13"
-status = "planned"
-commands = []
-tools = []
-evidence = []
-notes = ""
+status = "partial"
+commands = ["ai.ask"]
+tools = ["ai_ask"]
+evidence = ["crates/automation/tests/it/ai.rs::ask_sends_the_page_text_and_returns_the_answer"]
+notes = "File > Ask AI Assistant… and ai_ask answer a question from the page text; the model is asked to cite pages like (p. 3). Missing: clickable citations, conversation history."
 
 [[feature]]
 id = "misc.ai-conversational-edit"

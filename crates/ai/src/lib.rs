@@ -383,5 +383,22 @@ pub fn document_messages(question: &str, pages: &[(usize, String)]) -> Vec<Messa
     vec![Message::system(SYSTEM_PROMPT), Message::user(format!("Document text:\n{context}\nQuestion: {question}"))]
 }
 
+/// The instruction behind Summarize: a short summary a reader can scan.
+pub const SUMMARY_QUESTION: &str = "Summarize this document. Start with one or two sentences saying what it is, then list the key points, \
+figures, dates and any decisions or actions as short bullets. Cite page numbers like (p. 3).";
+
+/// The instruction behind Translate, for a language the user typed (`Spanish`, `French (Canada)`).
+/// `None` when the language is empty or longer than a language name can be.
+pub fn translate_question(language: &str) -> Option<String> {
+    let language = language.trim();
+    if language.is_empty() || language.chars().count() > 60 || language.chars().any(char::is_control) {
+        return None;
+    }
+    Some(format!(
+        "Translate the document text into {language}. Keep the order, headings, lists and numbers as they are, mark each page with its \
+heading like \"--- Page 3 ---\", and do not add comments of your own."
+    ))
+}
+
 #[cfg(test)]
 mod tests;

@@ -152,3 +152,12 @@ fn document_messages_cut_long_text_on_a_char_boundary() {
     assert!(empty[1].content.contains("--- Page 1 ---"));
     assert!(document_messages("q", &[])[1].content.contains("No text could be read"));
 }
+
+#[test]
+fn translate_question_names_the_language_and_refuses_junk() {
+    assert!(translate_question(" Spanish ").expect("q").contains("into Spanish."));
+    for bad in ["", "  ", "a\nb", &"x".repeat(61)] {
+        assert_eq!(translate_question(bad), None, "{bad:?}");
+    }
+    assert!(SUMMARY_QUESTION.contains("Summarize"));
+}

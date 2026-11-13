@@ -7,10 +7,32 @@
 use crate::persist::ai::page_texts;
 use crate::{Dialog, PdfCraftApp, widgets};
 
+/// What the dialog asks the model to do with the pages.
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
+pub(crate) enum Mode {
+    #[default]
+    Ask,
+    Summarize,
+    Translate,
+}
+
+/// The instruction sent for `mode`: the typed question, the fixed summary request, or the
+/// translation request for the typed language. `None` while the needed text is missing.
+pub(crate) fn instruction(mode: Mode, question: &str, language: &str) -> Option<String> {
+    match mode {
+        Mode::Ask => Some(question.trim().to_owned()).filter(|q| !q.is_empty()),
+        Mode::Summarize => Some(pdfcraft_ai::SUMMARY_QUESTION.to_owned()),
+        Mode::Translate => pdfcraft_ai::translate_question(language),
+    }
+}
+
 /// The Ask dialog's own fields; the answer lives with the settings (`PdfCraftApp::ai`).
 #[derive(Default)]
 pub(crate) struct Draft {
+    pub(crate) mode: Mode,
     pub(crate) question: String,
+    /// The language Translate writes in, as typed.
+    pub(crate) language: String,
     pub(crate) current_page: bool,
     /// Preferences ▸ AI Assistant: the port a local model server listens on, as typed.
     pub(crate) port: String,
@@ -63,7 +85,12 @@ pub(crate) fn pages_label(current_page: Option<usize>) -> String {
 
 /// The dialog's content. Returns `true` to close the dialog.
 pub(crate) fn body(ui: &mut egui::Ui, app: &mut PdfCraftApp) -> bool {
-    ui.heading(tl!("Ask AI Assistant"));
+    ui.heading(tl!("AI Assistant"));
+    ui.horizontal(|ui| {
+        ui.selectable_value(&mut app.ai_draft.mode, Mode::Ask, tl!("Ask"));
+        ui.selectable_value(&mut app.ai_draft.mode, Mode::Summarize, tl!("Summarize"));
+        ui.selectable_value(&mut app.ai_draft.mode, Mode::Translate, tl!("Translate"));
+    });
     let Some((view, id)) = app.active_ids() else {
         ui.label(tl!("Open a document to ask about it."));
         return false;
@@ -88,18 +115,36 @@ pub(crate) fn body(ui: &mut egui::Ui, app: &mut PdfCraftApp) -> bool {
         }
         ui.add_space(8.0);
     } else {
-        ui.label(crate::i18n::fmt(tl!("When you press Ask, the text of the pages goes to {url}. Nothing is sent before."), &[("url", &url)]));
+        ui.label(crate::i18n::fmt(tl!("When you press the button, the text of the pages goes to {url}. Nothing is sent before."), &[("url", &url)]));
     }
     ui.add_space(6.0);
-    ui.add(
-        widgets::block(&mut app.ai_draft.question).desired_rows(3).desired_width(f32::INFINITY).hint_text(tl!("Ask a question about this document")),
-    );
+    match app.ai_draft.mode {
+        Mode::Ask => {
+            ui.add(
+                widgets::block(&mut app.ai_draft.question)
+                    .desired_rows(3)
+                    .desired_width(f32::INFINITY)
+                    .hint_text(tl!("Ask a question about this document")),
+            );
+        }
+        Mode::Summarize => {
+            ui.label(tl!("Writes a short summary with the key points and page numbers."));
+        }
+        Mode::Translate => {
+            ui.add(widgets::line(&mut app.ai_draft.language).desired_width(240.0).hint_text(tl!("Language, for example Spanish")).char_limit(60));
+        }
+    }
     ui.add(widgets::checkbox(&mut app.ai_draft.current_page, tl!("Current page only")));
     ui.add_space(6.0);
     let mut ask = false;
     ui.horizontal(|ui| {
-        let ready = problem.is_none() && !running && !app.ai_draft.question.trim().is_empty();
-        ask = ui.add_enabled_ui(ready, |ui| widgets::pill_button(ui, tl!("Ask"), true)).inner.clicked();
+        let ready = problem.is_none() && !running && instruction(app.ai_draft.mode, &app.ai_draft.question, &app.ai_draft.language).is_some();
+        let label = match app.ai_draft.mode {
+            Mode::Ask => tl!("Ask"),
+            Mode::Summarize => tl!("Summarize"),
+            Mode::Translate => tl!("Translate"),
+        };
+        ask = ui.add_enabled_ui(ready, |ui| widgets::pill_button(ui, label, true)).inner.clicked();
         if running {
             ui.spinner();
             ui.label(tl!("Waiting for the answer…"));
@@ -111,8 +156,13 @@ pub(crate) fn body(ui: &mut egui::Ui, app: &mut PdfCraftApp) -> bool {
     if ask {
         let source = doc.export_source();
         let pages: Vec<usize> = if app.ai_draft.current_page { vec![current] } else { (0..source.pages).collect() };
-        let question = app.ai_draft.question.trim().to_owned();
-        app.ai_draft.asked = Some((question.clone(), pages_label(app.ai_draft.current_page.then_some(current))));
+        let question = instruction(app.ai_draft.mode, &app.ai_draft.question, &app.ai_draft.language).unwrap_or_default();
+        let heading = match app.ai_draft.mode {
+            Mode::Ask => question.clone(),
+            Mode::Summarize => tl!("Summary").to_owned(),
+            Mode::Translate => format!("{} {}", tl!("Translation into"), app.ai_draft.language.trim()),
+        };
+        app.ai_draft.asked = Some((heading, pages_label(app.ai_draft.current_page.then_some(current))));
         let config = app.ai.effective();
         app.ai.ask.start(ui.ctx(), app.run_inline, move || {
             // The web build cannot call the endpoint, so don't read every page just to say so.
@@ -175,6 +225,15 @@ mod tests {
         assert_eq!(port_of("http://192.168.1.5:8000"), Some("8000".into()));
         assert_eq!(port_of("https://api.openai.com/v1"), None);
         assert_eq!(port_of("http://localhost/v1"), None);
+    }
+
+    #[test]
+    fn each_mode_builds_its_instruction_or_waits_for_its_text() {
+        assert_eq!(instruction(Mode::Ask, "  why? ", ""), Some("why?".into()));
+        assert_eq!(instruction(Mode::Ask, "  ", ""), None);
+        assert!(instruction(Mode::Summarize, "", "").expect("summary").contains("Summarize"));
+        assert_eq!(instruction(Mode::Translate, "", " "), None);
+        assert!(instruction(Mode::Translate, "", "French").expect("translate").contains("into French"));
     }
 
     #[test]

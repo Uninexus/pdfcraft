@@ -93,3 +93,27 @@ fn unconfigured_ask_fails_clearly_and_status_hides_the_key() {
     let e = a.call("ai_ask", &json!({ "doc": 1, "question": "hi", "model": "m" })).unwrap_err().to_string();
     assert!(e.contains("endpoint") || e.contains("base URL"), "{e}");
 }
+
+#[test]
+fn summarize_and_translate_send_their_instruction_with_the_page_text() {
+    let dir = std::env::temp_dir().join(format!("pdfcraft-automation-ai-st-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("a.pdf"), pdf()).unwrap();
+    let mut a = Automation::new().with_root(&dir).unwrap();
+    let doc = json_of(a.call("doc_open", &json!({ "path": "a.pdf" })).unwrap())["doc"].as_u64().unwrap();
+
+    let (url, req) = server(r#"{"choices":[{"message":{"content":"Short."}}]}"#);
+    let out = json_of(a.call("ai_summarize", &json!({ "doc": doc, "base_url": url, "model": "m" })).unwrap());
+    assert_eq!(out["answer"], "Short.");
+    let req = req.join().unwrap();
+    assert!(req.contains("Summarize this document") && req.contains("Invoice total 42"), "{req}");
+
+    let (url, req) = server(r#"{"choices":[{"message":{"content":"Total de la factura 42"}}]}"#);
+    let out = json_of(a.call("ai_translate", &json!({ "doc": doc, "language": "Spanish", "base_url": url, "model": "m" })).unwrap());
+    assert_eq!(out["answer"], "Total de la factura 42");
+    assert!(req.join().unwrap().contains("into Spanish"));
+
+    let e =
+        a.call("ai_translate", &json!({ "doc": doc, "language": "  ", "base_url": "http://127.0.0.1:1/v1", "model": "m" })).unwrap_err().to_string();
+    assert!(e.contains("language"), "{e}");
+}
