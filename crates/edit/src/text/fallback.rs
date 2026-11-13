@@ -668,6 +668,38 @@ pub(super) fn source_program_completes(doc: &Document, fonts: &Dict, line: &Text
     !missing.is_empty() && source_program(doc, fonts, &line.font).is_some_and(|bytes| pdfcraft_fonts::embedding::covers(&bytes, &missing))
 }
 
+/// Whether `text` has characters `line`'s font can't encode that another font of the same face on
+/// the page (a complete copy next to the subset, or another subset with those letters) can: the
+/// styled path then draws them in that font instead of a substitute.
+pub(super) fn sibling_font_completes(doc: &Document, fonts: &Dict, line: &TextLine, text: &str) -> bool {
+    /// Distinct missing characters looked at: a draft with more is not worth a search of the page's fonts.
+    const MAX_CHECKED: usize = 64;
+    let Some(own) = fonts.get(line.font.as_bytes()).and_then(|f| doc.resolve(f).as_dict().cloned()).map(|f| Metrics::from_dict(doc, &f)) else {
+        return false;
+    };
+    let encodes = |m: &Metrics, c: char| m.encode(c.encode_utf8(&mut [0; 4])).is_some();
+    let mut missing: std::collections::BTreeSet<char> = std::collections::BTreeSet::new();
+    for c in text.chars().filter(|c| *c != ' ' && !super::blocks::row_break(*c)) {
+        if !missing.contains(&c) && !encodes(&own, c) {
+            if missing.len() >= MAX_CHECKED {
+                return false;
+            }
+            missing.insert(c);
+        }
+    }
+    if missing.is_empty() {
+        return false;
+    }
+    let face = pdfcraft_fonts::embedding::face_key(&own.base_font);
+    fonts.iter().take(128).any(|(name, font)| {
+        name != line.font.as_bytes()
+            && doc.resolve(font).as_dict().is_some_and(|dict| {
+                let sibling = Metrics::from_dict(doc, dict);
+                pdfcraft_fonts::embedding::face_key(&sibling.base_font) == face && missing.iter().all(|c| encodes(&sibling, *c))
+            })
+    })
+}
+
 /// A subset may contain all the letters but no space glyph: producers use another subset
 /// or a positioning operator for spaces. Do the same instead of substituting the whole font.
 pub(crate) fn source_encodes(metrics: &Metrics, text: &str) -> bool {

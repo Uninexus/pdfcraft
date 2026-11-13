@@ -556,6 +556,14 @@ impl Automation {
         if !doc.edit_notices.is_empty() {
             out["warnings"] = json!(doc.edit_notices.iter().map(ToString::to_string).collect::<Vec<_>>());
         }
+        // A paragraph whose font lacked letters of the new text was redrawn in a stand-in font:
+        // which font, and which letters, as data (the warning says it in words).
+        for notice in &doc.edit_notices {
+            if let pdfcraft_engine::EditNotice::SubstituteFont { fonts, missing } = notice {
+                out["substituted_fonts"] = json!(fonts);
+                out["missing_letters"] = json!(missing.iter().collect::<String>());
+            }
+        }
         Ok(out)
     }
 

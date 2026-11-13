@@ -266,9 +266,24 @@ pub(crate) struct EditCtx {
     /// What [`Edit::PrepareText`] prepared, repaired and left grouped, for
     /// [`Session::prepare_text`](crate::Session::prepare_text).
     pub(crate) prepared: Option<pdfcraft_edit::text::forms::Preparation>,
+    /// The stand-in fonts text edits drew with because the paragraph's own lacked letters of the
+    /// new text, and which letters (see [`EditNotice::SubstituteFont`](crate::EditNotice)).
+    pub(crate) substituted: Vec<(String, Vec<char>)>,
 }
 
 impl EditCtx {
+    /// Remember that a text edit drew with a stand-in font, for the notice that says so.
+    pub(crate) fn note_substitute(&mut self, edit: pdfcraft_edit::LineEdit) {
+        // Only when letters were missing: a Thai outline or a weight change names no lost letter.
+        if let Some(font) = edit.substituted
+            && !edit.missing.is_empty()
+        {
+            // "Inter Type3" is the edit crate's name for a drawn-outline face; say "Inter".
+            let font = font.strip_suffix(" Type3").map(str::to_owned).unwrap_or(font);
+            self.substituted.push((font, edit.missing));
+        }
+    }
+
     /// The field highlight (`app.runtimeHighlight`) the edit's next script reads: the field
     /// scripts' runner holds it while there is one (its scripts change it there), else the edit.
     pub(crate) fn highlight(&self) -> bool {
@@ -319,6 +334,7 @@ impl EditCtx {
             redaction_elsewhere: None,
             redaction_identification: pdfcraft_redact::Identification::default(),
             prepared: None,
+            substituted: Vec::new(),
         }
     }
 
@@ -881,7 +897,8 @@ pub(crate) fn run_edit(doc: &mut pdfcraft_cos::Document, edit: &Edit, cx: &mut E
             a11y::move_tag(doc, *object, *anchor, *placement).map_err(|e| EditError::Accessibility(e.to_string()))?;
         }
         Edit::EditTextLine { page, line, text } => {
-            pdfcraft_edit::replace_line(doc, *page, *line, text)?;
+            let edit = pdfcraft_edit::replace_line(doc, *page, *line, text)?;
+            cx.note_substitute(edit);
         }
         Edit::SetFieldScript { name, event, script } => {
             pdfcraft_forms::set_field_script(doc, name, event, script.as_deref())?;
@@ -907,7 +924,8 @@ pub(crate) fn run_edit(doc: &mut pdfcraft_cos::Document, edit: &Edit, cx: &mut E
         Edit::DeleteObjects { page, objects } => crate::object_clip::delete(doc, *page, objects, |doc, edit| run_edit(doc, edit, cx))?,
         Edit::PasteObjects { page, clip, offset } => crate::object_clip::paste(doc, *page, clip, *offset)?,
         Edit::EditTextBlock { page, block, text, style } => {
-            pdfcraft_edit::rewrite_block(doc, *page, *block, Some(text), style)?;
+            let edit = pdfcraft_edit::rewrite_block(doc, *page, *block, Some(text), style)?;
+            cx.note_substitute(edit);
         }
         Edit::PrepareText { page } => {
             let result = pdfcraft_edit::text::forms::prepare(doc, *page)?;

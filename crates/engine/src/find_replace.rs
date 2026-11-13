@@ -301,7 +301,7 @@ impl Document {
                 match outcome {
                     // `trial` already holds the paragraph rewritten in the substitute font, so
                     // accepting it is what the returned edit will do again on the document.
-                    Ok(Ok(pdfcraft_edit::LineEdit { substituted, rows_before, rows_after, extends_by }))
+                    Ok(Ok(pdfcraft_edit::LineEdit { substituted, rows_before, rows_after, extends_by, .. }))
                         if substituted.is_none() || query.substitute_font =>
                     {
                         if rows_after > rows_before {

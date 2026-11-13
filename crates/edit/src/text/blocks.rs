@@ -585,6 +585,11 @@ pub struct BlockStyle {
     /// How far across [`BlockStyle::cover`] may reach, whatever its padding: the edges of the words
     /// on either side that stay (user space).
     pub cover_between: Option<[f64; 2]>,
+    /// Refuse the edit, leaving the document as it was, when the paragraph's own font lacks a
+    /// letter of the new text and a substitute font would have to draw it. Off by default: Edit
+    /// text then redraws the paragraph in the nearest standard or bundled face and says so
+    /// ([`LineEdit::substituted`](crate::LineEdit::substituted)).
+    pub refuse_substitute: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]

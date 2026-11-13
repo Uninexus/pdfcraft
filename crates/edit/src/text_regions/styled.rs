@@ -4,7 +4,7 @@ use super::{
     BlockStyle, CraftFont, Dict, Document, EditError, HashMap, LineEdit, MAX_TYPE3_GLYPHS, Matrix, Metrics, Object, Op, PdfString, Pieces,
     RangeStyle, TextBlock, TextLine, Type3Glyph, builtin_thai_choice, coincident_ops, content_streams, fallback_face, japanese_glyph_from,
     needs_type3, no_fallback_font, no_glyph_for, page_dict, reveal_ops, rewritten_contents, row_break, source_encodes, source_family, source_program,
-    source_show, source_space, source_width, splice, type3_faces, type3_glyph, write_type3_glyphs,
+    source_show, source_space, source_width, splice, strip_subset_tag, type3_faces, type3_glyph, write_type3_glyphs,
 };
 
 // The draft is capped at 4 MiB; also bound the outline data prepared across all fallback faces.
@@ -35,13 +35,23 @@ struct FontResolver<'a> {
     programs: HashMap<String, Option<std::sync::Arc<Vec<u8>>>>,
 }
 
+/// Remember `ch` as one the source font could not show (once, up to [`MAX_MISSING_REPORTED`]).
+fn note_missing(missing: &mut Vec<char>, ch: char) {
+    if missing.len() < crate::text::rewrite::MAX_MISSING_REPORTED && !missing.contains(&ch) && ch != ' ' && !row_break(ch) {
+        missing.push(ch);
+    }
+}
+
 impl FontResolver<'_> {
     fn encodable_font(&mut self, source: &TextLine, text: &str, requested: Option<&str>) -> Result<Option<String>, EditError> {
         if let Some(resource) = requested {
             if !self.metrics.get(resource).is_some_and(|metrics| source_encodes(metrics, text)) {
+                let letter = text.chars().next().map_or(0, u32::from);
+                let face = self.metrics.get(resource).map_or_else(|| resource.to_owned(), |m| strip_subset_tag(&m.base_font).to_owned());
                 return Err(EditError::Invalid(format!(
-                    "the selected font resource {resource} cannot show U+{:04X}",
-                    text.chars().next().map_or(0, u32::from)
+                    "the selected font {face} (resource {resource}) has no glyph for {} (U+{letter:04X}); it is a subset that holds only the letters the document used. \
+                     Clear the font choice to let PdfCraft redraw the paragraph in a substitute font, or load a complete font that has the letter (Load font…)",
+                    char::from_u32(letter).unwrap_or('\u{fffd}'),
                 )));
             }
             return Ok(Some(resource.to_owned()));
@@ -126,6 +136,8 @@ const MAX_THAI_PROGRAMS: usize = 64 << 20;
 struct PreparedCharacters {
     values: Vec<StyledChar>,
     substituted: Option<String>,
+    /// The characters of the draft the source fonts could not show (see [`LineEdit::missing`]).
+    missing: Vec<char>,
     thai: ThaiShaping,
 }
 
@@ -170,6 +182,10 @@ impl CharacterPreparation<'_> {
         let mut thai_programs = pdfcraft_cos::DecodeBudget::new(MAX_THAI_PROGRAMS, 0);
         let mut chars = Vec::new();
         let mut substituted = None;
+        let mut missing: Vec<char> = Vec::new();
+        // A stand-in font or fallback outline drew at least one character (not Thai outlines chosen
+        // or found automatically).
+        let mut stood_in = false;
         let mut fallback = FallbackBuilder::new(max_glyphs);
         let mut resolver = FontResolver { doc, fonts, metrics, full_faces: HashMap::new(), programs: HashMap::new() };
         for (range, index) in spans {
@@ -273,8 +289,12 @@ impl CharacterPreparation<'_> {
                 } else if let Some(name) = resolver.encodable_font(source, &text, requested)? {
                     name
                 } else if needs_type3(&text) {
+                    note_missing(&mut missing, ch);
+                    stood_in = true;
                     fallback.prepare(source, ch, &text, chars.len())?
                 } else {
+                    note_missing(&mut missing, ch);
+                    stood_in = true;
                     let name = resolver.substitute_font(source);
                     substituted = Some(source_family(&source.base_font).base_font(source.bold, source.italic).to_owned());
                     name
@@ -283,6 +303,11 @@ impl CharacterPreparation<'_> {
             }
         }
         drop(resolver);
+        // A writer who turned substitution off keeps the paragraph as it is: nothing has been
+        // written to the document yet, so the edit is refused whole.
+        if style.refuse_substitute && stood_in {
+            return Err(crate::text::rewrite::refused_substitution(&first.base_font, &missing));
+        }
         for group in fallback.groups {
             let written = write_type3_glyphs(doc, fonts, group.face, false, group.glyphs, fallback.per_font);
             for name in &written.names {
@@ -299,7 +324,7 @@ impl CharacterPreparation<'_> {
             }
             substituted = Some(written.family.to_owned());
         }
-        Ok(PreparedCharacters { values: chars, substituted, thai })
+        Ok(PreparedCharacters { values: chars, substituted, missing, thai })
     }
 }
 
@@ -1653,6 +1678,7 @@ pub(crate) fn rewrite_styled_block(
     let thai = prepared.thai;
     let chars = prepared.values;
     let substituted = prepared.substituted;
+    let missing = prepared.missing;
     let phrase_size = block.phrase_size();
     let size_of = |source: &TextLine, index: usize| {
         overrides.get(&index).and_then(|r| r.size).or(style.size).or(phrase_size).unwrap_or(source.size).max(0.1) / source.origin.k.max(1e-6)
@@ -1942,7 +1968,7 @@ pub(crate) fn rewrite_styled_block(
         d.set(b"Resources".to_vec(), Object::Dict(res));
     })?;
     crate::draw_on_top(doc, &p, o.ctm, &on_top)?;
-    Ok(LineEdit::rows(substituted, block.rows.len(), rows_after, pitch))
+    Ok(LineEdit::rows(substituted, block.rows.len(), rows_after, pitch).lacking(missing))
 }
 
 #[cfg(test)]

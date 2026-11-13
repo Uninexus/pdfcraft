@@ -101,7 +101,9 @@ update the numbers.
   blocking text. A separate private four-page regression opens all 73 detected text regions;
   curve/hole hit testing now evaluates clipping paths and fill rules. A clip the image owns
   moves with it across nested states and content streams; shared path clips stay where they are.
-  Full matching document fonts complete absent subset glyphs; explicit installed/file font
+  Full matching document fonts complete absent subset glyphs (also beside a single-run
+  paragraph's subset); a paragraph redrawn in a stand-in font for a letter its subset lacks is
+  named in a notice with the letters, and `text_edit` can refuse that instead; explicit installed/file font
   selection, TrueType/OpenType-CFF embedding, disjoint style ranges, marked paragraph boundaries
   and single-face OpenType shaping/bidi have regression coverage. Actual Chinese keyboard
   insertion/deletion and save/reopen renders are checked on all four private pages.
