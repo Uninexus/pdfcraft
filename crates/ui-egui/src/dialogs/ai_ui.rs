@@ -108,14 +108,18 @@ pub(crate) fn body(ui: &mut egui::Ui, app: &mut PdfCraftApp) -> bool {
 
     if problem.is_some() {
         ui.add_space(4.0);
-        ui.label(tl!("The AI assistant is not set up yet. Choose a server and a model in Preferences."));
+        ui.label(tl!("The AI assistant is not set up yet. Choose a server and a model, or sign in with ChatGPT, in Preferences."));
         if widgets::pill_button(ui, tl!("Open Preferences"), true).clicked() {
             app.dialog = Some(Dialog::Preferences);
             return false;
         }
         ui.add_space(8.0);
     } else {
-        ui.label(crate::i18n::fmt(tl!("When you press the button, the text of the pages goes to {url}. Nothing is sent before."), &[("url", &url)]));
+        let target = if app.ai.provider == pdfcraft_ai::Provider::ChatGpt { tl!("OpenAI (your ChatGPT plan)").to_owned() } else { url };
+        ui.label(crate::i18n::fmt(
+            tl!("When you press the button, the text of the pages goes to {url}. Nothing is sent before."),
+            &[("url", &target)],
+        ));
     }
     ui.add_space(6.0);
     match app.ai_draft.mode {

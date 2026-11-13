@@ -3,6 +3,8 @@
 
 use egui::{Color32, CornerRadius, Margin, Rect, RichText, Sense, Stroke, pos2, vec2};
 
+use pdfcraft_ai::Provider;
+
 use crate::PdfCraftApp;
 use crate::canvas::{Fit, PageLayout, ViewDefaults};
 use crate::motion::AnimationEffects;
@@ -950,42 +952,54 @@ fn card_ai(ui: &mut egui::Ui, app: &mut PdfCraftApp, t: &Tokens, ctx: &mut PrefS
     );
     ui.add_space(6.0);
     ui.horizontal_wrapped(|ui| {
-        ctx.label_primary(ui, tl!("Presets"), t);
-        for (name, url) in AI_PRESETS {
-            if ctx.button(ui, name, t).clicked() {
-                app.ai.base_url = url.to_owned();
-            }
-        }
+        ctx.label_primary(ui, tl!("Use"), t);
+        crate::widgets::radio_value(ui, &mut app.ai.provider, Provider::Endpoint, tl!("An API endpoint (local model or API key)"));
+        #[cfg(not(target_arch = "wasm32"))]
+        crate::widgets::radio_value(ui, &mut app.ai.provider, Provider::ChatGpt, tl!("My ChatGPT plan"));
     });
-    ui.add_space(4.0);
-    ui.horizontal(|ui| {
-        let label = ctx.label_primary(ui, tl!("Base URL"), t);
-        ui.add(widgets::line(&mut app.ai.base_url).desired_width(300.0).hint_text("http://localhost:11434/v1").char_limit(MAX_AI_FIELD_CHARS))
-            .labelled_by(label.id);
-    });
-    // A model server on this computer: the port, then the models it has loaded to pick from.
-    if app.ai_draft.port.is_empty()
-        && let Some(port) = crate::ai_ui::port_of(&app.ai.base_url)
-    {
-        app.ai_draft.port = port;
-    }
     app.ai.test.poll();
-    ui.horizontal(|ui| {
-        let label = ctx.label_primary(ui, tl!("Local server port"), t);
-        ui.add(widgets::line(&mut app.ai_draft.port).desired_width(70.0).hint_text("11434").char_limit(5)).labelled_by(label.id);
-        let url = crate::ai_ui::local_base_url(&app.ai_draft.port);
-        let running = app.ai.test.is_running();
-        if ui.add_enabled_ui(url.is_some() && !running, |ui| ctx.button(ui, tl!("Find models"), t)).inner.clicked()
-            && let Some(url) = url
+    if app.ai.provider == Provider::ChatGpt {
+        #[cfg(not(target_arch = "wasm32"))]
+        chatgpt_panel(ui, app, t, ctx);
+    } else {
+        ui.horizontal_wrapped(|ui| {
+            ctx.label_primary(ui, tl!("Presets"), t);
+            for (name, url) in AI_PRESETS {
+                if ctx.button(ui, name, t).clicked() {
+                    app.ai.base_url = url.to_owned();
+                }
+            }
+        });
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            let label = ctx.label_primary(ui, tl!("Base URL"), t);
+            ui.add(widgets::line(&mut app.ai.base_url).desired_width(300.0).hint_text("http://localhost:11434/v1").char_limit(MAX_AI_FIELD_CHARS))
+                .labelled_by(label.id);
+        });
+        // A model server on this computer: the port, then the models it has loaded to pick from.
+        if app.ai_draft.port.is_empty()
+            && let Some(port) = crate::ai_ui::port_of(&app.ai.base_url)
         {
-            app.ai.base_url = url;
-            let config = app.ai.effective();
-            app.ai.test.start(ui.ctx(), app.run_inline, move || pdfcraft_ai::list_models(&config).map_err(|e| e.to_string()));
+            app.ai_draft.port = port;
         }
-        if running {
-            ui.spinner();
-        }
-    });
+        app.ai.test.poll();
+        ui.horizontal(|ui| {
+            let label = ctx.label_primary(ui, tl!("Local server port"), t);
+            ui.add(widgets::line(&mut app.ai_draft.port).desired_width(70.0).hint_text("11434").char_limit(5)).labelled_by(label.id);
+            let url = crate::ai_ui::local_base_url(&app.ai_draft.port);
+            let running = app.ai.test.is_running();
+            if ui.add_enabled_ui(url.is_some() && !running, |ui| ctx.button(ui, tl!("Find models"), t)).inner.clicked()
+                && let Some(url) = url
+            {
+                app.ai.base_url = url;
+                let config = app.ai.effective();
+                app.ai.test.start(ui.ctx(), app.run_inline, move || pdfcraft_ai::list_models(&config).map_err(|e| e.to_string()));
+            }
+            if running {
+                ui.spinner();
+            }
+        });
+    }
     ui.horizontal(|ui| {
         let label = ctx.label_primary(ui, tl!("Model"), t);
         let found: Vec<String> = match app.ai.test.result() {
@@ -1011,14 +1025,16 @@ fn card_ai(ui: &mut egui::Ui, app: &mut PdfCraftApp, t: &Tokens, ctx: &mut PrefS
             ui.add(widgets::line(&mut app.ai.model).desired_width(300.0).char_limit(MAX_AI_FIELD_CHARS)).labelled_by(label.id);
         }
     });
-    if !matches!(app.ai.test.result(), Some(Ok(m)) if !m.is_empty()) {
+    if app.ai.provider == Provider::Endpoint && !matches!(app.ai.test.result(), Some(Ok(m)) if !m.is_empty()) {
         ctx.label_secondary(ui, tl!("Type a port and press Find models to pick from what the server has loaded, or type a model name."), t);
     }
-    ui.horizontal(|ui| {
-        let label = ctx.label_primary(ui, tl!("API key"), t);
-        ui.add(widgets::line(&mut app.ai.api_key).password(true).desired_width(300.0).char_limit(MAX_AI_FIELD_CHARS)).labelled_by(label.id);
-    });
-    ctx.label_secondary(ui, tl!("A local server usually needs no key. Empty fields use the PDFCRAFT_AI_BASE_URL, PDFCRAFT_AI_MODEL and PDFCRAFT_AI_API_KEY environment variables."), t);
+    if app.ai.provider == Provider::Endpoint {
+        ui.horizontal(|ui| {
+            let label = ctx.label_primary(ui, tl!("API key"), t);
+            ui.add(widgets::line(&mut app.ai.api_key).password(true).desired_width(300.0).char_limit(MAX_AI_FIELD_CHARS)).labelled_by(label.id);
+        });
+        ctx.label_secondary(ui, tl!("A local server usually needs no key. Empty fields use the PDFCRAFT_AI_BASE_URL, PDFCRAFT_AI_MODEL and PDFCRAFT_AI_API_KEY environment variables."), t);
+    }
     ui.add_space(6.0);
     ui.horizontal(|ui| {
         let running = app.ai.test.is_running();
@@ -1045,6 +1061,65 @@ fn card_ai(ui: &mut egui::Ui, app: &mut PdfCraftApp, t: &Tokens, ctx: &mut PrefS
     }
     if let Some(problem) = &app.ai.problem {
         ui.colored_label(ui.visuals().error_fg_color, problem.as_str());
+    }
+}
+
+/// The "My ChatGPT plan" settings: sign in with the system browser, no API key and no API billing.
+#[cfg(not(target_arch = "wasm32"))]
+fn chatgpt_panel(ui: &mut egui::Ui, app: &mut PdfCraftApp, t: &Tokens, ctx: &mut PrefSearchContext) {
+    ctx.label_secondary(
+        ui,
+        tl!("Uses the ChatGPT Plus or Pro plan you already pay for, through OpenAI's Sign in with ChatGPT. No API key and no API billing. PdfCraft opens your browser to sign in and keeps the sign-in on this computer. The text of the pages you ask about goes to OpenAI."),
+        t,
+    );
+    app.ai.sign_in.poll();
+    if let Some(done) = app.ai.sign_in.result().cloned() {
+        app.ai.sign_in.cancel();
+        app.ai.sign_in_error = done.err();
+        app.ai.reload_chatgpt();
+        // The model list belongs to the account that just signed in (or out).
+        app.ai.test.cancel();
+    }
+    let signing_in = app.ai.sign_in.is_running();
+    let status = app.ai.chatgpt.clone();
+    ui.add_space(4.0);
+    ui.horizontal_wrapped(|ui| {
+        if signing_in {
+            ui.spinner();
+            ui.label(tl!("Finish signing in in your browser…"));
+            if ctx.button(ui, tl!("Cancel"), t).clicked() {
+                app.ai.cancel_chatgpt_sign_in();
+            }
+        } else if status.signed_in && status.plan_usage {
+            let who = if status.email.is_empty() {
+                tl!("Signed in").to_owned()
+            } else {
+                crate::i18n::fmt(tl!("Signed in as {email}"), &[("email", &status.email)])
+            };
+            ui.label(format!("{who}. {}", tl!("Using ChatGPT plan")));
+            if ctx.button(ui, tl!("Sign out"), t).clicked() {
+                app.ai.chatgpt_sign_out();
+            }
+            if ctx.button(ui, tl!("Manage usage"), t).clicked() {
+                app.open_url(pdfcraft_ai::chatgpt::USAGE_URL);
+            }
+        } else {
+            if ctx.button(ui, tl!("Sign in with ChatGPT"), t).clicked() {
+                app.ai.start_chatgpt_sign_in(ui.ctx(), app.run_inline);
+            }
+            if status.signed_in {
+                ui.label(tl!("Signed in, but plan usage was not allowed. Sign in again and allow it."));
+            }
+        }
+    });
+    if let Some(error) = &app.ai.sign_in_error {
+        ui.colored_label(ui.visuals().error_fg_color, error.as_str());
+    }
+    ctx.label_secondary(ui, tl!("Your plan's usage limits apply. If a limit is reached, PdfCraft says so and does not switch to API billing."), t);
+    // The model list comes from the account, once signed in.
+    if status.signed_in && !signing_in && app.ai.test.result().is_none() && !app.ai.test.is_running() {
+        let config = app.ai.effective();
+        app.ai.test.start(ui.ctx(), app.run_inline, move || pdfcraft_ai::list_models(&config).map_err(|e| e.to_string()));
     }
 }
 

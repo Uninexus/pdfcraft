@@ -11,7 +11,10 @@
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+#[cfg(not(target_arch = "wasm32"))]
+pub mod chatgpt;
 
 use serde_json::{Value, json};
 
@@ -36,9 +39,40 @@ pub enum AiError {
 
 pub type Result<T> = std::result::Result<T, AiError>;
 
+/// Who answers: an OpenAI-compatible server, or the user's ChatGPT plan through Sign in with ChatGPT.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Provider {
+    /// Any OpenAI-compatible chat endpoint, local or hosted (the default).
+    #[default]
+    Endpoint,
+    /// The user's ChatGPT Plus/Pro plan: no API key and no API billing (see [`chatgpt`]).
+    ChatGpt,
+}
+
+impl Provider {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Provider::Endpoint => "endpoint",
+            Provider::ChatGpt => "chatgpt",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Provider> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "endpoint" | "" => Some(Provider::Endpoint),
+            "chatgpt" => Some(Provider::ChatGpt),
+            _ => None,
+        }
+    }
+}
+
 /// Where the assistant sends its questions.
 #[derive(Clone, Default, PartialEq, Eq)]
 pub struct AiConfig {
+    /// Which kind of service answers.
+    pub provider: Provider,
+    /// Where the ChatGPT sign-in is kept (`chatgpt.json`); not part of `ai.json`.
+    pub chatgpt_session: Option<PathBuf>,
     /// The API root, such as `http://localhost:11434/v1` or `https://api.openai.com/v1`. A pasted
     /// `.../chat/completions` address is accepted too.
     pub base_url: String,
@@ -54,6 +88,7 @@ pub struct AiConfig {
 impl std::fmt::Debug for AiConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AiConfig")
+            .field("provider", &self.provider)
             .field("base_url", &self.base_url)
             .field("api_key", &self.api_key.as_ref().map(|_| "<set>"))
             .field("model", &self.model)
@@ -74,6 +109,8 @@ impl AiConfig {
     fn from_vars(var: impl Fn(&str) -> Option<String>) -> AiConfig {
         let get = |name: &str| var(name).map(|v| v.trim().to_owned()).filter(|v| !v.is_empty());
         AiConfig {
+            provider: get("PDFCRAFT_AI_PROVIDER").and_then(|v| Provider::parse(&v)).unwrap_or_default(),
+            chatgpt_session: get("PDFCRAFT_AI_CHATGPT_SESSION").map(PathBuf::from),
             base_url: get("PDFCRAFT_AI_BASE_URL").unwrap_or_default(),
             api_key: get("PDFCRAFT_AI_API_KEY"),
             model: get("PDFCRAFT_AI_MODEL").unwrap_or_default(),
@@ -84,6 +121,8 @@ impl AiConfig {
     /// Fields set here win; empty ones fall back to `other`.
     pub fn or(self, other: AiConfig) -> AiConfig {
         AiConfig {
+            provider: if self.provider == Provider::Endpoint { other.provider } else { self.provider },
+            chatgpt_session: self.chatgpt_session.or(other.chatgpt_session),
             base_url: if self.base_url.trim().is_empty() { other.base_url } else { self.base_url },
             api_key: self.api_key.filter(|k| !k.trim().is_empty()).or(other.api_key),
             model: if self.model.trim().is_empty() { other.model } else { self.model },
@@ -107,6 +146,8 @@ impl AiConfig {
         let v: Value = serde_json::from_str(&text).map_err(|e| AiError::Config(format!("AI settings {} are not valid JSON: {e}", path.display())))?;
         let s = |k: &str| v.get(k).and_then(Value::as_str).map(|s| s.trim().to_owned()).filter(|s| !s.is_empty());
         Ok(AiConfig {
+            provider: s("provider").and_then(|p| Provider::parse(&p)).unwrap_or_default(),
+            chatgpt_session: None,
             base_url: s("base_url").unwrap_or_default(),
             api_key: s("api_key"),
             model: s("model").unwrap_or_default(),
@@ -118,7 +159,7 @@ impl AiConfig {
     /// can hold an API key; on Windows the caller restricts it (`pdfcraft_platform::owner_only`).
     pub fn save(&self, path: &Path) -> Result<()> {
         let fail = |e: std::io::Error| AiError::Config(format!("cannot save AI settings {}: {e}", path.display()));
-        let body = json!({ "base_url": self.base_url, "api_key": self.api_key, "model": self.model, "timeout_secs": self.timeout_secs });
+        let body = json!({ "provider": self.provider.as_str(), "base_url": self.base_url, "api_key": self.api_key, "model": self.model, "timeout_secs": self.timeout_secs });
         let text = serde_json::to_string_pretty(&body).map_err(|e| AiError::Config(e.to_string()))?;
         if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
             std::fs::create_dir_all(dir).map_err(fail)?;
@@ -133,6 +174,12 @@ impl AiConfig {
 
     /// Checks that the settings can make a request, with a message that says what to fix.
     pub fn check(&self) -> Result<()> {
+        if self.provider == Provider::ChatGpt {
+            if self.model.trim().is_empty() {
+                return Err(AiError::Config("no model is chosen; sign in to ChatGPT, then pick a model in Preferences ▸ AI Assistant".into()));
+            }
+            return Ok(());
+        }
         self.endpoint("chat/completions").map(|_| ())?;
         if self.model.trim().is_empty() {
             return Err(AiError::Config("no AI model is set; give the model name your server uses (for example llama3.1 or gpt-4.1-mini)".into()));
@@ -161,13 +208,13 @@ impl AiConfig {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    fn timeout(&self) -> std::time::Duration {
+    pub(crate) fn timeout(&self) -> std::time::Duration {
         std::time::Duration::from_secs(if self.timeout_secs == 0 { Self::DEFAULT_TIMEOUT_SECS } else { self.timeout_secs })
     }
 }
 
 #[cfg(unix)]
-fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+pub(crate) fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     use std::io::Write;
     use std::os::unix::fs::OpenOptionsExt;
     // A leftover file keeps its old permissions under `create`, so start from nothing.
@@ -182,7 +229,7 @@ fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 }
 
 #[cfg(not(unix))]
-fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+pub(crate) fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     use std::io::Write;
     let mut f = std::fs::File::create(path)?;
     f.write_all(bytes)?;
@@ -266,6 +313,9 @@ fn status_message(status: u16, body: &str) -> String {
 #[cfg(not(target_arch = "wasm32"))]
 pub fn chat(config: &AiConfig, messages: &[Message]) -> Result<Reply> {
     config.check()?;
+    if config.provider == Provider::ChatGpt {
+        return chatgpt::chat(config, messages);
+    }
     let url = config.endpoint("chat/completions")?;
     let body = request_body(config.model.trim(), messages).to_string();
     let agent = agent(config);
@@ -286,6 +336,9 @@ pub fn chat(config: &AiConfig, messages: &[Message]) -> Result<Reply> {
 /// connection test. Servers that do not list models give an error the caller may ignore.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn list_models(config: &AiConfig) -> Result<Vec<String>> {
+    if config.provider == Provider::ChatGpt {
+        return chatgpt::list_models(config);
+    }
     let url = config.endpoint("models")?;
     let agent = agent(config);
     let mut req = agent.get(&url);
@@ -315,8 +368,13 @@ pub fn parse_models(body: &str) -> Result<Vec<String>> {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn agent(config: &AiConfig) -> ureq::Agent {
+    agent_with_timeout(config.timeout())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn agent_with_timeout(timeout: std::time::Duration) -> ureq::Agent {
     let tls = ureq::tls::TlsConfig::builder().root_certs(ureq::tls::RootCerts::PlatformVerifier).build();
-    ureq::Agent::config_builder().timeout_global(Some(config.timeout())).http_status_as_error(false).tls_config(tls).build().into()
+    ureq::Agent::config_builder().timeout_global(Some(timeout)).http_status_as_error(false).tls_config(tls).build().into()
 }
 
 #[cfg(not(target_arch = "wasm32"))]

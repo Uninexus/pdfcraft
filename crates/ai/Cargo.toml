@@ -15,6 +15,8 @@ serde_json.workspace = true
 thiserror.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+sha2 = "0.11"
+getrandom = "0.4"
 ureq = { version = "3", default-features = false, features = ["rustls-no-provider", "_ring", "gzip", "platform-verifier"] }
 
 [dev-dependencies]
