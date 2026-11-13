@@ -1,5 +1,6 @@
 # Where PdfCraft falls short of Acrobat Pro
 
+> **Last reviewed:** 2026-11-13 | **Last updated:** 2026-11-13 | **Change:** minor (gap 8: Insert pages, Combine files and Create ▸ Multiple files take Office documents through the installed LibreOffice; gap 8's first-beta sub-estimate re-estimated from 5–10 h to 3–6 h)
 > **Last reviewed:** 2026-11-11 | **Last updated:** 2026-11-11 | **Change:** minor (gap 8: known residual risk for the LibreOffice sidecar, sandbox tracked in #6953; estimates unchanged)
 > **Last reviewed:** 2026-10-28 | **Last updated:** 2026-10-28 | **Change:** minor (M10, #4119 partial: Enhance scanned file cleans scanned pages in place: background removal, edge shadow removal, despeckle; estimates unchanged)
 > **Last reviewed:** 2026-10-25 · **Last updated:** 2026-10-25 · **Change:** minor (gaps 5 and 14 current state: native release Hans face via LXGW WenKai Lite; Arabic logical catalog, explicit RTL direction and mirrored stock chrome, with native/browser/IME workflows unqualified; no readiness re-estimate)
@@ -193,9 +194,10 @@ update the numbers.
 ### 8. Office export weak, Office import basic
 
 - **Missing:** Word export that keeps layout; Excel and PowerPoint export; creating PDFs from HTML,
-  web pages and PostScript; SVG/XML/EPS/PS/JPEG 2000 export. Office documents open from File ▸ Open
-  through an installed LibreOffice, but Insert pages, Combine files and Create ▸ Multiple files
-  don't take them yet.
+  web pages and PostScript; SVG/XML/EPS/PS/JPEG 2000 export. Office documents open from File ▸ Open,
+  and Insert pages, Combine files and Create ▸ Multiple files take them too (desktop, through an
+  installed LibreOffice, converted on a worker thread); there is no Create ▸ From Office command or
+  conversion settings yet.
 - **Evidence:** `create.export-docx` partial; the synthetic invoice regression for
   [#773](https://github.com/storytold/pdfcraft/issues/773) now covers absent inferred borders,
   floating watermark text and per-page section sizes. Exact font matching, vector rules and
@@ -211,8 +213,8 @@ update the numbers.
   fetched. Sandboxing the converter is [#6953](https://github.com/storytold/pdfcraft/issues/6953).
 - **Impact:** "Export PDF" and "Create PDF" are two of Acrobat's most used tools.
 - **Gate:** lossy or missing sub-cases of the convert-and-share workflow (partial, not blocking).
-  First beta items: the rest of Create PDF from Office (Insert, Combine and Create ▸ Multiple files
-  on a worker, a Create ▸ From Office command; 5–10 h) and a Word export that keeps layout (20–35 h).
+  First beta items: the rest of Create PDF from Office (a Create ▸ From Office command, conversion
+  settings, progress and cancel for large batches; 3–6 h) and a Word export that keeps layout (20–35 h).
 - **Estimate:** 55–100 h. **Doc:** [file-format-parity.md](file-format-parity.md).
 
 ### 9. No Preflight; PDF/A partial; PDF/X and PDF/UA absent
@@ -435,6 +437,7 @@ update the numbers.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-13 | minor | Gap 8: Insert pages, Combine files and Create ▸ Multiple files take Office documents through the installed LibreOffice, converted on a worker thread (all or nothing when LibreOffice is missing). Gap 8's remaining first-beta Office item re-estimated from 5–10 h to 3–6 h. |
 | 2026-11-11 | minor | Gap 8: known residual risk for the LibreOffice sidecar (Impress has no link-update setting; the soffice process isn't network-sandboxed). Sandboxing tracked in #6953. Estimates unchanged. |
 | 2026-10-26 | minor | Gap 8: the LibreOffice profile never updates Writer or Calc linked content on load; Impress has no such setting and the process's network access isn't sandboxed. Estimates unchanged. |
 | 2026-10-25 | minor | Gaps 5 and 14 current state: native release builds embed LXGW WenKai Lite for Simplified Chinese, while the web build has no Hans face; Arabic catalogs stay logical with explicit RTL label direction and mirrored stock chrome, while native/browser RTL input, IME and complex workflows remain unqualified. Estimates unchanged. |

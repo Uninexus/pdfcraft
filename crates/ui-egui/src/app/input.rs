@@ -119,7 +119,12 @@ impl PdfCraftApp {
         };
         view.insert_at = Some(gap);
         if let Some(drop) = self.grid_drop.take() {
-            self.insert_each(drop.files.into_iter().map(read_grid_file));
+            // Files are read as their turn comes, unless Office documents need converting first.
+            if drop.files.iter().any(|(name, _)| crate::office_batch::has_office_name(name)) {
+                self.insert_converting_office(drop.files.into_iter().map(read_grid_file).collect());
+            } else {
+                self.insert_each(drop.files.into_iter().map(read_grid_file));
+            }
         }
     }
 

@@ -102,8 +102,34 @@ fn files_picker(purpose: FilePurpose) -> rfd::AsyncFileDialog {
     if !matches!(purpose, FilePurpose::CreateMultiple | FilePurpose::CreateMultipleSeparate | FilePurpose::InsertPages | FilePurpose::Combine) {
         return dialog.add_filter_any_case("PDF", &["pdf"]);
     }
-    let all: Vec<&str> = std::iter::once("pdf").chain(pdfcraft_engine::CONVERTIBLE).collect();
-    dialog.add_filter_any_case(tl!("PDF, images and text"), &all).add_filter_any_case("PDF", &["pdf"])
+    dialog.add_filter_any_case(tl!("PDF, images, text and Office documents"), &convertible_extensions()).add_filter_any_case("PDF", &["pdf"])
+}
+
+/// The extensions Create, Insert and Combine take: PDFs, what converts to one, and (on the
+/// desktop, where an installed LibreOffice converts them) Office documents.
+fn convertible_extensions() -> Vec<&'static str> {
+    let all = std::iter::once("pdf").chain(pdfcraft_engine::CONVERTIBLE);
+    #[cfg(not(target_arch = "wasm32"))]
+    let all = all.chain(pdfcraft_engine::OFFICE_EXTENSIONS.iter().copied());
+    all.collect()
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod picker_tests {
+    use super::*;
+
+    #[test]
+    fn the_insert_combine_and_create_pickers_offer_office_documents() {
+        let extensions = convertible_extensions();
+        for ext in ["pdf", "png", "txt", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "odt", "ods", "odp", "rtf"] {
+            assert!(extensions.contains(&ext), "{ext}");
+        }
+        // No extension is listed twice (a picker shows each once).
+        let mut sorted = extensions.clone();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(sorted.len(), extensions.len());
+    }
 }
 
 /// The Replace Pages dialog: the chosen file and the ranges (1-based, inclusive).
@@ -392,7 +418,12 @@ impl PdfCraftApp {
         if purpose == FilePurpose::CreateMultiple {
             // Each file is read when its turn comes, so the selection's bytes are not all held at once.
             if !paths.is_empty() {
-                self.stage_create_multiple(paths.iter().map(|p| read_named(p)));
+                // Unless Office documents need converting first, which holds the batch.
+                if paths.iter().any(|p| crate::office_batch::has_office_name(&p.to_string_lossy())) {
+                    self.stage_create_multiple_office(paths.iter().map(|p| read_named(p)).collect());
+                } else {
+                    self.stage_create_multiple(paths.iter().map(|p| read_named(p)));
+                }
             }
             return;
         }
@@ -400,7 +431,11 @@ impl PdfCraftApp {
             if !paths.is_empty() {
                 let paths = paths.to_vec();
                 let convert = move |app: &mut Self, dir: std::path::PathBuf| {
-                    app.stage_create_separate(paths.iter().map(|p| read_named(p)), Some(dir));
+                    if paths.iter().any(|p| crate::office_batch::has_office_name(&p.to_string_lossy())) {
+                        app.stage_create_separate_office(paths.iter().map(|p| read_named(p)).collect(), Some(dir));
+                    } else {
+                        app.stage_create_separate(paths.iter().map(|p| read_named(p)), Some(dir));
+                    }
                 };
                 match self.export_dir_override.clone() {
                     Some(dir) => convert(self, std::path::PathBuf::from(dir)),
@@ -450,7 +485,14 @@ impl PdfCraftApp {
             let incoming = files
                 .into_iter()
                 .zip(modified)
-                .map(|((name, bytes), modified)| crate::combine_ui::Incoming { name, bytes: Arc::new(bytes), modified, note: None, open_doc: None })
+                .map(|((name, bytes), modified)| crate::combine_ui::Incoming {
+                    name,
+                    bytes: Arc::new(bytes),
+                    modified,
+                    note: None,
+                    open_doc: None,
+                    failed: None,
+                })
                 .collect();
             self.stage_combine_with(incoming);
         } else {
@@ -592,10 +634,20 @@ impl PdfCraftApp {
                 }
             }
             FilePurpose::Ocr => self.ocr_files(files),
-            FilePurpose::CreateMultiple => self.stage_create_multiple(files.into_iter().map(Ok)),
+            FilePurpose::CreateMultiple => {
+                if files.iter().any(|(name, bytes)| crate::office_batch::is_office(name, bytes)) {
+                    self.stage_create_multiple_office(files.into_iter().map(Ok).collect());
+                } else {
+                    self.stage_create_multiple(files.into_iter().map(Ok));
+                }
+            }
             FilePurpose::CreateMultipleSeparate => {
                 let dir = self.export_dir_override.as_ref().map(std::path::PathBuf::from);
-                self.stage_create_separate(files.into_iter().map(Ok), dir);
+                if files.iter().any(|(name, bytes)| crate::office_batch::is_office(name, bytes)) {
+                    self.stage_create_separate_office(files.into_iter().map(Ok).collect(), dir);
+                } else {
+                    self.stage_create_separate(files.into_iter().map(Ok), dir);
+                }
             }
             FilePurpose::RedactWords => {
                 let Some((name, bytes)) = files.into_iter().next() else { return };
@@ -643,7 +695,34 @@ impl PdfCraftApp {
     /// Insert the pages of `files` (PDFs, images, text), in order, at the gap a "+" in the page
     /// grid chose, or else after the selection (or the current page); then select them.
     pub fn insert_files(&mut self, files: Vec<(String, Vec<u8>)>) {
+        if files.iter().any(|(name, bytes)| crate::office_batch::is_office(name, bytes)) {
+            return self.insert_converting_office(files.into_iter().map(Ok).collect());
+        }
         self.insert_each(files.into_iter().map(Ok));
+    }
+
+    /// [`Self::insert_each`] for a batch with Word, Excel, PowerPoint, OpenDocument or RTF files:
+    /// LibreOffice converts them on a worker, and the pages go in, in the order given, when it
+    /// is done, at the place the insert chose now (a gap a "+" chose is used up now, so it can't
+    /// outlive an abandoned conversion). Nothing is inserted if another document is in front by
+    /// then, or if LibreOffice isn't installed.
+    pub(crate) fn insert_converting_office(&mut self, files: Vec<crate::office_batch::Item>) {
+        let Some(view) = self.active.and_then(|i| self.views.get_mut(i)) else { return };
+        let (id, chosen) = (view.id, view.insert_at.take());
+        let after = view.target_pages().last().map_or(0, |p| p + 1);
+        self.convert_office_files(
+            files,
+            Box::new(move |app, files, _| {
+                let Some(i) = app.active.filter(|&i| app.views.get(i).is_some_and(|v| v.id == id)) else {
+                    return app.notify_tr("Another document came to the front while the files were being converted, so nothing was inserted.");
+                };
+                if let Some(view) = app.views.get_mut(i) {
+                    view.insert_at = Some(chosen.unwrap_or(after));
+                }
+                app.insert_each(files);
+            }),
+            String::new(),
+        );
     }
 
     /// [`Self::insert_files`] for files read as their turn comes: one that can't be read is skipped

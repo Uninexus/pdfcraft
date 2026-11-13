@@ -134,6 +134,8 @@ fn bookmarks_are_named_without_the_extension_of_a_converted_file() {
     assert_eq!(title_of("REPORT.PDF"), "REPORT");
     assert_eq!(title_of("scan.2024.JPG"), "scan.2024");
     assert_eq!(title_of("notes.txt"), "notes");
+    assert_eq!(title_of("Quarterly report.DOCX"), "Quarterly report", "an Office document's bookmark drops its extension");
+    assert_eq!(title_of("deck.pptx"), "deck");
     assert_eq!(title_of("v1.2"), "v1.2", "not a known extension");
     assert_eq!(title_of(".png"), ".png", "nothing would be left");
 }

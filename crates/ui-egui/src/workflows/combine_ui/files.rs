@@ -278,12 +278,15 @@ pub(crate) struct Incoming {
     pub note: Option<String>,
     /// The open document it is, when it came from a tab.
     pub open_doc: Option<pdfcraft_engine::DocId>,
+    /// Why it can't be used, when something already failed with it (an Office document that
+    /// couldn't be converted): it joins the list with this as its problem.
+    pub failed: Option<String>,
 }
 
 impl Incoming {
     /// A file known only by its name and bytes.
     pub(crate) fn new(name: String, bytes: Vec<u8>) -> Self {
-        Incoming { name, bytes: Arc::new(bytes), modified: None, note: None, open_doc: None }
+        Incoming { name, bytes: Arc::new(bytes), modified: None, note: None, open_doc: None, failed: None }
     }
 }
 

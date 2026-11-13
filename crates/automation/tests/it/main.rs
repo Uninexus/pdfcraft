@@ -19,6 +19,7 @@ mod list_selection;
 mod model_3d;
 mod model_render;
 mod office;
+mod office_stand_in;
 mod optimize_content_boundaries;
 mod page_actions;
 mod portfolio_info;

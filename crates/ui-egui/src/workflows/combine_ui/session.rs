@@ -256,7 +256,14 @@ impl PdfCraftApp {
         let (taken, refused): (Vec<_>, Vec<_>) = files.into_iter().partition(|f| takes(&f.name, &f.bytes));
         if !refused.is_empty() {
             let names: Vec<&str> = refused.iter().map(|f| f.name.as_str()).collect();
-            self.notify_fmt("Not added: {names}. Combine takes PDFs, images and text files.", &[("names", &names.join(", "))]);
+            self.notify_fmt(
+                if cfg!(target_arch = "wasm32") {
+                    "Not added: {names}. Combine takes PDFs, images and text files."
+                } else {
+                    "Not added: {names}. Combine takes PDFs, images, text files and Word, Excel, PowerPoint, OpenDocument and RTF files."
+                },
+                &[("names", &names.join(", "))],
+            );
         }
         if !taken.is_empty() {
             self.stage_combine_with(taken);
@@ -265,8 +272,40 @@ impl PdfCraftApp {
 
     /// Add files to the Combine files list, with what can be known about them up front.
     pub(crate) fn stage_combine_with(&mut self, files: Vec<Incoming>) {
+        // Word, Excel, PowerPoint, OpenDocument and RTF files are converted by LibreOffice on a
+        // worker, and join the list, in their place among the others, when that is done. Without
+        // LibreOffice none of the batch is added. One that can't be converted joins the list
+        // with why, like a file that can't be read.
+        if files.iter().any(|f| crate::office_batch::is_office(&f.name, &f.bytes)) {
+            let docs =
+                files.iter().filter(|f| crate::office_batch::is_office(&f.name, &f.bytes)).map(|f| (f.name.clone(), f.bytes.clone())).collect();
+            self.convert_office(
+                docs,
+                Box::new(move |app, results| {
+                    let mut results = results.into_iter();
+                    let mut ready = Vec::new();
+                    for mut file in files {
+                        if crate::office_batch::is_office(&file.name, &file.bytes) {
+                            match results.next() {
+                                // It keeps its name; its bytes are the PDF, which is what it is now.
+                                Some(Ok(pdf)) => file.bytes = pdf,
+                                // It stays in the list, with why, like any file that can't be read.
+                                Some(Err(why)) => file.failed = Some(why),
+                                None => continue,
+                            }
+                        }
+                        ready.push(file);
+                    }
+                    if !ready.is_empty() {
+                        app.stage_combine_with(ready);
+                    }
+                }),
+                String::new(),
+            );
+            return;
+        }
         let mut added = Vec::new();
-        for Incoming { name, bytes, modified, note, open_doc } in files {
+        for Incoming { name, bytes, modified, note, open_doc, failed } in files {
             // Images and text files become PDFs as they join the list (#569): from then on they
             // are ordinary files, with pages, thumbnails and page ranges.
             // A file that can't be read joins the list all the same, with why (the Warnings
@@ -279,21 +318,22 @@ impl PdfCraftApp {
                 notes: Vec::new(),
             };
             let source = bytes.clone();
-            let (bytes, assessed) = match self.session.as_pdf_inline(&name, &bytes) {
-                Ok(pdf) => {
-                    let assessed = assess(&pdf, None);
-                    (pdf, assessed)
-                }
-                Err(e) => {
-                    // (The engine's message names the file, which the row already shows.)
-                    let e = match e {
-                        pdfcraft_engine::EditError::Source(m) => m,
-                        other => other.to_string(),
-                    };
-                    let why = e.strip_prefix(&format!("{name}: ")).unwrap_or(&e).to_string();
-                    (bytes, Ok(unreadable(&why)))
-                }
-            };
+            let (bytes, assessed) =
+                match failed.map_or_else(|| self.session.as_pdf_inline(&name, &bytes), |why| Err(pdfcraft_engine::EditError::Source(why))) {
+                    Ok(pdf) => {
+                        let assessed = assess(&pdf, None);
+                        (pdf, assessed)
+                    }
+                    Err(e) => {
+                        // (The engine's message names the file, which the row already shows.)
+                        let e = match e {
+                            pdfcraft_engine::EditError::Source(m) => m,
+                            other => other.to_string(),
+                        };
+                        let why = e.strip_prefix(&format!("{name}: ")).unwrap_or(&e).to_string();
+                        (bytes, Ok(unreadable(&why)))
+                    }
+                };
             let assessed = match assessed {
                 Ok(a) => a,
                 Err(AssessError::Unreadable(e)) => unreadable(&e),
@@ -428,13 +468,20 @@ impl PdfCraftApp {
         self.use_paths(crate::files::FilePurpose::Combine, &paths);
     }
 
-    /// Add the PDFs, images and text files in `dir` to the Combine files list, as one undo step.
+    /// Add the PDFs, images, text files and Office documents in `dir` to the Combine files list, as one undo step.
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn add_folder_to_combine(&mut self, dir: &std::path::Path, recursive: bool) {
         let (paths, more) = combinable_in(dir, recursive);
         let folder = dir.file_name().map_or_else(|| dir.to_string_lossy().into_owned(), |n| n.to_string_lossy().into_owned());
         if paths.is_empty() {
-            self.notify_fmt("No PDFs, images or text files found in {folder}", &[("folder", &folder)]);
+            self.notify_fmt(
+                if cfg!(target_arch = "wasm32") {
+                    "No PDFs, images or text files found in {folder}"
+                } else {
+                    "No PDFs, images, text files or Office documents found in {folder}"
+                },
+                &[("folder", &folder)],
+            );
             self.open_combine_tab();
             return;
         }
@@ -459,7 +506,7 @@ impl PdfCraftApp {
             let modified = None;
             let note = doc.dirty.then(|| tl!("Includes unsaved changes").to_string());
             let name = if doc.name.to_ascii_lowercase().ends_with(".pdf") { doc.name.clone() } else { format!("{}.pdf", doc.name) };
-            incoming.push(Incoming { name, bytes: doc.bytes.clone(), modified, note, open_doc: Some(doc.id) });
+            incoming.push(Incoming { name, bytes: doc.bytes.clone(), modified, note, open_doc: Some(doc.id), failed: None });
         }
         self.stage_combine_with(incoming);
     }

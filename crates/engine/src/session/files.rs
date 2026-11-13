@@ -1,8 +1,9 @@
 use super::{
     Arc, CombineSource, Combined, DataFormat, DocId, EditError, Hairlines, HairlinesFixed, Hidden, ImageResolution, LOW_RESOLUTION_PRINT_DPI,
-    OptimizeReport, SaveOptions, Session, SourceKind, SplitPart, decode_text, guard, office_to_pdf, open_source, open_source_with, optimize, print,
+    OptimizeReport, SaveOptions, Session, SourceKind, SplitPart, decode_text, guard, open_source, open_source_with, optimize, print,
     print_layer_states, print_raster, set_default_layer_state, source_kind, writable, write_full,
 };
+use crate::{OfficeLocator, OfficeRunner};
 
 /// Whether a conversion may run LibreOffice for an Office document (seconds, in another
 /// process) or must refuse it because the caller is on the frame thread.
@@ -11,6 +12,9 @@ enum Office {
     Convert,
     Refuse,
 }
+
+/// The most bytes of PDFs one converting insert holds at once.
+const MAX_CONVERTED_BYTES: u64 = 512 * 1024 * 1024;
 
 /// The name of the edit that inserts what the clipboard holds, one of [`crate::BATCH_LABELS`].
 pub const INSERT_FROM_CLIPBOARD: &str = "Insert pages from the clipboard";
@@ -28,7 +32,34 @@ pub struct InsertPlan {
     pub skipped: Vec<(String, String)>,
 }
 
+/// Why a source can't be used: the error's text without the file's name, which the entry holds.
+fn source_problem(name: &str, error: &EditError) -> String {
+    let mut why = error.to_string();
+    while let Some(rest) = why.strip_prefix(name).and_then(|r| r.strip_prefix(": ")) {
+        why = rest.to_string();
+    }
+    why
+}
+
 impl Session {
+    /// Look for LibreOffice with `locator` instead of the usual places (`PDFCRAFT_SOFFICE`, the
+    /// `PATH`, the install folders): a stand-in for it, in tests.
+    pub fn with_office_locator(mut self, locator: OfficeLocator) -> Self {
+        self.set_office_locator(locator);
+        self
+    }
+
+    /// [`Self::with_office_locator`] on a session that is already open.
+    pub fn set_office_locator(&mut self, locator: OfficeLocator) {
+        self.office = OfficeRunner::with_locator(locator);
+    }
+
+    /// What converts Office documents for this session, for a worker thread to hold: Insert,
+    /// Combine and Create ▸ Multiple files convert there, off the frame thread.
+    pub fn office_runner(&self) -> OfficeRunner {
+        self.office.clone()
+    }
+
     /// The page count of another PDF (Replace Pages, Insert Pages dialogs).
     pub fn page_count_of(&self, name: &str, bytes: &Arc<Vec<u8>>) -> Result<usize, EditError> {
         Ok(pdfcraft_organize::page_count(&open_source(name, bytes)?)?)
@@ -97,7 +128,7 @@ impl Session {
             SourceKind::Pdf => open_source(name, bytes).map(|_| bytes.clone()),
             SourceKind::Image => self.create_from_images(&[(name.to_string(), bytes.to_vec())]),
             SourceKind::Text => self.create_from_text(title, &decode_text(bytes)),
-            SourceKind::Office => office_to_pdf(name, bytes),
+            SourceKind::Office => self.office.convert(name, bytes),
         })
         .map_err(|_| EditError::Source(format!("{name}: the file could not be read")))?;
         Ok((kind, created?))
@@ -137,11 +168,57 @@ impl Session {
     /// [`Self::insert_source_inline`] refuses them. Nothing is changed here: the caller applies
     /// the edit.
     pub fn plan_insert(&self, dest: DocId, at: usize, sources: impl IntoIterator<Item = (String, Arc<Vec<u8>>)>) -> InsertPlan {
+        self.plan_insert_with(dest, at, sources, Office::Refuse, false)
+    }
+
+    /// [`Self::plan_insert`] for a caller that may wait: an Office document is converted with
+    /// LibreOffice ([`OfficeRunner`]) like an image or a text file is, in the order given. It
+    /// runs a separate process for seconds per document, so keep it off the frame thread. The
+    /// first source that can't be used ends the plan: it is the only entry in
+    /// [`InsertPlan::skipped`], later ones are not converted, and the caller decides whether to
+    /// apply what came before. When any source is an Office document and LibreOffice can't be
+    /// found, nothing is converted at all and that one error is the plan's only entry.
+    pub fn plan_insert_converting(&self, dest: DocId, at: usize, sources: impl IntoIterator<Item = (String, Arc<Vec<u8>>)>) -> InsertPlan {
+        self.plan_insert_with(dest, at, sources, Office::Convert, true)
+    }
+
+    fn plan_insert_with(
+        &self,
+        dest: DocId,
+        at: usize,
+        sources: impl IntoIterator<Item = (String, Arc<Vec<u8>>)>,
+        office: Office,
+        stop_at_first_skip: bool,
+    ) -> InsertPlan {
         let count = self.get(dest).map_or(0, |d| d.info.pages.len());
         let start = at.min(count);
+        let sources: Vec<(String, Arc<Vec<u8>>)> = sources.into_iter().collect();
         let (mut edits, mut pages, mut skipped) = (Vec::new(), 0usize, Vec::new());
+        // Without LibreOffice nothing is worth converting: say so once, before any work.
+        if office == Office::Convert
+            && let Some((name, _)) = sources.iter().find(|(name, bytes)| source_kind(name, bytes) == Some(SourceKind::Office))
+            && !self.office.is_available()
+        {
+            return InsertPlan {
+                edit: None,
+                start,
+                pages,
+                skipped: vec![(name.clone(), source_problem(name, &pdfcraft_create::libreoffice_missing(name).into()))],
+            };
+        }
+        // What the sources hold once converted, against the cap the callers put on what they read.
+        // (Each conversion is held to its own 120 s and 512 MB; a call with many documents can
+        // still run for their sum, which callers bound by how many files they take.)
+        let mut held = 0u64;
         for (name, bytes) in sources {
-            match self.insert_source_inline(dest, &name, &bytes) {
+            let result = self.insert_source_with(dest, &name, &bytes, office).and_then(|(n, pdf)| {
+                held = held.saturating_add(pdf.len() as u64);
+                if office == Office::Convert && held > MAX_CONVERTED_BYTES {
+                    return Err(EditError::Source(format!("{name}: the files total more than 512 MB once converted; insert fewer at a time")));
+                }
+                Ok((n, pdf))
+            });
+            match result {
                 Ok((n, bytes)) => {
                     edits.push(crate::Edit::InsertPagesFrom {
                         name,
@@ -153,12 +230,11 @@ impl Session {
                     pages = pages.saturating_add(n);
                 }
                 Err(e) => {
-                    // Source errors lead with the file's name, which the entry already holds.
-                    let mut why = e.to_string();
-                    while let Some(rest) = why.strip_prefix(name.as_str()).and_then(|r| r.strip_prefix(": ")) {
-                        why = rest.to_string();
-                    }
+                    let why = source_problem(&name, &e);
                     skipped.push((name, why));
+                    if stop_at_first_skip {
+                        break;
+                    }
                 }
             }
         }

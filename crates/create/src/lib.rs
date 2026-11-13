@@ -11,7 +11,7 @@ pub use extract::{ExtractedImage, ImageExport, extract_images, image_file, image
 mod office;
 #[cfg(not(target_arch = "wasm32"))]
 pub use office::libreoffice;
-pub use office::{OFFICE_EXTENSIONS, is_office, office_to_pdf};
+pub use office::{OFFICE_EXTENSIONS, is_office, libreoffice_missing, office_to_pdf, office_to_pdf_located};
 use pdfcraft_fonts::wrap_with;
 use text_font::TextFont;
 

@@ -130,6 +130,14 @@ impl Automation {
         }
     }
 
+    /// Look for LibreOffice with `locator` instead of `PDFCRAFT_SOFFICE`, the `PATH` and the usual
+    /// install folders: for the tools that convert Office documents (`doc_combine`,
+    /// `doc_create_multiple`, `page_insert_image`) to use a stand-in in tests.
+    pub fn with_office_locator(mut self, locator: pdfcraft_engine::OfficeLocator) -> Self {
+        self.session = std::mem::take(&mut self.session).with_office_locator(locator);
+        self
+    }
+
     /// Confine every path the tools read or write to `root` (relative paths resolve inside it).
     pub fn with_root(mut self, root: impl Into<PathBuf>) -> std::io::Result<Self> {
         let root = root.into().canonicalize()?;
