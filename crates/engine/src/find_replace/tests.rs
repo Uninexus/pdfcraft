@@ -744,3 +744,26 @@ fn a_longer_replacement_keeps_the_rows_of_a_two_line_address() {
     let rows: Vec<String> = rows_of(&s, id).into_iter().map(|r| r.0).collect();
     assert_eq!(rows.last().map(String::as_str), Some("Washington, DC 20500"), "{rows:?}");
 }
+
+/// The entries of a table of contents (dot leaders and page numbers) keep their own rows when a
+/// longer replacement lands in one of them: the next entry's first word would not have fitted on
+/// the row above, which is no sign of a wrap.
+#[test]
+fn a_longer_replacement_keeps_the_entries_of_a_table_of_contents() {
+    let entries = [
+        "Introduction and Overview of the Platform ............... 4",
+        "Architecture ........................................... 7",
+        "Deployment Considerations for Large Clusters ........ 9",
+        "Networking ............................................. 12",
+        "Self-Service File Restore and Recovery Options ..... 22",
+        "Replication ......................................... 25",
+    ];
+    let (mut s, id) = open(pdf(&lines_page(&entries)));
+    assert!(s.get(id).unwrap().text_blocks(0)[0].joins.iter().all(Option::is_none));
+    let plan = replace_all(&mut s, id, &query("Networking", "Networking and the Cabling of Every Rack"));
+    assert_eq!(plan.replaced, 1);
+    let rows: Vec<String> = rows_of(&s, id).into_iter().map(|r| r.0).collect();
+    for entry in [entries[0], entries[1], entries[2], entries[4], entries[5]] {
+        assert!(rows.iter().any(|r| r == entry), "{entry:?} lost its row: {rows:?}");
+    }
+}

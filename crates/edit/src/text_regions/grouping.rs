@@ -414,8 +414,9 @@ fn group_layout(lines: &[TextLine], mixed: bool) -> Vec<TextBlock> {
     }
     for block in &mut blocks {
         block.reflow_text = reflow_text(block, lines);
-        let ragged = ragged_breaks(block, lines);
-        block.joins = (1..block.rows.len()).map(|row| break_gap(block, lines, row, Some(&ragged))).collect();
+        let entries = structured_entries(block, lines);
+        let ragged = if entries { Vec::new() } else { ragged_breaks(block, lines) };
+        block.joins = (1..block.rows.len()).map(|row| break_gap(block, lines, row, Some((&ragged, entries)))).collect();
     }
     for block in blocks.iter_mut().filter(|block| block.invisible && block.lines.len() > 1) {
         // Each word counts once: neighbouring words OCR sized alike share a run.
@@ -466,7 +467,7 @@ fn reflow_text(block: &TextBlock, lines: &[TextLine]) -> String {
 /// app did not mark (a file written elsewhere, or an older save), a single space when the
 /// geometry looks like an ordinary wrapped body line (`#2529`).
 ///
-/// `ragged` is `Some` for a rewrite that rejoins rows around a replacement ([`TextBlock::joins`]),
+/// `ragged` is `Some((verdicts, entries))` for a rewrite that rejoins rows around a replacement ([`TextBlock::joins`]),
 /// where a wrong guess changes text the replacement does not touch; it holds the verdict of
 /// [`ragged_breaks`] for each break of the block. A row that ends in a hyphen is never rejoined
 /// then: it may be a real one ("well-" "known") that joining would delete. An unmarked row is a
@@ -474,7 +475,7 @@ fn reflow_text(block: &TextBlock, lines: &[TextLine]) -> String {
 /// address or a poem always "reaches" its own right edge, so one alone proves nothing) and this one
 /// does too, as in justified text; or (b) the paragraph is ragged-right text that flows and
 /// [`ragged_breaks`] says so of this break.
-fn break_gap(block: &TextBlock, lines: &[TextLine], row_index: usize, ragged: Option<&[bool]>) -> Option<usize> {
+fn break_gap(block: &TextBlock, lines: &[TextLine], row_index: usize, ragged: Option<(&[bool], bool)>) -> Option<usize> {
     let line = block.rows.get(row_index).and_then(|row| row.first()).and_then(|i| lines.get(*i))?;
     if line.hard_break {
         return None;
@@ -489,7 +490,11 @@ fn break_gap(block: &TextBlock, lines: &[TextLine], row_index: usize, ragged: Op
     let width = prev[2] - prev[0];
     let reaches = |rect: [f64; 4]| block.rect[2] - rect[2] <= size * 0.75 && rect[2] - rect[0] >= size * 8.0;
     let mut justified = true;
-    if ragged.is_some() {
+    if let Some((_, entries)) = ragged {
+        // Rows that are entries of a list (a table of contents, say) are never a paragraph's wraps.
+        if entries {
+            return None;
+        }
         let full = block.rows.iter().filter_map(|row| row_rect(row, lines)).filter(|rect| reaches(*rect)).count();
         if ends_in_hyphen(&row_text(block, lines, row_index.saturating_sub(1))) {
             return None;
@@ -499,7 +504,7 @@ fn break_gap(block: &TextBlock, lines: &[TextLine], row_index: usize, ragged: Op
     // Short rows define the right edge by their own letters. A body line that fills the
     // measure leaves almost no room for the next word.
     let fills = slack <= size * 0.75 && width >= size * 8.0 && (next[2] - next[0]) + size * 0.25 > slack;
-    if !(justified && fills) && !ragged.is_some_and(|r| r.get(row_index).copied().unwrap_or(false)) {
+    if !(justified && fills) && !ragged.is_some_and(|(r, _)| r.get(row_index).copied().unwrap_or(false)) {
         return None;
     }
     let before = row_text(block, lines, row_index.saturating_sub(1)).trim_end().chars().next_back();
@@ -574,6 +579,55 @@ fn next_word_width(block: &TextBlock, lines: &[TextLine], row: usize, text: &str
         Some(per_char * chars as f64).filter(|w| w.is_finite() && *w > 0.0)
     })?;
     Some((word, space))
+}
+
+/// A run of leader characters: a table of contents' dots, an underscored fill, a rule of dashes.
+fn has_leader(text: &str) -> bool {
+    let mut run = 0;
+    for c in text.chars() {
+        if matches!(c, '.' | '\u{2026}' | '_' | '-' | '\u{00B7}' | '\u{2022}') {
+            run += if c == '\u{2026}' { 3 } else { 1 };
+            if run >= 3 {
+                return true;
+            }
+        } else {
+            run = 0;
+        }
+    }
+    false
+}
+
+/// Does the row open with a section number or a list marker ("8", "3.2", "1.1.", a bullet)?
+fn opens_with_number_or_marker(text: &str) -> bool {
+    let text = text.trim_start();
+    let token = text.split_whitespace().next().unwrap_or("");
+    let numbered = token.chars().any(|c| c.is_ascii_digit()) && token.chars().all(|c| c.is_ascii_digit() || c == '.') && text.len() > token.len();
+    numbered || opens_with_marker(text)
+}
+
+/// Are the rows of `block` entries of a list or table rather than the wraps of a paragraph: a
+/// leader run or a gap of more than three ems between two words (the dots or the tab before a
+/// page number, a table's columns) in any row, or section numbers or markers opening more than one
+/// row? A rewrite keeps every row of such a block, however long the rows are and however the next
+/// entry's first word would not have fitted on the one above.
+fn structured_entries(block: &TextBlock, lines: &[TextLine]) -> bool {
+    let size = block.size.max(1.0);
+    let mut numbered = 0;
+    for (index, row) in block.rows.iter().enumerate() {
+        let text = row_text(block, lines, index);
+        if has_leader(&text) {
+            return true;
+        }
+        let mut right = None::<f64>;
+        for b in row.iter().filter_map(|i| lines.get(*i)).flat_map(|l| l.ink.iter()) {
+            if right.is_some_and(|r| b[0] - r > size * 3.0) {
+                return true;
+            }
+            right = Some(right.map_or(b[2], |r| r.max(b[2])));
+        }
+        numbered += usize::from(opens_with_number_or_marker(&text));
+    }
+    numbered > 1
 }
 
 /// What one break of an unmarked paragraph says about ragged-right flow.

@@ -374,3 +374,68 @@ fn a_first_word_drawn_in_two_runs_is_measured_whole() {
     let split = joins_of(&placed_rows(&placed));
     assert_eq!(split, whole, "the runs of the word are one word");
 }
+
+/// Entries of a table of contents are lines of their own however long they are and however
+/// the next entry's first word would not have fitted: leaders, wide gaps and section numbers mark
+/// them.
+#[test]
+fn table_of_contents_entries_keep_their_rows() {
+    let leaders: Vec<String> = [
+        "Introduction and Overview of the Platform ............... 4",
+        "Architecture ........................................... 7",
+        "Deployment Considerations for Large Clusters ........ 9",
+        "Networking ............................................. 12",
+        "Self-Service File Restore and Recovery Options ..... 22",
+        "Replication ......................................... 25",
+    ]
+    .map(String::from)
+    .to_vec();
+    let gaps: Vec<String> = [
+        "Introduction and Overview of the Platform",
+        "Architecture",
+        "Deployment Considerations for Large Clusters",
+        "Networking",
+        "Self-Service File Restore",
+        "Replication and Recovery Options Overview",
+    ]
+    .iter()
+    .zip(["4", "7", "9", "12", "22", "25"])
+    .map(|(t, n)| format!("{t}{}{n}", " ".repeat(if t.len() > 30 { 14 } else { 40 })))
+    .collect();
+    let numbered: Vec<String> = [
+        "1.1 Introduction and Overview of the whole Platform",
+        "1.2 Architecture and design",
+        "1.3 Deployment Considerations for Large Clusters and",
+        "2.1 Networking and the cabling of every rack in it",
+        "2.2 Self-Service File Restore and Recovery Options",
+        "2.3 Replication between sites",
+    ]
+    .map(String::from)
+    .to_vec();
+    let mut rejoined = Vec::new();
+    for (name, rows) in [("leaders", leaders), ("gaps", gaps), ("numbered", numbered)] {
+        let doc = ragged_rows(&rows);
+        let blocks = text_blocks(&doc, 0).unwrap();
+        assert_eq!(blocks.len(), 1, "{name}: one block");
+        if blocks[0].joins.iter().any(Option::is_some) {
+            rejoined.push((name, blocks[0].joins.clone()));
+        }
+    }
+    assert!(rejoined.is_empty(), "entries rejoined: {rejoined:?}");
+}
+
+/// Entries whose page numbers line up on the right edge also fill the measure: the full-measure
+/// rule must not take those for justified text either.
+#[test]
+fn table_of_contents_entries_that_fill_the_measure_keep_their_rows() {
+    let rows = [
+        "Introduction and Overview ........ 4",
+        "Architecture of the whole system ...... 7",
+        "Deployment Considerations ..... 9",
+        "Replication ... 25",
+    ];
+    let doc = full_rows(&rows, 300.0);
+    let blocks = text_blocks(&doc, 0).unwrap();
+    assert_eq!(blocks.len(), 1);
+    assert!(blocks[0].joins.iter().all(Option::is_none), "{:?}", blocks[0].joins);
+}
