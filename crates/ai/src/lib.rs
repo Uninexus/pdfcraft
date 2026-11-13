@@ -15,6 +15,7 @@ use std::path::{Path, PathBuf};
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod chatgpt;
+pub mod refs;
 
 use serde_json::{Value, json};
 
