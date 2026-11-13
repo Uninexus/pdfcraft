@@ -37,6 +37,8 @@ pub const DEFAULT_APPS_URI: &str = "ms-settings:defaultapps";
 pub const DEFAULT_APPS_APP_URI: &str = "ms-settings:defaultapps?registeredAppUser=PdfCraft%20(portable)";
 
 const CLASSES: &str = r"Software\Classes";
+/// Holds only the Capabilities key below; removal deletes it whole so no empty key stays.
+const APP_KEY: &str = r"Software\PdfCraft.Portable";
 const CAPABILITIES: &str = r"Software\PdfCraft.Portable\Capabilities";
 /// The name under RegisteredApplications, and so in Settings ▸ Default apps.
 const APP_NAME: &str = "PdfCraft (portable)";
@@ -132,7 +134,7 @@ pub fn registration_plan(exe: &Path) -> Result<Plan, FileTypeError> {
             write(&format!(r"{CAPABILITIES}\FileAssociations"), Some(".pdf"), PROG_ID),
             write(REGISTERED_APPLICATIONS, Some(APP_NAME), CAPABILITIES),
         ],
-        delete_keys: vec![prog, CAPABILITIES.to_owned()],
+        delete_keys: vec![prog, APP_KEY.to_owned()],
         delete_values: vec![
             (format!(r"{CLASSES}\.pdf\OpenWithProgids"), PROG_ID.to_owned()),
             (REGISTERED_APPLICATIONS.to_owned(), APP_NAME.to_owned()),
@@ -160,7 +162,7 @@ pub fn check_plan(plan: &Plan) -> Result<(), FileTypeError> {
         }
     }
     for key in &plan.delete_keys {
-        let owned = key.eq_ignore_ascii_case(&format!(r"{CLASSES}\{PROG_ID}")) || key.eq_ignore_ascii_case(CAPABILITIES);
+        let owned = key.eq_ignore_ascii_case(&format!(r"{CLASSES}\{PROG_ID}")) || key.eq_ignore_ascii_case(APP_KEY);
         if protected(key) || !owned {
             return refuse(key.clone());
         }
@@ -369,6 +371,9 @@ mod tests {
         let mut deletes = plan();
         deletes.delete_keys.push(r"Software\Classes\.pdf".into());
         assert!(check_plan(&deletes).is_err(), "removing the whole .pdf key would take other apps' entries too");
+        let mut msi = plan();
+        msi.delete_keys.push(r"Software\PdfCraft".into());
+        assert!(check_plan(&msi).is_err(), "the installer's own key is not ours to delete");
         let mut values = plan();
         values.delete_values.push((r"Software\Classes\.pdf\OpenWithProgids".into(), "AcroExch.Document".into()));
         assert!(check_plan(&values).is_err(), "another app's entry stays");
@@ -377,7 +382,7 @@ mod tests {
     #[test]
     fn removal_deletes_only_what_the_registration_created() {
         let plan = plan();
-        assert_eq!(plan.delete_keys, [r"Software\Classes\PdfCraft.Portable", r"Software\PdfCraft.Portable\Capabilities"]);
+        assert_eq!(plan.delete_keys, [r"Software\Classes\PdfCraft.Portable", r"Software\PdfCraft.Portable"]);
         assert_eq!(
             plan.delete_values,
             [
