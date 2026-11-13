@@ -127,6 +127,8 @@ const FILE: &[&str] = &[
     "file.properties",
     "file.word_count",
     "ai.ask",
+    "ai.summary",
+    "ai.translate",
     SEP,
     "print.dialog",
 ];

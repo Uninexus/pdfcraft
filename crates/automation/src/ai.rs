@@ -1,4 +1,4 @@
-//! `ai_status` and `ai_ask`: the opt-in AI assistant (misc.ai-provider).
+//! `ai_status`, `ai_ask`, `ai_summarize` and `ai_translate`: the opt-in AI assistant (misc.ai-provider).
 //!
 //! The endpoint comes from the call's own arguments first, then from a settings file
 //! (`config_file`, honouring `--root`), then from the `PDFCRAFT_AI_BASE_URL`,
@@ -61,12 +61,27 @@ impl Automation {
     }
 
     pub(crate) fn ai_ask(&mut self, a: &Args) -> Result<Value> {
-        let config = self.ai_config(a)?;
-        config.check().map_err(failed)?;
         let question = a.str("question")?.trim().to_owned();
         if question.is_empty() {
             return Err(failed("question is empty"));
         }
+        self.ai_run(a, &question)
+    }
+
+    pub(crate) fn ai_summarize(&mut self, a: &Args) -> Result<Value> {
+        self.ai_run(a, pdfcraft_ai::SUMMARY_QUESTION)
+    }
+
+    pub(crate) fn ai_translate(&mut self, a: &Args) -> Result<Value> {
+        let language = a.str("language")?;
+        let question = pdfcraft_ai::translate_question(language).ok_or_else(|| failed("language must be a short language name such as Spanish"))?;
+        self.ai_run(a, &question)
+    }
+
+    /// Sends the pages named by `doc` and `pages` with `question` to the configured model.
+    fn ai_run(&mut self, a: &Args, question: &str) -> Result<Value> {
+        let config = self.ai_config(a)?;
+        config.check().map_err(failed)?;
         let doc = self.doc_to_copy(a)?;
         let id = doc.id;
         let pages = match a.opt_ints("pages")? {
@@ -78,7 +93,7 @@ impl Automation {
         }
         let texts = self.page_texts(id, &pages)?;
         let sent: Vec<(usize, String)> = pages.iter().zip(&texts).map(|(p, t)| (p + 1, t.plain_text())).collect();
-        let reply = pdfcraft_ai::chat(&config, &document_messages(&question, &sent)).map_err(failed)?;
+        let reply = pdfcraft_ai::chat(&config, &document_messages(question, &sent)).map_err(failed)?;
         Ok(json!({
             "answer": reply.content,
             "model": reply.model.unwrap_or(config.model),

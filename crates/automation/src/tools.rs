@@ -267,6 +267,16 @@ pub fn tools() -> Vec<ToolDef> {
             .cmd("ai.ask")
             .with(schema(json!({ "doc": doc(), "question": { "type": "string", "minLength": 1 }, "pages": pages("to send (default: all)"),
                 "base_url": { "type": "string" }, "model": { "type": "string" }, "api_key": { "type": "string" }, "config_file": path_arg(), "timeout_secs": { "type": "integer", "minimum": 1 } }), &["doc", "question"])),
+        t("ai_summarize", "Summarize a document with the AI assistant", "Ask the configured AI model (see ai_status) for a short summary with key points and page numbers. Same page selection, size limits, privacy and permission rules as ai_ask: the page text goes only to your configured endpoint. Changes nothing in the document.")
+            .ro()
+            .cmd("ai.summary")
+            .with(schema(json!({ "doc": doc(), "pages": pages("to summarize (default: all)"),
+                "base_url": { "type": "string" }, "model": { "type": "string" }, "api_key": { "type": "string" }, "config_file": path_arg(), "timeout_secs": { "type": "integer", "minimum": 1 } }), &["doc"])),
+        t("ai_translate", "Translate a document with the AI assistant", "Ask the configured AI model (see ai_status) to translate the text of the pages into language (a name such as Spanish or French (Canada)). Same page selection, size limits, privacy and permission rules as ai_ask. Returns the translated text; the document is not changed.")
+            .ro()
+            .cmd("ai.translate")
+            .with(schema(json!({ "doc": doc(), "language": { "type": "string", "minLength": 1, "maxLength": 60 }, "pages": pages("to translate (default: all)"),
+                "base_url": { "type": "string" }, "model": { "type": "string" }, "api_key": { "type": "string" }, "config_file": path_arg(), "timeout_secs": { "type": "integer", "minimum": 1 } }), &["doc", "language"])),
         t("text_extract", "Extract text", "Extract the text of some or all pages, in reading order. With rect, only the text inside that rectangle on each page, as Column select takes it: one row per visual line, side-by-side pieces (table cells) separated by a tab. With format \"html\", each page also carries html, the same text as Copy with formatting puts on the clipboard (paragraphs, bold, italic, size, colour and font family), and styles_incomplete when some styles had to be left out. With rect, the html is that text in line order, not split into the column's rows and cells. A page whose content was cut at the renderer's limits carries truncated: true; its text is incomplete. The HTML of one call is capped at 32 MiB in total; pages past the cap carry empty html with styles_incomplete. html_truncated is set when that cap is reached or when a page's own copy was cut at its span or size cap.")
             .ro()
             .cmd("edit.column_select")

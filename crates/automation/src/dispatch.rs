@@ -75,6 +75,8 @@ impl Automation {
             "text_word_count" => self.text_word_count(&a)?,
             "ai_status" => self.ai_status(&a)?,
             "ai_ask" => self.ai_ask(&a)?,
+            "ai_summarize" => self.ai_summarize(&a)?,
+            "ai_translate" => self.ai_translate(&a)?,
             "text_find" => self.text_find(&a)?,
             "text_find_folder" => self.text_find_folder(&a)?,
             "text_replace" => self.text_replace(&a)?,
