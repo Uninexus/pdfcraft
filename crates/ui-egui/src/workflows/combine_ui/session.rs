@@ -276,16 +276,19 @@ impl PdfCraftApp {
         // worker, and join the list, in their place among the others, when that is done. Without
         // LibreOffice none of the batch is added. One that can't be converted joins the list
         // with why, like a file that can't be read.
-        if files.iter().any(|f| crate::office_batch::is_office(&f.name, &f.bytes)) {
-            let docs =
-                files.iter().filter(|f| crate::office_batch::is_office(&f.name, &f.bytes)).map(|f| (f.name.clone(), f.bytes.clone())).collect();
+        // A file that already failed (`failed`) keeps its Office bytes but is not converted
+        // again: the batch is staged a second time with it in, and converting it anew would fail
+        // the same way and stage it again, without end.
+        let to_convert = |f: &Incoming| f.failed.is_none() && crate::office_batch::is_office(&f.name, &f.bytes);
+        if files.iter().any(to_convert) {
+            let docs = files.iter().filter(|f| to_convert(f)).map(|f| (f.name.clone(), f.bytes.clone())).collect();
             self.convert_office(
                 docs,
                 Box::new(move |app, results| {
                     let mut results = results.into_iter();
                     let mut ready = Vec::new();
                     for mut file in files {
-                        if crate::office_batch::is_office(&file.name, &file.bytes) {
+                        if file.failed.is_none() && crate::office_batch::is_office(&file.name, &file.bytes) {
                             match results.next() {
                                 // It keeps its name; its bytes are the PDF, which is what it is now.
                                 Some(Ok(pdf)) => file.bytes = pdf,
