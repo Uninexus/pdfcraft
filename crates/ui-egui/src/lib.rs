@@ -227,6 +227,7 @@ use workflows::print_paper;
 use workflows::print_ui;
 use workflows::scan_clean_ui;
 use workflows::web_print;
+use workflows::white_margins_ui;
 
 /// Files dropped on a document's page grid or its Pages panel.
 struct GridDrop {
@@ -733,6 +734,9 @@ pub struct PdfCraftApp {
     /// Scan & OCR ▸ Enhance scanned file: the dialog's choices and the running clean-up.
     pub scan_clean_draft: scan_clean_ui::ScanCleanDraft,
     pub scan_clean_run: Option<scan_clean_ui::ScanCleanRun>,
+    /// Remove white margins: the dialog's choices and the running measurement.
+    pub white_margins_draft: white_margins_ui::WhiteMarginsDraft,
+    pub white_margins_run: Option<white_margins_ui::WhiteMarginsRun>,
     /// A background job's progress card (see [`widgets::progress_notice`]).
     pub progress_notice: Option<widgets::ProgressNotice>,
     /// Pages copied or cut in Organize Pages, ready to paste (into any document).

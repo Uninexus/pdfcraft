@@ -133,6 +133,7 @@ impl PdfCraftApp {
                     "pdfa" => Some(Dialog::PdfA),
                     "signature" => Some(Dialog::Signature),
                     "optimize" => Some(Dialog::Optimize),
+                    "white-margins" => Some(Dialog::WhiteMargins),
                     "sign" | "certify" => {
                         // Sign with a Digital ID for an invisible signature on the current page.
                         let page = self.active.map_or(0, |i| self.views[i].current);

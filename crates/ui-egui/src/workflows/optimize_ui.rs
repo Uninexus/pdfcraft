@@ -407,6 +407,10 @@ impl PdfCraftApp {
             self.notify_tr("Scanned pages are already being enhanced");
             return;
         }
+        if self.white_margins_run.is_some() {
+            self.notify_tr("White margins are already being removed");
+            return;
+        }
         let job = match self.session.optimize_job(id, settings, discard) {
             Ok(job) => job,
             Err(e) => return self.save_optimized(id, kind, Err(e), destination),

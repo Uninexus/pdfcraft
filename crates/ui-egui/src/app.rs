@@ -283,6 +283,8 @@ impl PdfCraftApp {
             optimize_run: None,
             scan_clean_draft: scan_clean_ui::ScanCleanDraft::default(),
             scan_clean_run: None,
+            white_margins_draft: Default::default(),
+            white_margins_run: None,
             progress_notice: None,
             page_clipboard: None,
             comment_clipboard: None,
@@ -797,6 +799,7 @@ impl PdfCraftApp {
         self.poll_ocr();
         self.poll_optimize();
         self.poll_scan_clean();
+        self.poll_white_margins();
         self.poll_action();
         // The OCR Verify screen's worker may have finished while no frame was drawn.
         if self.ocr_verify.phase == workflows::ocr_verify::Phase::Running {

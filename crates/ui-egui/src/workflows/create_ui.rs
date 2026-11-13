@@ -271,6 +271,14 @@ impl PdfCraftApp {
                 self.notify_tr("Optimization is already running");
                 return;
             }
+            if self.scan_clean_run.is_some() {
+                self.notify_tr("Scanned pages are already being enhanced");
+                return;
+            }
+            if self.white_margins_run.is_some() {
+                self.notify_tr("White margins are already being removed");
+                return;
+            }
             if let Err(e) = self.session.optimize_job(id, &settings, &[]) {
                 return self.save_optimized(id, Reduce, Err(e), None);
             }
