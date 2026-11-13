@@ -14,6 +14,9 @@
 //!  --combine-view grid|list  --combine-zoom 60..200`
 //! `--combine files…` adds the files to the Combine files tab (File Explorer's "Combine files in
 //! PdfCraft", #585), of the PdfCraft already running when there is one.
+//! `--register-file-types` / `--unregister-file-types` (Windows) offer PdfCraft as a PDF app for the
+//! current user, or stop offering it, and exit without a window; the user still picks it in
+//! Settings > Default apps.
 //!
 //! `--new-window` opens a window of its own. Without it, on Windows, a launch that only names files
 //! hands them to the PdfCraft already running, where they open as tabs (`single_instance`).
@@ -72,6 +75,9 @@ Options:
   --new-window                open a window of its own instead of passing the files to a running PdfCraft
   --create-images [images…]   put the images in one PDF and ask for the page DPI
   --combine files…            add the files to the Combine files tab, of a running PdfCraft if there is one
+  --register-file-types       Windows: offer PdfCraft as a PDF app for this user (then choose it in Settings > Default apps)
+  --unregister-file-types     Windows: remove what --register-file-types added (first choose another .pdf app in Settings,
+                              or Windows keeps pointing PDF files at the removed program)
   --control <file>            enable the UI control channel (pdfcraft-cli ui --control <file> …)
   --page N, --zoom 150, --layout continuous, --theme dark, …
                               view settings applied once the files are open
@@ -86,6 +92,36 @@ fn print_and_exit(text: &str) -> eframe::Result {
     use std::io::Write;
     let _ = writeln!(std::io::stdout().lock(), "{text}");
     Ok(())
+}
+
+/// `--register-file-types` and `--unregister-file-types`: change the current user's registration as
+/// a PDF app, say what happened and exit without a window (nonzero when it failed). A release
+/// build on Windows has no console, so the result is also in the log file; Preferences'
+/// "Set up PdfCraft as a PDF app…" says it in the window.
+fn run_file_types(action: startup::FileTypes) -> ! {
+    use pdfcraft_platform::file_types;
+    let result = match action {
+        startup::FileTypes::Register => std::env::current_exe()
+            .map_err(|e| file_types::FileTypeError::BadPath(format!("the program's own path is unknown: {e}")))
+            .and_then(|exe| file_types::register_current_user(&exe))
+            .map(|()| "PdfCraft is now offered as a PDF app for this user. Choose it for .pdf in Windows Settings > Default apps; Windows does not let a program choose for you.".to_owned()),
+        startup::FileTypes::Unregister => file_types::unregister_current_user().map(|()| "PdfCraft is no longer offered as a PDF app for this user.".to_owned()),
+    };
+    let (text, code) = match result {
+        Ok(text) => {
+            log::info!("{text}");
+            (text, 0)
+        }
+        Err(e) => {
+            log::warn!("{e}");
+            (e.to_string(), 1)
+        }
+    };
+    {
+        use std::io::Write;
+        let _ = writeln!(std::io::stdout().lock(), "{text}");
+    }
+    std::process::exit(code)
 }
 
 /// The app was called PrintCraft before; settings saved then are under this key.
@@ -250,6 +286,9 @@ fn main() -> eframe::Result {
             // Standard error only by now (`attach_dir` gave up on the file); unlike `eprintln!`, never panics.
             Err(e) => log::warn!("no log file: {e}"),
         }
+    }
+    if let Some(action) = startup.file_types {
+        run_file_types(action);
     }
     // Windows, Linux and the BSDs: a launch that only names files (an Outlook attachment, an
     // Explorer double-click, a file manager or `xdg-open`) hands them to the PdfCraft already

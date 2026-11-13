@@ -472,8 +472,13 @@ Installers and executables are code-signed.
 The portable zip runs from any folder, a USB stick included. Its `portable.txt` keeps the settings,
 logs and crash recovery in a `PdfCraftData` folder next to `pdfcraft.exe`, so nothing is written to
 `%APPDATA%`; delete that file to use the normal per-user folders.
-Windows doesn't offer the portable copy as a default PDF app on its own, since it registers nothing;
-`portable.txt` has the PowerShell lines that register it for your user only, and how to undo them.
+Windows doesn't offer the portable copy as a default PDF app on its own, since it registers nothing.
+Choose Preferences > Set up PdfCraft as a PDF app… (or run `pdfcraft.exe --register-file-types`):
+it lists PdfCraft for your user only, no administrator rights, and opens Settings > Default apps,
+where you pick PdfCraft for `.pdf` yourself (Windows doesn't let a program choose for you).
+Preferences > Stop offering PdfCraft as a PDF app… (or `pdfcraft.exe --unregister-file-types`) removes
+it again; first choose another app for `.pdf` in Settings, or Windows keeps pointing PDF files at the
+removed program. `portable.txt` has similar PowerShell lines. Run it again if you move the folder.
 
 The MSI installs for your account only by default, without administrator privileges. Choose
 "Everyone on this computer" on its first page, or pass `ALLUSERS=1` from an elevated terminal, to install

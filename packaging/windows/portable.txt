@@ -11,7 +11,13 @@ drive), PdfCraft says so and uses the per-user folders instead.
 Opening PDF files with this copy
 
 The portable copy doesn't register itself with Windows, so picking it under "Open with" may not
-stick. To offer it in Settings > Apps > Default apps, open PowerShell in this folder and run:
+stick. The simplest way to offer it in Settings > Apps > Default apps is Preferences > "Set up
+PdfCraft as a PDF app..." in PdfCraft, or running "pdfcraft.exe --register-file-types". It writes
+the entries below for your user and a few more (the PDF icon, no thumbnail overlay, the app icon),
+and the app then opens that Settings page. To undo it, first choose another app for .pdf in
+Settings, then use Preferences > "Stop offering PdfCraft as a PDF app..." or run
+"pdfcraft.exe --unregister-file-types" (an empty .pdf\OpenWithProgids key stays). Or open PowerShell
+in this folder and run:
 
   $exe = (Resolve-Path .\pdfcraft.exe).Path
   $c = "HKCU:\Software\Classes"

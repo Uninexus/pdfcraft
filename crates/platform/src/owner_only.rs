@@ -137,7 +137,7 @@ const ICACLS: &str = "icacls.exe";
 /// every one of them a console window of its own, which flashes up while the app writes its
 /// `--control` file. The flag doesn't touch the pipes `output()` reads the answer through.
 #[cfg(windows)]
-fn system_tool(relative: &str) -> std::process::Command {
+pub(crate) fn system_tool(relative: &str) -> std::process::Command {
     use std::os::windows::process::CommandExt as _;
     /// `CREATE_NO_WINDOW`, from the Windows process creation flags.
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;

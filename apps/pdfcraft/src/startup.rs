@@ -13,6 +13,15 @@ pub(super) struct Arguments {
     pub two_paged: bool,
     pub version: bool,
     pub help: bool,
+    /// `--register-file-types` / `--unregister-file-types`: offer (or stop offering) PdfCraft as a
+    /// PDF app for the current Windows user, then exit without a window.
+    pub file_types: Option<FileTypes>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FileTypes {
+    Register,
+    Unregister,
 }
 
 impl Arguments {
@@ -34,6 +43,8 @@ impl Arguments {
                     break;
                 }
                 "--control" => parsed.control_file = args.next(),
+                "--register-file-types" => parsed.file_types = Some(FileTypes::Register),
+                "--unregister-file-types" => parsed.file_types = Some(FileTypes::Unregister),
                 "--create-images" => parsed.create_images = true,
                 // File Explorer's "Combine files in PdfCraft" (#585): the files go to the Combine
                 // files tab, of the running PdfCraft when there is one.
@@ -88,6 +99,17 @@ mod tests {
         assert_eq!(parsed.options, [("page".to_string(), "5".to_string())]);
         assert!(!reopens_last_session(parsed.new_window));
         assert!(reopens_last_session(parse(&["/tmp/a.pdf"]).new_window));
+    }
+
+    #[test]
+    fn the_file_type_flags_take_no_value_and_are_not_a_launch() {
+        assert_eq!(parse(&["--register-file-types"]).file_types, Some(FileTypes::Register));
+        assert_eq!(parse(&["--unregister-file-types"]).file_types, Some(FileTypes::Unregister));
+        assert_eq!(parse(&["a.pdf"]).file_types, None);
+        // A flag is not a value: the file after it stays a file, not an option's value.
+        let parsed = parse(&["--register-file-types", "a.pdf"]);
+        assert_eq!(parsed.files, ["a.pdf"]);
+        assert!(parsed.options.is_empty());
     }
 
     #[test]

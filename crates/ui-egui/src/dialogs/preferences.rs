@@ -685,6 +685,23 @@ fn card_general(ui: &mut egui::Ui, app: &mut PdfCraftApp, t: &Tokens, ctx: &mut 
     ctx.checkbox(ui, &mut app.update_check_at_start, tl!("Check for updates when PdfCraft starts"), t);
     ctx.checkbox(ui, &mut app.show_secured_notice, tl!("Show a notice when a document is secured"), t);
 
+    // The portable build has no installer to offer it under Settings ▸ Default apps.
+    #[cfg(windows)]
+    {
+        ui.add_space(4.0);
+        if ctx.button(ui, tl!("Set up PdfCraft as a PDF app…"), t).clicked() {
+            app.execute("help.default_app");
+        }
+        if ctx.button(ui, tl!("Stop offering PdfCraft as a PDF app…"), t).clicked() {
+            app.execute("help.default_app.remove");
+        }
+        ctx.label_secondary(
+            ui,
+            tl!("Lists PdfCraft under Windows Settings > Default apps for this user; you choose it there. Before stopping, choose another app for .pdf there, or Windows keeps pointing PDF files at the removed program."),
+            t,
+        );
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     {
         ui.horizontal(|ui| {
