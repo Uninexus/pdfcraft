@@ -1,3 +1,4 @@
+pub(super) mod default_app;
 pub(super) mod drag_pointer;
 pub(super) mod file_filter;
 #[cfg(not(target_arch = "wasm32"))]

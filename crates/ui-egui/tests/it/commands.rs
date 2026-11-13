@@ -548,6 +548,18 @@ fn the_about_dialog_shows_the_running_version() {
     h.get_by_label_contains(&format!("Version {}", env!("CARGO_PKG_VERSION")));
 }
 
+/// "Set up PdfCraft as a PDF app…" registers per user on Windows only; elsewhere it says so and
+/// changes nothing (the registry plan and its guards are tested in `pdfcraft-platform`).
+#[cfg(not(windows))]
+#[test]
+fn setting_up_the_pdf_app_says_it_is_only_for_windows_elsewhere() {
+    let mut h = harness();
+    assert!(pdfcraft_engine::commands::command("help.default_app").is_some());
+    h.state_mut().execute("help.default_app");
+    let toast = h.state().toast.clone().map(|(m, _)| m).unwrap_or_default();
+    assert!(toast.contains("only available on Windows"), "{toast:?}");
+}
+
 /// Check that the quit shortcut needs exact platform modifiers and that unsaved work opens the save prompt
 /// instead of closing.
 #[test]

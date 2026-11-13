@@ -272,6 +272,8 @@ impl PdfCraftApp {
             "help.shortcuts" => self.dialog = Some(Dialog::Shortcuts),
             "help.about" => self.dialog = Some(Dialog::About),
             "help.check_updates" => self.check_for_updates(),
+            "help.default_app" => self.set_up_default_app(),
+            "help.default_app.remove" => self.remove_default_app(),
             _ => return None,
         }
         Some(true)

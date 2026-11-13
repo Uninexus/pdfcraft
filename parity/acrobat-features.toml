@@ -10414,6 +10414,18 @@ evidence = []
 notes = "Release builds provide signed and notarized macOS artifacts and code-signed Windows installers when signing credentials are configured (packaging/macos/package.sh; packaging/windows/sign.ps1; README.md). Linux AppImage, Flatpak, deb and rpm packages ship, but are not code-signed. Windows MSI creates a Start menu shortcut, an optional (default on) desktop shortcut, an optional (default on, INSTALLPDFCONTEXTMENU) \"Edit with PdfCraft\" File Explorer menu entry for PDF files (#682) and an optional (default on, INSTALLIMAGECONTEXTMENU) \"Create PDF with PdfCraft…\" entry for images; an update keeps whichever of the three the installed version has (#1058, #305). It confirms full-UI completion with Finish (#143); packaging/windows/test-msi.ps1 checks the compiled MSI and windows-arm64.yml checks installation/removal. PDF files use a dedicated embedded document icon when PdfCraft is chosen as the default reader (confirmed in Windows Explorer); first-page thumbnails remain unsupported."
 
 [[feature]]
+id = "misc.portable-default-pdf-app"
+title = "Offer the portable app as a default PDF app (Windows)"
+area = "N"
+tier = "P2"
+milestone = "M14"
+status = "partial"
+commands = ["help.default_app", "help.default_app.remove"]
+tools = []
+evidence = ["crates/platform/src/file_types.rs::the_plan_offers_the_app_the_way_the_installer_does", "crates/platform/src/file_types.rs::the_plan_never_takes_the_default_from_the_user", "crates/platform/src/file_types.rs::a_plan_that_would_take_the_default_is_refused", "crates/platform/src/file_types.rs::removal_deletes_only_what_the_registration_created", "crates/platform/src/file_types.rs::unsafe_executable_paths_are_refused", "crates/platform/src/file_types.rs::other_systems_get_a_clear_error", "apps/pdfcraft/src/startup.rs::the_file_type_flags_take_no_value_and_are_not_a_launch"]
+notes = "The portable zip registers nothing, so Windows did not list it under Settings > Default apps. `pdfcraft --register-file-types` (and `--unregister-file-types`) and Preferences > Set up PdfCraft as a PDF app… and Stop offering PdfCraft as a PDF app… (help.default_app, help.default_app.remove; also in the command palette on Windows) write the MSI's Default Programs keys for this user only (HKCU, no administrator: ProgID PdfCraft.Portable with icon and open command, .pdf OpenWithProgids, Capabilities, RegisteredApplications), pointing at the running exe, through the system's reg.exe; the portable names keep an MSI installed for one user untouched. The UI command then opens Settings > Default apps. It never sets the default: Windows 10 and 11 protect that choice, so the user picks PdfCraft for .pdf in Settings, and it never writes .pdf's own default value or UserChoice. Moving the folder needs a new registration; unregistering removes only the keys it wrote (an empty .pdf\\OpenWithProgids key stays). The registry writes themselves, the Windows-only commands and the flags' exit path have not been run on Windows: the plan is tested on every OS and the executor was only compiled and linted for Windows, which is why this is partial. Before unregistering, the user should choose another .pdf app in Settings, or Windows keeps pointing PDF files at the removed program. There is no automation tool yet; the CLI flags on the desktop binary are the headless path (a release build on Windows has no console, so the result is also in the log file and the exit code)."
+
+[[feature]]
 id = "misc.web-deploy"
 title = "Hosted web app deployment"
 area = "N"
