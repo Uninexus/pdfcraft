@@ -7739,11 +7739,58 @@ fn comparing_page_ranges_keeps_original_page_numbers() {
     let v = s.compare_visual_in(old, new, 72.0, r(2, 2), r(2, 2)).unwrap();
     assert!(!v.is_empty() && v.iter().all(|(o, n, _)| (*o, *n) == (1, 1)), "{v:?}");
     assert!(s.compare_visual_in(old, new, 72.0, r(1, 1), r(1, 1)).unwrap().is_empty());
+    // A range for one file only: the other file's same page, not its first.
+    let v = s.compare_visual_in(old, new, 72.0, None, r(2, 2)).unwrap();
+    assert!(!v.is_empty() && v.iter().all(|(o, n, _)| (*o, *n) == (1, 1)), "{v:?}");
+    let v = s.compare_visual_in(old, new, 72.0, r(4, 4), None).unwrap();
+    assert!(!v.is_empty() && v.iter().all(|(o, n, _)| (*o, *n) == (3, 3)), "{v:?}");
     assert!(matches!(s.compare_visual_in(old, new, 72.0, r(0, 1), None), Err(EditError::Compare(_))));
     for bad in [r(0, 2), r(2, 1), r(1, 5), r(0, 0)] {
         assert!(matches!(s.compare_in(old, new, bad, None), Err(EditError::Compare(_))), "{bad:?}");
         assert!(matches!(s.compare_in(old, new, None, bad), Err(EditError::Compare(_))), "{bad:?}");
     }
+}
+
+/// The report and the marks follow the page ranges, and when the two ranges start at different
+/// pages every change still names each document's own page.
+#[test]
+fn compare_report_and_marks_follow_page_ranges() {
+    let mut s = Session::new().with_clock(|| 1_700_000_000);
+    let v1 = s.create_from_text("t", "a one\u{c}b two\u{c}c three\u{c}d four").unwrap();
+    let v2 = s.create_from_text("t", "a one\u{c}b TWO\u{c}c three\u{c}d FOUR").unwrap();
+    let old = s.open("v1.pdf", None, v1, None).unwrap();
+    let new = s.open("v2.pdf", None, v2, None).unwrap();
+    let r = |from, to| Some(compare::PageRange { from, to });
+    let text_of = |s: &mut Session, bytes: std::sync::Arc<Vec<u8>>| {
+        let id = s.open("report.pdf", None, bytes, None).unwrap();
+        page_texts(s, id).join(" ")
+    };
+    // Different starts: old page 4 against new pages 3 to 4. The old range holds only "d four",
+    // so "c three" is an insertion; each side reports its own page.
+    let c = s.compare_in(old, new, r(4, 4), r(3, 4)).unwrap();
+    let pages: Vec<_> = c.changes.iter().map(|x| (x.old.page, x.new.page)).collect();
+    assert_eq!(pages, [(3, 2), (3, 3)], "{c:?}");
+    let report = s.compare_report_in(old, new, r(4, 4), r(3, 4)).unwrap();
+    let text = text_of(&mut s, report);
+    assert!(text.contains("v1.pdf (page 4)") && text.contains("v2.pdf (pages 3 to 4)"), "{text}");
+    assert!(text.contains("old page 4, new page 3") && text.contains("old page 4, new page 4"), "{text}");
+    // A range that leaves the changed pages out leaves them out of the report ...
+    let report = s.compare_report_in(old, new, r(3, 3), r(3, 3)).unwrap();
+    let text = text_of(&mut s, report);
+    assert!(text.contains("0 changes") && !text.contains("FOUR"), "{text}");
+    // ... and the marks: none on pages 1 and 3, one each on the new file's own pages 2 and 4.
+    assert_eq!(s.mark_differences_in(old, new, r(1, 1), r(1, 1)).unwrap(), 0);
+    assert_eq!(s.mark_differences_in(old, new, r(4, 4), r(4, 4)).unwrap(), 1);
+    let on_page = |s: &Session| {
+        let mut p: Vec<usize> = s.get(new).unwrap().info.annotations.iter().map(|a| a.page).collect();
+        p.sort_unstable();
+        p
+    };
+    assert_eq!(on_page(&s), [3]);
+    assert_eq!(s.mark_differences_in(old, new, r(2, 2), r(2, 2)).unwrap(), 1);
+    assert_eq!(on_page(&s), [1, 3]);
+    assert!(matches!(s.mark_differences_in(old, new, r(2, 1), None), Err(EditError::Compare(_))));
+    assert!(matches!(s.compare_report_in(old, new, None, r(1, 9)), Err(EditError::Compare(_))));
 }
 
 #[test]

@@ -160,7 +160,7 @@ fn compare_filters_hide_text_or_visual_changes() {
     assert_eq!(kinds(&h, old_i), (text_old, 0));
 }
 
-/// The Compare Files dialog's Pages field rejects an out-of-range page: the
+/// The Compare Files dialog's New file pages field rejects an out-of-range page: the
 /// comparison does not run and the dialog stays open with the typed range kept.
 #[test]
 fn compare_dialog_pages_field_rejects_out_of_range() {
@@ -178,23 +178,198 @@ fn compare_dialog_pages_field_rejects_out_of_range() {
     assert!(h.state_mut().execute("doc.compare"));
     h.run_steps(2);
     h.get_by_label("Compare Files");
-    let pages = h.query_by_role_and_label(egui::accesskit::Role::TextInput, "Pages");
-    assert!(pages.is_some(), "the dialog has a Pages text input");
-    assert!(h.query_by_label("Pages:").is_some(), "the dialog has a Pages field");
+    let pages = h.query_by_role_and_label(egui::accesskit::Role::TextInput, "New file pages");
+    assert!(pages.is_some(), "the dialog has a New file pages text input");
+    assert!(h.query_by_label("New file pages:").is_some(), "the dialog has a New file pages field");
+    assert!(h.query_by_role_and_label(egui::accesskit::Role::TextInput, "Old file pages").is_some(), "and an Old file pages one");
     let Some(pages) = pages else { return };
     pages.focus();
     pages.type_text("99");
     h.run_steps(2);
     assert_eq!(
-        h.query_by_role_and_label(egui::accesskit::Role::TextInput, "Pages").and_then(|n| n.value()),
+        h.query_by_role_and_label(egui::accesskit::Role::TextInput, "New file pages").and_then(|n| n.value()),
         Some("99".to_string()),
         "the typed range is kept"
     );
+    h.get_by_label("New file: pages must be within 1-1");
     h.get_by_label("Compare").click();
     h.run_steps(3);
     assert!(h.query_by_label("Compare Files").is_some(), "the dialog stays open for an out-of-range page");
     assert!(h.state().compare.is_none(), "the comparison did not run");
     assert_ne!(h.state().right, Some(RightPanel::Compare));
+}
+
+fn four_page_versions() -> (Vec<u8>, Vec<u8>) {
+    let s = Session::new();
+    let v1 = s.create_from_text("t", "a one\u{c}b two\u{c}c three\u{c}d four").unwrap().to_vec();
+    let v2 = s.create_from_text("t", "a one\u{c}b TWO\u{c}c three\u{c}d FOUR").unwrap().to_vec();
+    (v1, v2)
+}
+
+fn four_page_harness() -> Harness<'static, PdfCraftApp> {
+    let (v1, v2) = four_page_versions();
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.open_bytes("v1.pdf", None, v1.clone()).unwrap();
+        app.open_bytes("v2.pdf", None, v2.clone()).unwrap();
+        app
+    });
+    h.run_steps(4);
+    h
+}
+
+fn type_into(h: &mut Harness<'_, PdfCraftApp>, label: &str, text: &str) {
+    let Some(field) = h.query_by_role_and_label(egui::accesskit::Role::TextInput, label) else { panic!("no {label} field") };
+    field.focus();
+    field.type_text(text);
+    h.run_steps(2);
+}
+
+/// The dialog has a page range for each file; the comparison, the panel, Mark as comments and
+/// the report all use them, and the pages shown are each file's own.
+#[test]
+fn compare_dialog_takes_a_page_range_for_each_file() {
+    let mut h = four_page_harness();
+    assert!(h.state_mut().execute("doc.compare"));
+    h.run_steps(2);
+    h.get_by_label("Old file pages:");
+    h.get_by_label("New file pages:");
+    // Old page 4 against new pages 3 to 4.
+    type_into(&mut h, "Old file pages", "4");
+    type_into(&mut h, "New file pages", "3-4");
+    h.get_by_label("Compare").click();
+    h.run_steps(3);
+    assert_eq!(h.state().right, Some(RightPanel::Compare));
+    let c = h.state().compare.as_ref().unwrap();
+    assert_eq!(c.old_range.map(|r| (r.from, r.to)), Some((4, 4)));
+    assert_eq!(c.new_range.map(|r| (r.from, r.to)), Some((3, 4)));
+    let pages: Vec<(usize, usize)> = c.result.changes.iter().map(|x| (x.old.page, x.new.page)).collect();
+    assert!(!pages.is_empty() && pages.iter().all(|(o, n)| *o == 3 && (2..=3).contains(n)), "{pages:?}");
+    assert!(c.result.changes.iter().all(|x| !x.new.text.contains("TWO")), "page 2 is outside the new range");
+    h.get_by_label("Compared pages: old file 4, new file 3-4");
+    // Mark as comments: only the new file's pages 3 to 4 get comments.
+    let id = h.state().active_ids().unwrap().1;
+    h.get_by_label("Mark as comments").click();
+    h.run_steps(3);
+    let marked = h.state().session.get(id).unwrap().info.annotations.len();
+    assert_eq!(marked, h.state().compare.as_ref().unwrap().result.changes.len());
+    // The report names the ranges.
+    h.get_by_label("Report…").click();
+    h.run_steps(3);
+    let report = h.state().active_ids().unwrap().1;
+    assert_eq!(h.state().session.get(report).unwrap().name, "Compare Report.pdf");
+}
+
+/// Ranges that don't fit their own file are refused, naming the file and its page count, and the
+/// comparison doesn't run; a range for one file alone and empty fields (the whole files) work.
+#[test]
+fn compare_dialog_page_range_errors_and_defaults() {
+    let mut h = four_page_harness();
+    assert!(h.state_mut().execute("doc.compare"));
+    h.run_steps(2);
+    type_into(&mut h, "Old file pages", "5");
+    h.get_by_label("Old file: pages must be within 1-4");
+    h.get_by_label("Compare").click();
+    h.run_steps(3);
+    assert!(h.state().compare.is_none(), "an out-of-range old page does not run the comparison");
+    assert!(h.query_by_label("Compare Files").is_some());
+    type_into(&mut h, "New file pages", "1,3");
+    h.get_by_label("New file: enter one page or one range, such as 3 or 2-5");
+    // A range for the new file alone: the same page of the old file is used, so one change.
+    h.state_mut().compare_old_pages.clear();
+    h.state_mut().compare_pages = "2".into();
+    h.run_steps(2);
+    h.get_by_label("Compare").click();
+    h.run_steps(3);
+    let c = h.state().compare.as_ref().unwrap();
+    assert_eq!(c.old_range.map(|r| (r.from, r.to)), Some((2, 2)));
+    assert_eq!(c.new_range.map(|r| (r.from, r.to)), Some((2, 2)));
+    assert_eq!(c.result.changes.len(), 1, "only page 2's change");
+    assert!(c.result.changes.iter().all(|x| x.new.page == 1 && x.old.page == 1));
+    // Both empty: the whole files, as before.
+    h.get_by_label("Clear").click();
+    h.run_steps(2);
+    h.state_mut().compare_pages.clear();
+    h.state_mut().run_compare();
+    h.run_steps(2);
+    let c = h.state().compare.as_ref().unwrap();
+    assert!((c.old_range, c.new_range) == (None, None));
+    assert_eq!(c.result.changes.len(), 2);
+}
+
+/// A range in one field only applies to both files, so the other file is not compared whole
+/// against a part: typing 2 in the New field keeps the changes of page 2, and 4 the changes of
+/// page 4, and the same in the Old field.
+#[test]
+fn compare_with_a_range_in_one_field_uses_the_same_pages_of_the_other_file() {
+    let mut h = four_page_harness();
+    h.state_mut().compare_old = h.state().views.first().map(|v| v.id);
+    for (old, new) in [("", "2"), ("2", ""), ("4", ""), ("", "4")] {
+        h.state_mut().compare_old_pages = old.into();
+        h.state_mut().compare_pages = new.into();
+        h.state_mut().run_compare();
+        h.run_steps(2);
+        let c = h.state().compare.as_ref().unwrap();
+        let page = old.parse::<usize>().or(new.parse()).unwrap();
+        assert_eq!(c.old_range, c.new_range, "{old:?} {new:?}");
+        assert_eq!(c.result.changes.len(), 1, "{old:?} {new:?}");
+        assert!(c.result.changes.iter().all(|x| x.old.page == page - 1 && x.new.page == page - 1), "{old:?} {new:?}");
+    }
+}
+
+/// The Pages fields start empty for another pair of files.
+#[test]
+fn compare_dialog_clears_the_pages_fields_for_another_pair_of_files() {
+    let mut h = four_page_harness();
+    assert!(h.state_mut().execute("doc.compare"));
+    h.run_steps(2);
+    type_into(&mut h, "New file pages", "2");
+    assert_eq!(h.state().compare_pages, "2");
+    // The same pair keeps what was typed; another old file starts over.
+    h.run_steps(2);
+    assert_eq!(h.state().compare_pages, "2");
+    h.state_mut().compare_old_pages = "3".into();
+    let (v1, _) = four_page_versions();
+    h.state_mut().open_bytes("v3.pdf", None, v1).unwrap();
+    h.run_steps(3);
+    let other =
+        h.state().views.iter().map(|v| v.id).find(|id| Some(*id) != h.state().active_ids().map(|a| a.1) && Some(*id) != h.state().compare_old);
+    h.state_mut().compare_old = other;
+    h.run_steps(3);
+    assert!(
+        h.state().compare_pages.is_empty() && h.state().compare_old_pages.is_empty(),
+        "{:?} {:?}",
+        h.state().compare_pages,
+        h.state().compare_old_pages
+    );
+}
+
+/// With ranges starting at different pages, visual differences sit on each file's own page: the
+/// old half is shaded on the old range's page, not the new one's.
+#[test]
+fn compare_with_different_ranges_shades_each_file_on_its_own_page() {
+    let mut h = four_page_harness();
+    h.state_mut().compare_old = h.state().views.first().map(|v| v.id);
+    h.state_mut().compare_old_pages = "4".into();
+    h.state_mut().compare_pages = "4".into();
+    h.state_mut().run_compare();
+    h.run_steps(3);
+    let c = h.state().compare.as_ref().unwrap();
+    assert!(c.visual.iter().all(|(o, n, _)| (*o, *n) == (3, 3)), "{:?}", c.visual);
+    h.state_mut().compare_old_pages = "3".into();
+    h.state_mut().run_compare();
+    h.run_steps(3);
+    let c = h.state().compare.as_ref().unwrap();
+    assert!(!c.visual.is_empty() && c.visual.iter().all(|(o, n, _)| (*o, *n) == (2, 3)), "{:?}", c.visual);
+    let (old, new) = (c.old, c.new);
+    let on = |h: &Harness<'_, PdfCraftApp>, id| {
+        let v = h.state().views.iter().find(|v| v.id == id).unwrap();
+        v.compare_marks.iter().map(|m| m.0).collect::<std::collections::BTreeSet<_>>()
+    };
+    assert!(on(&h, old).iter().all(|p| *p == 2 || *p == 3), "{:?}", on(&h, old));
+    assert!(on(&h, new).iter().all(|p| *p == 3), "{:?}", on(&h, new));
+    assert!(on(&h, old).contains(&2), "the old half is shaded on its own page 3");
 }
 
 /// Writes a screenshot of the Compare panel when PDFCRAFT_SHOT is set (for review).

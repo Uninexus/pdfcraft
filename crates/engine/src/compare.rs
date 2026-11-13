@@ -135,7 +135,8 @@ impl Session {
 
     /// [`Session::compare_visual`] of page ranges: the pages of the ranges are paired by position
     /// (`old_range.from + k` with `new_range.from + k`, for as many pairs as the shorter range
-    /// has; no range: the whole document, so page n with page n). Returns (old page, new page,
+    /// has; no range: the whole document, so page n with page n; a range for one file only: the
+    /// other file's same page numbers). Returns (old page, new page,
     /// user-space box in `new`), pages 0-based and the documents' own.
     pub fn compare_visual_in(
         &self,
@@ -147,8 +148,17 @@ impl Session {
     ) -> Result<Vec<(usize, usize, [f64; 4])>, EditError> {
         let a = self.get(old).ok_or(EditError::NoDocument)?;
         let b = self.get(new).ok_or(EditError::NoDocument)?;
-        let old_pages = old_range.map(|r| r.resolve(a.info.pages.len())).transpose()?.unwrap_or(0..a.info.pages.len());
-        let new_pages = new_range.map(|r| r.resolve(b.info.pages.len())).transpose()?.unwrap_or(0..b.info.pages.len());
+        // With a range for one file only, the other file's pages are paired by page number: the
+        // same pages (as far as it has them), not its first pages.
+        let pages_of = |range: Option<PageRange>, other: Option<PageRange>, count: usize| -> Result<std::ops::Range<usize>, EditError> {
+            match (range, other) {
+                (Some(r), _) => r.resolve(count),
+                (None, Some(o)) => o.resolve(usize::MAX).map(|p| p.start.min(count)..p.end.min(count)),
+                (None, None) => Ok(0..count),
+            }
+        };
+        let old_pages = pages_of(old_range, new_range, a.info.pages.len())?;
+        let new_pages = pages_of(new_range, old_range, b.info.pages.len())?;
         let renderer = |d: &crate::Document| {
             pdfcraft_render::PageRenderer::new(
                 d.bytes.clone(),
@@ -183,8 +193,40 @@ impl Session {
     /// [`Session::compare_report`] of the changes on `pages` ([`Session::compare_pages`]).
     pub fn compare_report_of(&self, old: DocId, new: DocId, pages: &[usize]) -> Result<Arc<Vec<u8>>, EditError> {
         let c = self.compare_pages(old, new, pages)?;
-        let name = |id| self.get(id).map(|d| d.name.clone()).unwrap_or_default();
-        self.create_report("Compare Report", &pdfcraft_compare::report(&c, &name(old), &name(new)))
+        self.compare_report_for(&c, old, new, None, None)
+    }
+
+    /// [`Session::compare_report`] of [`Session::compare_in`]: only the pages in each range. The
+    /// report names each range beside its file, and every change lists the old and the new
+    /// document's own page numbers.
+    pub fn compare_report_in(
+        &self,
+        old: DocId,
+        new: DocId,
+        old_range: Option<PageRange>,
+        new_range: Option<PageRange>,
+    ) -> Result<Arc<Vec<u8>>, EditError> {
+        let c = self.compare_in(old, new, old_range, new_range)?;
+        self.compare_report_for(&c, old, new, old_range, new_range)
+    }
+
+    fn compare_report_for(
+        &self,
+        c: &Comparison,
+        old: DocId,
+        new: DocId,
+        old_range: Option<PageRange>,
+        new_range: Option<PageRange>,
+    ) -> Result<Arc<Vec<u8>>, EditError> {
+        let name = |id, range: Option<PageRange>| {
+            let n = self.get(id).map(|d| d.name.clone()).unwrap_or_default();
+            match range {
+                Some(r) if r.from == r.to => format!("{n} (page {})", r.from),
+                Some(r) => format!("{n} (pages {} to {})", r.from, r.to),
+                None => n,
+            }
+        };
+        self.create_report("Compare Report", &pdfcraft_compare::report(c, &name(old, old_range), &name(new, new_range)))
     }
 
     /// Mark the differences in `new` as comments: highlights over replaced and inserted text
@@ -197,6 +239,23 @@ impl Session {
     /// [`Session::mark_differences`] of the changes on `pages` ([`Session::compare_pages`]).
     pub fn mark_differences_of(&mut self, old: DocId, new: DocId, pages: &[usize]) -> Result<usize, EditError> {
         let c = self.compare_pages(old, new, pages)?;
+        self.mark_comparison(new, &c)
+    }
+
+    /// [`Session::mark_differences`] of [`Session::compare_in`]: only the changes between the
+    /// pages in each range, placed on the newer document's own pages.
+    pub fn mark_differences_in(
+        &mut self,
+        old: DocId,
+        new: DocId,
+        old_range: Option<PageRange>,
+        new_range: Option<PageRange>,
+    ) -> Result<usize, EditError> {
+        let c = self.compare_in(old, new, old_range, new_range)?;
+        self.mark_comparison(new, &c)
+    }
+
+    fn mark_comparison(&mut self, new: DocId, c: &Comparison) -> Result<usize, EditError> {
         let mut edits = Vec::new();
         for ch in &c.changes {
             let color = colour(ch.kind);

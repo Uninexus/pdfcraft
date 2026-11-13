@@ -253,6 +253,8 @@ impl PdfCraftApp {
             pdfa: Default::default(),
             compare_old: None,
             compare_pages: String::new(),
+            compare_old_pages: String::new(),
+            compare_fields_for: None,
             compare: None,
             js_console: Default::default(),
             #[cfg(not(target_arch = "wasm32"))]

@@ -678,8 +678,13 @@ pub struct PdfCraftApp {
     pub pdfa: standards_ui::PdfaState,
     /// Compare files: the chosen older document and the last result.
     pub compare_old: Option<DocId>,
-    /// The Compare Files dialog's Pages field: the new file's pages to compare, empty for all.
+    /// The Compare Files dialog's New file pages field: one page or range ("3", "2-5") of the new
+    /// file to compare, empty for all.
     pub compare_pages: String,
+    /// The dialog's Old file pages field, the same for the old file.
+    pub compare_old_pages: String,
+    /// The (new, old) files the Pages fields were typed for; another pair clears them.
+    pub compare_fields_for: Option<(DocId, Option<DocId>)>,
     pub compare: Option<compare_ui::CompareState>,
     /// The JavaScript console and the Document JavaScripts draft.
     pub js_console: js_ui::JsConsole,
