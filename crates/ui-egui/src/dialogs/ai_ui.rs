@@ -12,8 +12,25 @@ use crate::{Dialog, PdfCraftApp, widgets};
 pub(crate) struct Draft {
     pub(crate) question: String,
     pub(crate) current_page: bool,
+    /// Preferences ▸ AI Assistant: the port a local model server listens on, as typed.
+    pub(crate) port: String,
     /// What the shown answer was asked: the question and a description of the pages sent.
     asked: Option<(String, String)>,
+}
+
+/// The OpenAI-compatible address of a model server on this computer, for a port the user typed
+/// (`11434` gives `http://localhost:11434/v1`). `None` when it is not a port number.
+pub(crate) fn local_base_url(port: &str) -> Option<String> {
+    let port: u16 = port.trim().parse().ok().filter(|p| *p != 0)?;
+    Some(format!("http://localhost:{port}/v1"))
+}
+
+/// The port in a `http://localhost:11434/v1` style address, to show in the port box.
+pub(crate) fn port_of(base_url: &str) -> Option<String> {
+    let rest = base_url.trim().strip_prefix("http://")?;
+    let authority = rest.split('/').next()?;
+    let (_, port) = authority.rsplit_once(':')?;
+    port.parse::<u16>().ok().map(|p| p.to_string())
 }
 
 /// What Test connection says about the models the server listed.
@@ -146,6 +163,18 @@ mod tests {
         let many: Vec<String> = (0..9).map(|i| format!("m{i}")).collect();
         let text = describe_models(&many, "");
         assert!(text.contains("m5, …") && !text.contains("m6") && text.contains("(9)"), "{text}");
+    }
+
+    #[test]
+    fn a_typed_port_gives_a_local_address_and_back() {
+        assert_eq!(local_base_url(" 8080 ").as_deref(), Some("http://localhost:8080/v1"));
+        for bad in ["", "0", "65536", "-1", "80a", "localhost:1"] {
+            assert_eq!(local_base_url(bad), None, "{bad:?}");
+        }
+        assert_eq!(port_of("http://localhost:11434/v1").as_deref(), Some("11434"));
+        assert_eq!(port_of("http://192.168.1.5:8000"), Some("8000".into()));
+        assert_eq!(port_of("https://api.openai.com/v1"), None);
+        assert_eq!(port_of("http://localhost/v1"), None);
     }
 
     #[test]
