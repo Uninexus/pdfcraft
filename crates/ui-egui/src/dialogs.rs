@@ -83,6 +83,7 @@ struct Pending {
     a11y_now: bool,
     ocr_now: bool,
     scan_clean_now: bool,
+    white_margins_now: bool,
     compare_now: bool,
     images_now: bool,
     stamp_now: bool,
@@ -477,6 +478,12 @@ fn dialog_body(ui: &mut egui::Ui, app: &mut PdfCraftApp, dialog: Dialog, req: &m
             req.apply = go;
             req.marks_now = req.apply;
             req.close = req.apply || cancel;
+            return false;
+        }
+        Dialog::WhiteMargins => {
+            let (go, cancel) = crate::white_margins_ui::body(ui, app, &t);
+            req.white_margins_now = go;
+            req.close = go || cancel;
             return false;
         }
         Dialog::PageBoxes => {
@@ -2244,6 +2251,9 @@ fn finish_close(app: &mut PdfCraftApp, dialog: Dialog, modal_closed: bool, req: 
     }
     if req.ocr_now {
         app.start_ocr();
+    }
+    if req.white_margins_now {
+        app.start_white_margins();
     }
     if req.scan_clean_now {
         app.start_scan_clean();

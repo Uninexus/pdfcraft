@@ -1266,6 +1266,7 @@ pub fn tools() -> Vec<ToolDef> {
             "Remove white margins",
             "Crop pages to their content, as Crop Pages ▸ Remove White Margins does: each page's crop box becomes the bounds of everything the page paints (text, images, drawings, visible annotations), found from a raster of the page at up to 144 dpi (so to about half a point; coarser on very large pages) where a pixel counts as content unless it is transparent or nearly white (every colour channel 250 or more), plus `padding` points on every side (default 0), never beyond the current crop box. /Rotate and /UserUnit are followed. The page is judged as the file sets it, whatever the view shows: layers are at the file's own defaults and comments are shown. The box is rounded outward to 0.01 pt and is at least 1 user unit on a side. A page with no content is left as it is and listed in `blank`; a page whose content already fills its crop box is listed in `unchanged`; a page that couldn't be drawn is left as it is and listed in `failed` with why. `cropped` lists the new crop box of each page in user space [x0, y0, x1, y1]. It sets the same crop box page_set_box does, so the media box is untouched, and all pages go in one undoable step. No per-odd/even or per-page-size options; whiteness is judged from the drawn page, not from the page's content stream.",
         )
+        .cmd("page.remove_white_margins")
         .with(schema(
             json!({
                 "doc": doc(),

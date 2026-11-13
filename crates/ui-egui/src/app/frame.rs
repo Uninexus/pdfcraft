@@ -6,6 +6,7 @@ impl PdfCraftApp {
         if widgets::progress_notice(self, ctx) {
             self.cancel_optimize();
             self.cancel_scan_clean();
+            self.cancel_white_margins();
         }
     }
 

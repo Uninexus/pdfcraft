@@ -145,6 +145,10 @@ impl PdfCraftApp {
             self.notify_tr("Optimization is already running");
             return;
         }
+        if self.white_margins_run.is_some() {
+            self.notify_tr("White margins are already being removed");
+            return;
+        }
         // What's typed in a form field is part of the document (#166).
         if !self.commit_form_typing() {
             return;
