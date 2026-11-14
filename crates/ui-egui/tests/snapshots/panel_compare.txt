@@ -6,7 +6,9 @@ Label = "0 Inserted"
 Label = "0 Deleted"
 Label = "1 Visual"
 Label = "Show:"
-CheckBox "Text" [on]
+CheckBox "Replaced" [on]
+CheckBox "Inserted" [on]
+CheckBox "Deleted" [on]
 CheckBox "Visual" [on]
 Button "Side by side"
 Button "New file only"

@@ -1,6 +1,6 @@
 # Where PdfCraft falls short of Acrobat Pro
 
-> **Last reviewed:** 2026-11-14 | **Last updated:** 2026-11-14 | **Change:** minor (gap 19: Preferences gains Identity (name, email) and Forms (highlight fields and colour, field tooltips); estimates unchanged)
+> **Last reviewed:** 2026-11-14 | **Last updated:** 2026-11-14 | **Change:** minor (gap 21: Compare files can be limited to replaced, inserted, deleted and visual changes in the dialog, panel, report, Mark as comments and tools; gap 19: Preferences gains Identity (name, email) and Forms (highlight fields and colour, field tooltips); estimates unchanged)
 > **Last reviewed:** 2026-11-13 | **Last updated:** 2026-11-13 | **Change:** minor (gap 21: the Compare Files dialog takes a page range for each file, and the report and Mark as comments follow them; estimates unchanged)
 > **Last reviewed:** 2026-11-13 | **Last updated:** 2026-11-13 | **Change:** minor (gap 8: Insert pages, Combine files and Create ▸ Multiple files take Office documents through the installed LibreOffice; gap 8's first-beta sub-estimate re-estimated from 5–10 h to 3–6 h)
 > **Last reviewed:** 2026-11-11 | **Last updated:** 2026-11-11 | **Change:** minor (gap 8: known residual risk for the LibreOffice sidecar, sandbox tracked in #6953; estimates unchanged)
@@ -414,8 +414,15 @@ update the numbers.
   file pages and New file pages fields (one page or one range each, empty for the whole file),
   which the comparison, the panel, the report and Mark as comments all use, as do
   `doc_compare_report` and `doc_compare_mark`. Results and the report name each file's own pages.
+  A filter by kind of change: the Compare Files dialog's Kinds of change checkboxes and the panel's
+  Show checkboxes (Replaced, Inserted, Deleted, Visual), which the list, the shading, Mark as
+  comments and the report follow, and `kinds` on `doc_compare`, `doc_compare_report` and
+  `doc_compare_mark` (bad values are refused, listing the allowed ones). A report of a filter says
+  what it hid and that the finer kinds are not told apart.
 - **Missing:** telling images, annotations, formatting and background/header-footer changes apart
-  (all of them are Visual today), scrolling the two halves by matching content rather than by
+  (the comparison reads words and pixels, so all of them are Visual, which is shaded and counted
+  but never listed or marked; the dialog and the report say so; Acrobat's defaults with
+  annotations, formatting and background off cannot be matched), scrolling the two halves by matching content rather than by
   offset, scanned documents. A range is one contiguous run of pages per file (the dialog's old
   Pages field also took a list such as `1,3`).
 - **Estimate:** 8–16 h. **Doc:** [target-app-parity.md](target-app-parity.md).
@@ -446,6 +453,7 @@ update the numbers.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-14 | minor | Gap 21: Compare files filters by kind of change (replaced, inserted, deleted, visual) in the dialog, the panel, Mark as comments, the report and `doc_compare`, `doc_compare_report`, `doc_compare_mark` (`kinds`); images, annotations, formatting and background changes are still not told apart. Estimates unchanged. |
 | 2026-11-13 | minor | Gap 21: the Compare Files dialog has Old file pages and New file pages fields; the comparison, panel, report and Mark as comments use them (`doc_compare_report` and `doc_compare_mark` take the same range arguments as `doc_compare`). Estimates unchanged. |
 | 2026-11-13 | minor | Gap 8: Insert pages, Combine files and Create ▸ Multiple files take Office documents through the installed LibreOffice, converted on a worker thread (all or nothing when LibreOffice is missing). Gap 8's remaining first-beta Office item re-estimated from 5–10 h to 3–6 h. |
 | 2026-11-11 | minor | Gap 8: known residual risk for the LibreOffice sidecar (Impress has no link-update setting; the soffice process isn't network-sandboxed). Sandboxing tracked in #6953. Estimates unchanged. |

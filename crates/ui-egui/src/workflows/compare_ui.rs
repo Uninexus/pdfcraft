@@ -4,7 +4,7 @@
 
 use egui::{Align, Color32, Layout};
 use pdfcraft_engine::DocId;
-use pdfcraft_engine::compare::{Comparison, Kind, PageRange};
+use pdfcraft_engine::compare::{ChangeKinds, Comparison, Kind, PageRange};
 
 use crate::theme::{self, Tokens};
 use crate::{PdfCraftApp, RightPanel, widgets};
@@ -30,10 +30,12 @@ pub struct CompareState {
     pub leader: usize,
     /// Each half's scroll offset last frame, to tell which one moved.
     pub prev_scroll: [egui::Vec2; 2],
-    /// Show: whether the text changes are in the list and the shading, and whether the visual
-    /// differences (counted, never listed) are shaded (Acrobat's Filter).
-    pub show_text: bool,
-    pub show_visual: bool,
+    /// Show: the kinds of change in the list and the shading (replaced, inserted, deleted) and
+    /// whether the visual differences (counted, never listed) are shaded, as Acrobat's Filter
+    /// does. Mark as comments and the report follow it. Images, annotations, formatting and
+    /// background changes are not kinds of their own: the comparison reads words and pixels, so
+    /// they are all visual.
+    pub kinds: ChangeKinds,
 }
 
 /// Visual differences are shaded orange.
@@ -46,7 +48,7 @@ pub enum PanelAction {
     Report,
     Clear,
     SideBySide(bool),
-    Show { text: bool, visual: bool },
+    Show(ChangeKinds),
 }
 
 pub fn colour(kind: Kind) -> Color32 {
@@ -108,6 +110,18 @@ pub(crate) fn body(ui: &mut egui::Ui, app: &mut PdfCraftApp, t: &Tokens) -> (boo
         }
     }
     ui.add_space(4.0);
+    ui.horizontal(|ui| {
+        ui.label(tl!("Kinds of change:"));
+        kind_checkboxes(ui, &mut app.compare_kinds);
+    });
+    ui.label(
+        egui::RichText::new(tl!(
+            "Images, annotations, formatting and background changes are not told apart: the comparison finds text changes and pixel differences, so they all count as visual."
+        ))
+        .small()
+        .color(t.text_muted),
+    );
+    ui.add_space(4.0);
     ui.label(
         egui::RichText::new(tl!(
             "Leave both fields empty to compare the whole files. Give one range for each file, such as 2-5 or 3; the pages of the two ranges are compared with each other. With a range for one file only, the same pages of the other file are used."
@@ -120,7 +134,7 @@ pub(crate) fn body(ui: &mut egui::Ui, app: &mut PdfCraftApp, t: &Tokens) -> (boo
     let (mut go, mut cancel) = (false, false);
     ui.horizontal(|ui| {
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            let ready = app.compare_old.is_some() && !pages_error;
+            let ready = app.compare_old.is_some() && !pages_error && !app.compare_kinds.is_empty();
             if ui.add_enabled_ui(ready, |ui| widgets::pill_button(ui, tl!("Compare"), true)).inner.clicked() {
                 go = true;
             }
@@ -130,6 +144,16 @@ pub(crate) fn body(ui: &mut egui::Ui, app: &mut PdfCraftApp, t: &Tokens) -> (boo
         })
     });
     (go, cancel)
+}
+
+/// A checkbox for each kind of change; true when one was clicked.
+fn kind_checkboxes(ui: &mut egui::Ui, kinds: &mut ChangeKinds) -> bool {
+    let mut changed = false;
+    changed |= ui.add(widgets::checkbox(&mut kinds.replaced, tl!("Replaced"))).changed();
+    changed |= ui.add(widgets::checkbox(&mut kinds.inserted, tl!("Inserted"))).changed();
+    changed |= ui.add(widgets::checkbox(&mut kinds.deleted, tl!("Deleted"))).changed();
+    changed |= ui.add(widgets::checkbox(&mut kinds.visual, tl!("Visual"))).changed();
+    changed
 }
 
 /// The Compare panel.
@@ -170,10 +194,9 @@ pub(crate) fn panel(ui: &mut egui::Ui, t: &Tokens, state: &Option<CompareState>,
     });
     ui.horizontal(|ui| {
         ui.label(tl!("Show:"));
-        let (mut text, mut visual) = (s.show_text, s.show_visual);
-        let text_changed = ui.add(widgets::checkbox(&mut text, tl!("Text"))).changed();
-        if ui.add(widgets::checkbox(&mut visual, tl!("Visual"))).changed() || text_changed {
-            action = Some(PanelAction::Show { text, visual });
+        let mut kinds = s.kinds;
+        if kind_checkboxes(ui, &mut kinds) {
+            action = Some(PanelAction::Show(kinds));
         }
     });
     ui.add_space(6.0);
@@ -188,10 +211,12 @@ pub(crate) fn panel(ui: &mut egui::Ui, t: &Tokens, state: &Option<CompareState>,
     });
     ui.add_space(4.0);
     ui.horizontal(|ui| {
-        if ui.button(tl!("Mark as comments")).clicked() {
+        // With no kind ticked there is nothing to mark or report.
+        let any = !s.kinds.is_empty();
+        if ui.add_enabled(any, egui::Button::new(tl!("Mark as comments"))).clicked() {
             action = Some(PanelAction::Mark);
         }
-        if ui.button(tl!("Report…")).clicked() {
+        if ui.add_enabled(any, egui::Button::new(tl!("Report…"))).clicked() {
             action = Some(PanelAction::Report);
         }
         if ui.button(tl!("Clear")).clicked() {
@@ -199,7 +224,7 @@ pub(crate) fn panel(ui: &mut egui::Ui, t: &Tokens, state: &Option<CompareState>,
         }
     });
     ui.separator();
-    for (i, ch) in c.changes.iter().enumerate().filter(|_| s.show_text).take(2000) {
+    for (i, ch) in c.changes.iter().enumerate().filter(|(_, ch)| s.kinds.wants(ch.kind)).take(2000) {
         let text = match ch.kind {
             Kind::Replaced => format!("\"{}\" → \"{}\"", ch.old.text, ch.new.text),
             Kind::Inserted => format!("+ \"{}\"", ch.new.text),
@@ -367,8 +392,7 @@ impl PdfCraftApp {
                     side_by_side,
                     leader: 1,
                     prev_scroll: [egui::Vec2::ZERO; 2],
-                    show_text: true,
-                    show_visual: true,
+                    kinds: self.compare_kinds,
                 });
                 self.shade_compare(i);
                 self.right = Some(RightPanel::Compare);
@@ -386,7 +410,7 @@ impl PdfCraftApp {
 
     pub(crate) fn compare_action(&mut self, index: usize, a: PanelAction) {
         let Some(s) = self.compare.as_mut() else { return };
-        let (old, new, old_range, new_range) = (s.old, s.new, s.old_range, s.new_range);
+        let (old, new, old_range, new_range, kinds) = (s.old, s.new, s.old_range, s.new_range, s.kinds);
         match a {
             PanelAction::Select(i) => {
                 s.selected = Some(i);
@@ -408,17 +432,18 @@ impl PdfCraftApp {
                 s.side_by_side = on;
                 s.leader = 1;
             }
-            PanelAction::Show { text, visual } => {
-                s.show_text = text;
-                s.show_visual = visual;
+            PanelAction::Show(kinds) => {
+                s.kinds = kinds;
                 self.shade_compare(index);
             }
-            PanelAction::Mark => match self.session.mark_differences_in(old, new, old_range, new_range) {
+            PanelAction::Mark => match self.session.mark_differences_in_kinds(old, new, old_range, new_range, kinds) {
                 Ok(n) => {
                     if let Some(info) = self.session.get(new).map(|d| d.info.clone()) {
                         self.views[index].document_changed(&info);
                     }
-                    self.notify(if n == 1 {
+                    self.notify(if n == 0 && !(kinds.replaced || kinds.inserted || kinds.deleted) {
+                        tl!("No comments added: visual differences are shaded, not marked as comments").to_string()
+                    } else if n == 1 {
                         tl!("Added 1 comment").to_string()
                     } else {
                         crate::i18n::fmt(tl!("Added {n} comments"), &[("n", &n.to_string())])
@@ -426,7 +451,7 @@ impl PdfCraftApp {
                 }
                 Err(e) => self.notify_error(e),
             },
-            PanelAction::Report => match self.session.compare_report_in(old, new, old_range, new_range) {
+            PanelAction::Report => match self.session.compare_report_in_kinds(old, new, old_range, new_range, kinds) {
                 Ok(bytes) => {
                     if let Err(e) = self.open_bytes("Compare Report.pdf", None, bytes.to_vec()) {
                         self.notify_error(e);
@@ -464,16 +489,21 @@ impl PdfCraftApp {
 
 /// One half's shading: its side of the text changes (the old file has no side of an insertion)
 /// and the visual differences no text change there covers, so both versions read with their own
-/// shading. Hidden kinds are left out after the overlap test, so hiding the text does not uncover
+/// shading. Hidden kinds are left out after the overlap test, so hiding a kind of text change does not uncover
 /// the visual differences a text change explains.
 fn shading(s: &CompareState, old: bool) -> Vec<(usize, [f32; 4], Color32)> {
     let overlaps = |p: usize, r: [f32; 4], marks: &[(usize, [f32; 4], Color32)]| {
         marks.iter().any(|(mp, m, _)| *mp == p && m[0] <= r[2] && r[0] <= m[2] && m[1] <= r[3] && r[1] <= m[3])
     };
-    let mut text = Vec::new();
+    let (mut text, mut shown) = (Vec::new(), Vec::new());
     for ch in s.result.changes.iter().filter(|ch| !(old && ch.kind == Kind::Inserted)) {
         let side = if old { &ch.old } else { &ch.new };
-        text.extend(side.rects.iter().map(|r| (side.page, r.map(|v| v as f32), colour(ch.kind))));
+        let marks = side.rects.iter().map(|r| (side.page, r.map(|v| v as f32), colour(ch.kind)));
+        // Every text change counts for the overlap test; only the kinds shown are shaded.
+        if s.kinds.wants(ch.kind) {
+            shown.extend(marks.clone());
+        }
+        text.extend(marks);
     }
     let mut visual = Vec::new();
     for (old_page, new_page, r) in &s.visual {
@@ -485,8 +515,8 @@ fn shading(s: &CompareState, old: bool) -> Vec<(usize, [f32; 4], Color32)> {
             visual.push((*p, r, VISUAL));
         }
     }
-    let mut out = if s.show_text { text } else { Vec::new() };
-    if s.show_visual {
+    let mut out = shown;
+    if s.kinds.visual {
         out.extend(visual);
     }
     out

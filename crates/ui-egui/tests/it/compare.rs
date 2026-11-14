@@ -111,9 +111,9 @@ fn text_and_visual_versions() -> (Vec<u8>, Vec<u8>) {
     (v1, s.save_bytes(id).unwrap().to_vec())
 }
 
-/// The Compare panel's Show: Text / Visual filter, on both halves: Text takes the text changes
-/// out of the list and the shading, Visual takes the visual differences (counted, never listed)
-/// out of the shading, and each brings them back.
+/// The Compare panel's Show checkboxes (Replaced, Inserted, Deleted, Visual), on both halves: a
+/// kind of text change leaves the list and the shading, Visual takes the visual differences
+/// (counted, never listed) out of the shading, and each brings them back.
 #[test]
 fn compare_filters_hide_text_or_visual_changes() {
     let (v1, v2) = text_and_visual_versions();
@@ -142,9 +142,9 @@ fn compare_filters_hide_text_or_visual_changes() {
     assert!(text_old > 0 && visual_old > 0, "and on the old file: {text_old} text, {visual_old} visual");
     h.get_by_label("\"five\" → \"three\"");
 
-    h.get_by_label("Text").click();
+    h.get_by_label("Replaced").click();
     h.run_steps(2);
-    assert!(h.query_by_label("\"five\" → \"three\"").is_none(), "text changes leave the list");
+    assert!(h.query_by_label("\"five\" → \"three\"").is_none(), "replaced changes leave the list");
     assert_eq!(kinds(&h, new_i), (0, visual_new), "and the new file's shading");
     assert_eq!(kinds(&h, old_i), (0, visual_old), "and the old file's");
 
@@ -153,11 +153,76 @@ fn compare_filters_hide_text_or_visual_changes() {
     assert_eq!(kinds(&h, new_i), (0, 0));
     assert_eq!(kinds(&h, old_i), (0, 0));
 
-    h.get_by_label("Text").click();
+    h.get_by_label("Replaced").click();
     h.run_steps(2);
     h.get_by_label("\"five\" → \"three\"");
-    assert_eq!(kinds(&h, new_i), (text_new, 0), "text back, visual still hidden");
+    assert_eq!(kinds(&h, new_i), (text_new, 0), "replaced back, visual still hidden");
     assert_eq!(kinds(&h, old_i), (text_old, 0));
+}
+
+/// The Compare Files dialog's Kinds of change checkboxes choose what the comparison shows, and
+/// Mark as comments and the report follow them (the panel's Show checkboxes change them after).
+#[test]
+fn compare_dialog_kinds_filter_the_panel_marks_and_report() {
+    let s = Session::new();
+    let v1 = s.create_from_text("t", "Rent is 900 per month. Pets are not allowed.").unwrap().to_vec();
+    let v2 = s.create_from_text("t", "Rent is 950 per month. Pets are allowed. Parking included.").unwrap().to_vec();
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.open_bytes("v1.pdf", None, v1.clone()).unwrap();
+        app.open_bytes("v2.pdf", None, v2.clone()).unwrap();
+        app
+    });
+    h.run_steps(4);
+    assert!(h.state_mut().execute("doc.compare"));
+    h.run_steps(2);
+    h.get_by_label("Kinds of change:");
+    // Without Inserted and Deleted: only the replacement is compared and listed.
+    h.get_by_label("Inserted").click();
+    h.get_by_label("Deleted").click();
+    h.run_steps(2);
+    h.get_by_label("Compare").click();
+    h.run_steps(3);
+    let k = h.state().compare.as_ref().unwrap().kinds;
+    assert_eq!((k.replaced, k.inserted, k.deleted, k.visual), (true, false, false, true));
+    h.get_by_label("\"900\" → \"950\"");
+    assert!(h.query_by_label("+ \"Parking included.\"").is_none() && h.query_by_label("+ \"Parking included\"").is_none());
+    let id = h.state().active_ids().unwrap().1;
+    h.get_by_label("Mark as comments").click();
+    h.run_steps(3);
+    assert_eq!(h.state().session.get(id).unwrap().info.annotations.len(), 1, "only the replacement is marked");
+    // Nothing ticked: Mark as comments and Report… are off, so no empty-kinds error is possible.
+    for k in ["Replaced", "Visual"] {
+        h.get_by_label(k).click();
+        h.run_steps(2);
+    }
+    assert!(h.state().compare.as_ref().unwrap().kinds.is_empty());
+    assert!(h.query_by(|n| n.label().as_deref() == Some("Mark as comments") && n.is_disabled()).is_some(), "Mark as comments is off");
+    assert!(h.query_by(|n| n.label().as_deref() == Some("Report…") && n.is_disabled()).is_some(), "Report… is off");
+    // Visual only: Mark as comments says why it adds nothing.
+    h.get_by_label("Visual").click();
+    h.run_steps(2);
+    h.get_by_label("Mark as comments").click();
+    h.run_steps(3);
+    assert_eq!(h.state().toast.clone().unwrap().0, "No comments added: visual differences are shaded, not marked as comments");
+    assert_eq!(h.state().session.get(id).unwrap().info.annotations.len(), 1, "still only the first mark");
+    h.get_by_label("Replaced").click();
+    h.run_steps(2);
+    // Bringing Inserted back through the panel marks the insertion too.
+    h.get_by_label("Inserted").click();
+    h.run_steps(2);
+    assert!(h.state().compare.as_ref().unwrap().kinds.inserted);
+    h.get_by_label("Mark as comments").click();
+    h.run_steps(3);
+    assert_eq!(h.state().session.get(id).unwrap().info.annotations.len(), 3, "1 + replaced and inserted again");
+    // Deleted back on: the report opens as a new document.
+    h.get_by_label("Deleted").click();
+    h.run_steps(2);
+    h.get_by_label("Report…").click();
+    h.run_steps(3);
+    let report = h.state().active_ids().unwrap().1;
+    assert_eq!(h.state().session.get(report).unwrap().name, "Compare Report.pdf");
 }
 
 /// The Compare Files dialog's New file pages field rejects an out-of-range page: the

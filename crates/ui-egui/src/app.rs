@@ -258,6 +258,7 @@ impl PdfCraftApp {
             compare_pages: String::new(),
             compare_old_pages: String::new(),
             compare_fields_for: None,
+            compare_kinds: pdfcraft_engine::compare::ChangeKinds::all(),
             compare: None,
             js_console: Default::default(),
             #[cfg(not(target_arch = "wasm32"))]

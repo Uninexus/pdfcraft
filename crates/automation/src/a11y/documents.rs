@@ -205,11 +205,25 @@ impl Automation {
         Ok(Some(pdfcraft_engine::compare::PageRange { from: f.unwrap_or(1), to: t.unwrap_or(count) }))
     }
 
+    /// The optional `kinds` of change (replaced, inserted, deleted, visual); all of them when
+    /// it is left out. An empty list or an unknown name is refused, listing the names allowed.
+    fn compare_kinds(a: &Args) -> Result<pdfcraft_engine::compare::ChangeKinds> {
+        if a.get("kinds").is_none() {
+            return Ok(pdfcraft_engine::compare::ChangeKinds::all());
+        }
+        pdfcraft_engine::compare::ChangeKinds::parse(&a.strs("kinds")?).map_err(|e| ToolError::InvalidArgs(e.to_string()))
+    }
+
     pub(crate) fn doc_compare(&self, a: &Args) -> Result<Value> {
         use pdfcraft_engine::compare::Kind;
         let (old, new) = self.compare_ids(a)?;
         let (old_range, new_range) = (self.compare_range(a, "other", old)?, self.compare_range(a, "doc", new)?);
-        let c = self.session.compare_in(old, new, old_range, new_range).map_err(failed)?;
+        let kinds = Self::compare_kinds(a)?;
+        let full = self.session.compare_in(old, new, old_range, new_range).map_err(failed)?;
+        let hidden = |k: Kind| if kinds.wants(k) { 0 } else { full.count(k) };
+        let hidden_counts = json!({ "replaced": hidden(Kind::Replaced), "inserted": hidden(Kind::Inserted), "deleted": hidden(Kind::Deleted) });
+        let identical = full.identical();
+        let c = kinds.filter(full);
         let limit = a.opt_int("limit")?.unwrap_or(500).max(1) as usize;
         let r2 = |r: &[f64; 4]| r.map(|v| (v * 100.0).round() / 100.0);
         let side =
@@ -220,7 +234,7 @@ impl Automation {
             .take(limit)
             .map(|ch| json!({ "kind": ch.kind.label().to_lowercase(), "old": side(&ch.old), "new": side(&ch.new) }))
             .collect();
-        let visual: Vec<Value> = if a.opt_bool("visual")?.unwrap_or(false) {
+        let visual: Vec<Value> = if a.opt_bool("visual")?.unwrap_or(false) && kinds.visual {
             // Pages of the ranges are paired by position (old from + k with new from + k).
             let ranged = old_range.is_some() || new_range.is_some();
             self.session
@@ -238,7 +252,9 @@ impl Automation {
         };
         Ok(json!({
             "visual": visual,
-            "identical": c.identical(),
+            "kinds": kinds.names(),
+            "hidden": hidden_counts,
+            "identical": identical,
             "replaced": c.count(Kind::Replaced),
             "inserted": c.count(Kind::Inserted),
             "deleted": c.count(Kind::Deleted),
@@ -251,7 +267,8 @@ impl Automation {
     pub(crate) fn doc_compare_report(&self, a: &Args) -> Result<Value> {
         let (old, new) = self.compare_ids(a)?;
         let (old_range, new_range) = (self.compare_range(a, "other", old)?, self.compare_range(a, "doc", new)?);
-        let bytes = self.session.compare_report_in(old, new, old_range, new_range).map_err(failed)?;
+        let kinds = Self::compare_kinds(a)?;
+        let bytes = self.session.compare_report_in_kinds(old, new, old_range, new_range, kinds).map_err(failed)?;
         let path = self.resolve(a.str("path")?, true)?;
         write_atomic(&path, &bytes)?;
         Ok(json!({ "path": path.to_string_lossy(), "bytes": bytes.len() }))
@@ -260,7 +277,9 @@ impl Automation {
     pub(crate) fn doc_compare_mark(&mut self, a: &Args) -> Result<Value> {
         let (old, new) = self.compare_ids(a)?;
         let (old_range, new_range) = (self.compare_range(a, "other", old)?, self.compare_range(a, "doc", new)?);
-        let (n, out) = self.session.with_own_js_output(new, |s| s.mark_differences_in(old, new, old_range, new_range)).map_err(failed)?;
+        let kinds = Self::compare_kinds(a)?;
+        let (n, out) =
+            self.session.with_own_js_output(new, |s| s.mark_differences_in_kinds(old, new, old_range, new_range, kinds)).map_err(failed)?;
         Ok(with_warnings(json!({ "comments": n }), out.errors))
     }
 }
