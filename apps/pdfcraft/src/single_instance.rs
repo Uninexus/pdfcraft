@@ -290,8 +290,9 @@ fn election(socket: &std::path::Path) -> Option<std::fs::File> {
     }
 }
 
-/// How many socket paths a launch tries in all: the one [`socket_path`] names, then
+/// How many socket paths a launch tries in one folder: the one [`socket_path`] names, then
 /// [`candidates`]' fallbacks. Bounded so a folder full of unremovable files costs a few attempts.
+/// A launch tries the alternative folder's too (twice this many in all, see [`all_candidates`]).
 #[cfg(any(windows, all(unix, not(target_os = "macos"))))]
 const MAX_CANDIDATES: usize = 8;
 
@@ -299,10 +300,11 @@ const MAX_CANDIDATES: usize = 8;
 /// (so the folder's owner-only protection covers them all): `primary` itself, then `name~1.sock`,
 /// `name~2.sock`… A leftover socket file that can neither be deleted nor bound over (Windows 11
 /// build 26300 answers "The file cannot be accessed by the system", os error 1920, for an old
-/// `instance-s1.sock`) would otherwise switch single-instance mode off for good. The first
-/// launch listens on the first candidate it can use and a later one connects to each in turn, so
-/// both sides agree on the list. `~` is in no session or display name, so a fallback never
-/// collides with another session's or display's socket.
+/// `instance-s1.sock`) would otherwise switch single-instance mode off for good. `~` is in no
+/// session or display name, so a fallback never collides with another session's or display's
+/// socket. [`all_candidates`] adds the alternative folder's; the first launch listens on the
+/// first of all of them it can use and a later one connects to each in turn, so both sides
+/// agree on that list.
 #[cfg(any(windows, all(unix, not(target_os = "macos"))))]
 fn candidates(primary: &std::path::Path) -> Vec<std::path::PathBuf> {
     let stem = primary.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
@@ -326,7 +328,11 @@ fn all_candidates(primary: &std::path::Path, alt: Option<&std::path::Path>) -> V
 /// (see [`SocketOps::probe`]): `%LOCALAPPDATA%\Temp\PdfCraft` on Windows, which is private to the
 /// user like `%LOCALAPPDATA%\PdfCraft` is. It is named from `%LOCALAPPDATA%` and never from
 /// `%TEMP%`, which a user or a policy can point at a folder other accounts can write to. None
-/// elsewhere, and when `%LOCALAPPDATA%` is unset.
+/// elsewhere, and when `%LOCALAPPDATA%` is unset. Storage Sense and Disk Cleanup can delete old
+/// files in `%LOCALAPPDATA%\Temp`, a running instance's socket among them: on a PC that has to
+/// use this folder, single-instance mode then degrades to a new window for each file until the
+/// next launch listens again.
+#[cfg(any(windows, all(unix, not(target_os = "macos"))))]
 fn alt_dir() -> Option<std::path::PathBuf> {
     #[cfg(windows)]
     {
@@ -348,8 +354,9 @@ struct SocketOps<'a> {
     /// file answers NotFound, a socket file answers Ok. On a Windows 11 build 26300 PC every
     /// socket under `%LOCALAPPDATA%\<folder>` answered "The file cannot be accessed by the system"
     /// (os error 1920) even for one just bound, and could not be deleted. Such a socket is bound
-    /// but nobody can connect to it, so a folder that answers anything else than Ok or NotFound
-    /// is given up and [`SocketOps::alt_dir`] is used.
+    /// but nobody can connect to it (connecting to one answered WSAEINVAL, os error 10022, at the
+    /// same time), so a folder that answers with an error other than NotFound or PermissionDenied
+    /// ([`folder_unusable`]) is given up and [`SocketOps::alt_dir`] is used.
     probe: &'a dyn Fn(&std::path::Path) -> std::io::Result<()>,
     /// Where to turn when a folder can't be used ([`alt_dir`]).
     alt_dir: Option<std::path::PathBuf>,
@@ -423,7 +430,7 @@ fn claim_with(path: &std::path::Path, files: &[String], may_hand_off: bool, comb
             // socket: give the whole folder up before binding anything there, so a PC like that
             // isn't left with one more undeletable file for each socket tried.
             if let Err(e) = (ops.probe)(candidate)
-                && e.kind() != std::io::ErrorKind::NotFound
+                && folder_unusable(&e)
             {
                 log::info!("single instance: {} can't be looked at ({e}); giving up its folder", candidate.display());
                 give_up_folder(&paths, &mut unusable, candidate.parent());
@@ -463,7 +470,7 @@ fn claim_with(path: &std::path::Path, files: &[String], may_hand_off: bool, comb
                     // Bound, but a socket nobody can connect to is no use: look at it as a
                     // launch would. The file can't be taken back if the file system refuses.
                     if let Err(e) = (ops.probe)(candidate)
-                        && e.kind() != std::io::ErrorKind::NotFound
+                        && folder_unusable(&e)
                     {
                         drop(listener);
                         let _ = (ops.remove)(candidate);
@@ -508,6 +515,16 @@ fn claim_with(path: &std::path::Path, files: &[String], may_hand_off: bool, comb
     }
     log::info!("single instance off: all {} candidate sockets from {} are unusable", paths.len(), path.display());
     Claim::Alone
+}
+
+/// Whether a failed look at a socket path (`SocketOps::probe`) means its folder can't hold a
+/// usable socket. NotFound is a path with nothing there yet, and PermissionDenied is what an
+/// exiting instance's delete-pending socket answers: [`claim_with`]'s remove and bind steps
+/// already retry it as busy, so neither gives a folder up. The os error 1920 of an affected PC
+/// is neither.
+#[cfg(any(windows, all(unix, not(target_os = "macos"))))]
+fn folder_unusable(e: &std::io::Error) -> bool {
+    !matches!(e.kind(), std::io::ErrorKind::NotFound | std::io::ErrorKind::PermissionDenied)
 }
 
 /// Marks every candidate in `dir` as unusable.
@@ -974,6 +991,25 @@ mod tests {
         assert_eq!(all_candidates(&primary, None), candidates(&primary));
         let unique: std::collections::HashSet<_> = all.iter().collect();
         assert_eq!(unique.len(), all.len());
+    }
+
+    /// PermissionDenied is what an exiting instance's delete-pending socket answers: it is not a
+    /// reason to give the folder up, whether before or after the bind.
+    #[cfg(any(windows, all(unix, not(target_os = "macos"))))]
+    #[test]
+    fn a_permission_denied_look_does_not_give_up_the_folder() {
+        let path = socket("probe-denied");
+        let alt = socket("probe-denied-alt").parent().map(std::path::Path::to_path_buf).unwrap();
+        let denied = |_: &std::path::Path| Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied));
+        let ops = SocketOps { probe: &denied, alt_dir: Some(alt.clone()), ..SocketOps::real() };
+        let claim = claim_with(&path, &[], true, false, &ops);
+        assert!(matches!(claim, Claim::Primary(_)));
+        assert!(UnixStream::connect(&path).is_ok(), "listening on the first candidate, in the first folder");
+        let socks = std::fs::read_dir(&alt).map_or(0, |d| d.filter_map(Result::ok).count());
+        assert_eq!(socks, 0, "the alternative folder was not touched");
+        assert!(!folder_unusable(&std::io::Error::from(std::io::ErrorKind::PermissionDenied)));
+        assert!(!folder_unusable(&std::io::Error::from(std::io::ErrorKind::NotFound)));
+        assert!(folder_unusable(&std::io::Error::from_raw_os_error(1920)));
     }
 
     #[cfg(any(windows, all(unix, not(target_os = "macos"))))]
