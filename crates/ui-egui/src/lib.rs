@@ -323,6 +323,9 @@ struct PendingDestination {
 /// How a tab moves to a window of its own: the file and the page to show.
 pub type WindowSpawner = fn(&str, usize) -> Result<(), String>;
 
+/// The colour Highlight fields draws over form fields until Preferences ▸ Forms changes it.
+pub(crate) const FIELD_HIGHLIGHT_DEFAULT: [u8; 3] = [0x6E, 0x8E, 0xF5];
+
 pub struct PdfCraftApp {
     /// Split view (`panes`); which pane shows each tab is its view's.
     pub panes: panes::Panes,
@@ -506,6 +509,14 @@ pub struct PdfCraftApp {
     /// Preferences: web and email addresses written as plain page text open on a click, like
     /// links (#4207).
     pub text_links: bool,
+    /// Preferences ▸ Identity ▸ Email: the contact information of new digital signatures. Empty
+    /// is none. (The name is `comment_prefs.author`.)
+    pub identity_email: String,
+    /// Preferences ▸ Forms: show a field's tooltip (its `/TU`) when the pointer rests on it.
+    pub form_tooltips: bool,
+    /// Preferences ▸ Forms: the colour Highlight fields draws over fields (a required field
+    /// keeps its red border).
+    pub field_highlight_color: [u8; 3],
     /// Preferences: open every document at Default zoom and Default page display, whatever
     /// layout or zoom it asks for (#1618).
     pub always_default_view: bool,

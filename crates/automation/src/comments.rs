@@ -13,8 +13,28 @@ use serde_json::{Value, json};
 
 use crate::{Args, Automation, Content, DEFAULT_DPI, MAX_DPI, Result, ToolError, encode_png, failed};
 
-/// Author used when a tool call names none.
+/// Author used when a tool call names none and no Identity name is set.
 pub(crate) const DEFAULT_AUTHOR: &str = "PdfCraft";
+
+impl Automation {
+    /// A comment's author: the call's `author`, else Preferences ▸ Identity ▸ Name, else
+    /// [`DEFAULT_AUTHOR`].
+    pub(crate) fn author_arg(&self, a: &Args) -> Result<String> {
+        if let Some(author) = a.opt_str("author")? {
+            return Ok(author.to_string());
+        }
+        let name = &self.session.identity().name;
+        Ok(if name.is_empty() { DEFAULT_AUTHOR.to_string() } else { name.clone() })
+    }
+
+    /// The text a typed signature (or its initials) starts from when none is given: the
+    /// Identity name, as the Fill & Sign dialog does. `None` when no name is set.
+    pub(crate) fn identity_signature_text(&self, initials: bool) -> Option<String> {
+        let name = &self.session.identity().name;
+        let text: String = if initials { name.split_whitespace().filter_map(|w| w.chars().next()).collect() } else { name.clone() };
+        (!text.is_empty()).then_some(text)
+    }
+}
 /// The largest side of a stamp's box, in points: the largest page PDF allows (ISO 32000-2 Annex C).
 const MAX_STAMP_SIDE: f64 = 14_400.0;
 
@@ -365,7 +385,7 @@ impl Automation {
                     let (w, h) = stamp.size();
                     let [x, y] = a.need::<2>("at", "a stamp (its centre)")?;
                     let rect = rect_to_user(&info, [x - w / 2.0, y - h / 2.0, x + w / 2.0, y + h / 2.0]);
-                    let author = a.opt_str("author")?.unwrap_or(DEFAULT_AUTHOR).to_string();
+                    let author = self.author_arg(a)?;
                     let by = dynamic.then(|| self.session.stamp_by_line(&author));
                     Shape::Stamp { rect, stamp, by }
                 }
@@ -495,7 +515,7 @@ impl Automation {
             style.border_shape = b;
         }
         let contents = a.opt_str("contents")?.unwrap_or_default().to_string();
-        let author = a.opt_str("author")?.unwrap_or(DEFAULT_AUTHOR).to_string();
+        let author = self.author_arg(a)?;
         // Replace Text: the struck-out text and a grouped caret holding `contents`.
         if kind == "replace" {
             let Shape::TextMarkup { quads, .. } = shape else {
@@ -564,7 +584,7 @@ impl Automation {
         let info = self.doc(a)?.info.pages[page].clone();
         let [x, y] = a.need::<2>("at", "Fill & Sign")?;
         let at = to_user(&info, x, y);
-        let author = a.opt_str("author")?.unwrap_or(DEFAULT_AUTHOR).to_string();
+        let author = self.author_arg(a)?;
         let kind = a.str("type")?;
         let scan = a.opt_bool("scan")?.unwrap_or(false);
         let sensitivity = a.opt_int("sensitivity")?;
@@ -654,7 +674,14 @@ impl Automation {
             }
             // A typed signature or initials in the script font, left edge at `at`, upright as displayed.
             kind @ ("signature" | "initials") => {
-                let t = a.str("text")?;
+                // Without `text`, the identity name (initials: its words' first letters), as the
+                // Fill & Sign dialog starts from it.
+                let from_identity = self.identity_signature_text(kind == "initials");
+                let t = match (a.opt_str("text")?, from_identity.as_deref()) {
+                    (Some(t), _) => t,
+                    (None, Some(t)) => t,
+                    (None, None) => a.str("text")?,
+                };
                 // Nobody sees a preview here: refuse what the script font would leave out.
                 if let Some(c) = pdfcraft_engine::script_missing(t) {
                     return Err(ToolError::InvalidArgs(format!(
@@ -693,7 +720,7 @@ impl Automation {
 
     pub(crate) fn comment_reply(&mut self, a: &Args) -> Result<Value> {
         let (page, index) = self.comment_target(a)?;
-        let author = a.opt_str("author")?.unwrap_or(DEFAULT_AUTHOR).to_string();
+        let author = self.author_arg(a)?;
         self.apply(a, Edit::ReplyToAnnotation { page, index, text: a.str("text")?.to_string(), author })
     }
 
@@ -701,14 +728,14 @@ impl Automation {
         let (page, index) = self.comment_target(a)?;
         let status = a.str("status")?;
         let state = ReviewState::from_name(status).ok_or_else(|| ToolError::InvalidArgs(format!("unknown status {status:?}")))?;
-        let author = a.opt_str("author")?.unwrap_or(DEFAULT_AUTHOR).to_string();
+        let author = self.author_arg(a)?;
         self.apply(a, Edit::SetAnnotationStatus { page, index, state, author })
     }
 
     pub(crate) fn comment_mark(&mut self, a: &Args) -> Result<Value> {
         let (page, index) = self.comment_target(a)?;
         let marked = a.opt_bool("marked")?.unwrap_or(true);
-        let author = a.opt_str("author")?.unwrap_or(DEFAULT_AUTHOR).to_string();
+        let author = self.author_arg(a)?;
         self.apply(a, Edit::MarkAnnotation { page, index, marked, author })
     }
 
@@ -896,7 +923,7 @@ impl Automation {
         let bytes = crate::read_input(&path)?;
         let file = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         let name = a.opt_str("name")?.map(str::to_owned).unwrap_or_else(|| file.rsplit_once('.').map_or(file.clone(), |(s, _)| s.to_owned()));
-        let author = a.opt_str("author")?.unwrap_or(DEFAULT_AUTHOR).to_string();
+        let author = self.author_arg(a)?;
         let edit = Edit::AddCustomStamp {
             page,
             rect,

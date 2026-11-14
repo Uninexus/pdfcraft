@@ -539,12 +539,23 @@ pub(crate) fn preferences_body(ui: &mut egui::Ui, app: &mut PdfCraftApp, t: &Tok
     });
     ui.add_space(12.0);
 
-    // Card 4: Comment (the name on comments, then how the comment tools behave)
+    // Identity: who is using PdfCraft (the name on comments and typed signatures, the email
+    // of new digital signatures).
+    preference_card(ui, t, tl!("Identity"), Some("user-round"), &mut ctx, |ui, ctx| {
+        card_identity(ui, app, t, ctx);
+    });
+    ui.add_space(12.0);
+
+    // Card 4: Comment (how the comment tools behave)
     let title4 = tl!("Comment");
     preference_card(ui, t, title4, Some("message-square-text"), &mut ctx, |ui, ctx| {
-        card_identity(ui, app, t, ctx);
-        ui.add_space(10.0);
         card_commenting_tools(ui, app, t, ctx);
+    });
+    ui.add_space(12.0);
+
+    // Forms: how form fields are marked and described on the pages.
+    preference_card(ui, t, tl!("Forms"), Some("text-cursor-input"), &mut ctx, |ui, ctx| {
+        card_forms(ui, app, t, ctx);
     });
     ui.add_space(12.0);
 
@@ -900,6 +911,7 @@ fn card_units_and_paper(ui: &mut egui::Ui, app: &mut PdfCraftApp, t: &Tokens, ct
 
 /// The comment tools' behaviour, in the Comment card: whether they stay selected and what they start with.
 fn card_commenting_tools(ui: &mut egui::Ui, app: &mut PdfCraftApp, t: &Tokens, ctx: &mut PrefSearchContext) {
+    ctx.checkbox(ui, &mut app.comment_prefs.hide_empty_highlight_hover, tl!("Hide hover previews for highlights without comment text"), t);
     ctx.checkbox(ui, &mut app.comment_prefs.pinned, tl!("Keep the selected comment tool selected after use"), t);
     ctx.label_secondary(ui, tl!("The same as the pin on the comment toolbar."), t);
     ui.add_space(6.0);
@@ -936,7 +948,27 @@ fn card_identity(ui: &mut egui::Ui, app: &mut PdfCraftApp, t: &Tokens, ctx: &mut
         let label = ctx.label_primary(ui, tl!("Name on new comments"), t);
         ui.add(crate::widgets::line(&mut app.comment_prefs.author).desired_width(240.0).char_limit(crate::MAX_AUTHOR_CHARS)).labelled_by(label.id);
     });
-    ctx.checkbox(ui, &mut app.comment_prefs.hide_empty_highlight_hover, tl!("Hide hover previews for highlights without comment text"), t);
+    ctx.label_secondary(ui, tl!("Also the text a typed signature starts from. It starts as your login name."), t);
+    ui.horizontal(|ui| {
+        let label = ctx.label_primary(ui, tl!("Email"), t);
+        ui.add(crate::widgets::line(&mut app.identity_email).desired_width(240.0).char_limit(crate::MAX_AUTHOR_CHARS)).labelled_by(label.id);
+    });
+    ctx.label_secondary(ui, tl!("Written as the contact information of digital signatures you add."), t);
+}
+
+/// Content for the Forms card.
+fn card_forms(ui: &mut egui::Ui, app: &mut PdfCraftApp, t: &Tokens, ctx: &mut PrefSearchContext) {
+    // Acrobat's "Highlight existing fields": shared with the toggle in the form bar.
+    ctx.checkbox(ui, &mut app.view_defaults.highlight_fields, tl!("Highlight fields"), t);
+    ui.horizontal(|ui| {
+        let label = ctx.label_primary(ui, tl!("Highlight colour"), t);
+        ui.color_edit_button_srgb(&mut app.field_highlight_color).labelled_by(label.id);
+        if app.field_highlight_color != crate::FIELD_HIGHLIGHT_DEFAULT && ctx.button(ui, tl!("Default"), t).clicked() {
+            app.field_highlight_color = crate::FIELD_HIGHLIGHT_DEFAULT;
+        }
+    });
+    ctx.label_secondary(ui, tl!("Required fields keep their red border."), t);
+    ctx.checkbox(ui, &mut app.form_tooltips, tl!("Show a field's tooltip when the pointer rests on it"), t);
 }
 
 /// The servers the preset buttons fill in.
@@ -1327,6 +1359,13 @@ fn reading_colours_section(ui: &mut egui::Ui, app: &mut PdfCraftApp, t: &Tokens,
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_identity_and_forms_cards_use_icons_that_exist() {
+        for name in ["user-round", "text-cursor-input"] {
+            assert!(icons::exists(name), "icon {name}");
+        }
+    }
 
     #[test]
     fn test_find_match_ranges_case_insensitive() {

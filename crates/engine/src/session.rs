@@ -42,6 +42,8 @@ pub struct Session {
     pub(crate) captions: Arc<StatusCaptions>,
     /// Preferences ▸ JavaScript ▸ Enable Acrobat JavaScript, inverted (on by default).
     pub(crate) js_off: bool,
+    /// Preferences ▸ Identity: who this session's user is (see [`Identity`]).
+    pub(crate) identity: crate::js::Identity,
     /// Preferences ▸ Date format, when not the default (see [`dates`]).
     pub(crate) date_format: Option<String>,
     /// Preferences ▸ Date format ▸ Language, when not following the interface language.

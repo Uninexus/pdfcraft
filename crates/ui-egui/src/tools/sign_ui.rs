@@ -529,6 +529,8 @@ impl PdfCraftApp {
             rect: d.rect,
             reason: some(&d.reason),
             location: some(&d.location),
+            // Preferences ▸ Identity ▸ Email is the signer's contact information.
+            contact: some(&self.identity_email),
             certify: d.certify,
             appearance: d.appearance.clone(),
             // The labels the preview shows: in the interface language, or all in English.

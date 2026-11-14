@@ -258,7 +258,8 @@ impl Automation {
         // refused with the document as it was.
         let reason = a.opt_str("reason")?.map(str::to_string);
         let location = a.opt_str("location")?.map(str::to_string);
-        let contact = a.opt_str("contact")?.map(str::to_string);
+        // Without `contact`, the Identity email, as Acrobat fills the contact information.
+        let contact = a.opt_str("contact")?.map(str::to_string).or_else(|| Some(self.session.identity().email.clone()).filter(|e| !e.is_empty()));
         let signing = field.clone();
         let scripted = signing.as_deref().is_some_and(|f| {
             self.session.sign_event_scripted(doc_id, f, SignEvent::Before) || self.session.sign_event_scripted(doc_id, f, SignEvent::After)

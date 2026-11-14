@@ -24,6 +24,7 @@ mod office_stand_in;
 mod optimize_content_boundaries;
 mod page_actions;
 mod portfolio_info;
+mod preferences;
 mod redact_after_stray_q_form;
 mod redact_text_after_q;
 mod render_warnings;

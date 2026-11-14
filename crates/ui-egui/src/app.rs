@@ -155,6 +155,9 @@ impl PdfCraftApp {
             update_check_at_start: true,
             show_secured_notice: true,
             text_links: true,
+            identity_email: String::new(),
+            form_tooltips: true,
+            field_highlight_color: crate::FIELD_HIGHLIGHT_DEFAULT,
             always_default_view: false,
             #[cfg(not(target_arch = "wasm32"))]
             watch: Default::default(),

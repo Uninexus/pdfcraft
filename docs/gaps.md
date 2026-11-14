@@ -1,5 +1,6 @@
 # Where PdfCraft falls short of Acrobat Pro
 
+> **Last reviewed:** 2026-11-14 | **Last updated:** 2026-11-14 | **Change:** minor (gap 19: Preferences gains Identity (name, email) and Forms (highlight fields and colour, field tooltips); estimates unchanged)
 > **Last reviewed:** 2026-11-13 | **Last updated:** 2026-11-13 | **Change:** minor (gap 21: the Compare Files dialog takes a page range for each file, and the report and Mark as comments follow them; estimates unchanged)
 > **Last reviewed:** 2026-11-13 | **Last updated:** 2026-11-13 | **Change:** minor (gap 8: Insert pages, Combine files and Create ▸ Multiple files take Office documents through the installed LibreOffice; gap 8's first-beta sub-estimate re-estimated from 5–10 h to 3–6 h)
 > **Last reviewed:** 2026-11-11 | **Last updated:** 2026-11-11 | **Change:** minor (gap 8: known residual risk for the LibreOffice sidecar, sandbox tracked in #6953; estimates unchanged)
@@ -393,7 +394,9 @@ update the numbers.
 
 - **Missing:** most of Acrobat's twenty or so preference pages (General, Documents, Commenting, Forms, Identity,
   Signatures, Security, Measuring, Units and guides, Convert, …). Today: Interface language,
-  Documents and view, Units and paper, Comment, Fill & Sign, JavaScript.
+  Documents and view, Units and paper, Identity (name, email), Comment, Forms (highlight fields and
+  colour, field tooltips), Fill & Sign, JavaScript. Identity has no login name, title or
+  organization and Forms no auto-complete: nothing in PdfCraft reads them yet.
 - **Estimate:** 15–25 h. **Doc:** [ui-parity.md](ui-parity.md).
 
 ### 20. Scanners, GPU page rendering, pen pressure, Read Out Loud

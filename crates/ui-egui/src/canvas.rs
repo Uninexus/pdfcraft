@@ -1390,6 +1390,10 @@ struct PageEnv<'a> {
     text_style: &'a pdfcraft_engine::AddedText,
     /// Preferences: addresses written as plain page text open like links (#4207).
     text_links: bool,
+    /// Preferences ▸ Forms: a field's tooltip shows on hover.
+    form_tooltips: bool,
+    /// Preferences ▸ Forms: the Highlight fields colour.
+    field_highlight_color: [u8; 3],
     tool: QuickTool,
     units: crate::units::Unit,
     unobstructed: bool,
@@ -3439,6 +3443,8 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
         tag,
         text_style: &text_style,
         text_links: app.text_links,
+        form_tooltips: app.form_tooltips,
+        field_highlight_color: app.field_highlight_color,
         tool,
         units,
         unobstructed,

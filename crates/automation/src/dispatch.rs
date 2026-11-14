@@ -860,6 +860,8 @@ impl Automation {
             "js_document_scripts" => self.js_document_scripts(&a)?,
             "js_set_document_script" => self.js_set_document_script(&a)?,
             "js_enabled" => self.js_enabled(&a)?,
+            "identity" => self.identity(&a)?,
+            "form_preferences" => self.form_preferences(&a)?,
             "form_set_script" => self.form_set_script(&a)?,
             "form_merge_data" => self.form_merge_data(&a)?,
             "form_actions" => self.form_actions(&a)?,

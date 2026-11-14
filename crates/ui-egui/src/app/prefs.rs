@@ -36,6 +36,19 @@ fn rgb_triple(v: &serde_json::Value) -> Option<[f64; 3]> {
     Some(out)
 }
 
+/// A restored `[r, g, b]` of three whole numbers 0–255; anything else is refused whole.
+pub(crate) fn rgb_bytes(v: &serde_json::Value) -> Option<[u8; 3]> {
+    let a = v.as_array()?;
+    if a.len() != 3 {
+        return None;
+    }
+    let mut out = [0u8; 3];
+    for (slot, x) in out.iter_mut().zip(a.iter()) {
+        *slot = u8::try_from(x.as_u64()?).ok()?;
+    }
+    Some(out)
+}
+
 impl PdfCraftApp {
     /// Sets the user's interface theme preference (Light, Dark, or System).
     pub fn set_theme_preference(&mut self, preference: ThemePreference) {
@@ -187,6 +200,9 @@ impl PdfCraftApp {
         v["comment_tool_pinned"] = serde_json::Value::Bool(self.comment_prefs.pinned);
         v["show_secured_notice"] = serde_json::Value::Bool(self.show_secured_notice);
         v["text_links"] = serde_json::Value::Bool(self.text_links);
+        v["identity_email"] = serde_json::Value::String(self.identity_email.clone());
+        v["form_tooltips"] = serde_json::Value::Bool(self.form_tooltips);
+        v["field_highlight_color"] = serde_json::json!(self.field_highlight_color);
         v["organize_zoom"] = serde_json::json!(self.organize_zoom);
         v["blank_paper"] = serde_json::json!(self.blank_paper.token());
         // Canonical names survive changes to the order of PAPERS and do not depend on UI language;
@@ -271,6 +287,17 @@ impl PdfCraftApp {
         }
         if let Some(on) = v["show_secured_notice"].as_bool() {
             self.show_secured_notice = on;
+        }
+        // Settings are untrusted: the email is trimmed and cut, and a colour must be three
+        // bytes or the default stays.
+        if let Some(email) = v["identity_email"].as_str() {
+            self.identity_email = email.trim().chars().take(MAX_AUTHOR_CHARS).collect();
+        }
+        if let Some(on) = v["form_tooltips"].as_bool() {
+            self.form_tooltips = on;
+        }
+        if let Some(c) = rgb_bytes(&v["field_highlight_color"]) {
+            self.field_highlight_color = c;
         }
         if let Some(on) = v["text_links"].as_bool() {
             self.text_links = on;
