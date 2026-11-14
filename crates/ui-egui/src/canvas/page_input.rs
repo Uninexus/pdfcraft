@@ -915,6 +915,8 @@ pub(super) fn page_overlays(ui: &mut egui::Ui, view: &mut DocView, frame: &mut P
         table_preview,
         tool,
         unobstructed,
+        form_tooltips,
+        field_highlight_color,
         ..
     } = frame.env;
     let PageSlot { i, r, xf } = *slot;
@@ -974,7 +976,9 @@ pub(super) fn page_overlays(ui: &mut egui::Ui, view: &mut DocView, frame: &mut P
         }
     } else {
         crate::forms_ui::paint_page(painter, &xf, i, info, form, view, input.hover.as_ref());
-        crate::forms_ui::tooltip(resp, form, input.hover.as_ref());
+        if form_tooltips {
+            crate::forms_ui::tooltip(resp, form, input.hover.as_ref());
+        }
         if let Some(hovered) = crate::forms_ui::hovered(form, input.hover.as_ref()) {
             frame.field_hover = Some(hovered);
         }
@@ -984,7 +988,7 @@ pub(super) fn page_overlays(ui: &mut egui::Ui, view: &mut DocView, frame: &mut P
     // red border. Radio buttons and round XFA check boxes are round, and so is theirs (as
     // in Acrobat). Only what can be filled is marked: a read-only widget (its field's, or a
     // radio button's own) is left as it is drawn.
-    paint_field_highlights(painter, &xf, info, form.as_slice(), i, view.highlight_fields);
+    paint_field_highlights(painter, &xf, info, form.as_slice(), i, view.highlight_fields, field_highlight_color);
     // Links: the hand and the link's target, which count only for the tools that follow or
     // edit links (`Layer::reached_by`). Tips draw above the palette, so none shows while it is
     // open, even beside it. A click follows the link its press was on, released over it: one that
@@ -1074,7 +1078,15 @@ pub(super) fn page_overlays(ui: &mut egui::Ui, view: &mut DocView, frame: &mut P
     }
 }
 
-fn paint_field_highlights(painter: &egui::Painter, xf: &PageXform, info: &DocInfo, form: &[pdfcraft_engine::FormField], page: usize, enabled: bool) {
+fn paint_field_highlights(
+    painter: &egui::Painter,
+    xf: &PageXform,
+    info: &DocInfo,
+    form: &[pdfcraft_engine::FormField],
+    page: usize,
+    enabled: bool,
+    color: [u8; 3],
+) {
     if !enabled {
         return;
     }
@@ -1085,8 +1097,9 @@ fn paint_field_highlights(painter: &egui::Painter, xf: &PageXform, info: &DocInf
         for widget in field.widgets.iter().filter(|widget| widget.page == Some(page) && !widget.hidden && !widget.read_only) {
             let rect = widget.rect;
             let screen_rect = xf.user_rect(info, page, [rect[0] as f32, rect[1] as f32, rect[2] as f32, rect[3] as f32]);
-            let tint = Color32::from_rgba_unmultiplied(0x6E, 0x8E, 0xF5, 48);
-            let (width, color) = if required { (2.0, Color32::from_rgb(0xE3, 0x22, 0x22)) } else { (1.0, Color32::from_rgb(0x6E, 0x8E, 0xF5)) };
+            let tint = Color32::from_rgba_unmultiplied(color[0], color[1], color[2], 48);
+            let (width, color) =
+                if required { (2.0, Color32::from_rgb(0xE3, 0x22, 0x22)) } else { (1.0, Color32::from_rgb(color[0], color[1], color[2])) };
             if widget.round {
                 let radius = screen_rect.width().min(screen_rect.height()) / 2.0;
                 painter.circle_filled(screen_rect.center(), radius, tint);

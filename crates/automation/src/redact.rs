@@ -7,7 +7,7 @@ use pdfcraft_engine::{
 };
 use serde_json::{Value, json};
 
-use crate::comments::{DEFAULT_AUTHOR, parse_color};
+use crate::comments::parse_color;
 use crate::{Args, Automation, Result, ToolError, failed};
 
 /// User text echoed in an error: quoted, at most 64 characters.
@@ -106,7 +106,7 @@ impl Automation {
             (None, _) if a.get("codes").is_some() => return Err(ToolError::InvalidArgs("codes needs code_set or custom_code_set".into())),
             (None, _) => String::new(),
         };
-        let author = a.opt_str("author")?.unwrap_or(DEFAULT_AUTHOR).to_string();
+        let author = self.author_arg(a)?;
         let mut style = Style::default_for(&Shape::Redact { quads: Vec::new(), overlay: String::new(), look: Default::default() });
         if let Some(c) = a.opt_str("fill")? {
             style.fill = Some(parse_color(c)?);

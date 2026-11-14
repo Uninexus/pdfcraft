@@ -143,3 +143,44 @@ fn reset_comment_tool_defaults_forgets_saved_colours_and_keeps_the_name_and_pin(
     assert_eq!((prefs.author.as_str(), prefs.pinned), ("Grace Hopper", true));
     assert_eq!(restarted(&h).comment_prefs.style(CommentTool::Highlight).color, original);
 }
+
+#[test]
+fn the_forms_page_changes_highlighting_the_highlight_colour_and_tooltips() {
+    let mut h = preferences();
+    assert!(h.state().view_defaults.highlight_fields && h.state().form_tooltips);
+    assert_eq!(h.state().field_highlight_color, [0x6E, 0x8E, 0xF5]);
+    // The page has its own card.
+    h.get_by_label("Forms");
+    h.get_by_label("Highlight fields").scroll_to_me();
+    h.run_steps(3);
+    h.get_by_label("Highlight fields").click();
+    h.run_steps(3);
+    assert!(!h.state().view_defaults.highlight_fields);
+    h.get_by_label("Show a field's tooltip when the pointer rests on it").click();
+    h.run_steps(3);
+    assert!(!h.state().form_tooltips);
+    // Kept across a restart.
+    h.state_mut().field_highlight_color = [10, 20, 30];
+    let again = restarted(&h);
+    assert_eq!((again.view_defaults.highlight_fields, again.form_tooltips, again.field_highlight_color), (false, false, [10, 20, 30]));
+}
+
+#[test]
+fn corrupt_saved_form_preferences_and_control_values_are_refused() {
+    let mut app = PdfCraftApp::new();
+    app.field_highlight_color = [1, 2, 3];
+    for bad in [r#"[1,2]"#, r#"[1,2,300]"#, r#"[1,2,-3]"#, r#"[1.5,2,3]"#, r##""#ff0000""##, "null", r#"["a","b","c"]"#] {
+        app.restore(&format!(r#"{{"field_highlight_color": {bad}, "form_tooltips": "yes"}}"#));
+        assert_eq!(app.field_highlight_color, [1, 2, 3], "{bad}");
+        assert!(app.form_tooltips, "a mistyped switch keeps the current one");
+    }
+    app.set_option("field-highlight-color", "#FF8000").unwrap();
+    assert_eq!(app.field_highlight_color, [255, 128, 0]);
+    for bad in ["FF8000", "#FF80", "#GG0000", "#ÿ0000", ""] {
+        assert!(app.set_option("field-highlight-color", bad).is_err(), "{bad}");
+    }
+    assert_eq!(app.field_highlight_color, [255, 128, 0]);
+    app.set_option("form-tooltips", "false").unwrap();
+    assert!(!app.form_tooltips);
+    assert!(app.set_option("form-tooltips", "maybe").is_err());
+}

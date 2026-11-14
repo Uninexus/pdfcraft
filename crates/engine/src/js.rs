@@ -858,6 +858,17 @@ fn unasked_requests(requests: &mut Vec<Request>) {
         .retain(|r| matches!(r, Request::Highlight(_) | Request::Zoom(_) | Request::Focus(_) | Request::FocusField { .. } | Request::GoToPage(_)));
 }
 
+/// The longest identity name or email kept, in characters.
+pub const MAX_IDENTITY_CHARS: usize = 200;
+
+/// Preferences ▸ Identity: the user's name, the default author of new comments and the default
+/// signer name text, and their email, the contact information of a new digital signature.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Identity {
+    pub name: String,
+    pub email: String,
+}
+
 impl Session {
     /// Preferences ▸ JavaScript ▸ Enable Acrobat JavaScript (on by default).
     pub fn set_javascript(&mut self, on: bool) {
@@ -869,6 +880,18 @@ impl Session {
         }
     }
 
+    /// Preferences ▸ Identity: the name and email of the person using this session. Each is
+    /// trimmed and cut to [`MAX_IDENTITY_CHARS`] characters; an empty one is unset.
+    pub fn set_identity(&mut self, name: &str, email: &str) {
+        let clean = |s: &str| s.trim().chars().take(MAX_IDENTITY_CHARS).collect::<String>();
+        self.identity = Identity { name: clean(name), email: clean(email) };
+    }
+
+    /// Preferences ▸ Identity as set (both empty when unset).
+    pub fn identity(&self) -> &Identity {
+        &self.identity
+    }
+
     /// Whether JavaScript is on (Preferences ▸ JavaScript ▸ Enable Acrobat JavaScript).
     pub fn javascript(&self) -> bool {
         !self.js_off
@@ -877,6 +900,11 @@ impl Session {
     /// Whether the viewer highlights form fields (Highlight fields), which forms' scripts read as
     /// `app.runtimeHighlight`. A script that changes it asks for [`Request::Highlight`]; the
     /// viewer then calls this with the new setting.
+    pub fn field_highlight(&self) -> bool {
+        self.field_highlight
+    }
+
+    /// Sets what [`Session::field_highlight`] reads.
     pub fn set_field_highlight(&mut self, on: bool) {
         self.field_highlight = on;
     }

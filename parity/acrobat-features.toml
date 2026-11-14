@@ -10124,7 +10124,7 @@ status = "partial"
 commands = ["app.preferences"]
 tools = ["js_enabled"]
 evidence = ["crates/ui-egui/tests/it/javascript.rs::document_scripts_and_preferences", "crates/ui-egui/tests/it/ui.rs::preferences_selects_default_workspace_for_next_open", "crates/ui-egui/tests/it/control.rs::control_default_workspace_and_session_override", "apps/pdfcraft/src/settings.rs::xdg_preferences_use_config_instead_of_data", "apps/pdfcraft/src/settings.rs::migration_preserves_preferences_and_other_data", "crates/ui-egui/tests/it/preferences_layout.rs::ok_is_on_screen_without_scrolling_at_any_window_height", "crates/ui-egui/tests/it/preferences_layout.rs::ok_closes_the_dialog_in_a_short_window_and_the_settings_still_scroll"]
-notes = "Preferences dialog with Interface language, Documents and view (persistent default workspace with session override), Units and paper (units, blank-page paper), Comment (identity, keep tool selected, reset comment tool colours and sizes), Fill & Sign (flatten on save, off by default) and JavaScript; other categories still live in their tools, and it isn't generated from a schema yet. XDG desktops store app.ron under XDG_CONFIG_HOME/pdfcraft or ~/.config/pdfcraft; existing data-folder preferences are copied without replacing configured preferences, with fallback on migration errors. Logs and recovery retain data locations. Portable/non-XDG locations are unchanged. The settings scroll when the window is short (down to a 60 pt scroll area, so OK stays on screen in the smallest window at the largest interface size) and the OK row stays below them, in reach (#3557); the dialog still has no Cancel, and a window shorter than the dialog's title, one row and OK would still clip it."
+notes = "Preferences dialog with Interface language, Documents and view (persistent default workspace with session override), Units and paper (units, blank-page paper), Identity (name, email), Comment (keep tool selected, reset comment tool colours and sizes), Forms (highlight fields and colour, field tooltips), Fill & Sign (flatten on save, off by default) and JavaScript; other categories still live in their tools, and it isn't generated from a schema yet. XDG desktops store app.ron under XDG_CONFIG_HOME/pdfcraft or ~/.config/pdfcraft; existing data-folder preferences are copied without replacing configured preferences, with fallback on migration errors. Logs and recovery retain data locations. Portable/non-XDG locations are unchanged. The settings scroll when the window is short (down to a 60 pt scroll area, so OK stays on screen in the smallest window at the largest interface size) and the OK row stays below them, in reach (#3557); the dialog still has no Cancel, and a window shorter than the dialog's title, one row and OK would still clip it."
 
 [[feature]]
 id = "misc.prefs-general"
@@ -10172,7 +10172,7 @@ status = "partial"
 commands = []
 tools = []
 evidence = ["crates/ui-egui/tests/it/preferences_pages.rs::the_comment_tool_pin_is_set_in_preferences_and_shared_with_the_toolbar_setting", "crates/ui-egui/tests/it/preferences_pages.rs::reset_comment_tool_defaults_forgets_saved_colours_and_keeps_the_name_and_pin", "crates/ui-egui/tests/it/control.rs::units_blank_paper_and_comment_defaults_are_set_and_reported_through_the_control_channel"]
-notes = "Preferences ▸ Comment (with the name on comments): Keep the selected comment tool selected after use (the same persisted setting as the comment toolbar pin) and Reset comment tool colours and sizes, which forgets every colour, opacity, width and font size saved with Make Current Properties Default (typed-text Fill & Sign defaults are not touched; also ui.set reset-comment-defaults=true). Missing: Acrobat's pop-up behaviours, pop-up font and size, comment-list options and the other Commenting preferences."
+notes = "Preferences ▸ Comment (the name on comments is in Identity): Keep the selected comment tool selected after use (the same persisted setting as the comment toolbar pin) and Reset comment tool colours and sizes, which forgets every colour, opacity, width and font size saved with Make Current Properties Default (typed-text Fill & Sign defaults are not touched; also ui.set reset-comment-defaults=true). Missing: Acrobat's pop-up behaviours, pop-up font and size, comment-list options and the other Commenting preferences."
 
 [[feature]]
 id = "misc.prefs-forms"
@@ -10180,11 +10180,11 @@ title = "Preferences: forms"
 area = "N"
 tier = "P1"
 milestone = "M14"
-status = "planned"
+status = "partial"
 commands = []
-tools = []
-evidence = []
-notes = ""
+tools = ["form_preferences"]
+evidence = ["crates/ui-egui/tests/it/preferences_pages.rs::the_forms_page_changes_highlighting_the_highlight_colour_and_tooltips", "crates/ui-egui/tests/it/preferences_pages.rs::corrupt_saved_form_preferences_and_control_values_are_refused", "crates/automation/tests/it/preferences.rs::form_preferences_share_highlight_fields_with_the_session"]
+notes = "Preferences \u25b8 Forms: Highlight fields (the same setting as the form bar's toggle, moved here from Appearance), the Highlight colour drawn over fillable fields (required fields keep their red border; default blue), and Show a field's tooltip when the pointer rests on it (a field's /TU). All three are remembered. Headless: form_preferences reads and sets Highlight fields (what scripts read as app.runtimeHighlight); the colour and the tooltips only change how the desktop viewer draws pages, so they have no tool and are set through the opt-in control channel (ui.set field-highlight-color=#RRGGBB, form-tooltips=true|false). The new labels are English until craft-i18n has rows for them. Missing: auto-complete of text fields (nothing in PdfCraft remembers entries yet, so no switch is offered), a separate colour for required fields, check-spelling, the calculation-order and tab-order preferences, and the Acrobat Forms options for form-field recognition."
 
 [[feature]]
 id = "misc.prefs-identity"
@@ -10192,11 +10192,11 @@ title = "Preferences: identity"
 area = "N"
 tier = "P1"
 milestone = "M14"
-status = "planned"
+status = "partial"
 commands = []
-tools = []
-evidence = []
-notes = ""
+tools = ["identity"]
+evidence = ["crates/ui-egui/tests/it/identity.rs::the_identity_name_signs_new_comments_and_is_remembered", "crates/ui-egui/tests/it/identity.rs::the_identity_email_is_typed_remembered_and_handed_to_the_engine", "crates/automation/tests/it/preferences.rs::the_identity_name_is_the_default_comment_author", "crates/automation/tests/it/preferences.rs::a_typed_signature_starts_from_the_identity_name", "crates/automation/tests/it/preferences.rs::the_identity_email_is_the_signatures_contact_unless_one_is_given"]
+notes = "Preferences \u25b8 Identity: Name (the default author of new comments, stamps, measurements and redaction marks, and the text a typed signature or its initials starts from; the login name until set) and Email (written as the contact information, /ContactInfo, of digital signatures made in the Sign dialog). Both are remembered. Headless: identity reads and sets both for the session; without an `author` argument the comment, stamp, measurement and redaction tools use the name instead of PdfCraft, fill_sign_add signature and initials take it when `text` is omitted, and sign_document uses the email when `contact` is omitted. The new Identity and Email labels are English until craft-i18n has rows for them. Not offered: Acrobat's login name, title and organization, because nothing in PdfCraft reads them (Acrobat exposes them to scripts as the identity object, which PdfCraft's script runtime doesn't have). Not yet: the name in a digital signature's own appearance (it shows the certificate's name, as Acrobat does)."
 
 [[feature]]
 id = "misc.prefs-full-screen"

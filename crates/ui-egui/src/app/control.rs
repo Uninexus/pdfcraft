@@ -361,7 +361,7 @@ impl PdfCraftApp {
                     }
                 };
             }
-            ("author", _) => self.comment_prefs.author = value.to_string(),
+            ("author", _) => self.comment_prefs.author = value.trim().chars().take(MAX_AUTHOR_CHARS).collect(),
             ("ai-base-url", _) => {
                 self.ai.base_url = value.to_string();
                 self.ai.save_if_changed();
@@ -400,6 +400,25 @@ impl PdfCraftApp {
                     "false" => false,
                     _ => return Err("hide-empty-highlight-hover must be true or false".into()),
                 };
+            }
+            // `--identity-email ada@example.com`: the contact information of new digital signatures.
+            ("identity-email", _) => self.identity_email = value.trim().chars().take(MAX_AUTHOR_CHARS).collect(),
+            ("form-tooltips", _) => {
+                self.form_tooltips = match value {
+                    "true" => true,
+                    "false" => false,
+                    _ => return Err("form-tooltips must be true or false".into()),
+                };
+            }
+            // `--field-highlight-color #RRGGBB`: what Highlight fields draws over fields.
+            ("field-highlight-color", _) => {
+                let hex = value
+                    .strip_prefix('#')
+                    .filter(|h| h.len() == 6 && h.bytes().all(|b| b.is_ascii_hexdigit()))
+                    .ok_or("field-highlight-color must be #RRGGBB")?;
+                // All six bytes are ASCII hex digits, so every two-byte slice is on a char boundary.
+                let byte = |i: usize| hex.get(i..i + 2).and_then(|p| u8::from_str_radix(p, 16).ok()).ok_or("field-highlight-color must be #RRGGBB");
+                self.field_highlight_color = [byte(0)?, byte(2)?, byte(4)?];
             }
             ("text-links", _) => {
                 self.text_links = match value {

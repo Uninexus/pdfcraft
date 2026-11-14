@@ -61,3 +61,33 @@ fn the_identity_name_signs_new_comments_and_is_remembered() {
     restored.restore(&format!(r#"{{"author": "{}"}}"#, "x".repeat(10_000)));
     assert_eq!(restored.comment_prefs.author.chars().count(), 200);
 }
+
+#[test]
+fn the_identity_email_is_typed_remembered_and_handed_to_the_engine() {
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(|_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.set_option("author", "Tester").unwrap();
+        app.set_option("dialog", "preferences").unwrap();
+        app
+    });
+    h.run_steps(4);
+    h.get_by_role_and_label(Role::TextInput, "Email").scroll_to_me();
+    h.run_steps(4);
+    h.get_by_role_and_label(Role::TextInput, "Email").click();
+    h.run_steps(1);
+    h.get_by_role_and_label(Role::TextInput, "Email").type_text("grace@example.com");
+    h.run_steps(3);
+    assert_eq!(h.state().identity_email, "grace@example.com");
+    // Remembered; a hostile value is trimmed and cut.
+    let mut restored = PdfCraftApp::new();
+    restored.restore(&h.state().persist());
+    assert_eq!(restored.identity_email, "grace@example.com");
+    restored.restore(&format!(r#"{{"identity_email": "  {}  "}}"#, "x".repeat(10_000)));
+    assert_eq!(restored.identity_email.chars().count(), 200);
+    restored.restore(r#"{"identity_email": 5}"#);
+    assert_eq!(restored.identity_email.chars().count(), 200, "a mistyped value keeps the current one");
+    // The control channel sets it too.
+    restored.set_option("identity-email", " a@b.c ").unwrap();
+    assert_eq!(restored.identity_email, "a@b.c");
+}
