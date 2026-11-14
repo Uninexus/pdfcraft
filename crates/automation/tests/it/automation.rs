@@ -6295,6 +6295,12 @@ fn redacting_with_codes_through_tools() {
     assert!(bad(&mut a, json!({ "doc": doc, "find": "Jane Roe", "code_set": "foia", "codes": [] })));
     assert!(bad(&mut a, json!({ "doc": doc, "find": "Jane Roe", "codes": ["(b)(6)"] })));
     assert!(bad(&mut a, json!({ "doc": doc, "find": "Jane Roe", "overlay": "X", "code_set": "foia", "codes": ["(b)(6)"] })));
+    // codes beside a literal overlay, with no set to read them from, was silently ignored.
+    let Err(ToolError::InvalidArgs(msg)) = a.call("redact_mark", &json!({ "doc": doc, "find": "Jane Roe", "overlay": "X", "codes": ["(b)(6)"] }))
+    else {
+        panic!("codes with an overlay and no code set is refused, not ignored")
+    };
+    assert!(msg.contains("codes needs code_set"), "{msg}");
     let Err(ToolError::InvalidArgs(msg)) =
         a.call("redact_mark", &json!({ "doc": doc, "find": "Jane Roe", "code_set": "foia", "codes": ["(b)(10)"] }))
     else {

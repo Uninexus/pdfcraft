@@ -73,6 +73,12 @@ impl Automation {
         let overlay = match (a.opt_str("overlay")?, a.opt_str("code_set")?) {
             (Some(_), Some(_)) => return Err(ToolError::InvalidArgs("pass overlay or code_set with codes, not both".into())),
             (Some(_), None) if custom.is_some() => return Err(ToolError::InvalidArgs("pass overlay or custom_code_set with codes, not both".into())),
+            // `codes` only means something inside a set; beside a literal overlay it used to be dropped without a word.
+            (Some(_), None) if a.get("codes").is_some() => {
+                return Err(ToolError::InvalidArgs(
+                    "codes needs code_set or custom_code_set; overlay is literal text, so drop codes or use a code set".into(),
+                ));
+            }
             (Some(o), None) => o.to_string(),
             (None, id) if custom.is_some() || id.is_some() => {
                 let picked = a.strs("codes")?;

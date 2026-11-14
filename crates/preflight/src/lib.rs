@@ -268,6 +268,41 @@ fn metadata(doc: &Document) -> Option<String> {
     }
 }
 
+/// Make the XMP `xmp:ModifyDate` say the same instant as the `/ModDate` that is about to be
+/// written (`pdf_date`, a PDF date), so the two agree, as PDF/A requires. Returns whether the
+/// metadata stream changed. A document with no readable, plain XMP stream, or whose XMP does
+/// not carry a ModifyDate (and is not PDF/A), is left as it is.
+pub fn sync_modify_date(doc: &mut Document, pdf_date: &str) -> bool {
+    let Some((r, stream)) = synced_metadata(doc, pdf_date) else { return false };
+    doc.set(r, Object::Stream(stream));
+    true
+}
+
+/// The metadata stream [`sync_modify_date`] would write, and its object, without changing
+/// `doc`: `None` when nothing needs to change.
+pub fn synced_metadata(doc: &Document, pdf_date: &str) -> Option<(ObjRef, Stream)> {
+    let iso = xmp::iso_date(pdf_date)?;
+    let r = catalog(doc).get(b"Metadata").and_then(Object::as_ref)?;
+    let Object::Stream(s) = &*doc.get(r) else { return None };
+    // A stream with its own Crypt filter is not ours to rewrite as plain bytes.
+    let crypt = match s.dict.get(b"Filter") {
+        Some(Object::Name(n)) => n.as_slice() == b"Crypt",
+        Some(Object::Array(a)) => a.iter().any(|f| f.as_name() == Some(b"Crypt".as_slice())),
+        _ => false,
+    };
+    if crypt {
+        return None;
+    }
+    // Not valid UTF-8: leave the stream as it is rather than replace bytes in it.
+    let text = s.decoded_within(xmp::MAX_XMP_BYTES).ok().and_then(|b| String::from_utf8(b).ok())?;
+    let updated = xmp::with_modify_date(&text, &iso)?;
+    let mut dict = s.dict.clone();
+    dict.remove(b"Filter");
+    dict.remove(b"DecodeParms");
+    dict.remove(b"Length");
+    Some((r, Stream::from_raw(dict, updated.into_bytes())))
+}
+
 /// What the document declares about its standards.
 pub fn declared(doc: &Document) -> Declared {
     let mut d = Declared::default();

@@ -3,6 +3,15 @@ use super::{
     display_bytes, display_config, guard, render_threads, signatures_of, writable, write_full, write_incremental, xfa_sync_datasets,
 };
 
+/// Make the XMP `xmp:ModifyDate` say the instant the writer is about to stamp into `/ModDate`,
+/// so a PDF/A file's two modification dates agree (ISO 19005: the information dictionary and the
+/// XMP must match). The same `mod_date` string feeds both, so they are one timestamp. The
+/// document is copied only when its XMP has to change.
+fn stamp_xmp(cos: &mut std::borrow::Cow<'_, pdfcraft_cos::Document>, mod_date: Option<&str>) {
+    let Some((r, stream)) = mod_date.and_then(|d| pdfcraft_preflight::synced_metadata(cos, d)) else { return };
+    cos.to_mut().set(r, pdfcraft_cos::Object::Stream(stream));
+}
+
 impl Session {
     /// The bytes to write for Save: an incremental update of the file as opened/last saved,
     /// with `/ModDate` stamped. Call `mark_saved` after writing them successfully.
@@ -24,8 +33,9 @@ impl Session {
         // file so that revision stays in the chain. A full rewrite (redaction, new encryption,
         // a reconstructed file) still writes the current graph on its own.
         let rewrite = editor.cos.full_save_required() || editor.cos.encryption_changed() || editor.cos.revisions().is_empty();
-        let cos = writable(&editor.cos)?;
+        let mut cos = writable(&editor.cos)?;
         guard(|| {
+            stamp_xmp(&mut cos, opts.mod_date.as_deref());
             if on_saved || rewrite {
                 write_incremental(&cos, &opts)
             } else {
@@ -47,8 +57,14 @@ impl Session {
         }
         let editor = doc.editor.as_ref().ok_or_else(|| EditError::ReadOnly(doc.read_only_reason.clone().unwrap_or_default()))?;
         let opts = SaveOptions { mod_date: self.now().map(pdfcraft_cos::pdf_date), ..SaveOptions::default() };
-        let cos = writable(&editor.cos)?;
-        guard(|| write_full(&cos, &opts)).map_err(EditError::Write)?.map(Arc::new).map_err(|e| EditError::Write(e.to_string()))
+        let mut cos = writable(&editor.cos)?;
+        guard(|| {
+            stamp_xmp(&mut cos, opts.mod_date.as_deref());
+            write_full(&cos, &opts)
+        })
+        .map_err(EditError::Write)?
+        .map(Arc::new)
+        .map_err(|e| EditError::Write(e.to_string()))
     }
 
     /// Check that `bytes`, from [`Self::save_bytes`] or [`Self::save_full_bytes`], reopen as this
