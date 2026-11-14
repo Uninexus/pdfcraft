@@ -905,6 +905,39 @@ fn save_is_incremental_stamps_mod_date_and_rebases() {
     assert_eq!(reopened.revisions().len(), 3);
 }
 
+/// A PDF/A file's Info `/ModDate` and its XMP `xmp:ModifyDate` must denote one instant. Save
+/// stamped a new `/ModDate` and left the XMP date at the conversion time, so they disagreed.
+#[test]
+fn save_writes_the_same_instant_to_info_mod_date_and_xmp_modify_date() {
+    // A file made PDF/A at an earlier time: its XMP says ModifyDate 2020-01-01.
+    let mut cos = pdfcraft_cos::Document::open(Arc::new(fixture(1))).unwrap();
+    pdfcraft_preflight::convert(&mut cos, pdfcraft_preflight::Level::A2b).unwrap();
+    let earlier = pdfcraft_cos::SaveOptions { mod_date: Some("D:20200101000000Z".into()), ..Default::default() };
+    let mut cos = pdfcraft_cos::Document::open(Arc::new(pdfcraft_cos::write_full(&cos, &earlier).unwrap())).unwrap();
+    pdfcraft_preflight::convert(&mut cos, pdfcraft_preflight::Level::A2b).unwrap();
+    let pdfa = pdfcraft_cos::write_full(&cos, &pdfcraft_cos::SaveOptions::default()).unwrap();
+
+    let mut s = Session::new().with_clock(|| 1_700_000_000);
+    let id = s.open("pdfa.pdf", None, Arc::new(pdfa), None).unwrap();
+    s.apply(id, Edit::SetInfo { key: "Title".into(), value: "Edited".into() }).unwrap();
+    for saved in [s.save_bytes(id).unwrap(), s.save_full_bytes(id).unwrap()] {
+        let back = pdfcraft_cos::Document::open(saved).unwrap();
+        let info = pdfcraft_organize::info(&back, "ModDate").expect("Info /ModDate");
+        let root = back.root().unwrap();
+        let md = back.resolve(back.get(root).as_dict().unwrap().get(b"Metadata").unwrap());
+        let xmp = {
+            let pdfcraft_cos::Object::Stream(st) = &*md else { panic!("Metadata is a stream") };
+            String::from_utf8(st.decoded_within(1 << 20).unwrap()).unwrap()
+        };
+        let start = xmp.find("<xmp:ModifyDate>").expect("xmp:ModifyDate") + "<xmp:ModifyDate>".len();
+        let iso = &xmp[start..start + xmp[start..].find('<').unwrap()];
+        let digits = |t: &str| t.chars().filter(char::is_ascii_digit).collect::<String>();
+        assert!(info.ends_with('Z') && iso.ends_with('Z'), "both UTC: {info} / {iso}");
+        assert_eq!(digits(&info), "20231114221320", "{info}");
+        assert_eq!(digits(&info), digits(iso), "Info /ModDate {info} and XMP ModifyDate {iso} are one instant");
+    }
+}
+
 /// #1937: a file whose cross-reference data had to be rebuilt saved as its original bytes when
 /// nothing was edited, so the damage Document Properties reported as repaired was still in the
 /// file. Save writes the rebuilt file in full; reopened, it needs no repair.

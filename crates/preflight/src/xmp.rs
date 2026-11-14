@@ -174,6 +174,64 @@ pub fn iso_date(pdf: &str) -> Option<String> {
     Some(format!("{y}-{mo}-{da}T{h}:{mi}:{s}{tz}"))
 }
 
+/// The XMP namespace, where `ModifyDate` lives (the conventional prefixes are `xmp:` and `xap:`).
+const XMP_NS: &str = "http://ns.adobe.com/xap/1.0/";
+const RDF_NS: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#";
+
+/// The name an element is written with (prefix included), read from its start tag.
+fn written_name(element: &str) -> Option<&str> {
+    element.strip_prefix('<')?.split(|c: char| c.is_whitespace() || c == '>' || c == '/').next()
+}
+
+/// `xmp` with `ModifyDate` of the XMP namespace set to `iso`, an XMP date. Properties are found
+/// by namespace, not prefix, so `xmp:` and `xap:` both count, and an element (empty, with
+/// attributes, or with text) or an attribute is replaced in place; no second one is added. A
+/// PDF/A packet without one gets it as a child of its first `rdf:Description`. Any other packet
+/// without one, one that is not well-formed or within the parser's limits, and one that already
+/// says `iso`, give `None`.
+pub fn with_modify_date(xmp: &str, iso: &str) -> Option<String> {
+    let doc = parse(xmp)?;
+    // (byte range replaced, its replacement)
+    let mut edits: Vec<(std::ops::Range<usize>, String)> = Vec::new();
+    for node in doc.descendants().filter(roxmltree::Node::is_element) {
+        if node.has_tag_name((XMP_NS, "ModifyDate")) {
+            let name = written_name(xmp.get(node.range())?)?;
+            // Keep the start tag's own attributes (such as namespace declarations) and write the value fresh.
+            let whole = xmp.get(node.range())?;
+            let start_end = whole.find('>')? + 1;
+            let start = whole.get(..start_end)?;
+            let open = start.strip_suffix("/>").map_or_else(|| start.to_owned(), |t| format!("{t}>"));
+            edits.push((node.range(), format!("{open}{iso}</{name}>")));
+        }
+        for at in node.attributes().filter(|a| a.namespace() == Some(XMP_NS) && a.name() == "ModifyDate") {
+            edits.push((at.range_value(), iso.to_owned()));
+        }
+    }
+    if edits.is_empty() {
+        identifier(xmp, PDFA_ID, "part")?;
+        let desc = doc.descendants().find(|n| n.has_tag_name((RDF_NS, "Description")))?;
+        let whole = xmp.get(desc.range())?;
+        let written = written_name(whole)?;
+        // A prefix already bound to the XMP namespace here; otherwise the element declares its own.
+        let child = match desc.lookup_prefix(XMP_NS) {
+            Some(p) => format!("<{p}:ModifyDate>{iso}</{p}:ModifyDate>"),
+            None => format!("<xmp:ModifyDate xmlns:xmp=\"{XMP_NS}\">{iso}</xmp:ModifyDate>"),
+        };
+        if let Some(head) = whole.strip_suffix("/>") {
+            edits.push((desc.range(), format!("{head}>\n   {child}\n  </{written}>")));
+        } else {
+            let close = desc.range().end.checked_sub(whole.len() - whole.rfind("</")?)?;
+            edits.push((close..close, format!("   {child}\n  ")));
+        }
+    }
+    edits.sort_by_key(|(r, _)| std::cmp::Reverse(r.start));
+    let mut out = xmp.to_owned();
+    for (range, with) in edits {
+        out.replace_range(range, &with);
+    }
+    (out != xmp).then_some(out)
+}
+
 fn info(doc: &Document, key: &str) -> Option<String> {
     let i = doc.trailer().get(b"Info").map(|i| doc.resolve(i))?;
     i.as_dict()?.get(key.as_bytes()).and_then(|v| doc.resolve(v).as_string().map(|s| s.to_text())).filter(|s| !s.is_empty())
@@ -238,6 +296,62 @@ mod tests {
         assert_eq!(value(e, "dc:title").as_deref(), Some("A & B"));
         assert_eq!(value(e, "pdfaid:part").as_deref(), Some("3"));
         assert_eq!(value(e, "pdfuaid:part"), None);
+    }
+
+    const HEAD: &str = "<x:xmpmeta xmlns:x=\"adobe:ns:meta/\"><rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\">";
+    const TAIL: &str = "</rdf:RDF></x:xmpmeta>";
+    const ISO: &str = "2023-11-14T22:13:20Z";
+
+    fn doc(body: &str) -> String {
+        format!("{HEAD}{body}{TAIL}")
+    }
+
+    fn modified(xmp: &str) -> Vec<String> {
+        let d = parse(xmp).expect("well-formed");
+        let mut found: Vec<String> =
+            d.descendants().filter(|n| n.has_tag_name((XMP_NS, "ModifyDate"))).map(|n| n.text().unwrap_or("").to_owned()).collect();
+        for n in d.descendants() {
+            found.extend(n.attributes().filter(|a| a.namespace() == Some(XMP_NS) && a.name() == "ModifyDate").map(|a| a.value().to_owned()));
+        }
+        found
+    }
+
+    #[test]
+    fn modify_date_is_replaced_in_every_form_by_namespace() {
+        let old = "2020-01-01T00:00:00Z";
+        for body in [
+            format!("<rdf:Description xmlns:xmp=\"{XMP_NS}\"><xmp:ModifyDate>{old}</xmp:ModifyDate></rdf:Description>"),
+            format!("<rdf:Description xmlns:xap=\"{XMP_NS}\"><xap:ModifyDate>{old}</xap:ModifyDate></rdf:Description>"),
+            format!("<rdf:Description xmlns:xmp=\"{XMP_NS}\"><xmp:ModifyDate/></rdf:Description>"),
+            format!("<rdf:Description xmlns:xmp=\"{XMP_NS}\"><xmp:ModifyDate rdf:x=\"1\"></xmp:ModifyDate></rdf:Description>"),
+            format!("<rdf:Description xmlns:xmp=\"{XMP_NS}\" xmp:ModifyDate=\"{old}\"/>"),
+            format!("<rdf:Description xmlns:xmp=\"{XMP_NS}\" xmp:ModifyDate = '{old}'/>"),
+        ] {
+            let out = with_modify_date(&doc(&body), ISO).unwrap_or_else(|| panic!("changed: {body}"));
+            assert_eq!(modified(&out), [ISO], "{out}");
+        }
+        let current = doc(&format!("<rdf:Description xmlns:xmp=\"{XMP_NS}\"><xmp:ModifyDate>{ISO}</xmp:ModifyDate></rdf:Description>"));
+        assert_eq!(with_modify_date(&current, ISO), None, "already current");
+    }
+
+    #[test]
+    fn modify_date_is_added_to_pdfa_once_and_otherwise_left() {
+        let aid = "xmlns:pdfaid=\"http://www.aiim.org/pdfa/ns/id/\"";
+        // xmp declared on an earlier Description; the last is pdfaid only.
+        let two = doc(&format!(
+            "<rdf:Description rdf:about=\"\" xmlns:xmp=\"{XMP_NS}\"><xmp:CreatorTool>t</xmp:CreatorTool></rdf:Description>\
+<rdf:Description rdf:about=\"\" {aid}><pdfaid:part>2</pdfaid:part></rdf:Description>"
+        ));
+        let out = with_modify_date(&two, ISO).unwrap();
+        assert_eq!(modified(&out), [ISO], "{out}");
+        assert_eq!(identifier(&out, PDFA_ID, "part").as_deref(), Some("2"));
+        // No xmp namespace anywhere, and a self-closing Description.
+        let bare = doc(&format!("<rdf:Description rdf:about=\"\" {aid} pdfaid:part=\"2\"/>"));
+        let out = with_modify_date(&bare, ISO).unwrap();
+        assert_eq!(modified(&out), [ISO], "{out}");
+        // Not PDF/A: untouched. Not well-formed: untouched.
+        assert_eq!(with_modify_date(&doc("<rdf:Description rdf:about=\"\"></rdf:Description>"), ISO), None);
+        assert_eq!(with_modify_date("<xmp:ModifyDate>unterminated", ISO), None);
     }
 
     #[test]
