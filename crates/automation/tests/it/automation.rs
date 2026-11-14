@@ -10118,6 +10118,61 @@ fn comparing_documents_through_tools() {
     assert!(a.call("doc_compare", &json!({ "doc": v2, "other": 999 })).is_err());
 }
 
+/// `kinds` limits doc_compare, its report and its marks to some of replaced, inserted, deleted
+/// and visual; a bad `kinds` is refused naming the allowed values.
+#[test]
+fn compare_kinds_limit_the_changes_the_report_and_the_marks() {
+    let dir = workdir("compare-kinds");
+    let mut a = auto(&dir);
+    let v1 = ok(&mut a, "doc_create", json!({ "from": "text", "text": "Rent is 900 per month. Pets are not allowed." }))["doc"].as_u64().unwrap();
+    let v2 = ok(&mut a, "doc_create", json!({ "from": "text", "text": "Rent is 950 per month. Pets are allowed. Parking included." }))["doc"]
+        .as_u64()
+        .unwrap();
+    let counts =
+        |r: &serde_json::Value| (r["replaced"].as_u64(), r["inserted"].as_u64(), r["deleted"].as_u64(), r["changes"].as_array().unwrap().len());
+    let r = ok(&mut a, "doc_compare", json!({ "doc": v2, "other": v1, "visual": true }));
+    assert_eq!(counts(&r), (Some(1), Some(1), Some(1), 3), "{r}");
+    assert_eq!(r["kinds"], json!(["replaced", "inserted", "deleted", "visual"]));
+    let all_visual = r["visual"].as_array().unwrap().len();
+    assert!(all_visual > 0);
+    // Only deletions: the list and counts leave the rest out, and "hidden" counts them.
+    let r = ok(&mut a, "doc_compare", json!({ "doc": v2, "other": v1, "visual": true, "kinds": ["Deleted"] }));
+    assert_eq!(counts(&r), (Some(0), Some(0), Some(1), 1), "{r}");
+    assert_eq!(r["changes"][0]["kind"], "deleted");
+    assert_eq!(r["hidden"], json!({ "replaced": 1, "inserted": 1, "deleted": 0 }));
+    assert_eq!(r["kinds"], json!(["deleted"]));
+    assert!(r["visual"].as_array().unwrap().is_empty(), "visual is not among the kinds: {r}");
+    assert_eq!(r["identical"], false, "identical is about the documents, not the filter");
+    let r = ok(&mut a, "doc_compare", json!({ "doc": v2, "other": v1, "visual": true, "kinds": ["replaced", "visual"] }));
+    assert_eq!(counts(&r), (Some(1), Some(0), Some(0), 1), "{r}");
+    assert_eq!(r["visual"].as_array().unwrap().len(), all_visual);
+    // Bad values name the argument and the allowed values, for all three tools.
+    for (tool, extra) in [("doc_compare", json!({})), ("doc_compare_report", json!({ "path": "x.pdf" })), ("doc_compare_mark", json!({}))] {
+        for bad in [json!(["images"]), json!(["replaced", "formatting"]), json!([]), json!("replaced"), json!([1])] {
+            let mut args = json!({ "doc": v2, "other": v1, "kinds": bad });
+            for (k, v) in extra.as_object().unwrap() {
+                args[k] = v.clone();
+            }
+            let e = a.call(tool, &args).unwrap_err().to_string();
+            assert!(
+                e.contains("kinds")
+                    && (bad.is_string() || bad.get(0).is_some_and(|x| x.is_number()) || e.contains("replaced, inserted, deleted, visual")),
+                "{tool} {bad}: {e}"
+            );
+        }
+    }
+    // The report lists only the kinds, and says what it could not tell apart.
+    ok(&mut a, "doc_compare_report", json!({ "doc": v2, "other": v1, "path": "kinds.pdf", "kinds": ["inserted"] }));
+    let d = ok(&mut a, "doc_open", json!({ "path": "kinds.pdf" }))["doc"].as_u64().unwrap();
+    let t = page_text(&mut a, d).join(" ");
+    assert!(t.contains("1 changes: 0 replaced, 1 inserted, 0 deleted") && t.contains("Parking") && !t.contains("950"), "{t}");
+    assert!(t.contains("Hidden by the filter: 1 replaced, 1 deleted") && t.contains("not told apart"), "{t}");
+    // Marks: only the kinds asked for; visual alone marks nothing.
+    assert_eq!(ok(&mut a, "doc_compare_mark", json!({ "doc": v2, "other": v1, "kinds": ["visual"] }))["comments"], 0);
+    assert_eq!(ok(&mut a, "doc_compare_mark", json!({ "doc": v2, "other": v1, "kinds": ["replaced", "deleted"] }))["comments"], 2);
+    assert_eq!(ok(&mut a, "doc_compare_mark", json!({ "doc": v2, "other": v1 }))["comments"], 3);
+}
+
 /// Compare files with a page range for each document: only the pages in range are compared,
 /// changes keep each document's own page numbers, and a bad range is refused.
 #[test]

@@ -7784,6 +7784,60 @@ fn comparing_page_ranges_keeps_original_page_numbers() {
     }
 }
 
+/// The kinds filter: it names the kinds the comparison tells apart, refuses anything else with
+/// the allowed names, and the report and the marks keep only the kinds it passes.
+#[test]
+fn compare_kinds_filter_the_report_and_the_marks() {
+    let mut s = Session::new().with_clock(|| 1_700_000_000);
+    // One replaced word (900 -> 950), one inserted, one deleted.
+    let v1 = s.create_from_text("t", "Rent is 900 per month. Pets are not allowed.").unwrap();
+    let v2 = s.create_from_text("t", "Rent is 950 per month. Pets are allowed. Parking included.").unwrap();
+    let old = s.open("v1.pdf", None, v1, None).unwrap();
+    let new = s.open("v2.pdf", None, v2, None).unwrap();
+    let kinds = |names: &[&str]| compare::ChangeKinds::parse(names).unwrap();
+    assert_eq!(kinds(&[" Replaced ", "DELETED"]).names(), ["replaced", "deleted"]);
+    assert!(compare::ChangeKinds::default().is_all());
+    for bad in [&["images"][..], &["replaced", "formatting"][..], &[][..]] {
+        let e = compare::ChangeKinds::parse(bad).unwrap_err().to_string();
+        assert!(e.contains("replaced, inserted, deleted, visual"), "{e}");
+    }
+    let text_of = |s: &mut Session, bytes: std::sync::Arc<Vec<u8>>| {
+        let id = s.open("report.pdf", None, bytes, None).unwrap();
+        page_texts(s, id).join(" ")
+    };
+    // The unfiltered report has all three and no filter notes.
+    let all = s.compare_report_in(old, new, None, None).unwrap();
+    let all = text_of(&mut s, all);
+    assert!(all.contains("3 changes") && !all.contains("Kinds of change shown"), "{all}");
+    // Only replacements: one change listed, the rest said to be hidden, and the report is
+    // honest that images, annotations and formatting are not separate kinds.
+    let r = s.compare_report_in_kinds(old, new, None, None, kinds(&["replaced"])).unwrap();
+    let t = text_of(&mut s, r);
+    assert!(t.contains("1 changes: 1 replaced, 0 inserted, 0 deleted"), "{t}");
+    assert!(t.contains("Kinds of change shown: replaced") && t.contains("Hidden by the filter: 1 inserted, 1 deleted"), "{t}");
+    assert!(t.contains("not told apart") && !t.contains("Visual differences"), "{t}");
+    // Visual on: the report counts them.
+    let r = s.compare_report_in_kinds(old, new, None, None, kinds(&["deleted", "visual"])).unwrap();
+    let t = text_of(&mut s, r);
+    assert!(t.contains("Kinds of change shown: deleted, visual") && t.contains("never listed): "), "{t}");
+    // Changes hidden by the filter are not "identical text": the line stays out of the report,
+    // and comes back only when the documents' text really is the same.
+    let r = s.compare_report_in_kinds(old, new, None, None, kinds(&["visual"])).unwrap();
+    let t = text_of(&mut s, r);
+    assert!(t.contains("0 changes") && t.contains("Hidden by the filter: 1 replaced") && !t.contains("text is identical"), "{t}");
+    let same = s.open("same.pdf", None, s.create_from_text("t", "Rent is 900 per month.").unwrap(), None).unwrap();
+    let same2 = s.open("same2.pdf", None, s.create_from_text("t", "Rent is 900 per month.").unwrap(), None).unwrap();
+    let r = s.compare_report_in_kinds(same, same2, None, None, kinds(&["visual"])).unwrap();
+    let t = text_of(&mut s, r);
+    assert!(t.contains("text is identical"), "{t}");
+    // Marks: only the passed text kinds; visual alone marks nothing.
+    assert_eq!(s.mark_differences_in_kinds(old, new, None, None, kinds(&["visual"])).unwrap(), 0);
+    assert_eq!(s.mark_differences_in_kinds(old, new, None, None, kinds(&["inserted", "deleted"])).unwrap(), 2);
+    assert_eq!(s.get(new).unwrap().info.annotations.len(), 2);
+    assert_eq!(s.mark_differences_in_kinds(old, new, None, None, kinds(&["replaced"])).unwrap(), 1);
+    assert_eq!(s.mark_differences_in(old, new, None, None).unwrap(), 3);
+}
+
 /// The report and the marks follow the page ranges, and when the two ranges start at different
 /// pages every change still names each document's own page.
 #[test]

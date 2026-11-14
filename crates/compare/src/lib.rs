@@ -299,6 +299,15 @@ pub fn compare(old: &[Word], new: &[Word]) -> Comparison {
 
 /// The compare report's text: a summary, then each change with its pages.
 pub fn report(c: &Comparison, old_name: &str, new_name: &str) -> String {
+    report_with_notes(c, old_name, new_name, &[], c.identical())
+}
+
+/// [`report`], with `notes` (one line each) after the summary: what a filter hid, what the
+/// comparison cannot tell apart.
+///
+/// `identical` is whether the documents' text is the same, which `c` does not say once a filter
+/// has taken changes out of it.
+pub fn report_with_notes(c: &Comparison, old_name: &str, new_name: &str, notes: &[String], identical: bool) -> String {
     let mut s = format!(
         "Compare Report\n\nOld file: {old_name}\nNew file: {new_name}\n\n{} changes: {} replaced, {} inserted, {} deleted.\n",
         c.changes.len(),
@@ -306,7 +315,11 @@ pub fn report(c: &Comparison, old_name: &str, new_name: &str) -> String {
         c.count(Kind::Inserted),
         c.count(Kind::Deleted)
     );
-    if c.identical() {
+    for note in notes {
+        s.push_str(note);
+        s.push('\n');
+    }
+    if identical {
         s.push_str("\nThe documents' text is identical.\n");
     }
     for (n, ch) in c.changes.iter().enumerate() {

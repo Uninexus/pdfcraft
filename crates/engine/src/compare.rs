@@ -53,6 +53,87 @@ impl PageRange {
     }
 }
 
+/// The kinds of change Compare files tells apart: the three kinds of text change, and visual
+/// differences (regions that look different). The comparison reads words and pixels only, so
+/// images, annotations, formatting and background or header/footer changes are not separate
+/// kinds: each one is a visual difference.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ChangeKinds {
+    pub replaced: bool,
+    pub inserted: bool,
+    pub deleted: bool,
+    pub visual: bool,
+}
+
+impl Default for ChangeKinds {
+    fn default() -> Self {
+        Self::all()
+    }
+}
+
+impl ChangeKinds {
+    /// The names a filter accepts, as `kinds` lists them.
+    pub const NAMES: [&'static str; 4] = ["replaced", "inserted", "deleted", "visual"];
+
+    /// Every kind (the default: nothing is hidden).
+    pub fn all() -> Self {
+        Self { replaced: true, inserted: true, deleted: true, visual: true }
+    }
+
+    pub fn is_all(self) -> bool {
+        self == Self::all()
+    }
+
+    pub fn is_empty(self) -> bool {
+        !(self.replaced || self.inserted || self.deleted || self.visual)
+    }
+
+    /// Whether text changes of `kind` pass the filter.
+    pub fn wants(self, kind: Kind) -> bool {
+        match kind {
+            Kind::Replaced => self.replaced,
+            Kind::Inserted => self.inserted,
+            Kind::Deleted => self.deleted,
+        }
+    }
+
+    /// The names of the kinds that pass, in [`ChangeKinds::NAMES`] order.
+    pub fn names(self) -> Vec<&'static str> {
+        [self.replaced, self.inserted, self.deleted, self.visual].iter().zip(Self::NAMES).filter(|(on, _)| **on).map(|(_, n)| n).collect()
+    }
+
+    /// The kinds named in `names` (case and surrounding spaces ignored). An empty list or a name
+    /// that is not a kind is refused, and the error lists the names allowed.
+    pub fn parse<S: AsRef<str>>(names: &[S]) -> Result<Self, EditError> {
+        let allowed = Self::NAMES.join(", ");
+        if names.is_empty() {
+            return Err(Self::empty_error());
+        }
+        let mut k = Self { replaced: false, inserted: false, deleted: false, visual: false };
+        for n in names {
+            match n.as_ref().trim().to_ascii_lowercase().as_str() {
+                "replaced" => k.replaced = true,
+                "inserted" => k.inserted = true,
+                "deleted" => k.deleted = true,
+                "visual" => k.visual = true,
+                _ => return Err(EditError::Compare(format!("unknown kind of change \"{}\": the kinds are {allowed}", n.as_ref().trim()))),
+            }
+        }
+        Ok(k)
+    }
+
+    /// The error for a filter that passes nothing.
+    pub fn empty_error() -> EditError {
+        EditError::Compare(format!("kinds is empty: name at least one of {}", Self::NAMES.join(", ")))
+    }
+
+    /// `c` with only the text changes this filter passes.
+    pub fn filter(self, mut c: Comparison) -> Comparison {
+        c.changes.retain(|ch| self.wants(ch.kind));
+        c
+    }
+}
+
 impl crate::Document {
     /// Standards ▸ Verify PDF/A: the rules the document breaks for `level`.
     pub fn pdfa_verify(&self, level: pdfcraft_preflight::Level) -> Vec<pdfcraft_preflight::Issue> {
@@ -193,7 +274,7 @@ impl Session {
     /// [`Session::compare_report`] of the changes on `pages` ([`Session::compare_pages`]).
     pub fn compare_report_of(&self, old: DocId, new: DocId, pages: &[usize]) -> Result<Arc<Vec<u8>>, EditError> {
         let c = self.compare_pages(old, new, pages)?;
-        self.compare_report_for(&c, old, new, None, None)
+        self.compare_report_for(&c, old, new, None, None, ChangeKinds::all())
     }
 
     /// [`Session::compare_report`] of [`Session::compare_in`]: only the pages in each range. The
@@ -206,8 +287,26 @@ impl Session {
         old_range: Option<PageRange>,
         new_range: Option<PageRange>,
     ) -> Result<Arc<Vec<u8>>, EditError> {
+        self.compare_report_in_kinds(old, new, old_range, new_range, ChangeKinds::all())
+    }
+
+    /// [`Session::compare_report_in`] listing only the kinds of change in `kinds`. A report of a
+    /// filter says which kinds it shows and how many changes it hid, counts the visual
+    /// differences when `kinds.visual` is on (they are never listed), and says that images,
+    /// annotations, formatting and background changes are not told apart from them.
+    pub fn compare_report_in_kinds(
+        &self,
+        old: DocId,
+        new: DocId,
+        old_range: Option<PageRange>,
+        new_range: Option<PageRange>,
+        kinds: ChangeKinds,
+    ) -> Result<Arc<Vec<u8>>, EditError> {
+        if kinds.is_empty() {
+            return Err(ChangeKinds::empty_error());
+        }
         let c = self.compare_in(old, new, old_range, new_range)?;
-        self.compare_report_for(&c, old, new, old_range, new_range)
+        self.compare_report_for(&c, old, new, old_range, new_range, kinds)
     }
 
     fn compare_report_for(
@@ -217,6 +316,7 @@ impl Session {
         new: DocId,
         old_range: Option<PageRange>,
         new_range: Option<PageRange>,
+        kinds: ChangeKinds,
     ) -> Result<Arc<Vec<u8>>, EditError> {
         let name = |id, range: Option<PageRange>| {
             let n = self.get(id).map(|d| d.name.clone()).unwrap_or_default();
@@ -226,7 +326,30 @@ impl Session {
                 None => n,
             }
         };
-        self.create_report("Compare Report", &pdfcraft_compare::report(c, &name(old, old_range), &name(new, new_range)))
+        let mut notes = Vec::new();
+        let shown = if kinds.is_all() { c.clone() } else { kinds.filter(c.clone()) };
+        if !kinds.is_all() {
+            notes.push(format!("Kinds of change shown: {}.", kinds.names().join(", ")));
+            let hidden: Vec<String> = [Kind::Replaced, Kind::Inserted, Kind::Deleted]
+                .into_iter()
+                .filter(|k| !kinds.wants(*k) && c.count(*k) > 0)
+                .map(|k| format!("{} {}", c.count(k), k.label().to_lowercase()))
+                .collect();
+            if !hidden.is_empty() {
+                notes.push(format!("Hidden by the filter: {}.", hidden.join(", ")));
+            }
+            if kinds.visual {
+                // A page that fails to render is left out of the count, as the panel does.
+                let n = self.compare_visual_in(old, new, 72.0, old_range, new_range).unwrap_or_default().len();
+                notes.push(format!("Visual differences (counted here, shaded in the viewer, never listed): {n}."));
+            }
+            notes.push(
+                "Images, annotations, formatting and background or header/footer changes are not told apart: the comparison finds text changes and pixel differences only, so all of them count as visual."
+                    .to_string(),
+            );
+        }
+        let text = pdfcraft_compare::report_with_notes(&shown, &name(old, old_range), &name(new, new_range), &notes, c.identical());
+        self.create_report("Compare Report", &text)
     }
 
     /// Mark the differences in `new` as comments: highlights over replaced and inserted text
@@ -251,7 +374,24 @@ impl Session {
         old_range: Option<PageRange>,
         new_range: Option<PageRange>,
     ) -> Result<usize, EditError> {
-        let c = self.compare_in(old, new, old_range, new_range)?;
+        self.mark_differences_in_kinds(old, new, old_range, new_range, ChangeKinds::all())
+    }
+
+    /// [`Session::mark_differences_in`] of the kinds of text change in `kinds`. Visual
+    /// differences are never marked (they are regions, with no text to quote), so `kinds.visual`
+    /// adds nothing here; a filter of only `visual` marks nothing.
+    pub fn mark_differences_in_kinds(
+        &mut self,
+        old: DocId,
+        new: DocId,
+        old_range: Option<PageRange>,
+        new_range: Option<PageRange>,
+        kinds: ChangeKinds,
+    ) -> Result<usize, EditError> {
+        if kinds.is_empty() {
+            return Err(ChangeKinds::empty_error());
+        }
+        let c = kinds.filter(self.compare_in(old, new, old_range, new_range)?);
         self.mark_comparison(new, &c)
     }
 
