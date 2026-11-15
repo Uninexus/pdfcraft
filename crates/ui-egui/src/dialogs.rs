@@ -21,6 +21,7 @@ pub(super) mod preferences;
 pub(super) mod printer_marks_ui;
 mod prompts;
 pub(super) mod protect;
+pub(super) mod readiness_ui;
 pub(super) mod standards_ui;
 pub(super) mod word_count_ui;
 
@@ -124,6 +125,9 @@ fn dialogs(app: &mut PdfCraftApp, ctx: &egui::Context) {
     if app.dialog != Some(Dialog::FieldTable) {
         app.field_table_draft = None;
     }
+    if app.dialog != Some(Dialog::PrintReadiness) {
+        app.readiness_report = None;
+    }
     if !matches!(app.dialog, Some(Dialog::Properties(_))) {
         app.discard_properties();
     }
@@ -164,6 +168,7 @@ fn dialogs(app: &mut PdfCraftApp, ctx: &egui::Context) {
             Dialog::FieldProps | Dialog::BulkFieldProps => 600.0,
             Dialog::Preferences => 610.0,
             Dialog::About => 820.0,
+            Dialog::PrintReadiness => 640.0,
             Dialog::PinTool => 540.0,
             _ => 520.0,
         });
@@ -520,6 +525,10 @@ fn dialog_body(ui: &mut egui::Ui, app: &mut PdfCraftApp, dialog: Dialog, req: &m
         }
         Dialog::BookmarksFromTextStyles => {
             req.close = crate::bookmark_styles_ui::body(ui, app, &t);
+            return false;
+        }
+        Dialog::PrintReadiness => {
+            req.close = crate::readiness_ui::body(ui, app, &t);
             return false;
         }
         Dialog::NumberPages => {

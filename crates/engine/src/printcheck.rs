@@ -23,6 +23,9 @@ const MIN_BLEED_MM: f64 = 2.0;
 /// Total ink (C + M + Y + K, in percent) above which a painted CMYK colour is reported. Press
 /// conditions run from about 240% (uncoated) to 340% (coated); 300% is the usual SWOP limit.
 const TAC_LIMIT_PERCENT: f64 = 300.0;
+/// What the report says it does not check (the text report and the dialog both show it).
+pub const NOT_CHECKED: &str =
+    "Not checked: PDF/X, ink inside images, shadings, patterns and annotation appearances, overprint effects, transparency flattening.";
 /// Spot colour names a finding lists before saying how many more there are.
 const MAX_SPOT_LISTED: usize = 8;
 
@@ -72,9 +75,11 @@ pub struct PrintReadiness {
 }
 
 impl PrintReadiness {
-    /// A plain-text report. The document is unchanged.
-    pub fn text(&self) -> String {
-        let mut out = String::from("Print readiness (verification only; the file was not changed)\n");
+    /// What was measured, one line each: the output intent, page boxes and bleed, each image's
+    /// resolution, fonts that aren't embedded and the PDF/A-2b result. The findings that follow
+    /// from it are in [`PrintReadiness::findings`].
+    pub fn details(&self) -> String {
+        let mut out = String::new();
         if self.output_intents.is_empty() {
             out.push_str("Output intent: none\n");
         } else {
@@ -125,6 +130,13 @@ impl PrintReadiness {
                 }
             }
         }
+        out
+    }
+
+    /// A plain-text report. The document is unchanged.
+    pub fn text(&self) -> String {
+        let mut out = String::from("Print readiness (verification only; the file was not changed)\n");
+        out.push_str(&self.details());
         if self.findings.is_empty() {
             out.push_str("Print checks: no stop for image resolution or bleed\n");
         } else {
@@ -133,9 +145,8 @@ impl PrintReadiness {
                 out.push_str(&format!("- [{}] {}\n", finding.severity, finding.message));
             }
         }
-        out.push_str(
-            "Not checked: PDF/X, ink inside images, shadings, patterns and annotation appearances, overprint effects, transparency flattening.\n",
-        );
+        out.push_str(NOT_CHECKED);
+        out.push('\n');
         out
     }
 }
