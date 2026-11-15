@@ -1799,11 +1799,11 @@ title = "Single-key tool accelerators"
 area = "B"
 tier = "P2"
 milestone = "M3"
-status = "planned"
+status = "partial"
 commands = []
 tools = []
-evidence = []
-notes = ""
+evidence = ["crates/ui-egui/tests/it/control.rs::single_key_accelerators_are_an_opt_in_preference_an_agent_can_read_set_and_keep", "crates/ui-egui/tests/it/control.rs::with_single_key_accelerators_on_a_letter_picks_a_tool", "crates/ui-egui/tests/it/control.rs::with_single_key_accelerators_off_the_extra_letters_do_nothing", "crates/ui-egui/tests/it/control.rs::single_key_accelerators_leave_typing_in_a_text_field_alone"]
+notes = "Preferences ▸ Use single-key accelerators to access tools (single_key_accelerators, off by default, remembered): with it on and nothing holding the keyboard (a text field, dialog, palette or menu), an unmodified Z picks Marquee zoom and G picks Snapshot. V (Select) and H (Hand) always worked and are not gated by it. Only those four letters are mapped: Acrobat's letters for comments, Edit text and other tools are not, and the letter is not shown in menus or tooltips. UI only: no automation tool, because the headless tools have no pointer tools; an agent reads and sets the preference with the UI control channel (ui.set / ui.state single_key_accelerators) and picks a tool with ui.set quick. Partial because of the unmapped tools"
 
 [[feature]]
 id = "view.customize-quick-tools"

@@ -135,6 +135,19 @@ impl PdfCraftApp {
             self.quick_tool = QuickTool::Hand;
             self.space_hand = None;
         }
+        // Opt-in (Preferences): more letters, as in Acrobat. Z zooms to a dragged rectangle and G
+        // copies one as an image. Pressing the active tool's key changes nothing.
+        if self.single_key_accelerators {
+            for (key, tool) in [(Key::Z, QuickTool::MarqueeZoom), (Key::G, QuickTool::Snapshot)] {
+                if keys.pressed(ctx, key) && self.quick_tool != tool {
+                    self.quick_tool = tool;
+                    self.space_hand = None;
+                    if tool == QuickTool::Snapshot {
+                        self.notify_tr("Drag a rectangle around the area to copy");
+                    }
+                }
+            }
+        }
         if space && self.space_hand.is_none() && self.quick_tool != QuickTool::Hand {
             self.space_hand = Some(self.quick_tool);
             self.quick_tool = QuickTool::Hand;

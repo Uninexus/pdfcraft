@@ -50,6 +50,9 @@ impl PdfCraftApp {
             ("update_check_at_start", _) => {
                 self.update_check_at_start = value.parse::<bool>().map_err(|_| "update_check_at_start must be true or false")?;
             }
+            ("single_key_accelerators", _) => {
+                self.single_key_accelerators = value.parse::<bool>().map_err(|_| "single_key_accelerators must be true or false")?;
+            }
             ("scroll_speed", _) => {
                 self.scroll_speed = scroll_speed::ScrollSpeed::parse(value).ok_or("scroll_speed must be slow, normal, or fast")?;
             }
