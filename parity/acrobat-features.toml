@@ -8610,11 +8610,16 @@ title = "Ink aliases and spot-to-process"
 area = "L"
 tier = "P2"
 milestone = "M11"
-status = "planned"
+status = "partial"
 commands = []
-tools = []
-evidence = []
-notes = ""
+tools = ["doc_inks", "doc_ink_aliases"]
+evidence = [
+    "crates/edit/src/ink_aliases.rs::every_space_naming_the_ink_is_renamed_and_nothing_else",
+    "crates/edit/src/ink_aliases.rs::an_alias_nothing_uses_writes_nothing_and_aliases_are_not_chained",
+    "crates/edit/src/ink_aliases.rs::bad_aliases_are_refused_before_anything_is_written",
+    "crates/automation/tests/it/automation.rs::ink_aliases_through_tools",
+]
+notes = "Headless first slice: doc_inks lists the spot colorants of the Separation and DeviceN colour spaces, and doc_ink_aliases renames them (from to) in every colour space of the document as one undoable edit; each space keeps its own alternate space and tint transform, so the page looks the same. Process colorants, All and None are never renamed. Missing: the Ink Manager window, converting a spot ink to process there (Convert colours does that for the whole document), and moving a DeviceN space's tint transform to the target ink."
 
 [[feature]]
 id = "print.printer-marks"

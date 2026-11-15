@@ -374,6 +374,23 @@ impl Session {
         pdfcraft_edit::fix_hairlines(&mut cos, pages, settings).unwrap_or_default()
     }
 
+    /// The spot colorants the document's colour spaces name, with how many spaces name each
+    /// (what Ink aliases would work on). Nothing is changed.
+    pub fn list_inks(&self, id: DocId) -> Vec<(String, usize)> {
+        let Some(doc) = self.get(id) else { return Vec::new() };
+        let Some(editor) = doc.editor.as_ref() else { return Vec::new() };
+        pdfcraft_edit::list_inks(&editor.cos)
+    }
+
+    /// How many colour spaces [`Edit::AliasInks`] would rename, and in how many objects, without
+    /// changing the document (the edit itself refuses when there is nothing to rename).
+    pub fn count_ink_aliases(&self, id: DocId, aliases: &pdfcraft_edit::InkAliases) -> pdfcraft_edit::InksAliased {
+        let Some(doc) = self.get(id) else { return Default::default() };
+        let Some(editor) = doc.editor.as_ref() else { return Default::default() };
+        let mut cos = editor.cos.clone();
+        pdfcraft_edit::alias_inks(&mut cos, aliases).unwrap_or_default()
+    }
+
     /// XFDF with these comments (0-based page, position in the page's `/Annots`) and their
     /// replies: what Copy puts on the clipboard; [`Edit::PasteComments`] takes it back in.
     pub fn export_comments(&self, id: DocId, which: &[(usize, usize)]) -> Result<String, EditError> {

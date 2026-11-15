@@ -166,6 +166,23 @@ pub fn tools() -> Vec<ToolDef> {
                 }),
                 &["doc"],
             )),
+        t("doc_inks", "List spot inks", "Print production: the spot colorants (Separation and DeviceN colour spaces) the document uses, each with how many colour spaces name it. Process colorants (Cyan, Magenta, Yellow, Black), All and None are not listed. Changes nothing.")
+            .ro()
+            .with(schema(json!({ "doc": doc() }), &["doc"])),
+        t("doc_ink_aliases", "Alias inks", "Print production, Ink Manager: rename spot colorants so that inks given one name print as one. Each { from, to } pair renames every Separation and DeviceN colorant named from to to, in page and form resources, images, patterns and shadings and the colour spaces kept as their own objects; a space keeps its own alternate space and tint transform, so the page looks the same on screen. A name is looked up once, so a to b with b to c does not become a to c. At most 64 pairs, names of 1 to 127 bytes. Process colorants, All and None are not inks and are never renamed. Nothing to rename is not an error: renamed is 0 and no edit is made. Undoable.")
+            .with(schema(
+                json!({
+                    "doc": doc(),
+                    "aliases": {
+                        "type": "array", "minItems": 1, "maxItems": 64,
+                        "items": {
+                            "type": "object", "additionalProperties": false, "required": ["from", "to"],
+                            "properties": { "from": { "type": "string", "minLength": 1, "maxLength": 127 }, "to": { "type": "string", "minLength": 1, "maxLength": 127 } }
+                        }
+                    }
+                }),
+                &["doc", "aliases"],
+            )),
         t("attachment_add", "Attach a file", "Attach the file at path to the document (document level, the Attachments panel; not a paper-clip comment on a page). name defaults to the file's name; the attachment's key, unique in the document, is returned. Undoable.")
             .cmd("edit.attach")
             .with(schema(json!({"doc": doc(), "path": {"type": "string"}, "name": {"type": "string"}, "description": {"type": "string"}}), &["doc", "path"])),
