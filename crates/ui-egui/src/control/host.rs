@@ -158,6 +158,7 @@ impl Host for crate::PdfCraftApp {
             "right_panel": self.right.map(|r| format!("{r:?}")),
             "hidden_interface": self.hidden_interface().to_json(),
             "dialog": self.dialog.map(|d| format!("{d:?}")),
+            "javascripts": self.javascripts_draft.state(self.dialog == Some(crate::Dialog::JavaScripts), crate::javascripts_ui::read_only(self)),
             "palette_open": self.palette_open,
             "theme": format!("{:?}", self.theme),
             "theme_preference": self.theme_preference,

@@ -131,6 +131,7 @@ use dialogs::comment_props;
 use dialogs::convert_colours_ui;
 use dialogs::credits;
 use dialogs::hairlines_ui;
+use dialogs::javascripts_ui;
 use dialogs::marks_ui;
 use dialogs::pageboxes;
 use dialogs::palette;
@@ -852,6 +853,8 @@ pub struct PdfCraftApp {
     /// Number pages dialog settings (1-based pages).
     pub number_draft: NumberDraft,
     pub(crate) word_count_draft: word_count_ui::Draft,
+    /// Edit all JavaScripts: the list, filters and the script being edited.
+    pub(crate) javascripts_draft: javascripts_ui::Draft,
     /// The AI assistant: its settings (Preferences) and the running request (Ask AI Assistant).
     pub(crate) ai: ai_settings::AiSettings,
     pub(crate) ai_draft: ai_ui::Draft,

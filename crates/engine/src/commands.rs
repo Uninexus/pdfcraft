@@ -378,6 +378,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     c("export.rtf", "Export to RTF…", FILE, None, Copying, "file-text"),
     c("app.preferences", "Preferences…", EDIT, Some(Shortcut::cmd(",")), Nothing, "settings"),
     c("tools.js_console", "JavaScript console…", None, Some(Shortcut::cmd("J")), Document, "square-terminal"),
+    c("tools.javascripts", "JavaScripts…", EDIT, None, Document, "file-code"),
     c("tools.document_js", "Document JavaScripts…", None, None, Modification, "file-code"),
     c("ocr.recognize", "Recognize text…", None, None, Modification, "scan-text"),
     c("ocr.enhance_camera", "Enhance camera image", None, None, Modification, "camera"),

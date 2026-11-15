@@ -14,6 +14,7 @@ pub(super) mod comment_props;
 pub(super) mod convert_colours_ui;
 pub(super) mod credits;
 pub(super) mod hairlines_ui;
+pub(super) mod javascripts_ui;
 pub(super) mod marks_ui;
 pub(super) mod pageboxes;
 pub(super) mod palette;
@@ -119,6 +120,9 @@ fn dialogs(app: &mut PdfCraftApp, ctx: &egui::Context) {
     if app.dialog != Some(Dialog::WordCount) {
         app.word_count_draft.cancel();
     }
+    if app.dialog != Some(Dialog::JavaScripts) {
+        app.javascripts_draft.reset();
+    }
     if app.dialog != Some(Dialog::AskAi) {
         app.ai.ask.cancel();
     }
@@ -176,7 +180,11 @@ fn dialogs(app: &mut PdfCraftApp, ctx: &egui::Context) {
             dialog_footer(ui, app, dialog, &mut req);
         }
     });
-    finish_dialog(app, dialog, modal.should_close(), &mut req);
+    let mut dismissed = modal.should_close();
+    if dismissed && dialog == Dialog::JavaScripts && crate::javascripts_ui::guard_dismiss(app) {
+        dismissed = false;
+    }
+    finish_dialog(app, dialog, dismissed, &mut req);
 }
 
 /// The dialog's content. Returns `false` when it has its own buttons and no footer is wanted.
@@ -185,6 +193,10 @@ fn dialog_body(ui: &mut egui::Ui, app: &mut PdfCraftApp, dialog: Dialog, req: &m
     match dialog {
         Dialog::WordCount => {
             req.close = crate::word_count_ui::body(ui, app);
+        }
+        Dialog::JavaScripts => {
+            req.close = crate::javascripts_ui::body(ui, app);
+            return false;
         }
         Dialog::AskAi => {
             req.close = crate::ai_ui::body(ui, app);
