@@ -699,6 +699,123 @@ fn print_as_image_is_an_advanced_choice_that_saves_pictures() {
     let _ = std::fs::remove_file(out);
 }
 
+/// A comment on the first page, as the Comments panel adds one.
+fn add_note(h: &mut Harness<'static, PdfCraftApp>, text: &str) {
+    let shape = pdfcraft_engine::Shape::Note { at: [100.0, 100.0], icon: pdfcraft_engine::NoteIcon::Comment };
+    assert!(h.state_mut().apply_edit(pdfcraft_engine::Edit::AddAnnotation(pdfcraft_engine::NewAnnotation {
+        page: 0,
+        style: pdfcraft_engine::Style::default_for(&shape),
+        shape,
+        contents: text.into(),
+        author: "Tester".into(),
+    })));
+}
+
+/// Save as PDF from the open dialog into a temporary file, and read it back.
+fn save_print(h: &mut Harness<'static, PdfCraftApp>, tag: &str) -> pdfcraft_cos::Document {
+    let out = std::env::temp_dir().join(format!("pdfcraft-print-{tag}-{}.pdf", std::process::id()));
+    h.state_mut().save_override = Some(out.to_string_lossy().into_owned());
+    h.state_mut().print_draft.printer = None;
+    h.run_steps(1);
+    h.get_by_label("Save as PDF").click();
+    h.run_steps(3);
+    assert_eq!(h.state().dialog, None);
+    let bytes = std::fs::read(&out).expect("saved");
+    let _ = std::fs::remove_file(out);
+    pdfcraft_cos::Document::open(std::sync::Arc::new(bytes)).unwrap()
+}
+
+/// "Include a summary of the comments" is off until asked for. Ticked, a comment on a printed
+/// page adds summary pages after the sheets; without comments the print is as before and the
+/// notice says no summary was added, once the file is written.
+#[test]
+fn comment_summary_adds_pages_after_the_sheets_and_says_when_there_is_nothing_to_add() {
+    let mut h = harness();
+    add_note(&mut h, "Summarise me please");
+    assert!(h.state_mut().execute("print.dialog"));
+    h.run_steps(3);
+    assert!(!h.state().print_draft.comment_summary, "off by default");
+    let doc = save_print(&mut h, "plain");
+    assert_eq!(pdfcraft_model::pages(&doc).len(), 1, "off: the document's sheet alone");
+
+    assert!(h.state_mut().execute("print.dialog"));
+    h.run_steps(3);
+    h.get_by_label("Include a summary of the comments").click();
+    h.run_steps(2);
+    assert!(h.state().print_draft.comment_summary);
+    let doc = save_print(&mut h, "summary");
+    assert!(pdfcraft_model::pages(&doc).len() >= 2, "the summary's pages follow the sheet");
+
+    // No comments on the printed page: nothing added, and the notice says so after the write.
+    let mut h = harness();
+    assert!(h.state_mut().execute("print.dialog"));
+    h.run_steps(3);
+    h.get_by_label("Include a summary of the comments").click();
+    h.run_steps(2);
+    let doc = save_print(&mut h, "none");
+    assert_eq!(pdfcraft_model::pages(&doc).len(), 1);
+    let toast = h.state().toast.as_ref().map(|(m, _)| m.clone()).unwrap_or_default();
+    assert!(toast.contains("The printed pages have no comments, so no summary was added."), "{toast:?}");
+}
+
+/// The checkbox greys out, unticked and with its reason, where the summary can't join the job
+/// (Booklet here); it is per job, so the next time the dialog opens it is off again.
+#[test]
+fn comment_summary_is_unavailable_in_a_booklet_and_starts_off_each_job() {
+    let mut h = harness();
+    assert!(h.state_mut().execute("print.dialog"));
+    h.run_steps(3);
+    h.get_by_label("Include a summary of the comments").click();
+    h.run_steps(2);
+    assert!(h.state().print_draft.comment_summary);
+    h.get_by_label("Booklet").click();
+    h.run_steps(3);
+    assert!(h.get_by_label("Include a summary of the comments").accesskit_node().is_disabled(), "no place for it in a booklet");
+    assert!(!h.state().print_draft.comment_summary, "a greyed-out ticked box can't apply");
+    assert!(h.state().print_draft.comment_summary_blocked().is_some_and(|r| r.contains("Booklet")));
+    // Back to a layout it fits, ticked again, then the dialog is opened afresh.
+    h.state_mut().print_draft.set_handling(pdfcraft_ui_egui::PrintHandling::Size);
+    h.run_steps(3);
+    h.get_by_label("Include a summary of the comments").click();
+    h.run_steps(2);
+    assert!(h.state().print_draft.comment_summary);
+    assert!(h.state_mut().execute("print.dialog"));
+    h.run_steps(3);
+    assert!(!h.state().print_draft.comment_summary, "a summary is asked for per job");
+}
+
+/// A document that withholds copying can't take the summary: the box is disabled with the reason,
+/// and Print refuses a draft that asks for one before running anything.
+#[test]
+fn comment_summary_is_unavailable_for_a_document_that_withholds_copying() {
+    let mut cos = pdfcraft_cos::Document::open(std::sync::Arc::new(include_bytes!("../data/form.pdf").to_vec())).unwrap();
+    cos.set_encryption(&pdfcraft_cos::NewEncryption {
+        algorithm: pdfcraft_cos::Algorithm::Aes256,
+        user_password: "",
+        owner_password: "boss",
+        permissions: -1 ^ 0b1_0000,
+        encrypt_metadata: true,
+        seed: [2; 32],
+    })
+    .unwrap();
+    let bytes = pdfcraft_cos::write_full(&cos, &Default::default()).unwrap();
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.open_bytes("locked.pdf", None, bytes.clone()).unwrap();
+        app
+    });
+    h.run_steps(4);
+    assert!(h.state_mut().execute("print.dialog"));
+    h.run_steps(3);
+    assert!(h.get_by_label("Include a summary of the comments").accesskit_node().is_disabled());
+    assert!(h.state().print_draft.comment_summary_blocked().is_some_and(|r| r.contains("copying")));
+    h.state_mut().print_draft.comment_summary = true;
+    assert!(!h.state_mut().print_now(), "refused up front");
+    let toast = h.state().toast.as_ref().map(|(m, _)| m.clone()).unwrap_or_default();
+    assert!(toast.contains("copying"), "{toast:?}");
+}
+
 /// The spooler answering with no printers at all says so (#160), and Save as PDF still works.
 #[test]
 fn an_empty_printer_list_says_none_were_found() {

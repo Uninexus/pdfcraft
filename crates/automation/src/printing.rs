@@ -367,6 +367,20 @@ impl Automation {
             }
         };
         let settings = print::Settings { pages, paper, orientation, layout, content, raster, crops: Vec::new(), area };
+        // Include a summary of the comments (off by default): after the document's sheets.
+        let summary_sort = match a.opt_str("comment_summary_sort")? {
+            Some(s) => {
+                pdfcraft_engine::SummarySort::parse(s).ok_or_else(|| bad(format!("unknown comment_summary_sort {s:?} (page, author, date, type)")))?
+            }
+            None => pdfcraft_engine::SummarySort::Page,
+        };
+        let with_summary = a.opt_bool("comment_summary")?.unwrap_or(false);
+        if with_summary {
+            // Before the destination is chosen and the Will Print actions run: a refusal changes nothing.
+            self.session.check_comment_summary(id, &settings).map_err(|e| bad(e.to_string()))?;
+        } else if a.opt_str("comment_summary_sort")?.is_some() {
+            return Err(bad("comment_summary_sort needs comment_summary true"));
+        }
         let laid_out = print::layout(&sizes, &settings).map_err(|e| bad(e.to_string()))?;
         let sheets = laid_out.len();
         // Where it goes is checked before the Will Print actions run, so a call that can't print
@@ -393,8 +407,24 @@ impl Automation {
         } else {
             Default::default()
         };
-        let bytes = self.session.print_pdf(id, &settings).map_err(failed)?;
-        let mut out = json!({ "sheets": sheets, "pages": settings.pages.len(), "bytes": bytes.len() });
+        let (bytes, summary) = if with_summary {
+            self.session.print_pdf_with_comment_summary(id, &settings, summary_sort).map_err(failed)?
+        } else {
+            (self.session.print_pdf(id, &settings).map_err(failed)?, pdfcraft_engine::CommentSummary::NoComments)
+        };
+        let summary_pages = match summary {
+            pdfcraft_engine::CommentSummary::Added { pages, .. } => pages,
+            pdfcraft_engine::CommentSummary::NoComments => 0,
+        };
+        let mut out = json!({ "sheets": sheets + summary_pages, "pages": settings.pages.len(), "bytes": bytes.len() });
+        if with_summary {
+            out["comment_summary"] = match summary {
+                pdfcraft_engine::CommentSummary::Added { pages, comments } => json!({ "pages": pages, "comments": comments }),
+                pdfcraft_engine::CommentSummary::NoComments => {
+                    json!({ "pages": 0, "comments": 0, "skipped": "the printed pages have no comments, so no summary was added" })
+                }
+            };
+        }
         if let Some(c) = settings.raster.as_ref().and_then(|r| r.colour.as_ref()) {
             out["color_management"] =
                 json!({ "profile": c.profile.name(), "rendering_intent": c.intent.id(), "black_point_compensation": c.black_point });

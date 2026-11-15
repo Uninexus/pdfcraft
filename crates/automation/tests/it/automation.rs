@@ -6644,6 +6644,73 @@ fn printing_through_tools() {
     assert!(matches!(a.call("doc_print", &json!({ "doc": doc, "pages": "99", "path": "x.pdf" })), Err(ToolError::InvalidArgs(_))));
 }
 
+/// Print's "Include a summary of the comments": off by default; on, the summary pages of the
+/// comments on the printed pages follow the document's sheets, so the job grows by them and its
+/// text holds a comment's words. Pages outside the range leave their comments out, a print
+/// without comments says it added nothing, and layouts with no place for a summary are refused.
+#[test]
+fn printing_with_a_comment_summary_through_tools() {
+    let dir = workdir("print-comment-summary");
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "a.pdf" }))["doc"].as_u64().unwrap();
+    let n = ok(&mut a, "doc_info", json!({ "doc": doc }))["document"]["pages"].as_u64().unwrap();
+    let pages_of = |a: &mut Automation, path: &str| {
+        let d = ok(a, "doc_open", json!({ "path": path }))["doc"].as_u64().unwrap();
+        (d, ok(a, "doc_info", json!({ "doc": d }))["document"]["pages"].as_u64().unwrap())
+    };
+    // No comments yet: asking for the summary adds nothing and says so.
+    let r = ok(&mut a, "doc_print", json!({ "doc": doc, "comment_summary": true, "path": "none.pdf" }));
+    assert_eq!((r["sheets"].as_u64(), r["comment_summary"]["pages"].as_u64()), (Some(n), Some(0)), "{r}");
+    assert!(r["comment_summary"]["skipped"].as_str().unwrap().contains("no comments"), "{r}");
+    assert_eq!(pages_of(&mut a, "none.pdf").1, n);
+
+    ok(&mut a, "comment_add", json!({ "doc": doc, "page": 1, "type": "note", "at": [20, 20], "contents": "Zebrafish on page one", "author": "Ada" }));
+    // Off by default: the print is the document alone, and no summary is reported.
+    let plain = ok(&mut a, "doc_print", json!({ "doc": doc, "path": "plain.pdf" }));
+    assert!(plain.get("comment_summary").is_none(), "{plain}");
+    assert_eq!(pages_of(&mut a, "plain.pdf").1, n);
+    // On: the summary's pages follow the document's, and carry the comment's words.
+    let r = ok(&mut a, "doc_print", json!({ "doc": doc, "comment_summary": true, "comment_summary_sort": "author", "path": "with.pdf" }));
+    let added = r["comment_summary"]["pages"].as_u64().unwrap();
+    assert!(added >= 1 && r["comment_summary"]["comments"] == 1, "{r}");
+    assert_eq!(r["sheets"].as_u64(), Some(n + added), "{r}");
+    let (with, total) = pages_of(&mut a, "with.pdf");
+    assert_eq!(total, n + added);
+    let found = ok(&mut a, "text_find", json!({ "doc": with, "query": "Zebrafish" }));
+    assert!(found["count"].as_u64().unwrap() >= 1, "{found}");
+    assert_eq!(found["matches"][0]["page"].as_u64(), Some(n + 1), "{found}");
+    // The summary covers the printed pages only: pages, subset and reverse decide which comments.
+    assert!(n >= 2, "the fixture has a second page");
+    ok(&mut a, "comment_add", json!({ "doc": doc, "page": 2, "type": "note", "at": [20, 20], "contents": "Quokka on page two", "author": "Bo" }));
+    let covered = |a: &mut Automation, args: Value, path: &str| {
+        let r = ok(a, "doc_print", args);
+        let (d, total) = pages_of(a, path);
+        let seen = |a: &mut Automation, word: &str| ok(a, "text_find", json!({ "doc": d, "query": word }))["count"].as_u64().unwrap() > 0;
+        (r["comment_summary"]["comments"].as_u64(), total, seen(a, "Zebrafish"), seen(a, "Quokka"))
+    };
+    let r = covered(&mut a, json!({ "doc": doc, "pages": "2", "comment_summary": true, "path": "page2.pdf" }), "page2.pdf");
+    assert_eq!((r.0, r.2, r.3), (Some(1), false, true), "page 2 only");
+    let r = covered(&mut a, json!({ "doc": doc, "subset": "even", "comment_summary": true, "path": "even.pdf" }), "even.pdf");
+    assert_eq!((r.0, r.2, r.3), (Some(1), false, true), "even pages only");
+    let r = covered(&mut a, json!({ "doc": doc, "subset": "odd", "comment_summary": true, "path": "odd.pdf" }), "odd.pdf");
+    assert_eq!((r.0, r.2, r.3), (Some(1), true, false), "odd pages only");
+    let r = covered(&mut a, json!({ "doc": doc, "reverse": true, "comment_summary": true, "path": "rev.pdf" }), "rev.pdf");
+    assert_eq!((r.0, r.2, r.3), (Some(2), true, true), "reversed, both comments");
+    let r = covered(&mut a, json!({ "doc": doc, "pages": "3", "comment_summary": true, "path": "p3.pdf" }), "p3.pdf");
+    assert_eq!((r.0, r.1, r.2, r.3), (Some(0), 1, false, false), "no comments on page 3, nothing added");
+    // Refused where a summary page has no place, and a sort alone is a mistake.
+    for args in [
+        json!({ "doc": doc, "layout": "booklet", "comment_summary": true, "path": "x.pdf" }),
+        json!({ "doc": doc, "pages": "1", "layout": "poster", "comment_summary": true, "path": "x.pdf" }),
+        json!({ "doc": doc, "comment_summary_sort": "author", "path": "x.pdf" }),
+        json!({ "doc": doc, "comment_summary": true, "comment_summary_sort": "colour", "path": "x.pdf" }),
+        json!({ "doc": doc, "as_image": true, "comment_summary": true, "path": "x.pdf" }),
+        json!({ "doc": doc, "area": [0, 0, 50, 50], "pages": "1", "comment_summary": true, "path": "x.pdf" }),
+    ] {
+        assert!(matches!(a.call("doc_print", &args), Err(ToolError::InvalidArgs(_))), "{args}");
+    }
+}
+
 #[test]
 fn printer_papers_through_tools() {
     let dir = workdir("printer-papers");

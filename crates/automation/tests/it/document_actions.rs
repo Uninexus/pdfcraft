@@ -123,3 +123,37 @@ fn js_event_runs_the_field_its_field_id_names() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A comment summary a document can't take (it withholds copying, or allows only low-resolution
+/// printing) is refused before anything runs: no Will Print action, no change, no file, with or
+/// without comments.
+#[test]
+fn a_refused_comment_summary_runs_no_will_print_action() {
+    let dir = std::env::temp_dir().join(format!("pdfcraft-summary-refused-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    for (name, permissions) in [("no-copy.pdf", -1 ^ 0b1_0000), ("low-res.pdf", -1 ^ 0b1000_0000_0000)] {
+        let mut cos = pdfcraft_cos::Document::open(std::sync::Arc::new(form())).unwrap();
+        cos.set_encryption(&pdfcraft_cos::NewEncryption {
+            algorithm: pdfcraft_cos::Algorithm::Aes256,
+            user_password: "",
+            owner_password: "owner",
+            permissions,
+            encrypt_metadata: true,
+            seed: [7; 32],
+        })
+        .unwrap();
+        std::fs::write(dir.join(name), pdfcraft_cos::write_full(&cos, &Default::default()).unwrap()).unwrap();
+        let mut a = Automation::new().with_root(&dir).unwrap().with_clock(|| 1_700_000_000);
+        let doc = tool(&mut a, "doc_open", json!({ "path": name }))["doc"].as_u64().unwrap();
+        let before = log(&mut a, doc);
+        let out = format!("out-{name}");
+        let refused = a.call("doc_print", &json!({ "doc": doc, "comment_summary": true, "path": out }));
+        assert!(refused.is_err(), "{name}: {refused:?}");
+        assert_eq!(log(&mut a, doc), before, "{name}: Will Print did not run");
+        assert!(!dir.join(&out).exists(), "{name}: nothing was written");
+        // Without the summary the same print still runs its Will Print action.
+        tool(&mut a, "doc_print", json!({ "doc": doc, "path": out }));
+        assert_ne!(log(&mut a, doc), before, "{name}: a plain print runs it");
+    }
+    let _ = std::fs::remove_dir_all(dir);
+}

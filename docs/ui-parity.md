@@ -76,6 +76,7 @@ No dump of Acrobat's menu tree has been diffed against the registry yet (gap 24)
 | Item | Acrobat | PdfCraft | Status |
 |---|---|---|---|
 | Print dialog with preview | yes | yes | shipped |
+| Print: Include a summary of the comments | yes | checkbox; comments-only pages after the sheets, for the printed pages; not in the preview, no sort choice; greyed with its reason for Booklet, Poster, Label, a selected area, Print as image, a copy-restricted or low-resolution-only document and in a browser | partial (`print.print-with-comment-summary`) |
 | Document Properties (description, security, fonts, initial view, custom, advanced) | yes | all but Custom and XMP | partial |
 | Field Properties (General, Appearance, Position, Options, Actions, Format, Validate, Calculate, Signed) | yes | all but Signed | partial |
 | Comment properties and properties bar | yes | yes; a text box's text, border and fill and a shape's line and fill each take an opacity of their own (Acrobat: one per comment); text boxes and typed text take an oval or a circle for their border (Acrobat: a rectangle) | shipped |

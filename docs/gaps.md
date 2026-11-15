@@ -389,6 +389,10 @@ update the numbers.
   print as image; PostScript output. Printer marks are in (Print production ▸ Add printer marks…).
   colour conversion, printer marks, flattener preview, colour management settings;
   print as image; PostScript output. Fix hairlines is in (Print production ▸ Fix hairlines…).
+  Print with a comments summary is in as a first slice (Print ▸ Include a summary of the comments;
+  `doc_print` `comment_summary`): comments-only summary pages for the printed pages follow the sheets, not yet
+  in the preview, with no sort choice in the dialog, and not with Booklet, Poster, Label, a selected area, Print as
+  image, a copy-restricted or low-resolution-only document, or in a browser.
 - **Evidence:** 17 print-production features planned (L area).
 - **Estimate:** 25–45 h (part of the L area's 30–55). **Doc:** [target-app-parity.md](target-app-parity.md).
 

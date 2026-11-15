@@ -164,6 +164,9 @@ fn offered(printer: Option<&str>, printers: &[spool::Printer]) -> bool {
     printer.is_none_or(|name| printers.iter().any(|p| p.name == name))
 }
 
+/// Said when Include a summary of the comments found no comments on the printed pages.
+const NO_SUMMARY_NOTICE: &str = "The printed pages have no comments, so no summary was added.";
+
 /// Asks for a frame when a worker thread ends, also when it panics: [`PdfCraftApp::poll_print`]
 /// then sees the answer, or the disconnected channel of a worker that died, without waiting
 /// for some other event to draw (#2108 review). Declared before the worker's sender, so the
@@ -249,6 +252,18 @@ impl PdfCraftApp {
             which,
             area: None,
             custom_new: None,
+            // Per job, like copies and the layout: a summary is asked for each time, never carried
+            // over from the last job or another document, and the document decides if it can.
+            comment_summary: false,
+            comment_summary_doc_block: self.active_ids().and_then(|(_, id)| self.session.get(id)).and_then(|doc| {
+                if !doc.allows_copying() {
+                    Some("The document's security settings don't allow copying, which the summary needs.")
+                } else if doc.permissions().is_some_and(|p| !p.print_high_quality()) {
+                    Some("The document only allows low-resolution printing, whose pages are pictures.")
+                } else {
+                    None
+                }
+            }),
             ..keep
         };
         if changed {
@@ -633,6 +648,11 @@ impl PdfCraftApp {
             return false;
         }
         let Some((_, id)) = self.active_ids() else { return false };
+        // A comment summary that can't be added is refused before the Will Print script runs.
+        if let Some(reason) = self.print_draft.comment_summary_blocked().filter(|_| self.print_draft.comment_summary) {
+            self.notify(reason);
+            return false;
+        }
         // A form's Will Print script runs first: what it changes is printed.
         if self.session.get(id).is_some_and(|d| d.allows_printing()) {
             let before = self.session.get(id).map(|d| d.edit_generation());
@@ -653,13 +673,20 @@ impl PdfCraftApp {
             }
         };
         let name = doc.name.clone();
-        let bytes = match self.session.print_pdf(id, &settings) {
+        let with_summary = self.print_draft.comment_summary && self.print_draft.comment_summary_possible();
+        let printed = if with_summary {
+            self.session.print_pdf_with_comment_summary(id, &settings, pdfcraft_engine::SummarySort::Page).map(|(b, s)| (b, Some(s)))
+        } else {
+            self.session.print_pdf(id, &settings).map(|b| (b, None))
+        };
+        let (bytes, summary) = match printed {
             Ok(b) => b,
             Err(e) => {
                 self.notify_error(e);
                 return false;
             }
         };
+        let no_summary = summary == Some(pdfcraft_engine::CommentSummary::NoComments);
         let to_printer = self.print_draft.printer.is_some();
         let sent = match self.print_draft.printer.clone() {
             #[cfg(target_arch = "wasm32")]
@@ -683,8 +710,14 @@ impl PdfCraftApp {
                 }
                 self.send_to_printer(printer, bytes, job)
             }
-            None => self.save_print_pdf(&name, bytes),
+            None => self.save_print_pdf(&name, bytes, no_summary),
         };
+        // Told only when a print ran: a job handed to a printer. Save as PDF says it when the file
+        // is written, which may be after the save picker closes.
+        if sent && no_summary && to_printer {
+            // New words: English until they are in craft-i18n.
+            self.notify(NO_SUMMARY_NOTICE);
+        }
         // What this printer printed with is what it starts with next time (#2001).
         if sent && to_printer {
             self.print_draft.remember_setup();
@@ -812,10 +845,17 @@ impl PdfCraftApp {
     /// ask where and write on a later frame. Returns `true` once written, or once the save picker
     /// is showing.
     #[cfg(not(target_arch = "wasm32"))]
-    fn save_print_pdf(&mut self, name: &str, bytes: Vec<u8>) -> bool {
+    fn save_print_pdf(&mut self, name: &str, bytes: Vec<u8>, no_summary: bool) -> bool {
         let write = move |app: &mut Self, path: std::path::PathBuf| match crate::editing::write_atomically(&path.to_string_lossy(), &bytes) {
             Ok(()) => {
-                app.notify_fmt("Saved the print-ready PDF to {path}", &[("path", &path.display().to_string())]);
+                if no_summary {
+                    app.notify(format!(
+                        "{} {NO_SUMMARY_NOTICE}",
+                        crate::i18n::fmt(tl!("Saved the print-ready PDF to {path}"), &[("path", &path.display().to_string())])
+                    ));
+                } else {
+                    app.notify_fmt("Saved the print-ready PDF to {path}", &[("path", &path.display().to_string())]);
+                }
                 true
             }
             Err(e) => {
@@ -838,12 +878,13 @@ impl PdfCraftApp {
     /// Print ▸ Save as PDF in a browser: download it, as Save does (#170). There is no folder to
     /// choose and no file system to write to, so `save_override` doesn't apply.
     #[cfg(target_arch = "wasm32")]
-    fn save_print_pdf(&mut self, name: &str, bytes: Vec<u8>) -> bool {
+    fn save_print_pdf(&mut self, name: &str, bytes: Vec<u8>, no_summary: bool) -> bool {
         let stem = name.trim_end_matches(".pdf").trim_end_matches(".PDF");
         let file = format!("{stem} (print).pdf");
         match crate::editing::download(&file, &bytes) {
             Ok(()) => {
                 self.notify_fmt("Downloaded {name}", &[("name", &file)]);
+                let _ = no_summary; // The browser print is blocked from asking for a summary, so never set.
                 true
             }
             Err(e) => {
