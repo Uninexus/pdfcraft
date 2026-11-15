@@ -5396,11 +5396,11 @@ title = "Edit all JavaScripts in one editor"
 area = "F"
 tier = "P2"
 milestone = "M12"
-status = "planned"
+status = "partial"
 commands = []
-tools = []
-evidence = []
-notes = ""
+tools = ["doc_javascripts", "doc_javascript_edit"]
+evidence = ["crates/forms/src/tests.rs::javascripts_lists_every_place_a_script_lives", "crates/forms/src/tests.rs::set_javascript_changes_only_the_code_and_survives_a_save", "crates/forms/src/tests.rs::remove_javascript_drops_the_slot_and_keeps_the_chain", "crates/forms/src/tests.rs::a_cyclic_next_chain_lists_each_action_once", "crates/forms/src/tests.rs::an_id_that_came_to_lead_to_another_script_is_refused", "crates/forms/src/tests.rs::removing_a_name_repairs_the_limits_and_drops_an_emptied_leaf", "crates/forms/src/tests.rs::removing_inside_an_action_array_takes_only_that_action", "crates/forms/src/tests.rs::the_listing_holds_a_bounded_amount_of_code", "crates/engine/src/edit_all_javascripts_tests.rs::undo_and_redo_shifting_what_an_id_leads_to_is_caught", "crates/forms/src/tests.rs::a_huge_script_is_cut_and_refused_on_edit_and_a_missing_or_binary_one_is_listed_without_code", "crates/engine/src/edit_all_javascripts_tests.rs::a_script_is_edited_in_one_undoable_step_and_nothing_runs", "crates/automation/tests/it/edit_all_javascripts.rs::every_script_is_listed_edited_and_removed_by_id", "crates/automation/tests/it/edit_all_javascripts.rs::hostile_structures_are_listed_safely"]
+notes = "Headless only, no editor window yet. doc_javascripts lists every JavaScript with a route-style id, kind, trigger, where it lives (field, page, name) and code: named document scripts, the open action, document actions (Will Close, Will Save, Did Save, Will Print, Did Print), field, link, annotation, page and bookmark actions, /Next chains included. doc_javascript_edit replaces or removes one by id as one undoable edit that keeps every other key; nothing is run. Every edit must give the script's fingerprint (a hash of its code from the list), so an id that came to lead to another script is refused. Bounded: 5000 scripts, 1 MiB per script, 16 MiB of code and 200000 page annotation visits in all, seen-sets and depth limits. Removing an action leaves the one chained after it (a named script keeps its name) and repairs the name tree's limits; setting a shared action changes only the place edited. XFA scripts are not listed."
 
 [[feature]]
 id = "form.js-security"

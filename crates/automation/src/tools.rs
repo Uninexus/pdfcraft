@@ -1518,6 +1518,17 @@ pub fn tools() -> Vec<ToolDef> {
             .ro()
             .cmd("tools.document_js")
             .with(schema(json!({ "doc": doc() }), &["doc"])),
+        t("doc_javascripts", "List all JavaScripts", "List every JavaScript in the document in one place: the named document scripts, the open action, document actions (Will Close, Will Save, Did Save, Will Print, Did Print), and field, link, annotation, page and bookmark actions. Each has an `id` for doc_javascript_edit, its `kind`, `trigger`, where it lives (`field`, `page`, `name`) and its `code` (null when the action holds no readable text; `truncated` when longer than 1 MiB). Reads only; nothing is run. At most 5000 scripts are listed, and page annotations are visited up to a limit (`capped` says a limit was hit). XFA form scripts are not included.")
+            .ro()
+            .with(schema(
+                json!({ "doc": doc(), "kind": { "type": "string", "enum": ["document", "open_action", "document_action", "field", "link", "annotation", "page", "bookmark"] } }),
+                &["doc"],
+            )),
+        t("doc_javascript_edit", "Edit or remove a JavaScript", "Replace (`action` set, with `code`, at most 1 MiB) or remove (`action` remove) the JavaScript with `id` from doc_javascripts, as one undoable edit that keeps every other key and action. `expect` must be the script's `fingerprint` from doc_javascripts: if the script at `id` is another one now, nothing changes and you are told to list again. Nothing is run. Removing an action leaves the action chained after it in its place (a named script then keeps its name); removing the last name of a name tree node repairs the tree. Setting an action shared by several places changes only this place. Ids are routes into the document, so list again after any edit.")
+            .with(schema(
+                json!({ "doc": doc(), "id": { "type": "string", "minLength": 1 }, "expect": { "type": "string", "minLength": 1 }, "action": { "type": "string", "enum": ["set", "remove"] }, "code": { "type": ["string", "null"] } }),
+                &["doc", "id", "expect", "action"],
+            )),
         t("js_set_document_script", "Edit a document JavaScript", "Add or replace the document-level JavaScript `name` with `script`, or delete it (script omitted). Undoable.")
             .cmd("tools.document_js")
             .with(schema(json!({ "doc": doc(), "name": { "type": "string", "minLength": 1 }, "script": { "type": "string" } }), &["doc", "name"])),

@@ -3,6 +3,7 @@ use std::sync::Arc;
 use pdfcraft_cos::{Document, Object, SaveOptions, write_incremental};
 
 use super::*;
+use crate::js_inventory::fingerprint;
 
 /// One page with a form: text fields (plain, multiline, comb, password, read-only, nested),
 /// a check box with appearances, one without, a radio group, a combo and a multi-select list,
@@ -7563,4 +7564,412 @@ fn page_scripts_are_the_pages_own_then_each_annotations_in_order() {
     let got: Vec<(Option<&str>, &str)> = close.iter().map(|s| (s.field.as_deref(), s.script.trim())).collect();
     assert_eq!(got, [(None, "close()"), (Some("anim"), "stop();")], "a URI action is not a script");
     assert!(page_scripts(&doc, 1, PageEvent::Open).is_empty(), "no such page");
+}
+
+// ── Edit all JavaScripts: the inventory and editing by id ─────────────────────────────────
+
+/// A page with a link, a field with actions, a bookmark, a named script, an open action chain
+/// and document actions: one script of every place a script can live.
+fn every_script_doc() -> Document {
+    document(&[
+        // 1 catalog
+        "<< /Type /Catalog /Pages 2 0 R /Names << /JavaScript 8 0 R >> /OpenAction 9 0 R /AA << /WS 11 0 R /DS 12 0 R >> /AcroForm << /Fields [6 0 R] >> /Outlines 13 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".into(),
+        // 3 page with its own action and annots
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] /AA << /O << /S /JavaScript /JS (pageOpen();) >> >> /Annots [5 0 R 6 0 R] >>".into(),
+        "<< /Unused true >>".into(),
+        // 5 link
+        "<< /Type /Annot /Subtype /Link /Rect [0 0 10 10] /A << /S /JavaScript /JS (linkClick();) >> >>".into(),
+        // 6 widget field
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (total) /Rect [0 20 10 30] /Keep (me) /AA << /K << /S /JavaScript /JS (keystroke();) /Extra 1 >> /C 7 0 R >> /A << /S /JavaScript /JS (mouseUp();) >> >>".into(),
+        "<< /S /JavaScript /JS (calc();) >>".into(),
+        // 8 named tree
+        "<< /Names [(alpha) 10 0 R (beta) << /S /JavaScript /JS (b();) >>] >>".into(),
+        // 9 open action with a chain
+        "<< /S /JavaScript /JS (open1();) /Next << /S /JavaScript /JS (open2();) >> >>".into(),
+        "<< /S /JavaScript /JS (a();) >>".into(),
+        "<< /S /JavaScript /JS (willSave();) >>".into(),
+        "<< /S /JavaScript /JS (didSave();) >>".into(),
+        // 13 outlines
+        "<< /Type /Outlines /First 14 0 R /Last 14 0 R >>".into(),
+        "<< /Title (Go) /Parent 13 0 R /A << /S /JavaScript /JS (bookmark();) >> >>".into(),
+    ])
+}
+
+fn listed(doc: &Document) -> Vec<(String, ScriptKind, String, Option<String>)> {
+    javascripts(doc).entries.into_iter().map(|e| (e.id, e.kind, e.trigger, e.code)).collect()
+}
+
+/// The fingerprint listed for `id`, or one that matches nothing.
+fn fp(doc: &Document, id: &str) -> String {
+    javascripts(doc).entries.into_iter().find(|e| e.id == id).map_or_else(|| "none".to_string(), |e| e.fingerprint)
+}
+
+/// `set_javascript` with the fingerprint the list shows now.
+fn set_js(doc: &mut Document, id: &str, code: &str) -> Result<(), FormError> {
+    let expect = fp(doc, id);
+    set_javascript(doc, id, &expect, code)
+}
+
+/// `remove_javascript` with the fingerprint the list shows now.
+fn remove_js(doc: &mut Document, id: &str) -> Result<(), FormError> {
+    let expect = fp(doc, id);
+    remove_javascript(doc, id, &expect)
+}
+
+fn code_of(doc: &Document, id: &str) -> Option<String> {
+    javascripts(doc).entries.into_iter().find(|e| e.id == id).and_then(|e| e.code)
+}
+
+#[test]
+fn javascripts_lists_every_place_a_script_lives() {
+    let doc = every_script_doc();
+    let inv = javascripts(&doc);
+    assert!(!inv.capped);
+    let find = |code: &str| inv.entries.iter().find(|e| e.code.as_deref() == Some(code)).unwrap_or_else(|| panic!("{code} not listed"));
+    let a = find("a();");
+    assert_eq!((a.kind, a.name.as_deref()), (ScriptKind::Document, Some("alpha")));
+    assert_eq!(find("b();").id, "catalog/Names/JavaScript/Names[3]");
+    assert_eq!((find("open1();").kind, find("open1();").id.as_str()), (ScriptKind::OpenAction, "catalog/OpenAction"));
+    assert_eq!(find("open2();").id, "catalog/OpenAction/Next");
+    assert_eq!((find("willSave();").kind, find("willSave();").trigger.as_str()), (ScriptKind::DocumentAction, "Will Save"));
+    assert_eq!(find("didSave();").trigger, "Did Save");
+    let page = find("pageOpen();");
+    assert_eq!((page.kind, page.page, page.trigger.as_str()), (ScriptKind::Page, Some(1), "Page Open"));
+    let link = find("linkClick();");
+    assert_eq!((link.kind, link.page), (ScriptKind::Link, Some(1)));
+    let key = find("keystroke();");
+    assert_eq!((key.kind, key.field.as_deref(), key.page, key.trigger.as_str()), (ScriptKind::Field, Some("total"), Some(1), "Keystroke"));
+    assert_eq!(find("mouseUp();").trigger, "Mouse Up");
+    assert_eq!((find("calc();").trigger.as_str(), find("calc();").id.as_str()), ("Calculate", "obj:6/AA/C"));
+    let bm = find("bookmark();");
+    assert_eq!((bm.kind, bm.name.as_deref()), (ScriptKind::Bookmark, Some("Go")));
+    // Each script once, though the field is reached from its page and from the field tree.
+    let ids: std::collections::HashSet<_> = inv.entries.iter().map(|e| &e.id).collect();
+    assert_eq!(ids.len(), inv.entries.len());
+    assert_eq!(inv.entries.len(), 12);
+}
+
+#[test]
+fn set_javascript_changes_only_the_code_and_survives_a_save() {
+    let mut doc = every_script_doc();
+    let id = "obj:6/AA/K";
+    assert_eq!(code_of(&doc, id).as_deref(), Some("keystroke();"));
+    let before = listed(&doc);
+    set_js(&mut doc, id, "event.rc = false;").unwrap();
+    // The action's other keys, and the rest of the widget, are as they were.
+    let widget = doc.get(ObjRef::new(6, 0));
+    let wd = widget.as_dict().unwrap();
+    assert!(wd.get(b"Keep").is_some());
+    let k = doc.resolve(wd.get(b"AA").unwrap());
+    let k = doc.resolve(k.as_dict().unwrap().get(b"K").unwrap());
+    assert!(k.as_dict().unwrap().get(b"Extra").is_some());
+    let after = listed(&reopen(&doc));
+    assert_eq!(before.len(), after.len());
+    for (b, a) in before.iter().zip(&after) {
+        assert_eq!((&b.0, b.1, &b.2), (&a.0, a.1, &a.2));
+        if a.0 == id {
+            assert_eq!(a.3.as_deref(), Some("event.rc = false;"));
+        } else {
+            assert_eq!(a.3, b.3, "{} changed", a.0);
+        }
+    }
+    // Indirect and direct, in a name tree and in a chain.
+    set_js(&mut doc, "obj:6/AA/C", "c2();").unwrap();
+    set_js(&mut doc, "catalog/Names/JavaScript/Names[3]", "b2();").unwrap();
+    set_js(&mut doc, "catalog/OpenAction/Next", "open3();").unwrap();
+    assert_eq!(code_of(&doc, "obj:6/AA/C").as_deref(), Some("c2();"));
+    assert_eq!(code_of(&doc, "catalog/Names/JavaScript/Names[3]").as_deref(), Some("b2();"));
+    assert_eq!(code_of(&doc, "catalog/OpenAction/Next").as_deref(), Some("open3();"));
+    assert_eq!(code_of(&doc, "catalog/OpenAction").as_deref(), Some("open1();"));
+}
+
+#[test]
+fn remove_javascript_drops_the_slot_and_keeps_the_chain() {
+    let mut doc = every_script_doc();
+    remove_js(&mut doc, "obj:6/AA/K").unwrap();
+    assert!(code_of(&doc, "obj:6/AA/K").is_none());
+    assert_eq!(code_of(&doc, "obj:6/AA/C").as_deref(), Some("calc();"));
+    // A named script goes with its name.
+    remove_js(&mut doc, "catalog/Names/JavaScript/Names[1]").unwrap();
+    let names: Vec<_> = javascripts(&doc).entries.into_iter().filter(|e| e.kind == ScriptKind::Document).filter_map(|e| e.name).collect();
+    assert_eq!(names, ["beta"]);
+    // The first of a chain: the action chained after it takes its place.
+    remove_js(&mut doc, "obj:9").unwrap_err();
+    remove_js(&mut doc, "catalog/OpenAction").unwrap();
+    let open: Vec<_> = javascripts(&doc).entries.into_iter().filter(|e| e.kind == ScriptKind::OpenAction).filter_map(|e| e.code).collect();
+    assert_eq!(open, ["open2();"]);
+}
+
+#[test]
+fn an_id_that_no_longer_leads_to_a_script_is_refused() {
+    let mut doc = every_script_doc();
+    remove_js(&mut doc, "obj:6/AA/K").unwrap();
+    for id in ["obj:6/AA/K", "obj:6/A/Nope", "obj:4", "obj:999", "catalog/Names", "", "obj:x", "obj:6/AA/K[", "../etc", "obj:3/Annots[9]"] {
+        let before = listed(&doc);
+        let e = set_js(&mut doc, id, "x").unwrap_err().to_string();
+        assert!(e.contains("list the JavaScripts again"), "{id}: {e}");
+        assert!(remove_js(&mut doc, id).is_err(), "{id}");
+        assert_eq!(listed(&doc), before, "{id} changed the document");
+    }
+}
+
+#[test]
+fn a_cyclic_next_chain_lists_each_action_once() {
+    let doc = document(&[
+        "<< /Type /Catalog /Pages 2 0 R /OpenAction 3 0 R >>".into(),
+        "<< /Type /Pages /Kids [] /Count 0 >>".into(),
+        "<< /S /JavaScript /JS (one();) /Next 4 0 R >>".into(),
+        "<< /S /JavaScript /JS (two();) /Next 3 0 R >>".into(),
+    ]);
+    assert_eq!(listed(&doc).iter().map(|e| e.3.clone().unwrap()).collect::<Vec<_>>(), ["one();", "two();"]);
+}
+
+#[test]
+fn a_cyclic_name_tree_and_outline_terminate() {
+    let doc = document(&[
+        "<< /Type /Catalog /Pages 2 0 R /Names << /JavaScript 3 0 R >> /Outlines 4 0 R >>".into(),
+        "<< /Type /Pages /Kids [] /Count 0 >>".into(),
+        "<< /Kids [3 0 R] /Names [(a) << /S /JavaScript /JS (a();) >>] >>".into(),
+        "<< /First 5 0 R >>".into(),
+        "<< /Title (x) /First 5 0 R /Next 5 0 R /A << /S /JavaScript /JS (b();) >> >>".into(),
+    ]);
+    assert_eq!(listed(&doc).len(), 2);
+}
+
+#[test]
+fn a_huge_script_is_cut_and_refused_on_edit_and_a_missing_or_binary_one_is_listed_without_code() {
+    let huge = "x".repeat(2 << 20);
+    let mut doc = document(&[
+        "<< /Type /Catalog /Pages 2 0 R /OpenAction 3 0 R /AA << /WS 4 0 R /WC 5 0 R /DS 6 0 R >> >>".into(),
+        "<< /Type /Pages /Kids [] /Count 0 >>".into(),
+        format!("<< /S /JavaScript /JS ({huge}) >>"),
+        "<< /S /JavaScript >>".into(),
+        "<< /S /JavaScript /JS 7 0 R >>".into(),
+        "<< /S /JavaScript /JS 42 >>".into(),
+        // A stream with a filter nobody can undo.
+        "<< /Length 3 /Filter /NoSuchFilter >>\nstream\nabc\nendstream".into(),
+    ]);
+    let inv = javascripts(&doc);
+    let open = inv.entries.iter().find(|e| e.kind == ScriptKind::OpenAction).unwrap();
+    assert!(open.truncated);
+    assert_eq!(open.code.as_ref().map(String::len), Some(MAX_SCRIPT_LEN));
+    let rest: Vec<_> = inv.entries.iter().filter(|e| e.kind == ScriptKind::DocumentAction).collect();
+    assert_eq!(rest.len(), 3);
+    assert!(rest.iter().all(|e| e.code.is_none() && !e.truncated));
+    // A script with no code can be given some, and too much is refused.
+    set_js(&mut doc, "catalog/AA/WS", "app.beep();").unwrap();
+    assert_eq!(code_of(&doc, "catalog/AA/WS").as_deref(), Some("app.beep();"));
+    set_js(&mut doc, "catalog/AA/WC", "app.beep();").unwrap();
+    assert_eq!(code_of(&doc, "catalog/AA/WC").as_deref(), Some("app.beep();"));
+    let e = set_js(&mut doc, "catalog/OpenAction", &huge).unwrap_err().to_string();
+    assert!(e.contains("at most"), "{e}");
+}
+
+#[test]
+fn the_list_stops_at_the_script_limit() {
+    let mut objs =
+        vec!["<< /Type /Catalog /Pages 2 0 R /Names << /JavaScript 3 0 R >> >>".to_string(), "<< /Type /Pages /Kids [] /Count 0 >>".to_string()];
+    let pairs: String = (0..MAX_SCRIPTS + 5).map(|i| format!("(n{i:05}) << /S /JavaScript /JS (s();) >> ")).collect();
+    objs.push(format!("<< /Names [{pairs}] >>"));
+    let inv = javascripts(&document(&objs));
+    assert_eq!(inv.entries.len(), MAX_SCRIPTS);
+    assert!(inv.capped);
+}
+
+fn names_doc(extra_next: bool) -> Document {
+    let next = if extra_next { " /Next << /S /JavaScript /JS (chained();) >>" } else { "" };
+    document(&[
+        "<< /Type /Catalog /Pages 2 0 R /Names << /JavaScript 3 0 R >> >>".into(),
+        "<< /Type /Pages /Kids [] /Count 0 >>".into(),
+        "<< /Kids [4 0 R 5 0 R] >>".into(),
+        format!("<< /Limits [(a) (b)] /Names [(a) << /S /JavaScript /JS (a();){next} >> (b) << /S /JavaScript /JS (b();) >>] >>"),
+        "<< /Limits [(c) (d)] /Names [(c) << /S /JavaScript /JS (c();) >> (d) << /S /JavaScript /JS (d();) >>] >>".into(),
+    ])
+}
+
+fn limits(doc: &Document, num: u32) -> Option<Vec<String>> {
+    let o = doc.get(ObjRef::new(num, 0));
+    let l = doc.resolve(o.as_dict()?.get(b"Limits")?);
+    Some(l.as_array()?.iter().map(|s| if let Object::String(s) = &*doc.resolve(s) { s.to_text() } else { String::new() }).collect())
+}
+
+fn named_ids(doc: &Document) -> Vec<(String, String)> {
+    javascripts(doc).entries.into_iter().filter(|e| e.kind == ScriptKind::Document).map(|e| (e.name.unwrap(), e.id)).collect()
+}
+
+#[test]
+fn removing_a_name_repairs_the_limits_and_drops_an_emptied_leaf() {
+    // The first name of a leaf.
+    let mut doc = names_doc(false);
+    let id = named_ids(&doc)[0].1.clone();
+    remove_js(&mut doc, &id).unwrap();
+    assert_eq!(limits(&doc, 4), Some(vec!["b".into(), "b".into()]));
+    // The last name of the other leaf.
+    let id = named_ids(&doc).into_iter().find(|(n, _)| n == "d").unwrap().1;
+    remove_js(&mut doc, &id).unwrap();
+    assert_eq!(limits(&doc, 5), Some(vec!["c".into(), "c".into()]));
+    // The only name of a leaf: the leaf leaves /Kids.
+    let id = named_ids(&doc).into_iter().find(|(n, _)| n == "c").unwrap().1;
+    remove_js(&mut doc, &id).unwrap();
+    let tree = doc.get(ObjRef::new(3, 0));
+    let kids = tree.as_dict().unwrap().get(b"Kids").unwrap().as_array().unwrap().clone();
+    assert_eq!(kids, [Object::Ref(ObjRef::new(4, 0))]);
+    assert_eq!(named_ids(&doc).len(), 1);
+    // Down to nothing: the root keeps an empty /Names and survives a save.
+    let id = named_ids(&doc)[0].1.clone();
+    remove_js(&mut doc, &id).unwrap();
+    let tree = doc.get(ObjRef::new(3, 0));
+    let d = tree.as_dict().unwrap();
+    assert!(!d.contains(b"Kids") && !d.contains(b"Limits"));
+    assert_eq!(d.get(b"Names").unwrap().as_array().unwrap().len(), 0);
+    assert!(javascripts(&reopen(&doc)).entries.is_empty());
+}
+
+#[test]
+fn removing_a_named_script_promotes_what_is_chained_after_it() {
+    let mut doc = names_doc(true);
+    let id = named_ids(&doc)[0].1.clone();
+    remove_js(&mut doc, &id).unwrap();
+    let named = named_ids(&doc);
+    assert_eq!(named.len(), 4, "the name stays, now pointing at the chained script");
+    assert_eq!(code_of(&doc, &named[0].1).as_deref(), Some("chained();"));
+    assert_eq!(named[0].0, "a");
+    assert_eq!(limits(&doc, 4), Some(vec!["a".into(), "b".into()]));
+}
+
+#[test]
+fn removing_inside_an_action_array_takes_only_that_action() {
+    // `Names` holds an array where an action is expected: removing its second entry must not
+    // take the first one with it.
+    let mut doc = document(&[
+        "<< /Type /Catalog /Pages 2 0 R /Names << /JavaScript << /Names [(n) [<< /S /JavaScript /JS (a();) >> << /S /JavaScript /JS (b();) >>]] >> >> >>".into(),
+        "<< /Type /Pages /Kids [] /Count 0 >>".into(),
+    ]);
+    let ids: Vec<_> = javascripts(&doc).entries.into_iter().map(|e| (e.id, e.code.unwrap())).collect();
+    assert_eq!(ids.len(), 2, "{ids:?}");
+    let (second, code) = ids[1].clone();
+    assert_eq!(code, "b();");
+    remove_js(&mut doc, &second).unwrap();
+    assert_eq!(javascripts(&doc).entries.iter().filter_map(|e| e.code.clone()).collect::<Vec<_>>(), ["a();"]);
+}
+
+#[test]
+fn removing_the_last_action_of_an_array_drops_its_key() {
+    let mut doc = document(&[
+        "<< /Type /Catalog /Pages 2 0 R /OpenAction << /S /JavaScript /JS (x\\(\\);) /Next [<< /S /JavaScript /JS (y\\(\\);) >>] >> >>".into(),
+        "<< /Type /Pages /Kids [] /Count 0 >>".into(),
+    ]);
+    let id = "catalog/OpenAction/Next[0]";
+    remove_js(&mut doc, id).unwrap();
+    let cat = doc.get(ObjRef::new(1, 0));
+    let open = cat.as_dict().unwrap().get(b"OpenAction").unwrap().clone();
+    assert!(!open.as_dict().unwrap().contains(b"Next"), "no empty /Next []");
+}
+
+#[test]
+fn an_id_that_came_to_lead_to_another_script_is_refused() {
+    // A name tree shifts when an earlier name goes.
+    let mut doc = document(&[
+        "<< /Type /Catalog /Pages 2 0 R /Names << /JavaScript << /Names [(a) << /S /JavaScript /JS (a();) >> (b) << /S /JavaScript /JS (b();) >> (c) << /S /JavaScript /JS (c();) >>] >> >> >>".into(),
+        "<< /Type /Pages /Kids [] /Count 0 >>".into(),
+    ]);
+    let named = named_ids(&doc);
+    let (stale_id, stale_fp) = (named[1].1.clone(), fp(&doc, &named[1].1));
+    remove_js(&mut doc, &named[0].1).unwrap();
+    let before = listed(&doc);
+    // The id of "b" still leads to a script, now "c".
+    assert!(code_of(&doc, &stale_id).is_some());
+    let e = set_javascript(&mut doc, &stale_id, &stale_fp, "x();").unwrap_err().to_string();
+    assert!(e.contains("changed; list the JavaScripts again"), "{e}");
+    assert!(remove_javascript(&mut doc, &stale_id, &stale_fp).is_err());
+    assert_eq!(listed(&doc), before);
+    // An open action removed: what was chained after it is at its id now.
+    let mut doc = every_script_doc();
+    let (id, old) = ("catalog/OpenAction", fp(&doc, "catalog/OpenAction"));
+    remove_javascript(&mut doc, id, &old).unwrap();
+    assert!(set_javascript(&mut doc, id, &old, "x();").is_err());
+    assert_eq!(code_of(&doc, id).as_deref(), Some("open2();"));
+    // A missing or wrong fingerprint changes nothing either.
+    for expect in ["", "0000000000000000"] {
+        assert!(set_javascript(&mut doc, id, expect, "x();").is_err());
+    }
+    assert_eq!(code_of(&doc, id).as_deref(), Some("open2();"));
+}
+
+#[test]
+fn setting_a_shared_action_changes_only_the_place_edited() {
+    let mut doc = document(&[
+        "<< /Type /Catalog /Pages 2 0 R /AA << /WS 3 0 R /DS 3 0 R >> >>".into(),
+        "<< /Type /Pages /Kids [] /Count 0 >>".into(),
+        "<< /S /JavaScript /JS (shared\\(\\);) >>".into(),
+    ]);
+    // Listed once, at its first place.
+    assert_eq!(javascripts(&doc).entries.len(), 1);
+    set_js(&mut doc, "catalog/AA/WS", "mine();").unwrap();
+    let list = javascripts(&doc).entries;
+    assert_eq!(list.iter().filter_map(|e| e.code.as_deref()).collect::<Vec<_>>(), ["mine();", "shared();"]);
+}
+
+#[test]
+fn a_route_through_one_object_twice_is_refused() {
+    let mut doc = document(&[
+        "<< /Type /Catalog /Pages 2 0 R /OpenAction 3 0 R >>".into(),
+        "<< /Type /Pages /Kids [] /Count 0 >>".into(),
+        "<< /S /JavaScript /JS (one\\(\\);) /Next 3 0 R >>".into(),
+    ]);
+    let id = "catalog/OpenAction/Next";
+    assert!(set_js(&mut doc, id, "x();").is_err());
+    assert!(set_javascript(&mut doc, id, &fingerprint(Some("one();")), "x();").is_err());
+    assert_eq!(code_of(&doc, "catalog/OpenAction").as_deref(), Some("one();"));
+}
+
+#[test]
+fn the_listing_holds_a_bounded_amount_of_code() {
+    // 5000 actions share one 1 MiB string: no more than the total is handed out.
+    let mut objs =
+        vec!["<< /Type /Catalog /Pages 2 0 R /Names << /JavaScript 3 0 R >> >>".to_string(), "<< /Type /Pages /Kids [] /Count 0 >>".to_string()];
+    let pairs: String = (0..MAX_SCRIPTS).map(|i| format!("(n{i:05}) << /S /JavaScript /JS 4 0 R >> ")).collect();
+    objs.push(format!("<< /Names [{pairs}] >>"));
+    objs.push(format!("({})", "y".repeat(MAX_SCRIPT_LEN)));
+    let inv = javascripts(&document(&objs));
+    assert_eq!(inv.entries.len(), MAX_SCRIPTS);
+    let held: usize = inv.entries.iter().filter_map(|e| e.code.as_ref()).map(String::len).sum();
+    assert!(held <= MAX_TOTAL_CODE, "{held}");
+    assert_eq!(held, MAX_TOTAL_CODE);
+    let cut = inv.entries.iter().filter(|e| e.truncated).count();
+    assert_eq!(cut, inv.truncated);
+    assert_eq!(cut, MAX_SCRIPTS - MAX_TOTAL_CODE / MAX_SCRIPT_LEN);
+    assert!(inv.entries.iter().all(|e| e.fingerprint == inv.entries[0].fingerprint));
+}
+
+#[test]
+fn many_pages_sharing_one_annots_array_are_visited_once() {
+    // 3000 pages share one array of 100 links: it is read for the first page only.
+    let pages = 3000;
+    let array = 3 + pages;
+    let mut objs = vec![
+        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+        format!("<< /Type /Pages /Kids [{}] /Count {pages} >>", (0..pages).map(|i| format!("{} 0 R ", 3 + i)).collect::<String>()),
+    ];
+    objs.extend((0..pages).map(|_| format!("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 10 10] /Annots {array} 0 R >>")));
+    objs.push(format!("[{}]", (0..100).map(|i| format!("{} 0 R ", array + 1 + i)).collect::<String>()));
+    objs.extend((0..100).map(|i| format!("<< /Type /Annot /Subtype /Link /Rect [0 0 1 1] /A << /S /JavaScript /JS (l{i}\\(\\);) >> >>")));
+    let inv = javascripts(&document(&objs));
+    assert_eq!(inv.entries.len(), 100);
+    assert!(!inv.capped);
+    assert!(inv.entries.iter().all(|e| e.page == Some(1)));
+}
+
+#[test]
+fn page_annotation_visits_are_limited() {
+    // Distinct annotation arrays: more visits than the limit allows.
+    let pages = 300;
+    let mut objs = vec![
+        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+        format!("<< /Type /Pages /Kids [{}] /Count {pages} >>", (0..pages).map(|i| format!("{} 0 R ", 3 + i)).collect::<String>()),
+    ];
+    let arr = "<< /Subtype /Text >> ".repeat(1000);
+    objs.extend((0..pages).map(|_| format!("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 10 10] /Annots [{arr}] >>")));
+    assert!(javascripts(&document(&objs)).capped);
 }

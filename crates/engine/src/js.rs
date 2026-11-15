@@ -798,6 +798,12 @@ impl crate::Document {
         self.editor.as_ref().and_then(|e| pdfcraft_forms::field_action_chains(&e.cos, name).ok()).unwrap_or_default()
     }
 
+    /// Every JavaScript in the document (Edit all JavaScripts), listed and bounded by
+    /// [`pdfcraft_forms::javascripts`]. Reading only: nothing is run.
+    pub fn list_javascripts(&self) -> pdfcraft_forms::ScriptInventory {
+        self.editor.as_ref().map(|e| pdfcraft_forms::javascripts(&e.cos)).unwrap_or_default()
+    }
+
     /// Document JavaScripts (name, source), in name order.
     pub fn document_scripts(&self) -> Vec<(String, String)> {
         self.editor.as_ref().map(|e| document_scripts(&e.cos)).unwrap_or_default()

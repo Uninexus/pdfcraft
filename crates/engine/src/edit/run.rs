@@ -158,6 +158,8 @@ pub(crate) fn check_permission(edit: &Edit, p: &pdfcraft_cos::Permissions) -> Re
         | Edit::EnhanceScan { .. }
         | Edit::SetDocumentScript { .. }
         | Edit::SetFieldScript { .. }
+        | Edit::SetJavaScript { .. }
+        | Edit::RemoveJavaScript { .. }
         | Edit::RemoveStandardId { .. }
         | Edit::EditTextLine { .. }
         | Edit::EditTextBlock { .. }
@@ -914,6 +916,7 @@ pub(crate) fn run_edit(doc: &mut pdfcraft_cos::Document, edit: &Edit, cx: &mut E
             pdfcraft_preflight::convert(doc, *level).map_err(|e| EditError::Invalid(e.to_string()))?;
         }
         Edit::RemoveStandardId { standard } => pdfcraft_organize::remove_standard_id(doc, *standard)?,
+        Edit::SetJavaScript { .. } | Edit::RemoveJavaScript { .. } => run_javascript_edit(doc, edit, cx)?,
         Edit::SetDocumentScript { name, script } => pdfcraft_forms::set_document_script(doc, name, script.as_deref())?,
         Edit::AddOcrText { page, words } => {
             crate::ocr::layer::add_text(doc, *page, words)?;
@@ -1187,6 +1190,20 @@ fn run_batch(doc: &mut pdfcraft_cos::Document, edits: &[Edit], cx: &mut EditCtx)
             }
             js.refresh_after_batch_edit(doc, e);
         }
+    }
+    Ok(())
+}
+
+/// Edit all JavaScripts: replace or remove the script at an id. The calculation plan was read
+/// from the old source, so it is dropped; nothing is run.
+fn run_javascript_edit(doc: &mut pdfcraft_cos::Document, edit: &Edit, cx: &mut EditCtx) -> Result<(), EditError> {
+    match edit {
+        Edit::SetJavaScript { id, expect, code } => pdfcraft_forms::set_javascript(doc, id, expect, code)?,
+        Edit::RemoveJavaScript { id, expect } => pdfcraft_forms::remove_javascript(doc, id, expect)?,
+        _ => return Ok(()),
+    }
+    if let Some(js) = cx.js.as_mut() {
+        js.invalidate_calculations();
     }
     Ok(())
 }
