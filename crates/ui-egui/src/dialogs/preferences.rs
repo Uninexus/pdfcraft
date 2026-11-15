@@ -940,6 +940,9 @@ fn scrolling(ui: &mut egui::Ui, app: &mut PdfCraftApp, t: &Tokens, ctx: &mut Pre
     ui.add_space(6.0);
     ctx.checkbox(ui, &mut app.invert_middle_drag, tl!("Invert middle-button drag"), t);
     ctx.label_secondary(ui, tl!("Panning or auto-scrolling with the middle (wheel) button moves the page the other way."), t);
+    ui.add_space(6.0);
+    // English-only until the string is in craft-i18n; a missing translation falls back to English.
+    ctx.checkbox(ui, &mut app.single_key_accelerators, tl!("Use single-key accelerators to access tools"), t);
 }
 
 /// Content for Card 4: Identity

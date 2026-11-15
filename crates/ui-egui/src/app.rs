@@ -153,6 +153,7 @@ impl PdfCraftApp {
             quit_session: None,
             reload_changed_files: true,
             update_check_at_start: true,
+            single_key_accelerators: false,
             show_secured_notice: true,
             text_links: true,
             identity_email: String::new(),

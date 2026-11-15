@@ -2320,3 +2320,82 @@ fn accessible_labels_on_format_text_and_pin_dialog() {
     let char_spin = ok(&mut h, &c, "ui.inspect", json!({"query": "Character spacing", "role": "SpinButton"}));
     assert!(char_spin["count"].as_u64().unwrap() >= 1, "character spacing spin button has accessible label: {char_spin}");
 }
+
+/// A letter as the keyboard sends it: the key goes down, the text arrives, the key comes up.
+fn letter(h: &mut Harness<'static, PdfCraftApp>, key: egui::Key, text: &str) {
+    h.key_down(key);
+    h.event(egui::Event::Text(text.into()));
+    h.key_up(key);
+    h.run_steps(2);
+}
+
+fn quick_tool(h: &mut Harness<'static, PdfCraftApp>, c: &ControlClient) -> String {
+    ok(h, c, "ui.state", json!({}))["quick_tool"].as_str().unwrap().to_string()
+}
+
+#[test]
+fn single_key_accelerators_are_an_opt_in_preference_an_agent_can_read_set_and_keep() {
+    let (mut h, c) = harness();
+    assert_eq!(ok(&mut h, &c, "ui.state", json!({}))["single_key_accelerators"], false, "off by default");
+    for value in ["true", "false"] {
+        ok(&mut h, &c, "ui.set", json!({ "key": "single_key_accelerators", "value": value }));
+        assert_eq!(ok(&mut h, &c, "ui.state", json!({}))["single_key_accelerators"], value == "true");
+        let mut restored = PdfCraftApp::new();
+        restored.single_key_accelerators = value != "true";
+        restored.restore(&h.state().persist());
+        assert_eq!(restored.single_key_accelerators, value == "true", "remembered between runs");
+    }
+    ok(&mut h, &c, "ui.set", json!({ "key": "single_key_accelerators", "value": true }));
+    for bad in ["yes", "1", ""] {
+        assert!(call(&mut h, &c, "ui.set", json!({ "key": "single_key_accelerators", "value": bad })).is_err());
+    }
+    assert_eq!(ok(&mut h, &c, "ui.state", json!({}))["single_key_accelerators"], true, "a refused value changes nothing");
+    // Settings written before the preference existed leave it off.
+    let mut old: Value = serde_json::from_str(&h.state().persist()).unwrap();
+    old.as_object_mut().unwrap().remove("single_key_accelerators");
+    let mut restored = PdfCraftApp::new();
+    restored.restore(&old.to_string());
+    assert!(!restored.single_key_accelerators);
+}
+
+#[test]
+fn with_single_key_accelerators_on_a_letter_picks_a_tool() {
+    let (mut h, c) = harness();
+    ok(&mut h, &c, "ui.set", json!({ "key": "single_key_accelerators", "value": "true" }));
+    h.run_steps(2);
+    letter(&mut h, egui::Key::Z, "z");
+    assert_eq!(quick_tool(&mut h, &c), "marquee-zoom", "Z picks Marquee zoom");
+    letter(&mut h, egui::Key::Z, "z");
+    assert_eq!(quick_tool(&mut h, &c), "marquee-zoom", "the active tool's key changes nothing");
+    letter(&mut h, egui::Key::G, "g");
+    assert_eq!(quick_tool(&mut h, &c), "snapshot", "G picks Snapshot");
+    letter(&mut h, egui::Key::V, "v");
+    assert_eq!(quick_tool(&mut h, &c), "select");
+    letter(&mut h, egui::Key::H, "h");
+    assert_eq!(quick_tool(&mut h, &c), "hand");
+    // The same tools are reachable without a key.
+    ok(&mut h, &c, "ui.set", json!({ "key": "quick", "value": "marquee-zoom" }));
+    assert_eq!(quick_tool(&mut h, &c), "marquee-zoom");
+}
+
+#[test]
+fn with_single_key_accelerators_off_the_extra_letters_do_nothing() {
+    let (mut h, c) = harness();
+    let before = quick_tool(&mut h, &c);
+    letter(&mut h, egui::Key::Z, "z");
+    letter(&mut h, egui::Key::G, "g");
+    assert_eq!(quick_tool(&mut h, &c), before, "Z and G pick nothing while the preference is off");
+}
+
+#[test]
+fn single_key_accelerators_leave_typing_in_a_text_field_alone() {
+    let (mut h, c) = harness();
+    ok(&mut h, &c, "ui.set", json!({ "key": "single_key_accelerators", "value": "true" }));
+    let before = quick_tool(&mut h, &c);
+    h.state_mut().views[0].open_find();
+    h.run_steps(3);
+    letter(&mut h, egui::Key::Z, "z");
+    letter(&mut h, egui::Key::G, "g");
+    assert_eq!(quick_tool(&mut h, &c), before, "letters typed into the find field pick no tool");
+    assert_eq!(h.state().views[0].find.as_ref().map(|f| f.query.as_str()), Some("zg"), "they are typed into the field");
+}

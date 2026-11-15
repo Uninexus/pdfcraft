@@ -57,7 +57,7 @@ No dump of Acrobat's menu tree has been diffed against the registry yet (gap 24)
 | Cursor coordinates, line weights | yes | no | planned |
 | Measuring snap to paths, endpoints, midpoints, intersections | yes | yes | shipped |
 | Nudge selected objects with arrow keys (Shift for larger steps) | yes | yes in Edit text: a point, Shift ten points, for selected objects, images and an open paragraph's box (#1520); and in Prepare a form, for the selected field (#2608); a selected comment: a screen pixel, ⌘/Ctrl or Shift ten | shipped |
-| Single-key tool accelerators (H, V, Z, …) | yes, opt-in | no | planned |
+| Single-key tool accelerators (H, V, Z, …) | yes, opt-in | V and H always; Z (Marquee zoom) and G (Snapshot) with Preferences ▸ Use single-key accelerators to access tools (off by default); no more letters yet | partial |
 | Context menus on pages, thumbnails, comments, fields | yes | thumbnails, comments, fields | partial |
 | Comment pop-ups as movable windows, connector lines | yes | inline in the panel | planned |
 | Disabled commands explain why | no | yes | ahead |

@@ -503,6 +503,10 @@ pub struct PdfCraftApp {
     /// Preferences: ask for a newer release when the desktop app starts (#5737). Off, the app
     /// asks only from Help ▸ Check for updates.
     pub update_check_at_start: bool,
+    /// Preferences: Use single-key accelerators to access tools (off by default). On, an
+    /// unmodified Z or G picks Marquee zoom or Snapshot while nothing has the keyboard. V and
+    /// H, which pick Select and Hand, work with it off.
+    pub single_key_accelerators: bool,
     /// Preferences: tell the user, above the pages, that a document is secured (its security
     /// settings restrict changes). Off only hides that notice (#4035); kept in the settings.
     pub show_secured_notice: bool,
