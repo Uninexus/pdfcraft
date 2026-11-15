@@ -8516,11 +8516,15 @@ title = "Total area coverage warning"
 area = "L"
 tier = "P1"
 milestone = "M11"
-status = "planned"
+status = "partial"
 commands = []
-tools = []
-evidence = []
-notes = ""
+tools = ["print_readiness"]
+evidence = [
+    "crates/engine/src/printcheck.rs::total_ink_over_the_limit_is_a_warning_and_under_it_is_silent",
+    "crates/engine/src/printcheck.rs::a_colour_a_form_sets_is_counted_where_it_is_drawn_and_a_self_drawing_form_is_flagged",
+    "crates/automation/tests/it/automation.rs::print_readiness_reports_ink_through_tools",
+]
+notes = "First slice: print_readiness warns when a painted CMYK colour (k, K, or sc/scn in DeviceCMYK or a four-component ICCBased space, inside forms too) has more than 300% total ink, with the highest value found. Missing: ink inside images and shadings, a settable limit, a per-pixel coverage map, a separations preview."
 
 [[feature]]
 id = "print.color-warnings"
@@ -8528,11 +8532,15 @@ title = "Overprint and rich-black warnings"
 area = "L"
 tier = "P1"
 milestone = "M11"
-status = "planned"
+status = "partial"
 commands = []
-tools = []
-evidence = []
-notes = ""
+tools = ["print_readiness"]
+evidence = [
+    "crates/engine/src/printcheck.rs::rich_black_text_is_reported_and_pure_black_text_is_not",
+    "crates/engine/src/printcheck.rs::overprint_and_spot_colours_are_noted",
+    "crates/automation/tests/it/automation.rs::print_readiness_reports_ink_through_tools",
+]
+notes = "First slice: print_readiness notes text shown in rich black (K 90% or more with other inks), pages that turn overprint on (a gs with OP or op true) and the spot colours selected (Separation, DeviceN). Missing: a warning by text size, overprint effects and previews, rich black in fills and strokes, a UI panel (the report is text and findings only)."
 
 [[feature]]
 id = "print.object-inspector"
