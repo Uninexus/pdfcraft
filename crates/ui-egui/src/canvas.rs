@@ -1392,6 +1392,9 @@ struct PageEnv<'a> {
     text_links: bool,
     /// Preferences ▸ Forms: a field's tooltip shows on hover.
     form_tooltips: bool,
+    /// Preferences ▸ Forms ▸ Auto-Complete: what the focused text field's text could be completed
+    /// to (empty when the preference is off).
+    form_suggestions: &'a [String],
     /// Preferences ▸ Forms: the Highlight fields colour.
     field_highlight_color: [u8; 3],
     tool: QuickTool,
@@ -2829,7 +2832,24 @@ fn scroll_direction(dir: i8, dy: f32, resized: bool) -> i8 {
 /// text editor was finished.
 fn frame_overlays(ui: &mut egui::Ui, view: &mut DocView, env: &PageEnv<'_>, primary_down: bool, hover_text: Option<(Pos2, String)>) -> bool {
     let PageEnv {
-        added, allowed, author, avail, can_modify, comments_hidden, doc, form, info, keys, prefs, t, today, tool, units, unobstructed, ..
+        added,
+        allowed,
+        author,
+        avail,
+        can_modify,
+        comments_hidden,
+        doc,
+        form,
+        form_suggestions,
+        info,
+        keys,
+        prefs,
+        t,
+        today,
+        tool,
+        units,
+        unobstructed,
+        ..
     } = *env;
     if let Some((pos, text)) = hover_text {
         // Click-through, as a tooltip is: the pages lose the pointer under anything that isn't.
@@ -2861,7 +2881,7 @@ fn frame_overlays(ui: &mut egui::Ui, view: &mut DocView, env: &PageEnv<'_>, prim
         view.pending_edit = Some(e);
     }
     let text_box = crate::forms_ui::text_box(doc, view, form);
-    if let Some(e) = crate::forms_ui::overlay(ui.ctx(), keys, view, info, form, primary_down, text_box.as_ref(), today) {
+    if let Some(e) = crate::forms_ui::overlay(ui.ctx(), keys, view, info, form, primary_down, text_box.as_ref(), today, form_suggestions) {
         view.pending_edit = Some(e);
     }
     if let Some(e) = crate::fill_sign::type_box(ui.ctx(), keys, view, info, author) {
@@ -3367,6 +3387,14 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     // The table being set up in its window, shown on its own document's page.
     let table_preview = app.field_table_draft.as_mut().filter(|d| d.doc == view.id).and_then(|d| Some(d.preview(info.pages.get(d.page)?, &form)));
     let can_modify = doc.allows_modification();
+    // Only for a focused plain text field, with the preference on (the session asks too).
+    let form_suggestions = view
+        .forms
+        .focus
+        .as_ref()
+        .filter(|focus| app.session.form_autocomplete() && crate::forms_ui::focused_field(focus, &form).is_some_and(crate::forms_ui::autocompletes))
+        .map(|focus| app.session.suggest_form_entries(&focus.text))
+        .unwrap_or_default();
     if preparing {
         crate::prepare::after_refresh(view, &form);
     } else {
@@ -3444,6 +3472,7 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
         text_style: &text_style,
         text_links: app.text_links,
         form_tooltips: app.form_tooltips,
+        form_suggestions: &form_suggestions,
         field_highlight_color: app.field_highlight_color,
         tool,
         units,

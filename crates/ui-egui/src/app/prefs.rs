@@ -204,6 +204,10 @@ impl PdfCraftApp {
         v["identity_email"] = serde_json::Value::String(self.identity_email.clone());
         v["form_tooltips"] = serde_json::Value::Bool(self.form_tooltips);
         v["field_highlight_color"] = serde_json::json!(self.field_highlight_color);
+        // Auto-Complete (Preferences ▸ Forms) and what it remembered: plain text the person typed,
+        // kept in the local settings only, and removable from the same page.
+        v["form_autocomplete"] = serde_json::Value::Bool(self.session.form_autocomplete());
+        v["form_entries"] = serde_json::json!(self.session.form_entries().entries());
         v["organize_zoom"] = serde_json::json!(self.organize_zoom);
         v["blank_paper"] = serde_json::json!(self.blank_paper.token());
         // Canonical names survive changes to the order of PAPERS and do not depend on UI language;
@@ -299,6 +303,13 @@ impl PdfCraftApp {
         }
         if let Some(on) = v["form_tooltips"].as_bool() {
             self.form_tooltips = on;
+        }
+        if let Some(on) = v["form_autocomplete"].as_bool() {
+            self.session.set_form_autocomplete(on);
+        }
+        // Not an array, or not text in it: nothing remembered, never an error (see `FormEntries::restored`).
+        if let Some(list) = v["form_entries"].as_array() {
+            self.session.set_form_entries(pdfcraft_engine::form_entries::FormEntries::restored(list.iter().filter_map(|e| e.as_str())));
         }
         if let Some(c) = rgb_bytes(&v["field_highlight_color"]) {
             self.field_highlight_color = c;

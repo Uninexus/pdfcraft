@@ -972,6 +972,25 @@ fn card_forms(ui: &mut egui::Ui, app: &mut PdfCraftApp, t: &Tokens, ctx: &mut Pr
     });
     ctx.label_secondary(ui, tl!("Required fields keep their red border."), t);
     ctx.checkbox(ui, &mut app.form_tooltips, tl!("Show a field's tooltip when the pointer rests on it"), t);
+    // Auto-Complete (Basic): offers what was typed into text fields before. Off by default.
+    ui.horizontal(|ui| {
+        ctx.label_primary(ui, tl!("Auto-Complete"), t);
+        let mut on = app.session.form_autocomplete();
+        if ctx.pill_choice_a11y(ui, t, &mut on, &[(false, tl!("Off"), tl!("Auto-Complete Off")), (true, tl!("Basic"), tl!("Auto-Complete Basic"))]) {
+            app.session.set_form_autocomplete(on);
+        }
+    });
+    ctx.label_secondary(
+        ui,
+        tl!("Offers what you typed into other text fields before, as you type. Passwords, signatures, dates, numbers, multi-line and read-only fields are never remembered. Entries stay on this computer. Turning this off keeps the saved list until you remove it with Remove all remembered entries."),
+        t,
+    );
+    let count = app.session.form_entries().len();
+    ui.add_enabled_ui(count > 0, |ui| {
+        if ctx.button(ui, tl!("Remove all remembered entries"), t).clicked() {
+            app.session.clear_form_entries();
+        }
+    });
 }
 
 /// The servers the preset buttons fill in.

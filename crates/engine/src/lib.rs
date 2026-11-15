@@ -34,6 +34,7 @@ pub mod field_table;
 mod fill_sign;
 pub mod find_replace;
 pub mod folder_search;
+pub mod form_entries;
 mod history;
 pub mod js;
 mod layers;

@@ -51,6 +51,10 @@ pub struct Session {
     /// Highlight fields, as the viewer shows it: what forms' scripts read as
     /// `app.runtimeHighlight` (off by default, as in a session without a viewer).
     pub(crate) field_highlight: bool,
+    /// Preferences ▸ Forms ▸ Auto-Complete: on remembers what is typed into text fields and offers
+    /// it back (off by default), and what it has remembered (see [`crate::form_entries`]).
+    pub(crate) form_autocomplete: bool,
+    pub(crate) form_entries: crate::form_entries::FormEntries,
     /// What the XFA scripts' time limits are multiplied by (`None`: 1); see
     /// [`Session::with_xfa_time_scale`].
     pub(crate) xfa_time_scale: Option<u32>,

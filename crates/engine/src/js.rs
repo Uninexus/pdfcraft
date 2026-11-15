@@ -909,6 +909,52 @@ impl Session {
         self.field_highlight = on;
     }
 
+    /// Preferences ▸ Forms ▸ Auto-Complete (Basic): whether text typed into fields is remembered
+    /// and offered back. Off by default.
+    pub fn form_autocomplete(&self) -> bool {
+        self.form_autocomplete
+    }
+
+    /// Sets what [`Session::form_autocomplete`] reads. Turning it off keeps what was remembered
+    /// (remove it with [`Session::clear_form_entries`]), but nothing more is added or offered.
+    pub fn set_form_autocomplete(&mut self, on: bool) {
+        self.form_autocomplete = on;
+    }
+
+    /// The remembered entries (see [`crate::form_entries`]).
+    pub fn form_entries(&self) -> &crate::form_entries::FormEntries {
+        &self.form_entries
+    }
+
+    /// The remembered entries, to forget one.
+    pub fn form_entries_mut(&mut self) -> &mut crate::form_entries::FormEntries {
+        &mut self.form_entries
+    }
+
+    /// Replaces the remembered entries, as the app does when it restores its settings.
+    pub fn set_form_entries(&mut self, entries: crate::form_entries::FormEntries) {
+        self.form_entries = entries;
+    }
+
+    /// Remembers `text` typed into `field` when Auto-Complete is on and the field allows it
+    /// ([`crate::form_entries::rememberable`]). Returns whether it was kept.
+    pub fn remember_form_entry(&mut self, field: &pdfcraft_forms::Field, text: &str) -> bool {
+        self.form_autocomplete && self.form_entries.remember(field, text)
+    }
+
+    /// What to offer for `typed` while Auto-Complete is on; nothing when it is off.
+    pub fn suggest_form_entries(&self, typed: &str) -> Vec<String> {
+        if !self.form_autocomplete {
+            return Vec::new();
+        }
+        self.form_entries.suggest(typed).into_iter().map(str::to_owned).collect()
+    }
+
+    /// Forgets every remembered entry.
+    pub fn clear_form_entries(&mut self) {
+        self.form_entries.clear();
+    }
+
     /// What scripts printed or asked for since the last call (alerts, console, print, …).
     pub fn take_js_output(&mut self, id: DocId) -> JsOutput {
         self.docs.iter_mut().find(|d| d.id == id).map(|d| std::mem::take(&mut d.js_output)).unwrap_or_default()
