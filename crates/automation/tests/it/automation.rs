@@ -10571,6 +10571,40 @@ fn print_readiness_through_tools() {
     assert!(pdfcraft_automation::tools().iter().any(|t| t.name == "print_readiness" && t.read_only));
 }
 
+/// The ink checks ride on print_readiness: total ink over the limit, rich black text, overprint and
+/// spot colours are read from the page's vector colours, and nothing in the document changes.
+#[test]
+fn print_readiness_reports_ink_through_tools() {
+    let dir = workdir("print-ink");
+    let content = "/On gs BT /F1 9 Tf 0.6 0.4 0.4 1 k 20 150 Td (Small) Tj ET 0.9 0.8 0.7 0.9 k 10 10 100 100 re f";
+    let pdf = format!(
+        "%PDF-1.7
+1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
+2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Contents 4 0 R /Resources << /ExtGState << /On << /OP true >> >> /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> >> >> >> endobj
+4 0 obj << /Length {} >> stream
+{content}
+endstream endobj
+trailer << /Root 1 0 R >>
+%%EOF",
+        content.len()
+    );
+    std::fs::write(dir.join("ink.pdf"), pdf).unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "ink.pdf" }))["doc"].as_u64().unwrap();
+    let before = ok(&mut a, "doc_info", json!({ "doc": doc }));
+    let r = ok(&mut a, "print_readiness", json!({ "doc": doc }));
+    let findings = r["findings"].as_array().unwrap();
+    let find = |id: &str| findings.iter().find(|f| f["id"] == id).unwrap_or_else(|| panic!("{id} in {r}"));
+    let total = find("ink-total");
+    assert_eq!((total["severity"].as_str(), total["page"].as_u64()), (Some("warn"), Some(1)), "{r}");
+    assert!(total["message"].as_str().unwrap().contains("up to 330%"), "{r}");
+    assert!(find("ink-rich-black-text")["message"].as_str().unwrap().contains("1 time"), "{r}");
+    assert_eq!(find("ink-overprint")["page"].as_u64(), Some(1), "{r}");
+    assert!(r["text"].as_str().unwrap().contains("ink inside images, shadings, patterns and annotation appearances"), "{r}");
+    assert_eq!(ok(&mut a, "doc_info", json!({ "doc": doc })), before, "verification doesn't change the document");
+}
+
 #[test]
 fn exporting_to_word_html_and_rtf() {
     let dir = workdir("office");

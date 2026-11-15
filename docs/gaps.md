@@ -388,11 +388,14 @@ update the numbers.
 
 ### 18. Print production tools absent
 
-- **Missing:** Output Preview, separations, total area coverage, overprint preview, ink manager,
+- **Missing:** Output Preview, separations, overprint preview, ink manager,
   colour conversion, fix hairlines, flattener preview, colour management settings;
   print as image; PostScript output. Printer marks are in (Print production ▸ Add printer marks…).
   colour conversion, printer marks, flattener preview, colour management settings;
   print as image; PostScript output. Fix hairlines is in (Print production ▸ Fix hairlines…).
+  Total area coverage and the overprint, rich-black text and spot-colour notes are in as a first slice
+  (`print_readiness`, the ink findings): painted vector CMYK colours only, not those inside images,
+  shadings, patterns or annotation appearances, with no setting for the limit.
   Print with a comments summary is in as a first slice (Print ▸ Include a summary of the comments;
   `doc_print` `comment_summary`): comments-only summary pages for the printed pages follow the sheets, not yet
   in the preview, with no sort choice in the dialog, and not with Booklet, Poster, Label, a selected area, Print as
