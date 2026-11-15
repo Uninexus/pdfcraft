@@ -28,7 +28,7 @@ const MAX_COMPARE_BYTES: usize = 64 << 20;
 /// The stream entries that say how the data is stored, not what it is.
 const ENCODING: [&[u8]; 3] = [b"Length", b"Filter", b"DecodeParms"];
 /// The colorants of DeviceCMYK, which a DeviceN space may name without defining them.
-const PROCESS: [&[u8]; 4] = [b"Cyan", b"Magenta", b"Yellow", b"Black"];
+pub const PROCESS: [&[u8]; 4] = [b"Cyan", b"Magenta", b"Yellow", b"Black"];
 
 /// What the colour spaces of a document break of 6.2.4.4.
 #[derive(Debug, Default, PartialEq, Eq)]

@@ -8524,7 +8524,7 @@ evidence = [
     "crates/engine/src/printcheck.rs::a_colour_a_form_sets_is_counted_where_it_is_drawn_and_a_self_drawing_form_is_flagged",
     "crates/automation/tests/it/automation.rs::print_readiness_reports_ink_through_tools",
 ]
-notes = "First slice: print_readiness warns when a painted CMYK colour (k, K, or sc/scn in DeviceCMYK or a four-component ICCBased space, inside forms too) has more than 300% total ink, with the highest value found. Missing: ink inside images and shadings, a settable limit, a per-pixel coverage map, a separations preview."
+notes = "First slice: print_readiness warns when a painted CMYK colour (k, K, or sc/scn in DeviceCMYK or a four-component ICCBased space, inside forms too) has more than 300% total ink, with the highest value found. Missing: ink inside images, shadings, patterns and annotation appearances, a settable limit, a per-pixel coverage map, a separations preview. Invisible text (Tr 3) is ignored."
 
 [[feature]]
 id = "print.color-warnings"
@@ -8540,7 +8540,7 @@ evidence = [
     "crates/engine/src/printcheck.rs::overprint_and_spot_colours_are_noted",
     "crates/automation/tests/it/automation.rs::print_readiness_reports_ink_through_tools",
 ]
-notes = "First slice: print_readiness notes text shown in rich black (K 90% or more with other inks), pages that turn overprint on (a gs with OP or op true) and the spot colours selected (Separation, DeviceN). Missing: a warning by text size, overprint effects and previews, rich black in fills and strokes, a UI panel (the report is text and findings only)."
+notes = "First slice: print_readiness notes text shown in rich black (K 90% or more with other inks), pages that turn overprint on (a gs with OP or op true) and the spot colours selected (Separation, DeviceN). Spot colours are those selected with cs (process colorants, All and None are not spot colours; Indexed bases and patterns are not seen). Missing: a warning by text size, overprint effects and previews, rich black in fills and strokes, a UI panel (the report is text and findings only)."
 
 [[feature]]
 id = "print.object-inspector"

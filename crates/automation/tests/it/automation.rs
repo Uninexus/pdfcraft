@@ -10601,7 +10601,7 @@ trailer << /Root 1 0 R >>
     assert!(total["message"].as_str().unwrap().contains("up to 330%"), "{r}");
     assert!(find("ink-rich-black-text")["message"].as_str().unwrap().contains("1 time"), "{r}");
     assert_eq!(find("ink-overprint")["page"].as_u64(), Some(1), "{r}");
-    assert!(r["text"].as_str().unwrap().contains("ink inside images and shadings"), "{r}");
+    assert!(r["text"].as_str().unwrap().contains("ink inside images, shadings, patterns and annotation appearances"), "{r}");
     assert_eq!(ok(&mut a, "doc_info", json!({ "doc": doc })), before, "verification doesn't change the document");
 }
 

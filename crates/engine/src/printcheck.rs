@@ -23,6 +23,8 @@ const MIN_BLEED_MM: f64 = 2.0;
 /// Total ink (C + M + Y + K, in percent) above which a painted CMYK colour is reported. Press
 /// conditions run from about 240% (uncoated) to 340% (coated); 300% is the usual SWOP limit.
 const TAC_LIMIT_PERCENT: f64 = 300.0;
+/// Spot colour names a finding lists before saying how many more there are.
+const MAX_SPOT_LISTED: usize = 8;
 
 /// One thing a printer should see, without the file having been rewritten.
 #[derive(Clone, Debug, PartialEq)]
@@ -131,7 +133,9 @@ impl PrintReadiness {
                 out.push_str(&format!("- [{}] {}\n", finding.severity, finding.message));
             }
         }
-        out.push_str("Not checked: PDF/X, ink inside images and shadings, overprint effects, transparency flattening.\n");
+        out.push_str(
+            "Not checked: PDF/X, ink inside images, shadings, patterns and annotation appearances, overprint effects, transparency flattening.\n",
+        );
         out
     }
 }
@@ -257,13 +261,14 @@ fn inspect(doc: &Document) -> PrintReadiness {
 fn ink_findings(pages: &[ink::InkPage], findings: &mut Vec<Finding>) {
     let plural = |n: usize| if n == 1 { "" } else { "s" };
     let mut spot = std::collections::BTreeSet::new();
+    let mut capped = false;
     for page in pages {
         if page.over_limit > 0 {
             findings.push(Finding {
                 id: "ink-total",
                 severity: "warn",
                 message: format!(
-                    "Page {} paints {} object{} with more than {:.0}% total ink (up to {:.0}%). Press conditions usually allow 240% to 340%. Colours inside images and shadings were not measured.",
+                    "Page {} paints {} object{} with more than {:.0}% total ink (up to {:.0}%). Press conditions usually allow 240% to 340%. Colours inside images, shadings and patterns were not measured.",
                     page.page,
                     page.over_limit,
                     plural(page.over_limit),
@@ -298,18 +303,27 @@ fn ink_findings(pages: &[ink::InkPage], findings: &mut Vec<Finding>) {
             findings.push(Finding {
                 id: "ink-incomplete",
                 severity: "info",
-                message: format!("Page {}: some content was past what the ink check reads, so its colours may be missing.", page.page),
+                message: format!("Page {}: some content could not be read in full (damaged, over the read limit, or nested too deeply), so its colours may be missing.", page.page),
                 page: Some(page.page),
             });
         }
         spot.extend(page.spot.iter().cloned());
+        capped |= page.spot_capped;
     }
     if !spot.is_empty() {
         let names: Vec<String> = spot.into_iter().collect();
+        let shown = names.iter().take(MAX_SPOT_LISTED).cloned().collect::<Vec<_>>().join(", ");
+        let more = if capped {
+            ", and more".to_string()
+        } else if names.len() > MAX_SPOT_LISTED {
+            format!(", and {} more", names.len() - MAX_SPOT_LISTED)
+        } else {
+            String::new()
+        };
         findings.push(Finding {
             id: "ink-spot",
             severity: "info",
-            message: format!("Spot colour{} selected: {}. They print on their own plates unless converted.", plural(names.len()), names.join(", ")),
+            message: format!("Spot colour{} selected: {shown}{more}. They print on their own plates unless converted.", plural(names.len())),
             page: None,
         });
     }
@@ -579,7 +593,7 @@ mod tests {
         assert_eq!(first[0].severity, "warn");
         assert!(first[0].message.contains("2 objects") && first[0].message.contains("up to 330%"), "{}", first[0].message);
         assert!(ink_ids(&report, Some(2)).is_empty() && ink_ids(&report, Some(3)).is_empty(), "{:?}", report.findings);
-        assert!(report.text().contains("ink inside images and shadings"));
+        assert!(report.text().contains("ink inside images, shadings, patterns and annotation appearances"));
     }
 
     #[test]
@@ -643,5 +657,156 @@ mod tests {
         let report = inspect(&doc);
         assert!(report.findings.iter().any(|f| f.id == "ink-total" && f.page == Some(1)), "{:?}", report.findings);
         assert!(report.findings.iter().any(|f| f.id == "ink-incomplete" && f.page == Some(1)), "{:?}", report.findings);
+    }
+
+    #[test]
+    fn invisible_text_is_not_counted_and_the_stroking_modes_use_the_stroke_colour() {
+        let mut doc = Document::new_empty();
+        // Tr 3 is the OCR text layer of a scan: nothing is painted. Tr is saved by q and Q.
+        ink_page(&mut doc, Dict::new(), "BT 3 Tr 0.9 0.8 0.7 0.9 k (hidden) Tj ET");
+        ink_page(&mut doc, Dict::new(), "q 3 Tr Q BT 0.6 0.4 0.4 1 k (shown) Tj ET");
+        // Tr 1 strokes: the fill colour is not what is painted.
+        ink_page(&mut doc, Dict::new(), "BT 1 Tr 0 0 0 0 k 0.9 0.8 0.7 0.9 K (outlined) Tj ET");
+        ink_page(&mut doc, Dict::new(), "BT 7 Tr 0.9 0.8 0.7 0.9 k (clip only) Tj ET");
+        let report = inspect(&doc);
+        assert!(ink_ids(&report, Some(1)).is_empty(), "{:?}", report.findings);
+        assert_eq!(ink_ids(&report, Some(2)), vec!["ink-rich-black-text"], "{:?}", report.findings);
+        // The stroke colour is what is painted: 330% total, and rich black (K 90% with other inks).
+        assert_eq!(ink_ids(&report, Some(3)), vec!["ink-rich-black-text", "ink-total"], "{:?}", report.findings);
+        assert!(ink_ids(&report, Some(4)).is_empty(), "{:?}", report.findings);
+    }
+
+    fn device_n(names: Vec<Object>) -> Object {
+        Object::Array(vec![Object::name("DeviceN"), Object::Array(names), Object::name("DeviceCMYK"), Object::Dict(Dict::new())])
+    }
+
+    fn spaces_page(doc: &mut Document, spaces: Vec<(&str, Object)>, content: &str) {
+        let mut dict = Dict::new();
+        for (name, space) in spaces {
+            dict.set(name.as_bytes().to_vec(), space);
+        }
+        let mut res = Dict::new();
+        res.set(b"ColorSpace".to_vec(), Object::Dict(dict));
+        ink_page(doc, res, content);
+    }
+
+    #[test]
+    fn process_and_special_colorants_are_not_spot_colours() {
+        let mut doc = Document::new_empty();
+        let sep = |n: &str| Object::Array(vec![Object::name("Separation"), Object::name(n), Object::name("DeviceCMYK"), Object::Dict(Dict::new())]);
+        spaces_page(
+            &mut doc,
+            vec![
+                ("All", sep("All")),
+                ("None", sep("None")),
+                ("Process", device_n(["Cyan", "Magenta", "Yellow", "Black"].map(Object::name).to_vec())),
+                ("Mixed", device_n(["Cyan", "PANTONE 185 C", "None"].map(Object::name).to_vec())),
+            ],
+            "/All cs /None cs /Process cs /Mixed cs",
+        );
+        let report = inspect(&doc);
+        let spot: Vec<_> = report.findings.iter().filter(|f| f.id == "ink-spot").collect();
+        assert_eq!(spot.len(), 1, "{:?}", report.findings);
+        assert!(spot[0].message.contains("PANTONE 185 C") && !spot[0].message.contains("Cyan"), "{}", spot[0].message);
+        assert!(spot[0].message.starts_with("Spot colour selected:"), "{}", spot[0].message);
+    }
+
+    #[test]
+    fn a_huge_devicen_list_is_capped_in_the_report() {
+        let mut doc = Document::new_empty();
+        let names: Vec<Object> = (0..5_000).map(|i| Object::name(&format!("Spot{i:05}{}", "x".repeat(300)))).collect();
+        spaces_page(&mut doc, vec![("Many", device_n(names))], "/Many cs");
+        let report = inspect(&doc);
+        let spot = report.findings.iter().find(|f| f.id == "ink-spot").expect("a spot finding");
+        assert!(spot.message.len() < 1_500, "{} bytes", spot.message.len());
+        assert!(spot.message.contains(", and "), "{}", spot.message);
+    }
+
+    #[test]
+    fn an_icc_cmyk_space_starts_at_no_ink_and_reads_n_given_by_reference() {
+        let mut doc = Document::new_empty();
+        let n = doc.add(Object::Int(4));
+        let mut profile = Dict::new();
+        profile.set(b"N".to_vec(), Object::Ref(n));
+        let icc = doc.add(Object::Stream(Stream::from_raw(profile, vec![0; 8])));
+        let space = Object::Array(vec![Object::name("ICCBased"), Object::Ref(icc)]);
+        // No colour set yet: ICC CMYK starts at 0 0 0 0, so text in it is not rich black.
+        spaces_page(&mut doc, vec![("Icc", space.clone())], "/Icc cs BT (plain) Tj ET");
+        // A colour set with scn in the space is read.
+        spaces_page(&mut doc, vec![("Icc", space)], "/Icc cs 0.9 0.8 0.7 0.9 scn 0 0 10 10 re f");
+        let report = inspect(&doc);
+        assert!(ink_ids(&report, Some(1)).is_empty(), "{:?}", report.findings);
+        assert_eq!(ink_ids(&report, Some(2)), vec!["ink-total"], "{:?}", report.findings);
+    }
+
+    #[test]
+    fn forms_nested_too_deeply_are_flagged_and_do_not_overflow() {
+        let mut doc = Document::new_empty();
+        let mut form = Dict::new();
+        form.set(b"Subtype".to_vec(), Object::name("Form"));
+        form.set(b"BBox".to_vec(), Object::Array(vec![0.into(), 0.into(), 10.into(), 10.into()]));
+        let mut inner = doc.add(Object::Stream(Stream::from_raw(form.clone(), b"0.9 0.8 0.7 0.9 k 0 0 5 5 re f".to_vec())));
+        for _ in 0..20 {
+            let mut xs = Dict::new();
+            xs.set(b"X".to_vec(), Object::Ref(inner));
+            let mut res = Dict::new();
+            res.set(b"XObject".to_vec(), Object::Dict(xs));
+            let mut d = form.clone();
+            d.set(b"Resources".to_vec(), Object::Dict(res));
+            inner = doc.add(Object::Stream(Stream::from_raw(d, b"/X Do".to_vec())));
+        }
+        let mut xs = Dict::new();
+        xs.set(b"X".to_vec(), Object::Ref(inner));
+        let mut res = Dict::new();
+        res.set(b"XObject".to_vec(), Object::Dict(xs));
+        ink_page(&mut doc, res, "/X Do");
+        let report = inspect(&doc);
+        assert!(report.findings.iter().any(|f| f.id == "ink-incomplete" && f.page == Some(1)), "{:?}", report.findings);
+        assert!(!report.findings.iter().any(|f| f.id == "ink-total"), "the colour is past the depth limit: {:?}", report.findings);
+    }
+
+    /// A page drawing one form thousands of times, with a large XObject dictionary shared by form
+    /// and page, reads that dictionary once rather than once per drawing.
+    #[test]
+    fn many_form_drawings_with_a_big_resource_dictionary_stay_fast() {
+        let mut doc = Document::new_empty();
+        let mut xs = Dict::new();
+        for i in 0..3_000 {
+            xs.set(format!("Filler{i}").into_bytes(), Object::Int(i));
+        }
+        let mut form = Dict::new();
+        form.set(b"Subtype".to_vec(), Object::name("Form"));
+        form.set(b"BBox".to_vec(), Object::Array(vec![0.into(), 0.into(), 10.into(), 10.into()]));
+        let shared = doc.add(Object::Dict({
+            let mut r = Dict::new();
+            r.set(b"XObject".to_vec(), Object::Dict(xs.clone()));
+            r
+        }));
+        form.set(b"Resources".to_vec(), Object::Ref(shared));
+        let f = doc.add(Object::Stream(Stream::from_raw(form, b"0.9 0.8 0.7 0.9 k 0 0 5 5 re f".to_vec())));
+        xs.set(b"F".to_vec(), Object::Ref(f));
+        let mut res = Dict::new();
+        res.set(b"XObject".to_vec(), Object::Dict(xs));
+        let content = "/F Do ".repeat(20_000);
+        ink_page(&mut doc, res, &content);
+        let started = std::time::Instant::now();
+        let report = inspect(&doc);
+        assert!(started.elapsed() < std::time::Duration::from_secs(10), "{:?}", started.elapsed());
+        assert!(report.findings.iter().any(|f| f.id == "ink-total"), "{:?}", report.findings);
+    }
+
+    #[test]
+    fn q_nesting_past_the_cap_does_not_unbalance_the_pops() {
+        let mut doc = Document::new_empty();
+        // 300 q (44 past the cap), a colour, 300 Q: the colour is set inside the stack, so after
+        // the last Q nothing paints with it.
+        let content = format!("{} 0.9 0.8 0.7 0.9 k {} 10 10 5 5 re f", "q ".repeat(300), "Q ".repeat(300));
+        ink_page(&mut doc, Dict::new(), &content);
+        let report = inspect(&doc);
+        assert!(ink_ids(&report, Some(1)).is_empty(), "the colour was restored away: {:?}", report.findings);
+        let inside = format!("{} 0.9 0.8 0.7 0.9 k 10 10 5 5 re f {}", "q ".repeat(300), "Q ".repeat(300));
+        ink_page(&mut doc, Dict::new(), &inside);
+        let report = inspect(&doc);
+        assert_eq!(ink_ids(&report, Some(2)), vec!["ink-total"], "{:?}", report.findings);
     }
 }

@@ -28,6 +28,8 @@ mod header;
 pub mod icc;
 mod limits;
 mod spot;
+/// The colorants of DeviceCMYK: not spot colours, however a DeviceN space names them.
+pub use spot::PROCESS as PROCESS_COLORANTS;
 mod trailer;
 mod transparency;
 mod xmp;
