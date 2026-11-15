@@ -807,6 +807,13 @@ fn comment_summary_is_unavailable_for_a_document_that_withholds_copying() {
     });
     h.run_steps(4);
     assert!(h.state_mut().execute("print.dialog"));
+    // `print_now` returns early while the printer list or paper sizes are still loading, and a real
+    // print spooler (Windows) answers more slowly than a fixed number of steps, so wait for it.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while (h.state().print_draft.printers_loading || h.state().print_draft.papers_loading()) && std::time::Instant::now() < deadline {
+        h.run_steps(1);
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
     h.run_steps(3);
     assert!(h.get_by_label("Include a summary of the comments").accesskit_node().is_disabled());
     assert!(h.state().print_draft.comment_summary_blocked().is_some_and(|r| r.contains("copying")));
