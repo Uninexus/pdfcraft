@@ -103,3 +103,43 @@ fn form_preferences_share_highlight_fields_with_the_session() {
     assert!(a.session().field_highlight());
     assert!(matches!(a.call("form_preferences", &json!({ "highlight_fields": "yes" })), Err(ToolError::InvalidArgs(_))));
 }
+
+fn add_field(a: &mut Automation, doc: u64, name: &str, kind: &str) {
+    let (kind, multiline) = if kind == "multiline" { ("text", true) } else { (kind, false) };
+    tool(a, "form_add_field", json!({ "doc": doc, "page": 1, "type": kind, "name": name, "rect": [20, 20, 160, 40], "multiline": multiline }));
+}
+
+#[test]
+fn auto_complete_is_off_until_asked_for_and_remembers_only_plain_text_fields() {
+    let (mut a, doc) = setup("autocomplete");
+    for (name, kind) in [("city", "text"), ("when", "date"), ("sig", "signature"), ("agree", "checkbox"), ("notes", "multiline")] {
+        add_field(&mut a, doc, name, kind);
+    }
+    let off = tool(&mut a, "form_preferences", json!({}));
+    assert_eq!((off["auto_complete"].clone(), off["entry_count"].clone()), (json!("off"), json!(0)));
+
+    // Off: filling remembers nothing and nothing is offered.
+    tool(&mut a, "form_fill", json!({ "doc": doc, "values": { "city": "Maplewood" } }));
+    assert_eq!(tool(&mut a, "form_preferences", json!({ "suggest": "map" }))["suggestions"], json!([]));
+    assert_eq!(tool(&mut a, "form_preferences", json!({}))["entry_count"], 0);
+
+    tool(&mut a, "form_preferences", json!({ "auto_complete": "basic" }));
+    assert!(a.session().form_autocomplete());
+    tool(&mut a, "form_fill", json!({ "doc": doc, "values": { "city": "Maplewood", "when": "01/02/2003", "agree": true, "notes": "a long note" } }));
+    tool(&mut a, "form_fill", json!({ "doc": doc, "values": { "city": "Oakdale" } }));
+    let out = tool(&mut a, "form_preferences", json!({ "list_entries": true, "suggest": "MAP" }));
+    assert_eq!(out["entries"], json!(["Oakdale", "Maplewood"]), "newest first; the date, the check box and the multi-line field are not kept");
+    assert_eq!(out["suggestions"], json!(["Maplewood"]));
+    assert_eq!(out["entry_count"], 2);
+    assert!(tool(&mut a, "form_preferences", json!({}))["entries"].is_null(), "listed only on request");
+
+    assert_eq!(tool(&mut a, "form_preferences", json!({ "forget_entry": " Oakdale " }))["entry_count"], 1);
+    assert!(matches!(a.call("form_preferences", &json!({ "forget_entry": "Oakdale", "auto_complete": "off" })), Err(ToolError::InvalidArgs(_))));
+    assert!(a.session().form_autocomplete(), "a refused call changes nothing");
+    // Off again: what was remembered stays, but nothing is offered or added.
+    let out = tool(&mut a, "form_preferences", json!({ "auto_complete": "off", "suggest": "map" }));
+    assert_eq!((out["suggestions"].clone(), out["entry_count"].clone()), (json!([]), json!(1)));
+    assert_eq!(tool(&mut a, "form_preferences", json!({ "clear_entries": true }))["entry_count"], 0);
+    assert!(matches!(a.call("form_preferences", &json!({ "auto_complete": "advanced" })), Err(ToolError::InvalidArgs(_))));
+    assert!(matches!(a.call("form_preferences", &json!({ "clear_entries": "yes" })), Err(ToolError::InvalidArgs(_))));
+}

@@ -74,9 +74,85 @@ pub struct ChoiceList {
     pub placed: bool,
 }
 
+/// Auto-Complete's popup for the focused text field: which suggestion the arrow keys are on, the
+/// text it was dismissed (Escape) at, and where it was drawn.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct Suggest {
+    /// The field and widget this state is for, and the text it last saw: it starts over when the
+    /// focus moves to another field, and the highlight clears when the text changes.
+    owner: Option<(String, Option<ObjRef>, usize)>,
+    text: String,
+    pub selected: Option<usize>,
+    pub hidden_for: Option<String>,
+    pub rect: Option<egui::Rect>,
+}
+
+impl Suggest {
+    /// Keeps the state for the focused field only: another field or widget starts it over, and a
+    /// change of text drops the highlight.
+    fn follow(&mut self, focus: &Focus) {
+        let owner = (focus.name.clone(), focus.obj, focus.widget);
+        if self.owner.as_ref() != Some(&owner) {
+            *self = Suggest { owner: Some(owner), text: focus.text.clone(), ..Suggest::default() };
+        } else if self.text != focus.text {
+            self.text = focus.text.clone();
+            self.selected = None;
+        }
+    }
+}
+
+/// What the keys did to Auto-Complete's popup.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SuggestKey {
+    Down,
+    Up,
+}
+
+/// Where the arrow keys put the highlight among `n` suggestions: Down goes to the first and then
+/// on (stopping at the last), Up goes back and past the first to none, which is the typed text.
+fn move_selection(selected: Option<usize>, n: usize, key: SuggestKey) -> Option<usize> {
+    let last = n.checked_sub(1)?;
+    match (key, selected) {
+        (SuggestKey::Down, None) => Some(0),
+        (SuggestKey::Down, Some(i)) => Some(i.saturating_add(1).min(last)),
+        (SuggestKey::Up, Some(i)) if i > 0 => Some((i - 1).min(last)),
+        (SuggestKey::Up, _) => None,
+    }
+}
+
+/// The suggestion Auto-Complete offers to take, or none: Enter or Tab on the highlighted one, or a
+/// click (`clicked`). The arrows move the highlight and Escape hides the popup until the text
+/// changes; all of them are taken only while the popup shows, so the field keeps its own keys
+/// (Tab goes to the next field, Escape ends editing) otherwise.
+fn suggestion_keys(ctx: &egui::Context, keys: PageKeys, st: &mut Suggest, text: &str, n: usize) -> Option<usize> {
+    if n == 0 {
+        st.selected = None;
+        return None;
+    }
+    st.selected = st.selected.filter(|i| *i < n);
+    // Only the plain keys: Shift+Tab goes back a field and Shift+arrows select text.
+    if ctx.input(|i| !i.modifiers.is_none()) {
+        return None;
+    }
+    if keys.take(ctx, egui::Key::Escape) {
+        st.hidden_for = Some(text.to_owned());
+        st.selected = None;
+        return None;
+    }
+    if keys.take(ctx, egui::Key::ArrowDown) {
+        st.selected = move_selection(st.selected, n, SuggestKey::Down);
+    } else if keys.take(ctx, egui::Key::ArrowUp) {
+        st.selected = move_selection(st.selected, n, SuggestKey::Up);
+    }
+    let picked = st.selected?;
+    (keys.take(ctx, egui::Key::Enter) || keys.take(ctx, egui::Key::Tab)).then_some(picked)
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct FormView {
     pub focus: Option<Focus>,
+    /// Auto-Complete's popup for the focused text field.
+    pub(crate) suggest: Suggest,
     /// The draft whose edit is queued (`DocView::pending_edit`): if the field refuses the value,
     /// the editor reopens with it rather than losing the typing.
     pub(crate) committed: Option<Focus>,
@@ -1256,6 +1332,7 @@ pub(crate) fn overlay(
     primary_down: bool,
     text_box: Option<&form_appearance::TextBox>,
     today: (i64, u32, u32),
+    suggestions: &[String],
 ) -> Option<Edit> {
     let pressed = view.forms.pressed;
     if !primary_down {
@@ -1264,6 +1341,7 @@ pub(crate) fn overlay(
     let toggle = std::mem::take(&mut view.forms.toggle);
     view.forms.keys = None;
     let focus = view.forms.focus.clone()?;
+    view.forms.suggest.follow(&focus);
     let Some(f) = focused_field(&focus, form) else {
         view.forms.focus = None;
         return None;
@@ -1292,6 +1370,9 @@ pub(crate) fn overlay(
     match f.kind {
         FormFieldKind::Text if !read_only => {
             let multiline = f.has(field_flags::MULTILINE);
+            let offered = offered_suggestions(view, f, &focus.text, suggestions);
+            let accepted = take_suggestion(ctx, keys, view, f, &focus.text, offered);
+            let popup_rect = view.forms.suggest.rect;
             // Shown at once, like the paragraph editor: a fade-in shows the field's value through it.
             // Over the page, so only where the document shows: a field scrolled under the mode bar
             // or a side panel must leave them their pointer (#2755). It stays on its field, cut off
@@ -1342,6 +1423,12 @@ pub(crate) fn overlay(
                         te = te.layouter(&mut layouter);
                     }
                     let (r, laid_out) = show_field_editor(ui, te, rect, turned);
+                    if !offered.is_empty() {
+                        // While the popup shows, Escape and Tab (and the arrows) come to us instead
+                        // of making egui drop the field's focus first (taken in `take_suggestion`).
+                        let filter = egui::EventFilter { tab: true, horizontal_arrows: true, vertical_arrows: true, escape: true };
+                        ui.memory_mut(|m| m.set_focus_lock_filter(r.id, filter));
+                    }
                     // The form field's own logical name; not a visual/preordered label.
                     let r = r.accessible_name(f.name.clone());
                     let caret_placed = settle_text_editor(ui, fx, &r, primary_down, laid_out.clone(), text_box.zip(before), frame);
@@ -1357,6 +1444,12 @@ pub(crate) fn overlay(
                     } else if lost
                         && (!multiline || !enter)
                         && !fx.calendar_rect.is_some_and(|c| ui.input(|i| i.pointer.interact_pos().is_some_and(|p| c.contains(p))))
+                        && !popup_rect.is_some_and(|c| {
+                            let over = ui.input(|i| i.pointer.interact_pos().is_some_and(|p| c.contains(p)));
+                            // A press on a suggestion leaves the field open; it takes the keyboard back.
+                            fx.request_focus |= over;
+                            over
+                        })
                     {
                         if pressed {
                             // The field reopened with a refused value; keep it open and focused.
@@ -1367,6 +1460,8 @@ pub(crate) fn overlay(
                         }
                     }
                 });
+            let id = egui::Id::unique(("form-field", view.pane.key, &f.name, focus.widget));
+            show_suggestions(ctx, view, f, rect, offered, accepted, id);
             // Date fields: a calendar under the field (Acrobat's date picker).
             if let pdfcraft_engine::form_scripts::Format::Date(fmt) = &f.actions.format
                 && let Some(picked) = calendar(ctx, view, rect, fmt, today)
@@ -1467,6 +1562,81 @@ pub(crate) fn overlay(
         edit = tab_to_next_field(view, info, form, f, focus.widget, forward, edit);
     }
     edit.or_else(|| view.pending_edit.take())
+}
+
+/// Whether Auto-Complete works in `f`: a plain one-line text field ([`pdfcraft_engine::form_entries::rememberable`]
+/// refuses password, comb, multi-line, rich-text, read-only and formatted ones).
+pub(crate) fn autocompletes(f: &FormField) -> bool {
+    pdfcraft_engine::form_entries::rememberable(f)
+}
+
+/// What Auto-Complete offers for the focused text field's `typed` text: nothing for a field that is
+/// not a plain one-line field (the arrows are a multi-line field's own), or after Escape hid the
+/// popup at this text.
+fn offered_suggestions<'a>(view: &DocView, f: &FormField, typed: &str, suggestions: &'a [String]) -> &'a [String] {
+    if autocompletes(f) && view.forms.suggest.hidden_for.as_deref() != Some(typed) { suggestions } else { &[] }
+}
+
+/// Puts `text` in the focused field as the suggestion taken, cut to the field's limit, and hides
+/// the popup until the text changes.
+fn fill_suggestion(view: &mut DocView, f: &FormField, text: &str) {
+    if let Some(fx) = view.forms.focus.as_mut() {
+        fx.text = f.max_len.map_or_else(|| text.to_owned(), |max| text.chars().take(max).collect());
+        fx.request_focus = true;
+        view.forms.suggest.hidden_for = Some(fx.text.clone());
+    }
+}
+
+/// The keys of Auto-Complete's popup, before the field's editor sees them. Returns whether a
+/// suggestion was taken (and fills it in).
+fn take_suggestion(ctx: &egui::Context, keys: PageKeys, view: &mut DocView, f: &FormField, typed: &str, offered: &[String]) -> bool {
+    let Some(text) = suggestion_keys(ctx, keys, &mut view.forms.suggest, typed, offered.len()).and_then(|i| offered.get(i)) else {
+        return false;
+    };
+    fill_suggestion(view, f, text);
+    true
+}
+
+/// Draws Auto-Complete's popup and takes a click on it. After a suggestion was taken, by key
+/// (`by_key`) or by click, the caret goes to the end of the text in the editor `id`.
+fn show_suggestions(ctx: &egui::Context, view: &mut DocView, f: &FormField, rect: Rect, offered: &[String], by_key: bool, id: egui::Id) {
+    let mut taken = by_key;
+    if let Some(text) = suggestion_popup(ctx, view, rect, offered).and_then(|i| offered.get(i)) {
+        fill_suggestion(view, f, text);
+        taken = true;
+    }
+    if taken && let Some(mut st) = egui::TextEdit::load_state(ctx, id) {
+        let end = view.forms.focus.as_ref().map_or(0, |fx| fx.text.chars().count());
+        st.cursor.set_char_range(Some(egui::text::CCursorRange::one(egui::text::CCursor::new(end))));
+        st.store(ctx, id);
+    }
+}
+
+/// Auto-Complete's popup under the field: the suggestions, the one the arrows are on
+/// highlighted. Returns the one clicked.
+fn suggestion_popup(ctx: &egui::Context, view: &mut DocView, field: Rect, offered: &[String]) -> Option<usize> {
+    if offered.is_empty() || view.forms.focus.is_none() {
+        view.forms.suggest.rect = None;
+        return None;
+    }
+    let selected = view.forms.suggest.selected;
+    let mut clicked = None;
+    let area = egui::Area::new(egui::Id::unique(("form-suggestions", view.view_key())))
+        .order(egui::Order::Foreground)
+        .fixed_pos(field.left_bottom() + vec2(0.0, 2.0))
+        .show(ctx, |ui| {
+            egui::Frame::popup(ui.style()).show(ui, |ui| {
+                ui.set_min_width(field.width().max(120.0));
+                ui.set_max_width(field.width().max(320.0));
+                for (i, text) in offered.iter().enumerate() {
+                    if ui.selectable_label(selected == Some(i), text).clicked() {
+                        clicked = Some(i);
+                    }
+                }
+            });
+        });
+    view.forms.suggest.rect = Some(area.response.rect);
+    clicked
 }
 
 /// Where a drop-down's open list ([`choice_list`]) goes and what it lists.
@@ -1773,5 +1943,17 @@ mod tests {
         assert_eq!(TextFrame::new(field, 0, 180, 0).turn, 180);
         // Out-of-range input stays a quarter turn.
         assert_eq!(TextFrame::new(field, i64::MIN, u16::MAX, u16::MAX).turn % 90, 0);
+    }
+
+    #[test]
+    fn the_arrows_walk_the_suggestions_and_stop_at_the_ends() {
+        use super::{SuggestKey::*, move_selection};
+        assert_eq!(move_selection(None, 3, Down), Some(0));
+        assert_eq!(move_selection(Some(0), 3, Down), Some(1));
+        assert_eq!(move_selection(Some(2), 3, Down), Some(2));
+        assert_eq!(move_selection(Some(1), 3, Up), Some(0));
+        assert_eq!(move_selection(Some(0), 3, Up), None);
+        assert_eq!(move_selection(None, 3, Up), None);
+        assert_eq!(move_selection(Some(5), 0, Down), None, "no suggestions, nothing to highlight");
     }
 }

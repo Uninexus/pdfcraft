@@ -358,9 +358,11 @@ update the numbers.
 
 - **Missing:** the wider Acrobat JavaScript object model (annotations, layers, dialogs), document
   actions, the Actions tab triggers that run JavaScript, form submission, the debugger, barcode
-  fields, rich-text values; XFA flattening and complete dynamic-form fidelity.
+  fields, rich-text values; XFA flattening and complete dynamic-form fidelity. Auto-complete
+  from previous entries is basic only: no Advanced mode (Acrobat's second level), and nothing is
+  remembered from date, number or formatted fields.
 - **Evidence:** `form.js-host` partial, `form.document-actions`, `form.submit-form`,
-  `edit.action-javascript`, `form.js-debugger`, `form.xfa-flatten` planned; XFA layout, FormCalc
+  `edit.action-javascript`, `form.js-debugger`, `form.xfa-flatten` planned; `form.auto-complete` partial; XFA layout, FormCalc
   and data partial.
 - **Estimate:** 40–75 h. **Doc:** [pdf-spec-parity.md](pdf-spec-parity.md).
 
@@ -395,8 +397,9 @@ update the numbers.
 - **Missing:** most of Acrobat's twenty or so preference pages (General, Documents, Commenting, Forms, Identity,
   Signatures, Security, Measuring, Units and guides, Convert, …). Today: Interface language,
   Documents and view, Units and paper, Identity (name, email), Comment, Forms (highlight fields and
-  colour, field tooltips), Fill & Sign, JavaScript. Identity has no login name, title or
-  organization and Forms no auto-complete: nothing in PdfCraft reads them yet.
+  colour, field tooltips, Auto-Complete Off or Basic), Fill & Sign, JavaScript. Identity has no
+  login name, title or organization: nothing in PdfCraft reads them yet. Forms has no Advanced
+  auto-complete, no separate colour for required fields, spelling or calculation-order options.
 - **Estimate:** 15–25 h. **Doc:** [ui-parity.md](ui-parity.md).
 
 ### 20. Scanners, GPU page rendering, pen pressure, Read Out Loud

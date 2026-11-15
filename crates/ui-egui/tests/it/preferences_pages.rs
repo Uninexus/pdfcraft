@@ -184,3 +184,46 @@ fn corrupt_saved_form_preferences_and_control_values_are_refused() {
     assert!(!app.form_tooltips);
     assert!(app.set_option("form-tooltips", "maybe").is_err());
 }
+
+#[test]
+fn auto_complete_is_off_by_default_and_its_entries_survive_a_restart_only_when_sound() {
+    let mut app = PdfCraftApp::new();
+    assert!(!app.session.form_autocomplete(), "off until asked for");
+    app.set_option("form-autocomplete", "basic").unwrap();
+    assert!(app.session.form_autocomplete());
+    assert!(app.set_option("form-autocomplete", "advanced").is_err());
+    assert!(app.session.form_autocomplete(), "a refused value changes nothing");
+    app.session.set_form_entries(pdfcraft_engine::form_entries::FormEntries::restored(["Maple Street", "Oak Avenue"]));
+    let saved = app.persist();
+    let mut again = PdfCraftApp::new();
+    again.restore(&saved);
+    assert!(again.session.form_autocomplete());
+    assert_eq!(again.session.form_entries().entries(), ["Maple Street", "Oak Avenue"]);
+    assert_eq!(again.session.suggest_form_entries("ma"), ["Maple Street"]);
+    // Hostile or mistyped saved values give an empty list or keep the switch, never a crash.
+    let many = (0..5000).map(|i| format!("\"e{i}\"")).collect::<Vec<_>>().join(",");
+    for bad in [r#""text""#, "null", "7", r#"{"a":1}"#, r#"[1,null,["x"],"\u0000bad"]"#, &format!("[{many}]")] {
+        again.restore(&format!(r#"{{"form_entries": {bad}, "form_autocomplete": "yes"}}"#));
+        assert!(again.session.form_entries().len() <= pdfcraft_engine::form_entries::MAX_ENTRIES, "{bad:.40}");
+        assert!(again.session.form_autocomplete(), "a mistyped switch keeps the current one");
+    }
+    again.restore(r#"{"form_entries": []}"#);
+    assert!(again.session.form_entries().is_empty());
+}
+
+#[test]
+fn the_forms_page_turns_auto_complete_on_and_removes_remembered_entries() {
+    let mut h = preferences();
+    h.state_mut().session.set_form_entries(pdfcraft_engine::form_entries::FormEntries::restored(["Maple Street"]));
+    h.get_by_label("Forms");
+    h.get_by_label("Auto-Complete Basic").scroll_to_me();
+    h.run_steps(3);
+    assert!(!h.state().session.form_autocomplete());
+    h.get_by_label("Auto-Complete Basic").click();
+    h.run_steps(3);
+    assert!(h.state().session.form_autocomplete());
+    assert!(restarted(&h).session.form_autocomplete());
+    h.get_by_label("Remove all remembered entries").click();
+    h.run_steps(3);
+    assert!(h.state().session.form_entries().is_empty());
+}

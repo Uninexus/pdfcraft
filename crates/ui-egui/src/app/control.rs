@@ -413,6 +413,14 @@ impl PdfCraftApp {
                     _ => return Err("form-tooltips must be true or false".into()),
                 };
             }
+            // `--form-autocomplete off|basic`: Preferences ▸ Forms ▸ Auto-Complete.
+            ("form-autocomplete", _) => {
+                self.session.set_form_autocomplete(match value {
+                    "off" => false,
+                    "basic" => true,
+                    _ => return Err("form-autocomplete must be off or basic".into()),
+                });
+            }
             // `--field-highlight-color #RRGGBB`: what Highlight fields draws over fields.
             ("field-highlight-color", _) => {
                 let hex = value

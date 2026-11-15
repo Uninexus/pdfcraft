@@ -2619,3 +2619,187 @@ fn a_pointer_resting_on_a_list_the_keys_scroll_keeps_the_highlight_on_the_keys()
     h.run_steps(3);
     assert_eq!(value(&h, "country"), ["2900"], "the item End went to, not the one under the pointer");
 }
+
+fn two_text_fields() -> Harness<'static, PdfCraftApp> {
+    let mut h = harness();
+    for (name, y) in [("home_city", 40.0), ("work_city", 80.0)] {
+        h.state_mut().apply_edit(pdfcraft_engine::Edit::AddField {
+            page: 0,
+            rect: [50.0, y, 200.0, y + 20.0],
+            kind: pdfcraft_engine::NewField::Text { multiline: false },
+            name: Some(name.into()),
+        });
+    }
+    h.run_steps(4);
+    h
+}
+
+fn type_in_field(h: &mut Harness<'static, PdfCraftApp>, name: &str, text: &str) {
+    click_field(h, name, 0);
+    h.event(egui::Event::Text(text.into()));
+    h.run_steps(3);
+}
+
+fn seeded(on: bool) -> Harness<'static, PdfCraftApp> {
+    let mut h = two_text_fields();
+    h.state_mut().apply_edit(pdfcraft_engine::Edit::AddField {
+        page: 0,
+        rect: [50.0, 120.0, 200.0, 140.0],
+        kind: pdfcraft_engine::NewField::Text { multiline: false },
+        name: Some("secret".into()),
+    });
+    h.state_mut().apply_edit(pdfcraft_engine::Edit::SetFieldProps {
+        name: "secret".into(),
+        props: Box::new(pdfcraft_engine::FieldProps { flags: vec![(pdfcraft_engine::field_flags::PASSWORD, true)], ..Default::default() }),
+    });
+    h.run_steps(4);
+    // Seeded directly, so the preference can be off while there are entries to offer.
+    h.state_mut().session.set_form_entries(pdfcraft_engine::form_entries::FormEntries::restored(["Maplewood"]));
+    if on {
+        h.state_mut().set_option("form-autocomplete", "basic").unwrap();
+    }
+    h
+}
+
+fn draft(h: &Harness<'static, PdfCraftApp>) -> String {
+    h.state().views[0].forms.focus.as_ref().map(|f| f.text.clone()).unwrap_or_default()
+}
+
+#[test]
+fn auto_complete_offers_nothing_while_off_even_with_saved_entries() {
+    let mut h = seeded(false);
+    assert_eq!(h.state().session.form_entries().len(), 1);
+    type_in_field(&mut h, "work_city", "ma");
+    assert!(h.query_by_label("Maplewood").is_none(), "no popup while Auto-Complete is off");
+}
+
+#[test]
+fn auto_complete_remembers_on_leaving_a_field_and_offers_it_in_another() {
+    let mut h = two_text_fields();
+    h.state_mut().set_option("form-autocomplete", "basic").unwrap();
+    type_in_field(&mut h, "home_city", "Maplewood");
+    h.key_press(egui::Key::Enter);
+    h.run_steps(4);
+    assert_eq!(h.state().session.form_entries().entries(), ["Maplewood"]);
+    type_in_field(&mut h, "work_city", "ma");
+    h.get_by_label("Maplewood");
+    h.key_press(egui::Key::ArrowDown);
+    h.run_steps(2);
+    h.key_press(egui::Key::Enter);
+    h.run_steps(3);
+    assert!(h.query_by_label("Maplewood").is_none(), "the popup closes once a suggestion is taken");
+    h.key_press(egui::Key::Enter);
+    h.run_steps(4);
+    assert_eq!(value(&h, "work_city"), vec!["Maplewood".to_string()]);
+}
+
+#[test]
+fn escape_hides_the_popup_and_keeps_the_field_open() {
+    let mut h = seeded(true);
+    type_in_field(&mut h, "work_city", "ma");
+    h.get_by_label("Maplewood");
+    h.key_press(egui::Key::Escape);
+    h.run_steps(3);
+    assert!(h.query_by_label("Maplewood").is_none());
+    assert_eq!(focused(&h), Some(("work_city".into(), 0)), "that Escape was the popup's");
+    assert_eq!(draft(&h), "ma");
+}
+
+#[test]
+fn tab_takes_the_highlighted_suggestion_and_shift_tab_does_not() {
+    let mut h = seeded(true);
+    type_in_field(&mut h, "work_city", "ma");
+    h.key_press(egui::Key::ArrowDown);
+    h.run_steps(2);
+    h.key_press_modifiers(egui::Modifiers::SHIFT, egui::Key::Tab);
+    h.run_steps(3);
+    assert_ne!(focused(&h), Some(("work_city".into(), 0)), "Shift+Tab still goes back a field");
+    assert_ne!(value(&h, "work_city"), vec!["Maplewood".to_string()]);
+
+    let mut h = seeded(true);
+    type_in_field(&mut h, "work_city", "ma");
+    h.key_press(egui::Key::ArrowDown);
+    h.run_steps(2);
+    h.key_press(egui::Key::Tab);
+    h.run_steps(3);
+    assert_eq!(focused(&h), Some(("work_city".into(), 0)), "Tab took the suggestion and stayed");
+    assert_eq!(draft(&h), "Maplewood");
+}
+
+#[test]
+fn enter_with_nothing_highlighted_commits_the_typed_text() {
+    let mut h = seeded(true);
+    type_in_field(&mut h, "work_city", "ma");
+    h.get_by_label("Maplewood");
+    h.key_press(egui::Key::Enter);
+    h.run_steps(4);
+    assert_eq!(value(&h, "work_city"), vec!["ma".to_string()]);
+}
+
+#[test]
+fn the_popup_state_does_not_follow_the_focus_to_another_field() {
+    // A highlight left in one field must not make Enter take a suggestion in the next.
+    let mut h = seeded(true);
+    type_in_field(&mut h, "home_city", "ma");
+    h.key_press(egui::Key::ArrowDown);
+    h.run_steps(2);
+    click_field(&mut h, "work_city", 0);
+    h.event(egui::Event::Text("m".into()));
+    h.run_steps(3);
+    h.key_press(egui::Key::Enter);
+    h.run_steps(4);
+    assert_eq!(value(&h, "work_city"), vec!["m".to_string()]);
+    // Escape in one field does not hide the popup in another that has the same text.
+    let mut h = seeded(true);
+    type_in_field(&mut h, "home_city", "ma");
+    h.key_press(egui::Key::Escape);
+    h.run_steps(3);
+    assert!(h.query_by_label("Maplewood").is_none());
+    type_in_field(&mut h, "work_city", "ma");
+    h.get_by_label("Maplewood");
+}
+
+#[test]
+fn a_password_field_shows_no_popup_and_a_check_box_is_never_remembered() {
+    let mut h = seeded(true);
+    type_in_field(&mut h, "secret", "ma");
+    assert!(h.query_by_label("Maplewood").is_none(), "no suggestions into a password field");
+    h.state_mut().apply_edit(pdfcraft_engine::Edit::AddField {
+        page: 0,
+        rect: [50.0, 160.0, 70.0, 180.0],
+        kind: pdfcraft_engine::NewField::CheckBox,
+        name: Some("agree".into()),
+    });
+    h.run_steps(3);
+    let s = h.state_mut();
+    let id = s.views[0].id;
+    let field = |name: &str| s.session.get(id).unwrap().form.iter().find(|f| f.name == name).unwrap().clone();
+    let (check, password, plain) = (field("agree"), field("secret"), field("home_city"));
+    assert!(!s.session.remember_form_entry(&check, "Off") && !s.session.remember_form_entry(&password, "hunter2"));
+    assert!(s.session.remember_form_entry(&plain, "Oakdale"), "a plain text field is");
+    assert_eq!(s.session.form_entries().entries(), ["Oakdale", "Maplewood"]);
+}
+
+#[test]
+fn a_clicked_suggestion_is_taken_with_the_caret_at_its_end() {
+    let mut h = seeded(true);
+    type_in_field(&mut h, "work_city", "ma");
+    h.get_by_label("Maplewood").click();
+    h.run_steps(4);
+    assert_eq!(draft(&h), "Maplewood");
+    assert_eq!(focused(&h), Some(("work_city".into(), 0)), "the field stays open");
+    h.event(egui::Event::Text("!".into()));
+    h.run_steps(3);
+    assert_eq!(draft(&h), "Maplewood!", "typing goes on from the end");
+}
+
+#[test]
+fn tab_with_nothing_highlighted_still_commits_and_moves_on() {
+    let mut h = seeded(true);
+    type_in_field(&mut h, "home_city", "ma");
+    h.get_by_label("Maplewood");
+    h.key_press(egui::Key::Tab);
+    h.run_steps(4);
+    assert_eq!(value(&h, "home_city"), vec!["ma".to_string()]);
+    assert_eq!(focused(&h), Some(("work_city".into(), 0)));
+}

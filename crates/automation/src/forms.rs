@@ -432,6 +432,20 @@ impl Automation {
         }
         let edit = if edits.len() == 1 { edits.remove(0) } else { Edit::Batch { label: "Fill in form".into(), edits } };
         let mut out = self.apply(a, edit)?;
+        // With Auto-Complete on, what was filled in is remembered as typing it would be: the value
+        // the field now holds (after its own limits), for plain text fields only.
+        if self.session.form_autocomplete() {
+            let stored: Vec<(pdfcraft_engine::FormField, String)> = self
+                .doc(a)?
+                .form
+                .iter()
+                .filter(|f| values.get(&f.name).is_some_and(Value::is_string))
+                .filter_map(|f| Some((f.clone(), f.value.first()?.clone())))
+                .collect();
+            for (field, text) in &stored {
+                self.session.remember_form_entry(field, text);
+            }
+        }
         out["filled"] = json!(values.len());
         // A value the box cuts off at a fixed font size is saved whole but shows only in part:
         // said, not silent (#4018).
