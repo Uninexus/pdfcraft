@@ -3327,10 +3327,12 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     let (single_paging, edge_turned) = single_page_paging(ui, view, &PagingCx { row: &row, rects: &rects, avail, middle_gesture, unobstructed });
     let now = ui.input(|i| i.time);
     let animates = app.animation_effects.animates(app.motion.reduced);
-    let wheel_enabled = navigation_enabled && unobstructed && !middle_gesture;
+    // The wheel works in a visible window that another application has focus over (Windows'
+    // "Scroll inactive windows"), like wheel zoom above; keys and the other gestures still need focus.
+    let wheel_enabled = zoom_enabled && unobstructed && !middle_gesture;
     let Wheel { precise_scroll, line_base, coarse_scroll, has_page, paging_owns_vertical } =
         read_wheel(ui, view, avail, single_paging, edge_turned, wheel_enabled, animates);
-    let may_glide = !paging_owns_vertical && !middle_gesture && navigation_enabled && unobstructed && animates;
+    let may_glide = !paging_owns_vertical && !middle_gesture && zoom_enabled && unobstructed && animates;
     let wheel_scrolled = precise_scroll != Vec2::ZERO || line_base != Vec2::ZERO || coarse_scroll != Vec2::ZERO || has_page;
     let motion = GlideCx { now, may_glide, key_scroll, key_side, auto_delta, zoom_delta, edge_delta, wheel_scrolled };
     let glide = step_glide(ui, view, avail, &motion);

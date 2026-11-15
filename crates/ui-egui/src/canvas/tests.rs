@@ -2218,6 +2218,46 @@ fn ctrl_wheel_zooms_an_unfocused_window() {
     assert!(h.state().views[0].zoom > before, "Ctrl+wheel zooms without window focus");
 }
 
+/// Plain wheel scrolling works in a visible window that another application has focus over:
+/// Windows' "Scroll inactive windows" setting sends the wheel to the window under the pointer
+/// (#7120, #7421, #7482).
+#[test]
+fn plain_wheel_scrolls_an_unfocused_window() {
+    let mut h = egui_kittest::Harness::builder().with_size(vec2(1400.0, 900.0)).build_eframe(|_cc| {
+        let mut app = PdfCraftApp::new();
+        let bytes = app.session.create_blank(300.0, 400.0, 6).unwrap();
+        app.open_bytes("blank.pdf", None, bytes.as_ref().clone()).unwrap();
+        app
+    });
+    h.run_steps(3);
+    let center = h.state().views[0].viewport_rect().center();
+    h.hover_at(center);
+    h.input_mut().focused = false;
+    h.run_steps(2);
+    assert_eq!(h.state().views[0].current, 0);
+    let wheel = |dy: f32| egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Line,
+        delta: vec2(0.0, dy),
+        phase: egui::TouchPhase::Move,
+        modifiers: egui::Modifiers::NONE,
+        source: egui::MouseWheelSource::Unknown,
+    };
+    // The palette still blocks it.
+    h.state_mut().palette_open = true;
+    for _ in 0..40 {
+        h.event(wheel(-3.0));
+        h.run_steps(2);
+    }
+    assert_eq!(h.state().views[0].current, 0, "the palette still blocks the wheel");
+    h.state_mut().palette_open = false;
+    h.run_steps(2);
+    for _ in 0..40 {
+        h.event(wheel(-3.0));
+        h.run_steps(2);
+    }
+    assert!(h.state().views[0].current > 0, "the wheel scrolls without window focus (page {})", h.state().views[0].current);
+}
+
 #[test]
 fn virtualized_organizer_keeps_insert_gaps_at_document_positions() {
     use egui_kittest::kittest::Queryable;
