@@ -9872,7 +9872,7 @@ status = "partial"
 commands = ["ai.ask"]
 tools = ["ai_ask"]
 evidence = ["crates/automation/tests/it/ai.rs::ask_sends_the_page_text_and_returns_the_answer"]
-notes = "File > Ask AI Assistant… and ai_ask answer a question from the page text; the model is asked to cite pages like (p. 3). Missing: clickable citations, conversation history."
+notes = "File > Ask AI Assistant… and ai_ask answer a question from the page text; the model is asked to cite pages like (p. 3), and those references in the answer are clickable and jump to the page (v0.21.6). Missing: conversation history."
 
 [[feature]]
 id = "misc.ai-conversational-edit"
