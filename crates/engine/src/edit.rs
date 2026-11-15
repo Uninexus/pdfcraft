@@ -442,6 +442,21 @@ pub enum Edit {
         name: String,
         script: Option<String>,
     },
+    /// Edit all JavaScripts: replace the source of the JavaScript at `id` (an id from
+    /// [`Document::list_javascripts`](crate::Document::list_javascripts)) with `code`. `expect` is
+    /// that script's `fingerprint` from the list; if the script at `id` is another one now, the
+    /// edit is refused. Nothing is run.
+    SetJavaScript {
+        id: String,
+        expect: String,
+        code: String,
+    },
+    /// Edit all JavaScripts: remove the JavaScript at `id` (`expect` as above); an action
+    /// chained after it stays.
+    RemoveJavaScript {
+        id: String,
+        expect: String,
+    },
     /// Field Properties ▸ a custom script: set or remove field `name`'s JavaScript for `event`
     /// (keystroke, format, validate, calculate or mouse_up).
     SetFieldScript {

@@ -22,6 +22,7 @@ pub mod appearance;
 mod author;
 mod calc_order;
 pub mod detect;
+mod js_inventory;
 mod scripting;
 pub mod table;
 pub use actions::{FieldAction, Trigger, field_action_chains, field_actions, set_field_actions, widget_scripts};
@@ -30,6 +31,9 @@ pub use author::{
     delete_field_object, delete_widget, duplicate_field, look, redraw_field, redraw_fields, set_button_icon, set_button_icon_target, set_props,
 };
 pub use calc_order::{CalculatedField, CalculationIssue, CalculationOrder, calculation_order, set_calculation_order};
+pub use js_inventory::{
+    MAX_SCRIPT_LEN, MAX_SCRIPTS, MAX_TOTAL_CODE, ScriptEntry, ScriptInventory, ScriptKind, javascripts, remove_javascript, set_javascript,
+};
 pub use scripting::{
     DocumentTrigger, FieldChange, FieldEvent, NoScripts, PageEvent, PageScript, ScriptResult, Scripts, apply_script_changes, document_action_scripts,
     document_scripts, document_scripts_named, page_scripts, set_document_script, set_field_script,

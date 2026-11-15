@@ -178,6 +178,58 @@ impl Automation {
         Ok(with_warnings(self.js_document_scripts(a)?, warnings))
     }
 
+    /// `doc_javascripts`: every JavaScript in the document (document scripts, the open action,
+    /// document actions, field, link, annotation, page and bookmark actions), with an id to
+    /// edit it by. Reads only; nothing is run. `kind` limits the list.
+    pub(crate) fn doc_javascripts(&self, a: &Args) -> Result<Value> {
+        use pdfcraft_engine::JavaScriptKind as ScriptKind;
+        let kind = a
+            .opt_str("kind")?
+            .map(|k| {
+                ScriptKind::from_id(k).ok_or_else(|| {
+                    let all: Vec<&str> = ScriptKind::ALL.iter().map(|k| k.id()).collect();
+                    ToolError::InvalidArgs(format!("kind must be one of {}", all.join(", ")))
+                })
+            })
+            .transpose()?;
+        let inv = self.doc(a)?.list_javascripts();
+        let scripts: Vec<Value> = inv
+            .entries
+            .iter()
+            .filter(|e| kind.is_none_or(|k| e.kind == k))
+            .map(|e| {
+                json!({ "id": e.id, "kind": e.kind.id(), "trigger": e.trigger, "field": e.field, "page": e.page, "name": e.name,
+                    "code": e.code, "truncated": e.truncated, "fingerprint": e.fingerprint })
+            })
+            .collect();
+        Ok(
+            json!({ "count": scripts.len(), "scripts": scripts, "capped": inv.capped, "truncated_count": inv.truncated, "max_scripts": pdfcraft_engine::MAX_JAVASCRIPTS,
+            "max_script_bytes": pdfcraft_engine::MAX_JAVASCRIPT_LEN, "max_total_code_bytes": pdfcraft_engine::MAX_JAVASCRIPT_TOTAL }),
+        )
+    }
+
+    /// `doc_javascript_edit`: replace (`action` "set", with `code`) or remove (`action` "remove")
+    /// the JavaScript with `id`, as one undoable edit; nothing is run. Returns the document's
+    /// scripts afterwards, whose ids may have changed.
+    pub(crate) fn doc_javascript_edit(&mut self, a: &Args) -> Result<Value> {
+        let id_text = a.str("id")?.to_string();
+        let expect = a.str("expect")?.to_string();
+        let edit = match a.str("action")? {
+            "set" => pdfcraft_engine::Edit::SetJavaScript { id: id_text, expect, code: a.str("code")?.to_string() },
+            "remove" => {
+                if a.get("code").is_some() {
+                    return Err(ToolError::InvalidArgs("code is only for action set".into()));
+                }
+                pdfcraft_engine::Edit::RemoveJavaScript { id: id_text, expect }
+            }
+            _ => return Err(ToolError::InvalidArgs("action must be set or remove".into())),
+        };
+        let id = self.doc(a)?.id;
+        self.apply_with_warnings(id, edit)?;
+        let doc = json!({ "doc": a.get("doc").cloned().unwrap_or(Value::Null) });
+        self.doc_javascripts(&Args(&doc))
+    }
+
     /// `form_set_script`: set field `field`'s JavaScript for `event` to `script`, or remove it when
     /// `script` is left out, as one undoable edit; returns the console output and errors.
     pub(crate) fn form_set_script(&mut self, a: &Args) -> Result<Value> {

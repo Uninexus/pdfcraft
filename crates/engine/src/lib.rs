@@ -136,6 +136,10 @@ pub use pdfcraft_annot::{
 };
 pub use pdfcraft_annot::{MAX_MODEL_BYTES as MAX_3D_MODEL_BYTES, ModelFormat as Model3dFormat};
 pub use pdfcraft_forms::detect;
+pub use pdfcraft_forms::{
+    MAX_SCRIPT_LEN as MAX_JAVASCRIPT_LEN, MAX_SCRIPTS as MAX_JAVASCRIPTS, MAX_TOTAL_CODE as MAX_JAVASCRIPT_TOTAL, ScriptEntry as JavaScriptEntry,
+    ScriptInventory as JavaScriptInventory, ScriptKind as JavaScriptKind,
+};
 pub use pdfcraft_optimize as optimize;
 pub use pdfcraft_preflight as pdfa;
 pub use pdfcraft_print as print;
@@ -207,6 +211,8 @@ pub const MAX_STAMP_LINE: usize = 200;
 
 #[cfg(test)]
 mod document_actions_tests;
+#[cfg(test)]
+mod edit_all_javascripts_tests;
 #[cfg(test)]
 mod link_javascript_tests;
 #[cfg(test)]

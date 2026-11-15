@@ -859,6 +859,8 @@ impl Automation {
             "js_advance" => self.js_advance(&a)?,
             "js_document_scripts" => self.js_document_scripts(&a)?,
             "js_set_document_script" => self.js_set_document_script(&a)?,
+            "doc_javascripts" => self.doc_javascripts(&a)?,
+            "doc_javascript_edit" => self.doc_javascript_edit(&a)?,
             "js_enabled" => self.js_enabled(&a)?,
             "identity" => self.identity(&a)?,
             "form_preferences" => self.form_preferences(&a)?,
