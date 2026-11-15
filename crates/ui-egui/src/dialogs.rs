@@ -125,6 +125,9 @@ fn dialogs(app: &mut PdfCraftApp, ctx: &egui::Context) {
     if app.dialog != Some(Dialog::FieldTable) {
         app.field_table_draft = None;
     }
+    if app.dialog != Some(Dialog::PrintReadiness) {
+        app.readiness_report = None;
+    }
     if !matches!(app.dialog, Some(Dialog::Properties(_))) {
         app.discard_properties();
     }

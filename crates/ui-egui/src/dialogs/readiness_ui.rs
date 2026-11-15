@@ -1,12 +1,17 @@
 //! Print production ▸ Print readiness: what a printer would look at, measured and reported, with
-//! nothing changed (the same report as the `print_readiness` tool): image resolution where each
-//! image is drawn, bleed, the output intent, fonts that aren't embedded, the PDF/A result, and
-//! ink (total coverage, rich black text, overprint, spot colours).
+//! nothing changed (the same report as the `print_readiness` tool): the findings, then what was
+//! measured: the output intent, page boxes and bleed, image resolution where each image is drawn,
+//! fonts that aren't embedded and the PDF/A-2b result. The measuring runs on the UI thread, as
+//! the PDF/A check does.
 
-use pdfcraft_engine::printcheck::PrintReadiness;
+use pdfcraft_engine::printcheck::{NOT_CHECKED, PrintReadiness};
 
 use crate::theme::{self, Tokens};
 use crate::{PdfCraftApp, widgets};
+
+/// Detail lines shown: a document with thousands of PDF/A problems lists the first ones here and
+/// the rest in Copy report.
+const MAX_DETAIL_LINES: usize = 200;
 
 impl PdfCraftApp {
     /// Measure the active document and open the report. Nothing is edited.
@@ -31,24 +36,34 @@ pub(crate) fn body(ui: &mut egui::Ui, app: &mut PdfCraftApp, t: &Tokens) -> bool
     ui.label(egui::RichText::new(tl!("Print readiness")).font(theme::semibold(18.0)));
     ui.label(egui::RichText::new(tl!("Measures what a printer looks at. The document is not changed.")).small().color(t.text_muted));
     ui.add_space(8.0);
-    let Some(report) = app.readiness_report.clone() else {
-        ui.label(tl!("There is no report to show."));
-        return widgets::pill_button(ui, tl!("Close"), true).clicked();
-    };
-    findings(ui, &report, t);
-    ui.add_space(12.0);
+    let mut copied = false;
     let mut close = false;
-    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-        close = widgets::pill_button(ui, tl!("Close"), true).clicked();
-        if widgets::pill_button(ui, tl!("Copy report"), false).clicked() {
-            ui.ctx().copy_text(report.text());
+    match &app.readiness_report {
+        None => {
+            ui.label(tl!("There is no report to show."));
+            close = widgets::pill_button(ui, tl!("Close"), true).clicked();
         }
-    });
+        Some(report) => {
+            report_body(ui, report, t);
+            ui.add_space(12.0);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                close = widgets::pill_button(ui, tl!("Close"), true).clicked();
+                if widgets::pill_button(ui, tl!("Copy report"), false).clicked() {
+                    ui.ctx().copy_text(report.text());
+                    copied = true;
+                }
+            });
+        }
+    }
+    if copied {
+        app.notify_tr("Report copied");
+    }
     close
 }
 
-fn findings(ui: &mut egui::Ui, report: &PrintReadiness, t: &Tokens) {
+fn report_body(ui: &mut egui::Ui, report: &PrintReadiness, t: &Tokens) {
     egui::ScrollArea::vertical().max_height(420.0).auto_shrink([false, true]).show(ui, |ui| {
+        widgets::section_title(ui, tl!("Findings"));
         if report.findings.is_empty() {
             ui.label(tl!("No stop for image resolution, bleed or ink."));
         }
@@ -63,11 +78,19 @@ fn findings(ui: &mut egui::Ui, report: &PrintReadiness, t: &Tokens) {
                 ui.label(&finding.message);
             });
         }
+        widgets::section_title(ui, tl!("Measured"));
+        let details = report.details();
+        let lines: Vec<&str> = details.lines().collect();
+        for line in lines.iter().take(MAX_DETAIL_LINES) {
+            ui.label(egui::RichText::new(*line).small());
+        }
+        if lines.len() > MAX_DETAIL_LINES {
+            let more =
+                crate::i18n::fmt(tl!("… and {n} more lines (Copy report has them all)"), &[("n", &(lines.len() - MAX_DETAIL_LINES).to_string())]);
+            ui.label(egui::RichText::new(more).small().color(t.text_muted));
+        }
         ui.add_space(8.0);
-        ui.label(
-            egui::RichText::new(tl!("Not checked: PDF/X, ink inside images and shadings, overprint effects, transparency flattening."))
-                .small()
-                .color(t.text_muted),
-        );
+        // The engine's own sentence, the one the text report ends with.
+        ui.label(egui::RichText::new(NOT_CHECKED).small().color(t.text_muted));
     });
 }

@@ -45,11 +45,58 @@ fn the_report_lists_the_ink_findings_and_changes_nothing() {
     assert_eq!(h.state().session.get(id).unwrap().can_undo(), None);
 }
 
+/// A page with a TrimBox and a bleed past it, and nothing drawn: nothing for the report to find.
+fn trimmed() -> Vec<u8> {
+    let mut doc = pdfcraft_cos::Document::open(std::sync::Arc::new(include_bytes!("../data/form.pdf").to_vec())).unwrap();
+    for page in pdfcraft_model::pages(&doc) {
+        let [x0, y0, x1, y1] = page.crop(&doc);
+        doc.update_dict(page.obj, |d| {
+            let rect = |n: f64| pdfcraft_cos::Object::Array(vec![(x0 + n).into(), (y0 + n).into(), (x1 - n).into(), (y1 - n).into()]);
+            d.set(b"TrimBox".to_vec(), rect(18.0));
+            d.set(b"BleedBox".to_vec(), rect(0.0));
+        })
+        .unwrap();
+    }
+    pdfcraft_cos::write_full(&doc, &Default::default()).unwrap()
+}
+
 #[test]
-fn a_document_with_nothing_to_report_says_so() {
-    let mut h = harness(include_bytes!("../data/form.pdf").to_vec());
+fn a_document_with_nothing_to_report_says_so_and_still_shows_what_was_measured() {
+    let mut h = harness(trimmed());
     assert!(h.state_mut().execute("prepress.readiness"));
     h.run_steps(3);
     assert_eq!(h.state().dialog, Some(Dialog::PrintReadiness));
-    assert!(h.state().readiness_report.as_ref().is_some_and(|r| !r.findings.iter().any(|f| f.id.starts_with("ink-"))));
+    assert!(h.state().readiness_report.as_ref().is_some_and(|r| r.findings.is_empty()), "{:?}", h.state().readiness_report);
+    h.get_by_label("No stop for image resolution, bleed or ink.");
+    // What was measured is on screen too: the output intent and the page boxes, and what isn't checked.
+    h.get_by_label_contains("Output intent");
+    h.get_by_label_contains("Page 1: media");
+    h.get_by_label_contains("annotation appearances");
+}
+
+#[test]
+fn the_dialog_shows_fonts_and_pdfa_results_and_clears_its_report_when_closed() {
+    let mut h = harness(include_bytes!("../data/form.pdf").to_vec());
+    assert!(h.state_mut().execute("prepress.readiness"));
+    h.run_steps(3);
+    let report = h.state().readiness_report.clone().unwrap();
+    // The PDF/A-2b result is a line of the report, shown whether or not it found a problem.
+    h.get_by_label_contains("PDF/A-2b");
+    assert!(report.details().contains("PDF/A-2b"));
+    h.get_by_label("Close").click();
+    h.run_steps(2);
+    assert_eq!(h.state().dialog, None);
+    assert!(h.state().readiness_report.is_none(), "the report is dropped with the dialog");
+}
+
+#[test]
+fn print_readiness_needs_a_document() {
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(|_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app
+    });
+    h.run_steps(3);
+    assert!(!h.state_mut().execute("prepress.readiness"), "disabled without a document");
+    assert_eq!(h.state().dialog, None);
 }
