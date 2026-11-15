@@ -98,7 +98,23 @@ pub fn comment_kind(a: &pdfcraft_render::Annotation) -> &str {
 /// "Page N" heading when sorted by page. Checkmarks and status replies are left out, as are
 /// pop-ups; the number is the comment's position on its page.
 pub fn comment_summary(name: &str, all: &[pdfcraft_render::Annotation], sort: SummarySort) -> String {
+    comment_summary_pages(name, all, sort, None)
+}
+
+/// [`comment_summary`] of the comments on `pages` (0-based) only, with the numbers they have on
+/// the whole document; `None` takes every page. Print's "include a summary of the comments" uses
+/// it so the summary covers what is printed.
+pub fn comment_summary_pages(name: &str, all: &[pdfcraft_render::Annotation], sort: SummarySort, pages: Option<&[usize]>) -> String {
     use std::fmt::Write;
+    let kept: Vec<pdfcraft_render::Annotation>;
+    let all = match pages {
+        Some(pages) => {
+            let wanted: std::collections::HashSet<usize> = pages.iter().copied().collect();
+            kept = all.iter().filter(|a| wanted.contains(&a.page)).cloned().collect();
+            &kept[..]
+        }
+        None => all,
+    };
     let top: Vec<&pdfcraft_render::Annotation> = all.iter().filter(|a| a.is_comment()).collect();
     // Each reply under the annotation its `/IRT` points at, in document order, gathered once.
     type Children<'a> = std::collections::HashMap<(usize, usize), Vec<&'a pdfcraft_render::Annotation>>;

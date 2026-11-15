@@ -156,7 +156,7 @@ pub use pdfcraft_xfdf::{Outline as CommentOutline, comment_count, comment_outlin
 use bookmarks::outline_rows;
 pub use bookmarks::{BookmarkPage, BookmarkRow};
 use comments::comment_list;
-pub use comments::{SummarySort, comment_kind, comment_summary, comment_type_name};
+pub use comments::{SummarySort, comment_kind, comment_summary, comment_summary_pages, comment_type_name};
 #[cfg(test)]
 use document::page_runs;
 pub use document::{Document, EditNotice, TextNotice, display_bytes_for, render_password_for};
@@ -172,7 +172,7 @@ pub use pictures::{MarkFile, image_dimensions};
 use pictures::{embed_image, fit_picture, mark_source, model_poster};
 use protection::unrestricted;
 pub use protection::{Changes, Printing, Protection, SecuritySummary};
-pub use session::{INSERT_FROM_CLIPBOARD, InsertPlan, Session};
+pub use session::{CommentSummary, INSERT_FROM_CLIPBOARD, InsertPlan, Session};
 pub use sources::{CombineSource, Combined, OfficeBatch, OfficeLocator, OfficeRunner, combine_source_check, office_to_pdf, source_page_count};
 use sources::{open_source, open_source_with};
 #[cfg(test)]

@@ -834,6 +834,8 @@ pub fn tools() -> Vec<ToolDef> {
                 "cut_marks": { "type": "boolean" },
                 "orientation": { "type": "string", "enum": ["auto", "portrait", "landscape"] },
                 "comments_forms": { "type": "string", "enum": ["document", "document-and-markups", "document-and-stamps", "form-fields-only"] },
+                "comment_summary": { "type": "boolean", "description": "Include a summary of the comments (Acrobat's Print option; default false): summary pages, as Summarize Comments writes them but only for comments on the printed pages (pages, subset and reverse decide which), follow the document's sheets, one per sheet on the same paper, turned as most of the sheets are, whatever the layout. Printed pages without comments print without one (comment_summary.skipped says so). Refused, before anything runs (the Will Print actions included) and whether or not there are comments, with booklet, poster, label, a selected area, as_image or color_management app (pictures), a document that withholds copying, or one that allows only low-resolution printing. Result: comment_summary {pages, comments}; sheets counts the summary pages." },
+                "comment_summary_sort": { "type": "string", "enum": ["page", "author", "date", "type"], "description": "Order of the comment summary (default page); needs comment_summary." },
                 "paper": { "type": "string", "description": "A paper name (US Letter, A4…) or a size of its own such as 8.5x14in, 210x297mm, 10x15cm or 612x792pt (1 to 200 inches a side)." },
                 "path": { "type": "string" },
                 "printer": { "type": "string" },

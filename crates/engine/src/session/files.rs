@@ -16,6 +16,36 @@ enum Office {
 /// The most bytes of PDFs one converting insert holds at once.
 const MAX_CONVERTED_BYTES: u64 = 512 * 1024 * 1024;
 
+/// What became of Print's comment summary ([`Session::print_pdf_with_comment_summary`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CommentSummary {
+    /// `pages` summary pages, covering `comments` comments, follow the document's sheets.
+    Added { pages: usize, comments: usize },
+    /// The printed pages have no comments: nothing was added.
+    NoComments,
+}
+
+impl CommentSummary {
+    /// Whether a summary page can join a print laid out as `settings` says: not a booklet, poster,
+    /// label or selected-area print, whose sheets have no place for it, and not a print as image
+    /// or a colour-managed one (pictures), whose pages the summary's text would not follow.
+    pub fn check_layout(settings: &print::Settings) -> Result<(), EditError> {
+        if matches!(settings.layout, print::Layout::Booklet { .. } | print::Layout::Poster { .. } | print::Layout::Label { .. })
+            || settings.area.is_some()
+        {
+            return Err(EditError::Print(
+                "a summary of the comments can't join a booklet, poster, label or selected-area print: print the summary on its own with Summarize Comments".into(),
+            ));
+        }
+        if settings.raster.is_some() {
+            return Err(EditError::Print(
+                "a summary of the comments can't join a print as image or a colour-managed print, whose pages are pictures: turn that off, or print the summary on its own with Summarize Comments".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+
 /// The name of the edit that inserts what the clipboard holds, one of [`crate::BATCH_LABELS`].
 pub const INSERT_FROM_CLIPBOARD: &str = "Insert pages from the clipboard";
 
@@ -355,6 +385,80 @@ impl Session {
             }
         };
         guard(|| pdfcraft_xfdf::export_xfdf_comments(&cos, which, &doc.name)).map_err(EditError::Write)
+    }
+
+    /// What stops Print's comment summary joining a print of document `id` laid out as `settings`
+    /// say, before anything is done: the layout ([`CommentSummary::check_layout`]), a document
+    /// that withholds copying (the summary copies the comments' text out, as Summarize Comments
+    /// does), and one that allows only low-resolution printing (its pages must go as pictures,
+    /// which the summary's text pages would not). Independent of whether there are comments, so
+    /// a caller can refuse before running Will Print actions.
+    pub fn check_comment_summary(&self, id: DocId, settings: &print::Settings) -> Result<(), EditError> {
+        let doc = self.get(id).ok_or(EditError::NoDocument)?;
+        CommentSummary::check_layout(settings)?;
+        doc.check_copying()?;
+        if doc.permissions().is_some_and(|p| !p.print_high_quality()) {
+            return Err(EditError::Print(
+                "this document only allows low-resolution printing, whose pages go as pictures, so a summary of the comments can't join it; print the summary on its own with Summarize Comments"
+                    .into(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// [`Self::print_pdf`] with Print's "Include a summary of the comments": the comment-summary
+    /// pages (the text [`crate::comment_summary_pages`] writes, in `sort` order, for the comments on
+    /// the printed pages only) follow the document's sheets, one summary page per sheet fitted to
+    /// the same paper, turned the way most of the document's sheets are (the first one when they
+    /// are evenly split), whatever the layout. Returns the job and what became of the summary. A
+    /// document whose printed pages have no comments prints without one
+    /// ([`CommentSummary::NoComments`]). Everything [`Self::check_comment_summary`] refuses is
+    /// refused first, whether or not there are comments.
+    pub fn print_pdf_with_comment_summary(
+        &self,
+        id: DocId,
+        settings: &print::Settings,
+        sort: crate::SummarySort,
+    ) -> Result<(Vec<u8>, CommentSummary), EditError> {
+        self.check_comment_summary(id, settings)?;
+        let doc = self.get(id).ok_or(EditError::NoDocument)?;
+        let printed = self.print_pdf(id, settings)?;
+        let on_pages: std::collections::HashSet<usize> = settings.pages.iter().copied().collect();
+        let text = crate::comment_summary_pages(&doc.name, &doc.info.annotations, sort, Some(&settings.pages));
+        let comments = doc.info.annotations.iter().filter(|a| a.is_comment() && on_pages.contains(&a.page)).count();
+        if comments == 0 {
+            return Ok((printed, CommentSummary::NoComments));
+        }
+        let report = self.create_report(&format!("Summary of Comments on {}", doc.name), &text)?;
+        let summary = pdfcraft_cos::Document::open(report).map_err(|e| EditError::Print(e.to_string()))?;
+        let pages = pdfcraft_organize::page_count(&summary)?;
+        // The summary goes on the paper the job is laid out on, turned as most sheets are.
+        let sizes: Vec<(f64, f64)> = doc.info.pages.iter().map(|p| (f64::from(p.width), f64::from(p.height))).collect();
+        let laid = print::layout(&sizes, settings).map_err(|e| EditError::Print(e.to_string()))?;
+        let landscape_sheets = laid.iter().filter(|s| s.size.0 > s.size.1).count();
+        let landscape = match (landscape_sheets * 2).cmp(&laid.len()) {
+            std::cmp::Ordering::Greater => true,
+            std::cmp::Ordering::Less => false,
+            std::cmp::Ordering::Equal => laid.first().is_some_and(|s| s.size.0 > s.size.1),
+        };
+        let extra = print::Settings {
+            pages: (0..pages).collect(),
+            orientation: if landscape { print::Orientation::Landscape } else { print::Orientation::Portrait },
+            layout: print::Layout::Size(print::SizeMode::Fit),
+            content: print::Content::Document,
+            crops: Vec::new(),
+            raster: None,
+            area: None,
+            paper: settings.paper,
+        };
+        let sheets = pdfcraft_print::impose(&summary, &extra).map_err(|e| EditError::Print(e.to_string()))?;
+        let sheets = pdfcraft_cos::Document::open(Arc::new(sheets)).map_err(|e| EditError::Print(e.to_string()))?;
+        let mut job = pdfcraft_cos::Document::open(Arc::new(printed)).map_err(|e| EditError::Print(e.to_string()))?;
+        let at = pdfcraft_organize::page_count(&job)?;
+        let summary_pages = pdfcraft_organize::page_count(&sheets)?;
+        pdfcraft_organize::import_pages(&mut job, &sheets, &(0..summary_pages).collect::<Vec<_>>(), at)?;
+        let bytes = self.write_new(&job)?;
+        Ok((bytes.to_vec(), CommentSummary::Added { pages: summary_pages, comments }))
     }
 
     /// The print-ready PDF for `settings` (sheets laid out for the paper; see `pdfcraft-print`).

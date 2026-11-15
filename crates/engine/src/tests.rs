@@ -5542,6 +5542,127 @@ trailer << /Root 1 0 R >>
     check(&s);
 }
 
+/// Print's comment summary covers the printed pages only, numbers each comment as the whole
+/// summary does, and the job is the document's sheets then the summary pages (or just the sheets
+/// when the printed pages have no comments).
+#[test]
+fn print_with_comment_summary_covers_printed_pages_and_follows_the_sheets() {
+    let (mut s, id) = session_with(2);
+    for page in 0..2 {
+        s.apply(id, rect_comment(page, [40.0, 40.0, 90.0, 90.0])).unwrap();
+        s.apply(id, Edit::SetAnnotationContents { page, index: 0, text: format!("NOTE_ON_PAGE_{}", page + 1) }).unwrap();
+    }
+    let all = s.get(id).unwrap().info.annotations.clone();
+    let text = comment_summary_pages("doc.pdf", &all, SummarySort::Page, Some(&[1]));
+    assert!(text.contains("NOTE_ON_PAGE_2") && !text.contains("NOTE_ON_PAGE_1"), "{text}");
+    let settings = |pages: Vec<usize>| print::Settings {
+        pages,
+        paper: (612.0, 792.0),
+        orientation: print::Orientation::Auto,
+        layout: print::Layout::Size(print::SizeMode::Fit),
+        content: print::Content::DocumentAndMarkups,
+        crops: Vec::new(),
+        raster: None,
+        area: None,
+    };
+    let sheets = |bytes: &[u8]| pdfcraft_organize::page_count(&pdfcraft_cos::Document::open(Arc::new(bytes.to_vec())).unwrap()).unwrap();
+    let plain = s.print_pdf(id, &settings(vec![0, 1])).unwrap();
+    let (job, outcome) = s.print_pdf_with_comment_summary(id, &settings(vec![0, 1]), SummarySort::Page).unwrap();
+    let CommentSummary::Added { pages, comments } = outcome else { panic!("{outcome:?}") };
+    assert_eq!((comments, sheets(&job)), (2, sheets(&plain) + pages));
+    let (job, outcome) = s.print_pdf_with_comment_summary(id, &settings(vec![1]), SummarySort::Page).unwrap();
+    assert!(matches!(outcome, CommentSummary::Added { comments: 1, .. }), "{outcome:?}");
+    assert_eq!(sheets(&job), 1 + 1);
+    let (empty, empty_id) = session_with(1);
+    let (job, outcome) = empty.print_pdf_with_comment_summary(empty_id, &settings(vec![0]), SummarySort::Page).unwrap();
+    assert_eq!((outcome, sheets(&job)), (CommentSummary::NoComments, 1));
+}
+
+/// Print's comment summary follows the sheets however they are laid out: landscape sheets get
+/// landscape summary pages, N-up sheets and a reversed order keep the summary to the printed
+/// pages' comments, and the summary is the same whatever the order the pages print in.
+#[test]
+fn print_comment_summary_follows_landscape_n_up_and_reversed_jobs() {
+    let (mut s, id) = session_with(3);
+    for page in 0..3 {
+        s.apply(id, rect_comment(page, [40.0, 40.0, 90.0, 90.0])).unwrap();
+    }
+    let job = |layout: print::Layout, orientation: print::Orientation, pages: Vec<usize>| print::Settings {
+        pages,
+        paper: (612.0, 792.0),
+        orientation,
+        layout,
+        content: print::Content::DocumentAndMarkups,
+        crops: Vec::new(),
+        raster: None,
+        area: None,
+    };
+    let fit = || print::Layout::Size(print::SizeMode::Fit);
+    let sheets = |s: &mut Session, bytes: Vec<u8>| {
+        let d = s.open("job.pdf", None, Arc::new(bytes), None).unwrap();
+        s.get(d).unwrap().info.pages.iter().map(|p| (p.width, p.height)).collect::<Vec<_>>()
+    };
+    // Landscape: every sheet, summary pages included, is wider than tall.
+    let (bytes, outcome) =
+        s.print_pdf_with_comment_summary(id, &job(fit(), print::Orientation::Landscape, vec![0, 1, 2]), SummarySort::Page).unwrap();
+    let CommentSummary::Added { pages, comments: 3 } = outcome else { panic!("{outcome:?}") };
+    let sizes = sheets(&mut s, bytes);
+    assert_eq!(sizes.len(), 3 + pages);
+    assert!(sizes.iter().all(|(w, h)| w > h), "{sizes:?}");
+    // N-up: three pages share one sheet, then the summary's pages follow, one per sheet.
+    let (bytes, outcome) =
+        s.print_pdf_with_comment_summary(id, &job(print::Layout::multiple(4), print::Orientation::Auto, vec![0, 1, 2]), SummarySort::Page).unwrap();
+    let CommentSummary::Added { pages, .. } = outcome else { panic!("{outcome:?}") };
+    assert_eq!(sheets(&mut s, bytes).len(), 1 + pages);
+    // Reversed: the pages print last to first; the summary covers the same comments.
+    let (bytes, outcome) = s.print_pdf_with_comment_summary(id, &job(fit(), print::Orientation::Auto, vec![2, 1, 0]), SummarySort::Page).unwrap();
+    assert!(matches!(outcome, CommentSummary::Added { comments: 3, .. }), "{outcome:?}");
+    let reversed_pages = sheets(&mut s, bytes).len();
+    let (bytes, _) = s.print_pdf_with_comment_summary(id, &job(fit(), print::Orientation::Auto, vec![0, 1, 2]), SummarySort::Page).unwrap();
+    assert_eq!(reversed_pages, sheets(&mut s, bytes).len());
+}
+
+/// A comment summary the document can't take is refused before anything is printed, with or
+/// without comments: one that withholds copying, one that allows only low-resolution printing, and
+/// a print whose pages are pictures.
+#[test]
+fn print_comment_summary_is_refused_up_front_for_documents_and_modes_that_cannot_take_it() {
+    let settings = |raster: Option<print::Raster>| print::Settings {
+        pages: vec![0],
+        paper: (612.0, 792.0),
+        orientation: print::Orientation::Auto,
+        layout: print::Layout::Size(print::SizeMode::Fit),
+        content: print::Content::DocumentAndMarkups,
+        crops: Vec::new(),
+        raster,
+        area: None,
+    };
+    let encrypted = |permissions: i32| {
+        let mut doc = pdfcraft_cos::Document::open(Arc::new(fixture(1))).unwrap();
+        doc.set_encryption(&pdfcraft_cos::NewEncryption {
+            algorithm: pdfcraft_cos::Algorithm::Aes256,
+            user_password: "",
+            owner_password: "boss",
+            permissions,
+            encrypt_metadata: true,
+            seed: [5; 32],
+        })
+        .unwrap();
+        Arc::new(pdfcraft_cos::write_full(&doc, &Default::default()).unwrap())
+    };
+    let mut s = Session::new();
+    let no_copy = s.open("no-copy.pdf", None, encrypted(-1 ^ 0b1_0000), None).unwrap();
+    assert_eq!(s.check_comment_summary(no_copy, &settings(None)), Err(EditError::NotPermitted("copying text and images")));
+    assert!(matches!(s.print_pdf_with_comment_summary(no_copy, &settings(None), SummarySort::Page), Err(EditError::NotPermitted(_))));
+    assert!(s.print_pdf(no_copy, &settings(None)).is_ok(), "printing itself is allowed");
+    let low_res = s.open("low.pdf", None, encrypted(-1 ^ 0b1000_0000_0000), None).unwrap();
+    assert!(matches!(s.check_comment_summary(low_res, &settings(None)), Err(EditError::Print(m)) if m.contains("low-resolution")));
+    let (mut plain, id) = session_with(1);
+    assert!(plain.check_comment_summary(id, &settings(None)).is_ok());
+    assert!(matches!(plain.check_comment_summary(id, &settings(Some(print::Raster::default()))), Err(EditError::Print(m)) if m.contains("pictures")));
+    let _ = &mut plain;
+}
+
 /// #820: the generated summary includes replies to replies, indented one level deeper.
 #[test]
 fn comment_summary_includes_replies_to_replies() {

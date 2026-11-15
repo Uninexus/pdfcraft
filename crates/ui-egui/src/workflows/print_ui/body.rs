@@ -549,19 +549,33 @@ pub(crate) fn body(
             });
             ui.add_space(6.0);
             widgets::section_title(ui, tl!("Comments & Forms"));
-            combo(
-                ui,
-                "content",
-                tl!("Comments & Forms"),
-                &mut d.content,
-                &[
-                    (Content::Document, tl!("Document")),
-                    (Content::DocumentAndMarkups, tl!("Document and markups")),
-                    (Content::DocumentAndStamps, tl!("Document and stamps")),
-                    (Content::FormFieldsOnly, tl!("Form fields only")),
-                ],
-                220.0,
-            );
+            ui.horizontal_wrapped(|ui| {
+                combo(
+                    ui,
+                    "content",
+                    tl!("Comments & Forms"),
+                    &mut d.content,
+                    &[
+                        (Content::Document, tl!("Document")),
+                        (Content::DocumentAndMarkups, tl!("Document and markups")),
+                        (Content::DocumentAndStamps, tl!("Document and stamps")),
+                        (Content::FormFieldsOnly, tl!("Form fields only")),
+                    ],
+                    220.0,
+                );
+
+                // New words: English until they are in craft-i18n.
+                // A choice that can't apply is dropped, so a greyed-out ticked box never applies.
+                let blocked = d.comment_summary_blocked();
+                if blocked.is_some() {
+                    d.comment_summary = false;
+                }
+                let response = ui.add_enabled(blocked.is_none(), widgets::checkbox(&mut d.comment_summary, "Include a summary of the comments"));
+                match blocked {
+                    Some(reason) => response.on_disabled_hover_text(reason),
+                    None => response.on_hover_text("Adds pages listing the comments on the printed pages after the document's pages."),
+                };
+            });
             // Advanced (Acrobat's Advanced Print Setup): print as image. Folded unless it is on.
             ui.add_space(6.0);
             egui::CollapsingHeader::new(egui::RichText::new(crate::i18n::upper_label("Advanced")).font(theme::semibold(10.5)).color(t.text_faint))

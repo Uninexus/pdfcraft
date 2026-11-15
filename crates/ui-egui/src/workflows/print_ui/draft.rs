@@ -73,6 +73,12 @@ pub struct PrintDraft {
     pub cut_marks: bool,
     pub orientation: Orientation,
     pub content: Content,
+    /// Include a summary of the comments: summary pages for the comments on the printed pages
+    /// follow the sheets (off by default; not with Booklet, Poster, Label or a selected area).
+    pub comment_summary: bool,
+    /// Why the open document can't take a comment summary (it withholds copying, or allows only
+    /// low-resolution printing); read when the dialog opens.
+    pub comment_summary_doc_block: Option<&'static str>,
     /// Print as image (Acrobat's Advanced Print Setup) at `dpi`.
     pub as_image: bool,
     pub dpi: f64,
@@ -158,6 +164,8 @@ impl Default for PrintDraft {
             cut_marks: true,
             orientation: Orientation::Auto,
             content: Content::DocumentAndMarkups,
+            comment_summary: false,
+            comment_summary_doc_block: None,
             as_image: false,
             dpi: 300.0,
             paper: 0,
@@ -572,5 +580,33 @@ impl PrintDraft {
             .collect(),
             driver_settings: None,
         }
+    }
+}
+
+impl PrintDraft {
+    /// Why the summary of the comments can't join this job, when it can't: the document's
+    /// permissions, or a layout whose sheets have no place for the summary pages (Booklet,
+    /// Poster, Label, a selected area), Print as image (pictures), or, in a browser, the browser's
+    /// own print dialog, which is handed the document's sheets only.
+    pub fn comment_summary_blocked(&self) -> Option<&'static str> {
+        if let Some(reason) = self.comment_summary_doc_block {
+            return Some(reason);
+        }
+        if self.area.is_some() || !matches!(self.handling, Handling::Size | Handling::Multiple) {
+            return Some("Not available with Booklet, Poster, Label or a selected area.");
+        }
+        if self.as_image {
+            return Some("Not available with Print as image, which prints pictures.");
+        }
+        #[cfg(target_arch = "wasm32")]
+        if self.printer.as_deref() == Some(crate::web_print::BROWSER_PRINTER) {
+            return Some("Not available when printing from the browser; use Save as PDF.");
+        }
+        None
+    }
+
+    /// [`Self::comment_summary_blocked`] is `None`.
+    pub fn comment_summary_possible(&self) -> bool {
+        self.comment_summary_blocked().is_none()
     }
 }
