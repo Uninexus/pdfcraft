@@ -8517,9 +8517,10 @@ area = "L"
 tier = "P1"
 milestone = "M11"
 status = "partial"
-commands = []
+commands = ["prepress.readiness"]
 tools = ["print_readiness"]
 evidence = [
+    "crates/ui-egui/tests/it/print_readiness.rs::the_report_lists_the_ink_findings_and_changes_nothing",
     "crates/engine/src/printcheck.rs::total_ink_over_the_limit_is_a_warning_and_under_it_is_silent",
     "crates/engine/src/printcheck.rs::a_colour_a_form_sets_is_counted_where_it_is_drawn_and_a_self_drawing_form_is_flagged",
     "crates/automation/tests/it/automation.rs::print_readiness_reports_ink_through_tools",
@@ -8533,9 +8534,10 @@ area = "L"
 tier = "P1"
 milestone = "M11"
 status = "partial"
-commands = []
+commands = ["prepress.readiness"]
 tools = ["print_readiness"]
 evidence = [
+    "crates/ui-egui/tests/it/print_readiness.rs::the_report_lists_the_ink_findings_and_changes_nothing",
     "crates/engine/src/printcheck.rs::rich_black_text_is_reported_and_pure_black_text_is_not",
     "crates/engine/src/printcheck.rs::overprint_and_spot_colours_are_noted",
     "crates/automation/tests/it/automation.rs::print_readiness_reports_ink_through_tools",

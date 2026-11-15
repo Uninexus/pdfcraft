@@ -64,6 +64,10 @@ fn findings(ui: &mut egui::Ui, report: &PrintReadiness, t: &Tokens) {
             });
         }
         ui.add_space(8.0);
-        ui.label(egui::RichText::new(tl!("Not checked: PDF/X, ink inside images and shadings, overprint effects, transparency flattening.")).small().color(t.text_muted));
+        ui.label(
+            egui::RichText::new(tl!("Not checked: PDF/X, ink inside images and shadings, overprint effects, transparency flattening."))
+                .small()
+                .color(t.text_muted),
+        );
     });
 }

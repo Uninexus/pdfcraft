@@ -14,7 +14,6 @@ pub(super) mod comment_props;
 pub(super) mod convert_colours_ui;
 pub(super) mod credits;
 pub(super) mod hairlines_ui;
-pub(super) mod readiness_ui;
 pub(super) mod marks_ui;
 pub(super) mod pageboxes;
 pub(super) mod palette;
@@ -22,6 +21,7 @@ pub(super) mod preferences;
 pub(super) mod printer_marks_ui;
 mod prompts;
 pub(super) mod protect;
+pub(super) mod readiness_ui;
 pub(super) mod standards_ui;
 pub(super) mod word_count_ui;
 
