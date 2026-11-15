@@ -136,6 +136,7 @@ use dialogs::pageboxes;
 use dialogs::palette;
 use dialogs::printer_marks_ui;
 use dialogs::protect;
+use dialogs::readiness_ui;
 use dialogs::standards_ui;
 use dialogs::word_count_ui;
 pub use home::folders_ui;
@@ -857,6 +858,8 @@ pub struct PdfCraftApp {
     pub printer_marks_draft: printer_marks_ui::PrinterMarksDraft,
     pub convert_colours_draft: convert_colours_ui::ConvertColoursDraft,
     pub hairlines_draft: hairlines_ui::HairlinesDraft,
+    /// The report Print production ▸ Print readiness shows.
+    pub readiness_report: Option<pdfcraft_engine::printcheck::PrintReadiness>,
     /// Protect Using Password dialog state.
     pub protect_draft: protect::ProtectDraft,
     /// New bookmarks from text styles dialog state (#1693).

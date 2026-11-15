@@ -378,6 +378,7 @@ impl PdfCraftApp {
             printer_marks_draft: Default::default(),
             convert_colours_draft: Default::default(),
             hairlines_draft: Default::default(),
+            readiness_report: None,
         }
     }
 
