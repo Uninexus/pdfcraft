@@ -3,6 +3,9 @@ use super::json::{Args, one_based, summary};
 use super::paths::{child, read_input, read_input_bytes, unused, write_atomic};
 use super::{Arc, Automation, CombineSource, Edit, Path, PathBuf, Value, json};
 
+/// The most pages `page_boxes` lists in one call.
+const MAX_BOX_PAGES: usize = 2000;
+
 impl Automation {
     pub(crate) fn doc_create(&mut self, a: &Args) -> Result<Value> {
         let (name, bytes) = match a.str("from")? {
@@ -160,6 +163,59 @@ impl Automation {
         let mut out = self.apply(a, Edit::SetPageBox { pages, which, spec })?;
         out["page_sizes"] = json!(self.doc(a)?.info.pages.iter().map(|p| [p.width, p.height]).collect::<Vec<_>>());
         Ok(out)
+    }
+
+    /// `page_boxes`: every page's media, crop, bleed, trim and art boxes as the viewer uses them
+    /// (corners ordered, clipped to the media box, defaulted from the parent box), with whether
+    /// the file sets each one and whether it has a key the reader ignored. User space, in points;
+    /// the origin is the bottom-left corner of the page only when the media box starts at 0, 0.
+    /// `pages` lists those pages in ascending order, each once; at most [`MAX_BOX_PAGES`] pages
+    /// come back, and `truncated` says when more were left out.
+    pub(crate) fn page_boxes(&mut self, a: &Args) -> Result<Value> {
+        const NAMES: [&str; 5] = ["media", "crop", "bleed", "trim", "art"];
+        let id = self.doc(a)?.id;
+        let report = self.session.page_box_report(id).map_err(ToolError::from)?;
+        let wanted: Vec<usize> = match a.opt_ints("pages")? {
+            Some(_) => {
+                let mut mask = vec![false; report.len()];
+                for p in self.pages(a, "pages")? {
+                    match mask.get_mut(p) {
+                        Some(m) => *m = true,
+                        None => {
+                            return Err(ToolError::InvalidArgs(format!("page {} is not in the page tree, which has {} pages", p + 1, report.len())));
+                        }
+                    }
+                }
+                mask.iter().enumerate().filter(|(_, m)| **m).map(|(i, _)| i).collect()
+            }
+            None => (0..report.len()).collect(),
+        };
+        let truncated = wanted.len() > MAX_BOX_PAGES;
+        let pages: Vec<Value> = wanted
+            .iter()
+            .take(MAX_BOX_PAGES)
+            .filter_map(|&i| report.get(i).map(|r| (i, r)))
+            .map(|(i, r)| {
+                let mut page = serde_json::Map::new();
+                page.insert("page".into(), json!(i + 1));
+                page.insert("rotate".into(), json!(r.rotate));
+                for (k, name) in NAMES.iter().enumerate() {
+                    let b = r.boxes.get(k).copied().unwrap_or_default();
+                    let mut entry = json!({ "rect": b, "set": r.explicit.get(k).copied().unwrap_or(false) });
+                    if r.ignored.get(k).copied().unwrap_or(false) {
+                        entry["ignored"] = json!(true);
+                    }
+                    page.insert((*name).into(), entry);
+                }
+                if r.explicit.get(2).copied().unwrap_or(false) && r.explicit.get(3).copied().unwrap_or(false) {
+                    let (bl, tr) = (r.boxes.get(2).copied().unwrap_or_default(), r.boxes.get(3).copied().unwrap_or_default());
+                    // Left, bottom, right, top; negative where the bleed stops short of the trim.
+                    page.insert("bleed_past_trim".into(), json!([tr[0] - bl[0], tr[1] - bl[1], bl[2] - tr[2], bl[3] - tr[3]]));
+                }
+                Value::Object(page)
+            })
+            .collect();
+        Ok(json!({ "pages": pages, "total": report.len(), "truncated": truncated }))
     }
 
     /// `page_remove_white_margins`: crop pages to their content ([`Session::remove_white_margins`]).

@@ -10862,6 +10862,61 @@ trailer << /Root 1 0 R >>
     assert_eq!(names, vec!["Gold Foil", "PANTONE 871 C"], "{inks}");
 }
 
+/// Page boxes through the tools: `page_boxes` reads what `page_set_box` wrote, after a save and a
+/// reopen, says which boxes are set or ignored and how far the bleed runs past the trim on each
+/// side (with different margins per side, so a wrong order shows).
+#[test]
+fn page_boxes_are_listed_after_setting_and_reopening() {
+    let dir = workdir("page-boxes");
+    let pdf = "%PDF-1.7
+1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
+2 0 obj << /Type /Pages /Kids [3 0 R 4 0 R 5 0 R] /Count 3 /MediaBox [0 0 300 400] >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R >> endobj
+4 0 obj << /Type /Page /Parent 2 0 R /Rotate 450 /MediaBox [0 0 500 500] /TrimBox [900 900 950 950] >> endobj
+5 0 obj << /Type /Page /Parent 2 0 R >> endobj
+trailer << /Root 1 0 R >>
+%%EOF";
+    std::fs::write(dir.join("boxes.pdf"), pdf).unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "boxes.pdf" }))["doc"].as_u64().unwrap();
+    assert!(pdfcraft_automation::tools().iter().any(|t| t.name == "page_boxes" && t.read_only));
+    let r = ok(&mut a, "page_boxes", json!({ "doc": doc }));
+    assert_eq!(r["pages"][0]["media"], json!({ "rect": [0.0, 0.0, 300.0, 400.0], "set": true }), "{r}");
+    assert_eq!(r["pages"][0]["trim"]["set"], false, "{r}");
+    assert_eq!(r["pages"][0]["trim"]["rect"], json!([0.0, 0.0, 300.0, 400.0]), "{r}");
+    assert_eq!(r["pages"][1]["rotate"], 90, "{r}");
+    assert_eq!(
+        r["pages"][1]["trim"],
+        json!({ "rect": [0.0, 0.0, 500.0, 500.0], "set": false, "ignored": true }),
+        "an off-page TrimBox is ignored: {r}"
+    );
+    assert!(r["pages"][0].get("bleed_past_trim").is_none());
+    assert_eq!((r["total"].as_u64(), r["truncated"].as_bool()), (Some(3), Some(false)), "{r}");
+
+    // Page 1: bleed [11 12 13 14] inside, trim [20 30 40 50]: the bleed runs 9, 18, 27 and 36 past it.
+    ok(&mut a, "page_set_box", json!({ "doc": doc, "pages": [1], "box": "trim", "margins": [20, 30, 40, 50] }));
+    ok(&mut a, "page_set_box", json!({ "doc": doc, "pages": [1], "box": "bleed", "margins": [11, 12, 13, 14] }));
+    // Page 3: a bleed box that stops short of the trim gives negative values.
+    ok(&mut a, "page_set_box", json!({ "doc": doc, "pages": [3], "box": "trim", "margins": [10, 10, 10, 10] }));
+    ok(&mut a, "page_set_box", json!({ "doc": doc, "pages": [3], "box": "bleed", "margins": [15, 10, 5, 12] }));
+    ok(&mut a, "doc_save", json!({ "doc": doc, "path": "boxes-out.pdf" }));
+    let doc2 = ok(&mut a, "doc_open", json!({ "path": "boxes-out.pdf" }))["doc"].as_u64().unwrap();
+    let r = ok(&mut a, "page_boxes", json!({ "doc": doc2, "pages": [3, 1, 1] }));
+    let listed: Vec<_> = r["pages"].as_array().unwrap().iter().map(|p| p["page"].as_u64().unwrap()).collect();
+    assert_eq!(listed, [1, 3], "ascending, each once: {r}");
+    let p = &r["pages"][0];
+    assert_eq!(p["trim"], json!({ "rect": [20.0, 30.0, 260.0, 350.0], "set": true }), "{r}");
+    assert_eq!(p["bleed"], json!({ "rect": [11.0, 12.0, 287.0, 386.0], "set": true }), "{r}");
+    assert_eq!(p["bleed_past_trim"], json!([9.0, 18.0, 27.0, 36.0]), "{r}");
+    assert_eq!(p["art"]["set"], false, "{r}");
+    let q = &r["pages"][1];
+    assert_eq!(q["bleed_past_trim"], json!([-5.0, 0.0, 5.0, -2.0]), "bleed short of the trim is negative: {r}");
+    match err(&mut a, "page_boxes", json!({ "doc": doc2, "pages": [9] })) {
+        ToolError::InvalidArgs(_) => {}
+        other => panic!("{other:?}"),
+    }
+}
+
 #[test]
 fn exporting_to_word_html_and_rtf() {
     let dir = workdir("office");

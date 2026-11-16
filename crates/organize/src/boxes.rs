@@ -6,7 +6,7 @@
 
 use pdfcraft_cos::{Document, Object};
 
-use crate::{OrganizeError, check, walk};
+use crate::{OrganizeError, check, resolved_rotation, walk};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PageBox {
@@ -88,6 +88,58 @@ pub fn page_boxes(doc: &Document) -> Result<Vec<[[f64; 4]; 5]>, OrganizeError> {
             let crop = own(b"CropBox").and_then(|c| clip(c, media)).unwrap_or(media);
             let child = |k: &[u8]| rect_of(d.get(k), doc).and_then(|c| clip(c, media)).unwrap_or(crop);
             [media, crop, child(b"BleedBox"), child(b"TrimBox"), child(b"ArtBox")]
+        })
+        .collect())
+}
+
+/// One page's boxes: the effective rectangles (as [`page_boxes`]: corners ordered, clipped to the
+/// media box), which of them the file sets, which it sets but the reader ignores, and the page's
+/// `/Rotate`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PageBoxReport {
+    /// Media, crop, bleed, trim, art.
+    pub boxes: [[f64; 4]; 5],
+    /// Whether each of `boxes` comes from a valid entry (the media and crop boxes may be
+    /// inherited from a `/Pages` node), not defaulted from its parent box.
+    pub explicit: [bool; 5],
+    /// Whether the key is present but its value was rejected (not four numbers, no positive
+    /// width and height, or, for the other boxes, no overlap with the media box), so the box
+    /// defaulted instead.
+    pub ignored: [bool; 5],
+    /// The page's rotation in degrees, as [`page_rotation`] gives it.
+    pub rotate: i64,
+}
+
+/// Every page's boxes with which are set or ignored and the rotation, for a headless read of Set
+/// Page Boxes.
+pub fn page_box_report(doc: &Document) -> Result<Vec<PageBoxReport>, OrganizeError> {
+    Ok(walk(doc)?
+        .iter()
+        .map(|(page, inherited)| {
+            let obj = doc.get(*page);
+            let d = obj.as_dict().cloned().unwrap_or_default();
+            let entry = |k: &[u8], inheritable: bool| if inheritable { d.get(k).or_else(|| inherited.get(k)) } else { d.get(k) };
+            let media_key = entry(b"MediaBox", true).is_some();
+            let media_set = rect_of(entry(b"MediaBox", true), doc);
+            let media = media_set.unwrap_or([0.0, 0.0, 612.0, 792.0]);
+            let crop_key = entry(b"CropBox", true).is_some();
+            let crop_set = rect_of(entry(b"CropBox", true), doc).and_then(|c| clip(c, media));
+            let crop = crop_set.unwrap_or(media);
+            let child = |k: &[u8]| rect_of(entry(k, false), doc).and_then(|c| clip(c, media));
+            let (bleed, trim, art) = (child(b"BleedBox"), child(b"TrimBox"), child(b"ArtBox"));
+            let present =
+                [media_key, crop_key, entry(b"BleedBox", false).is_some(), entry(b"TrimBox", false).is_some(), entry(b"ArtBox", false).is_some()];
+            let explicit = [media_set.is_some(), crop_set.is_some(), bleed.is_some(), trim.is_some(), art.is_some()];
+            let mut ignored = [false; 5];
+            for (i, flag) in ignored.iter_mut().enumerate() {
+                *flag = present[i] && !explicit[i];
+            }
+            PageBoxReport {
+                boxes: [media, crop, bleed.unwrap_or(crop), trim.unwrap_or(crop), art.unwrap_or(crop)],
+                explicit,
+                ignored,
+                rotate: resolved_rotation(doc, inherited).rem_euclid(360),
+            }
         })
         .collect())
 }

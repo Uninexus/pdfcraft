@@ -770,6 +770,7 @@ impl Automation {
             "doc_guide_add" => self.doc_guide_add(&a)?,
             "doc_guide_remove" => self.doc_guide_remove(&a)?,
             "doc_inks" => self.doc_inks(&a)?,
+            "page_boxes" => self.page_boxes(&a)?,
             "doc_ink_aliases" => self.doc_ink_aliases(&a)?,
             "attachment_add" => {
                 let path = self.resolve(a.str("path")?, false)?;

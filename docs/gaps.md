@@ -429,6 +429,8 @@ update the numbers.
   shadings, patterns or annotation appearances, with no setting for the limit.
   Ink aliases are in as a headless slice (`doc_inks`, `doc_ink_aliases`: spot colorants listed and renamed
   so two inks print as one), with no Ink Manager window yet.
+  Page boxes can be read back headlessly (`page_boxes`: all five boxes, which the file sets, the rotation and the
+  bleed past the trim), which print checks need; there is still no UI for it beyond Set Page Boxes.
   Print with a comments summary is in as a first slice (Print ▸ Include a summary of the comments;
   `doc_print` `comment_summary`): comments-only summary pages for the printed pages follow the sheets, not yet
   in the preview, with no sort choice in the dialog, and not with Booklet, Poster, Label, a selected area, Print as
@@ -500,6 +502,7 @@ update the numbers.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-16 | minor | Gap 18: `page_boxes` lists every page's media, crop, bleed, trim and art boxes, which the file sets, the rotation and the bleed past the trim (headless, read-only). Estimates unchanged. |
 | 2026-11-16 | minor | Gap 13: the signature listing reads the page tree only for a document that has a signature field (≈ 0.25 s less per edit of a 100,000-page file); measured that each save keeps one more copy of the file in undo history. Estimates unchanged. |
 | 2026-11-16 | minor | Gap 8: `doc_create` from `office` converts one Office document into a new PDF through an installed LibreOffice (headless; no menu command yet). Estimates unchanged. |
 | 2026-11-14 | minor | Gap 21: Compare files filters by kind of change (replaced, inserted, deleted, visual) in the dialog, the panel, Mark as comments, the report and `doc_compare`, `doc_compare_report`, `doc_compare_mark` (`kinds`); images, annotations, formatting and background changes are still not told apart. Estimates unchanged. |

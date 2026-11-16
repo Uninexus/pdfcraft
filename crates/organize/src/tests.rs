@@ -2742,6 +2742,66 @@ fn page_boxes_default_inherit_and_set() {
 }
 
 #[test]
+fn page_box_report_says_which_boxes_the_file_sets() {
+    let mut doc = open(fixture());
+    let r = page_box_report(&doc).unwrap();
+    assert_eq!(r.len(), 3);
+    assert_eq!(r[0].boxes, page_boxes(&doc).unwrap()[0], "the effective rectangles are page_boxes'");
+    assert_eq!(r[0].explicit, [true, false, false, false, false], "pages 1-2 inherit the media box and set nothing else");
+    assert_eq!(r[0].ignored, [false; 5]);
+    assert_eq!(r[0].rotate, 90, "the fixture inherits /Rotate 90 from the page-tree root");
+    assert_eq!(r[0].rotate, page_rotation(&doc, 0).unwrap());
+    set_page_box(&mut doc, &[0], PageBox::Trim, BoxSpec::Margins([10.0, 10.0, 10.0, 10.0])).unwrap();
+    set_page_box(&mut doc, &[1], PageBox::Bleed, BoxSpec::Rect([0.0, 0.0, 50.0, 50.0])).unwrap();
+    let doc = open(write_incremental(&doc, &SaveOptions::default()).unwrap());
+    let r = page_box_report(&doc).unwrap();
+    assert_eq!(r[0].explicit, [true, false, false, true, false]);
+    assert_eq!(r[0].boxes[3], [10.0, 10.0, 290.0, 390.0]);
+    assert_eq!(r[0].boxes[2], r[0].boxes[1], "an unset bleed box is the crop box");
+    assert_eq!(r[1].explicit, [true, false, true, false, false]);
+}
+
+#[test]
+fn page_box_report_covers_inheritance_reversed_corners_bad_entries_and_rotation() {
+    let d = open(build(
+        &[
+            "<< /Type /Catalog /Pages 2 0 R >>".into(),
+            "<< /Type /Pages /Kids [3 0 R 4 0 R 5 0 R] /Count 3 /MediaBox [0 0 300 400] /CropBox [20 20 280 380] >>".into(),
+            // Reversed corners, an indirect rectangle, a negative rotation.
+            "<< /Type /Page /Parent 2 0 R /TrimBox [280 380 40 60] /BleedBox 6 0 R /Rotate -90 >>".into(),
+            // A rectangle clipped away entirely, one that is not numbers, one with no area, a quarter turn plus 360 (450).
+            "<< /Type /Page /Parent 2 0 R /TrimBox [400 400 500 500] /ArtBox [(a) 0 10 10] /BleedBox [5 5 5 50] /Rotate 450 >>".into(),
+            // Its own media box makes the inherited crop box clip to nothing.
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 10 10] /Rotate 45 >>".into(),
+            "[10 10 290 390]".into(),
+        ],
+        "/Root 1 0 R",
+    ));
+    let r = page_box_report(&d).unwrap();
+    assert_eq!(r.len(), 3);
+    // Page 1.
+    assert_eq!(r[0].explicit, [true, true, true, true, false], "crop is set when inherited; an indirect rectangle counts");
+    assert_eq!(r[0].boxes[1], [20.0, 20.0, 280.0, 380.0]);
+    assert_eq!(r[0].boxes[3], [40.0, 60.0, 280.0, 380.0], "corners are put in order");
+    assert_eq!(r[0].boxes[2], [10.0, 10.0, 290.0, 390.0]);
+    assert_eq!(r[0].ignored, [false; 5]);
+    assert_eq!(r[0].rotate, 270, "a negative rotation is turned into 0..360");
+    // Page 2.
+    assert_eq!(r[1].explicit, [true, true, false, false, false]);
+    assert_eq!(r[1].ignored, [false, false, true, true, true], "a box clipped away, not numbers and no area are ignored");
+    assert_eq!(r[1].boxes[3], r[1].boxes[1], "an ignored box defaults to the crop box");
+    assert_eq!(r[1].rotate, 90);
+    // Page 3: the inherited crop box lies outside its media box.
+    assert_eq!(r[2].explicit, [true, false, false, false, false]);
+    assert_eq!(r[2].ignored, [false, true, false, false, false]);
+    assert_eq!(r[2].boxes[1], [0.0, 0.0, 10.0, 10.0]);
+    assert_eq!(r[2].rotate, 45, "a rotation that is not a right angle is passed on as page_rotation gives it");
+    for (i, page) in r.iter().enumerate() {
+        assert_eq!(page.rotate, page_rotation(&d, i).unwrap());
+    }
+}
+
+#[test]
 fn page_boxes_remove_uninherited_crop_clip_disjoint_boxes_and_reject_overflow() {
     let mut doc = open(fixture());
     set_page_box(&mut doc, &[0], PageBox::Crop, BoxSpec::Margins([10.0, 20.0, 30.0, 40.0])).unwrap();
