@@ -2399,3 +2399,100 @@ fn single_key_accelerators_leave_typing_in_a_text_field_alone() {
     assert_eq!(quick_tool(&mut h, &c), before, "letters typed into the find field pick no tool");
     assert_eq!(h.state().views[0].find.as_ref().map(|f| f.query.as_str()), Some("zg"), "they are typed into the field");
 }
+
+/// The guide lines in the last frame, as screen end points. A guide is the one cyan 1-point line
+/// the canvas draws (`canvas/guides.rs`).
+fn guide_lines(h: &Harness<'static, PdfCraftApp>) -> Vec<[egui::Pos2; 2]> {
+    fn walk(shape: &egui::Shape, out: &mut Vec<[egui::Pos2; 2]>) {
+        match shape {
+            egui::Shape::LineSegment { points, stroke } if stroke.color == pdfcraft_ui_egui::canvas::GUIDE_COLOR => out.push(*points),
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|s| walk(s, out)),
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    h.output().shapes.iter().for_each(|clipped| walk(&clipped.shape, &mut out));
+    out
+}
+
+#[test]
+fn show_guides_is_a_command_and_an_observable_per_view_setting() {
+    let (mut h, c) = harness();
+    let state = ok(&mut h, &c, "ui.state", json!({}));
+    assert_eq!((state["active"]["show_guides"].clone(), state["active"]["guides"].clone()), (json!(false), json!(0)));
+    let id = h.state().views[0].id;
+    h.state_mut().session.add_guide(id, 0, pdfcraft_engine::guides::GuideAxis::Vertical, 50.0).unwrap();
+    h.state_mut().session.add_guide(id, 0, pdfcraft_engine::guides::GuideAxis::Horizontal, 100.0).unwrap();
+    assert_eq!(ok(&mut h, &c, "ui.state", json!({}))["active"]["guides"], 2);
+
+    ok(&mut h, &c, "ui.set", json!({ "key": "guides", "value": "on" }));
+    assert_eq!(ok(&mut h, &c, "ui.state", json!({}))["active"]["show_guides"], true);
+    ok(&mut h, &c, "ui.command", json!({ "id": "view.show_guides" }));
+    assert_eq!(ok(&mut h, &c, "ui.state", json!({}))["active"]["show_guides"], false, "the command toggles");
+    ok(&mut h, &c, "ui.command", json!({ "id": "view.show_guides" }));
+    assert_eq!(ok(&mut h, &c, "ui.state", json!({}))["active"]["show_guides"], true);
+    for value in ["true", "1", "", "ON"] {
+        assert!(call(&mut h, &c, "ui.set", json!({ "key": "guides", "value": value })).is_err(), "{value:?}");
+    }
+    assert_eq!(ok(&mut h, &c, "ui.state", json!({}))["active"]["show_guides"], true, "a refused value changes nothing");
+    assert!(!h.state().session.get(id).unwrap().dirty, "guides are view state, not an edit");
+
+    // Clear guides removes the document's guides, and not the setting.
+    ok(&mut h, &c, "ui.command", json!({ "id": "view.clear_guides" }));
+    let state = ok(&mut h, &c, "ui.state", json!({}));
+    assert_eq!((state["active"]["guides"].clone(), state["active"]["show_guides"].clone()), (json!(0), json!(true)));
+    assert!(h.state().session.guides(id, None).unwrap().is_empty());
+    assert!(!h.state().session.get(id).unwrap().dirty);
+    // With none left it says so and is not an error.
+    ok(&mut h, &c, "ui.command", json!({ "id": "view.clear_guides" }));
+}
+
+#[test]
+fn shown_guides_are_drawn_over_the_page_at_their_position_and_hidden_ones_are_not() {
+    let (mut h, c) = harness();
+    let id = h.state().views[0].id;
+    h.state_mut().session.add_guide(id, 0, pdfcraft_engine::guides::GuideAxis::Vertical, 50.0).unwrap();
+    h.state_mut().session.add_guide(id, 0, pdfcraft_engine::guides::GuideAxis::Horizontal, 100.0).unwrap();
+    // The fixture's pages are 200 x 300 pt.
+    h.run_steps(3);
+    assert!(guide_lines(&h).is_empty(), "hidden by default");
+    ok(&mut h, &c, "ui.set", json!({ "key": "guides", "value": "on" }));
+    h.run_steps(3);
+    let page = ok(&mut h, &c, "ui.state", json!({}))["active"]["pages_on_screen"][0]["rect"].clone();
+    let r: Vec<f32> = page.as_array().unwrap().iter().map(|v| v.as_f64().unwrap() as f32).collect();
+    let (w, hgt) = (r[2] - r[0], r[3] - r[1]);
+    let lines = guide_lines(&h);
+    assert_eq!(lines.len(), 2, "{lines:?}");
+    let near = |a: f32, b: f32| (a - b).abs() < 1.0;
+    let vertical = lines.iter().find(|l| near(l[0].x, l[1].x)).expect("a vertical line");
+    assert!(near(vertical[0].x, r[0] + w * 0.25) && near(vertical[0].y.min(vertical[1].y), r[1]) && near(vertical[0].y.max(vertical[1].y), r[3]));
+    let horizontal = lines.iter().find(|l| near(l[0].y, l[1].y)).expect("a horizontal line");
+    assert!(near(horizontal[0].y, r[1] + hgt * (100.0 / 300.0)) && near(horizontal[0].x.min(horizontal[1].x), r[0]));
+    ok(&mut h, &c, "ui.set", json!({ "key": "guides", "value": "off" }));
+    h.run_steps(3);
+    assert!(guide_lines(&h).is_empty());
+    ok(&mut h, &c, "ui.set", json!({ "key": "guides", "value": "on" }));
+    ok(&mut h, &c, "ui.command", json!({ "id": "view.clear_guides" }));
+    h.run_steps(3);
+    assert!(guide_lines(&h).is_empty(), "cleared guides are gone from the page");
+}
+
+#[test]
+fn a_guide_left_beyond_a_cropped_page_is_not_drawn() {
+    let (mut h, c) = harness();
+    let id = h.state().views[0].id;
+    h.state_mut().session.add_guide(id, 0, pdfcraft_engine::guides::GuideAxis::Vertical, 180.0).unwrap();
+    ok(&mut h, &c, "ui.set", json!({ "key": "guides", "value": "on" }));
+    h.run_steps(3);
+    assert_eq!(guide_lines(&h).len(), 1, "on the 200 pt wide page");
+    // Cropping the page to 160 pt wide leaves the guide at 180 pt, past its right edge.
+    let crop = pdfcraft_engine::Edit::SetPageBox {
+        pages: vec![0],
+        which: pdfcraft_engine::PageBox::Crop,
+        spec: pdfcraft_engine::BoxSpec::Margins([10.0, 20.0, 30.0, 40.0]),
+    };
+    assert!(h.state_mut().apply_edit(crop));
+    h.run_steps(4);
+    assert_eq!(h.state().session.guides(id, None).unwrap().len(), 1, "the guide itself is kept");
+    assert!(guide_lines(&h).is_empty(), "{:?}", guide_lines(&h));
+}

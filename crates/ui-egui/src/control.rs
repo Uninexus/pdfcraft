@@ -33,6 +33,9 @@
 //! - `ui.set {key: "single_key_accelerators", value: "true"|"false"}` turns the opt-in single-key
 //!   tool accelerators (Z Marquee zoom, G Snapshot) on or off; `ui.state.single_key_accelerators`
 //!   reports it. `ui.set {key: "quick", value: "marquee-zoom"|"snapshot"|…}` picks a tool without a key.
+//! - `ui.set {key: "guides", value: "on"|"off"}` shows or hides the active tab's ruler guides (View ▸ Guides ▸
+//!   Show Guides, `view.show_guides`); `ui.state.active.show_guides` and `.guides` (how many the document has)
+//!   report it. `view.clear_guides` removes them.
 //! - `ui.set {key, value}`: view options (`--page`, `--zoom`, …), plus persistent preferences.
 //!   `select` accepts physical page numbers and ranges such as `1,12,16-18`; blank clears the
 //!   explicit selection. This is the same bounded parser as the Organize Pages field; invalid

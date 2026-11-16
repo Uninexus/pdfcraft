@@ -405,7 +405,7 @@ update the numbers.
 
 - **Missing:** moving several selected objects across pages (same-page moves shipped, #844), single-key accelerators for the remaining tools (V, H, and the opt-in Z and G shipped),
   rulers and grids (ruler guides are in as a headless slice: `doc_guides`, `doc_guide_add`, `doc_guide_remove`, per page and
-  session-only; the app has no rulers to drag them from, draws none and snaps to none), loupe and dynamic zoom, multiple windows and spreadsheet split (split
+  session-only, and View ▸ Guides ▸ Show Guides draws them over the pages and Clear Guides removes them; the app has no rulers to drag them from and snaps to none), loupe and dynamic zoom, multiple windows and spreadsheet split (split
   view shipped), comment
   pop-ups that can be moved, connector lines, customisable quick tools; shortcut display and tool-mode bugs (#746, #721), macOS window controls
   (#789).
@@ -512,6 +512,7 @@ update the numbers.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-16 | minor | Gap 16: View ▸ Guides ▸ Show Guides draws a document's ruler guides over the pages (per tab, off by default, `ui.set guides`) and Clear Guides removes them; no rulers to drag from and no snapping yet (`view.guides` stays partial). Estimates unchanged. |
 | 2026-11-16 | minor | Gap 22: `af_list`, `af_add` and `af_remove` list and edit PDF 2.0 associated files (`/AF`) at document level (`core.pdf20-associated-files` is partial). Estimates unchanged. |
 | 2026-11-16 | minor | Gap 22: `doc_linearization` reports a file's linearization parameter dictionary and whether it still holds (read-only; `core.linearization` is partial). Estimates unchanged. |
 | 2026-11-16 | minor | Gap 11: `accessibility_reading_order` lists the tagged content in logical reading order, inline elements included, with type, page, MCID, text and inherited alt text and language (headless, read-only). Estimates unchanged. |

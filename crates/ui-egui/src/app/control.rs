@@ -226,6 +226,11 @@ impl PdfCraftApp {
                 };
                 self.set_active_page_gaps(show);
             }
+            ("guides", Some(v)) => match value {
+                "on" => v.show_guides = true,
+                "off" => v.show_guides = false,
+                _ => return Err("guides must be on or off".into()),
+            },
             ("default-page-gaps", _) => {
                 self.view_defaults.show_page_gaps = match value {
                     "on" => true,

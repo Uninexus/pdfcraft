@@ -175,6 +175,7 @@ const DISPLAY: &[&str] = &[
     "view.fit_width_scrolling",
     "view.fit_one_page",
 ];
+const GUIDES: &[&str] = &["view.show_guides", "view.clear_guides"];
 const THEMES: &[&str] = &["view.theme.system", "view.theme.light", "view.theme.dark"];
 const PANES: &[&str] = &["view.side_panel", "view.tools_pane", "view.split"];
 const PANE_COMMANDS: &[&str] = &["comment.list", "form.fields", "ui.dock.reset"];
@@ -352,6 +353,7 @@ impl PdfCraftApp {
             Node::submenu(tl!("Rotate view"), list(&[ROTATE_CW, ROTATE_CCW], &mut used)),
             Node::submenu(tl!("Page navigation"), list(NAVIGATION, &mut used)),
             Node::submenu(tl!("Page display"), list(DISPLAY, &mut used)),
+            Node::submenu(tl!("Guides"), list(GUIDES, &mut used)),
             Node::Separator,
         ];
         view.extend(list(PANES, &mut used));
@@ -515,6 +517,7 @@ impl PdfCraftApp {
             "view.continuous" => Some(view.is_some_and(|v| v.continuous())),
             "view.page_gaps" => Some(view.is_some_and(|v| v.show_page_gaps)),
             "view.layout.cover" => Some(view.is_some_and(|v| v.cover)),
+            "view.show_guides" => Some(view.is_some_and(|v| v.show_guides)),
             "view.full_screen" => Some(self.full_screen),
             "view.read_mode" => Some(self.mode == crate::Mode::Read),
             "view.side_panel" => Some(self.right.is_some()),

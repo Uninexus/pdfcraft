@@ -25,6 +25,8 @@ mod cache;
 pub(super) mod crop;
 mod find;
 pub(super) mod fling;
+mod guides;
+pub use guides::GUIDE_COLOR;
 pub(super) mod image_pick;
 mod navigation;
 mod organize;
@@ -493,6 +495,9 @@ pub struct DocView {
     /// Whether the base layout scrolls continuously (independent of `layout`, as in Acrobat).
     pub continuous: bool,
     pub show_page_gaps: bool,
+    /// View ▸ Show Guides: draw this document's ruler guides over its pages. View state: never
+    /// saved, never exported or printed.
+    pub show_guides: bool,
     /// View rotation in degrees clockwise (0, 90, 180, 270); display only, never saved.
     pub rotation: u16,
     pub current: usize,
@@ -1033,6 +1038,7 @@ impl DocView {
             layout: defaults.layout,
             continuous: defaults.continuous,
             show_page_gaps: defaults.show_page_gaps,
+            show_guides: false,
             rotation: 0,
             current: 0,
             organize: false,
@@ -1233,6 +1239,7 @@ impl DocView {
         fresh.layout = self.layout;
         fresh.continuous = self.continuous;
         fresh.show_page_gaps = self.show_page_gaps;
+        fresh.show_guides = self.show_guides;
         fresh.rotation = self.rotation;
         fresh.current = self.current;
         fresh.organize = self.organize;
@@ -1285,6 +1292,7 @@ impl DocView {
         v.layout = self.layout;
         v.continuous = self.continuous;
         v.show_page_gaps = self.show_page_gaps;
+        v.show_guides = self.show_guides;
         v.rotation = self.rotation;
         v.cover = self.cover;
         v.current = self.current;
@@ -1358,6 +1366,8 @@ struct PageEnv<'a> {
     form: &'a Arc<Vec<pdfcraft_engine::FormField>>,
     generation: u64,
     glide: Vec2,
+    /// The ruler guides to draw (empty unless View ▸ Show Guides is on).
+    guides: &'a [pdfcraft_engine::guides::Guide],
     hand: bool,
     info: &'a DocInfo,
     /// The Animation effects preference as it applies now (full screen's transitions follow it).
@@ -1767,6 +1777,8 @@ fn draw_page(ui: &mut egui::Ui, view: &mut DocView, frame: &mut PageFrame<'_>, i
     if view.show_page_gaps {
         painter.rect_stroke(r, CornerRadius::ZERO, Stroke::new(0.5, t.border.gamma_multiply(0.8)), egui::StrokeKind::Outside);
     }
+    // Ruler guides: thin lines over the page, drawn only (no hit-testing, never exported).
+    guides::paint(painter, &xf, i, frame.env.guides);
 
     let slot = PageSlot { i, r, xf };
     // Addresses written as plain text are found once per text layer, before the tools hit-test them.
@@ -3372,6 +3384,7 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     let comments_hidden = doc.comments_hidden();
     let form = doc.form.clone();
     let generation = doc.edit_generation();
+    let guides = if view.show_guides { app.session.guides(view.id, None).unwrap_or_default() } else { Vec::new() };
     let can_fill = doc.allows_form_filling();
     let can_crop = doc.allows_assembly();
     let signature = app.signature.clone();
@@ -3449,6 +3462,7 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
         glide,
         hand,
         info,
+        guides: &guides,
         initials: &initials,
         key_scroll,
         key_side,
