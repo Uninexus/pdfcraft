@@ -1,5 +1,6 @@
 # Where PdfCraft falls short of Acrobat Pro
 
+> **Last reviewed:** 2026-11-16 | **Last updated:** 2026-11-16 | **Change:** minor (gap 8: `doc_create` from `office` makes a PDF from one Office document, headless; estimates unchanged)
 > **Last reviewed:** 2026-11-14 | **Last updated:** 2026-11-14 | **Change:** minor (gap 21: Compare files can be limited to replaced, inserted, deleted and visual changes in the dialog, panel, report, Mark as comments and tools; gap 19: Preferences gains Identity (name, email) and Forms (highlight fields and colour, field tooltips); estimates unchanged)
 > **Last reviewed:** 2026-11-13 | **Last updated:** 2026-11-13 | **Change:** minor (gap 21: the Compare Files dialog takes a page range for each file, and the report and Mark as comments follow them; estimates unchanged)
 > **Last reviewed:** 2026-11-13 | **Last updated:** 2026-11-13 | **Change:** minor (gap 8: Insert pages, Combine files and Create ▸ Multiple files take Office documents through the installed LibreOffice; gap 8's first-beta sub-estimate re-estimated from 5–10 h to 3–6 h)
@@ -200,8 +201,8 @@ update the numbers.
 - **Missing:** Word export that keeps layout; Excel and PowerPoint export; creating PDFs from HTML,
   web pages and PostScript; SVG/XML/EPS/PS/JPEG 2000 export. Office documents open from File ▸ Open,
   and Insert pages, Combine files and Create ▸ Multiple files take them too (desktop, through an
-  installed LibreOffice, converted on a worker thread); there is no Create ▸ From Office command or
-  conversion settings yet.
+  installed LibreOffice, converted on a worker thread); headlessly `doc_create` from `office` makes a
+  PDF from one document. Create ▸ Single file already converts one Office file in the app; there is no Create ▸ From Office menu entry, conversion settings or progress yet.
 - **Evidence:** `create.export-docx` partial; the synthetic invoice regression for
   [#773](https://github.com/storytold/pdfcraft/issues/773) now covers absent inferred borders,
   floating watermark text and per-page section sizes. Exact font matching, vector rules and
@@ -217,7 +218,7 @@ update the numbers.
   fetched. Sandboxing the converter is [#6953](https://github.com/storytold/pdfcraft/issues/6953).
 - **Impact:** "Export PDF" and "Create PDF" are two of Acrobat's most used tools.
 - **Gate:** lossy or missing sub-cases of the convert-and-share workflow (partial, not blocking).
-  First beta items: the rest of Create PDF from Office (a Create ▸ From Office command, conversion
+  First beta items: the rest of Create PDF from Office (a Create ▸ From Office menu command, conversion
   settings, progress and cancel for large batches; 3–6 h) and a Word export that keeps layout (20–35 h).
 - **Estimate:** 55–100 h. **Doc:** [file-format-parity.md](file-format-parity.md).
 
@@ -472,6 +473,7 @@ update the numbers.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-16 | minor | Gap 8: `doc_create` from `office` converts one Office document into a new PDF through an installed LibreOffice (headless; no menu command yet). Estimates unchanged. |
 | 2026-11-14 | minor | Gap 21: Compare files filters by kind of change (replaced, inserted, deleted, visual) in the dialog, the panel, Mark as comments, the report and `doc_compare`, `doc_compare_report`, `doc_compare_mark` (`kinds`); images, annotations, formatting and background changes are still not told apart. Estimates unchanged. |
 | 2026-11-13 | minor | Gap 21: the Compare Files dialog has Old file pages and New file pages fields; the comparison, panel, report and Mark as comments use them (`doc_compare_report` and `doc_compare_mark` take the same range arguments as `doc_compare`). Estimates unchanged. |
 | 2026-11-13 | minor | Gap 8: Insert pages, Combine files and Create ▸ Multiple files take Office documents through the installed LibreOffice, converted on a worker thread (all or nothing when LibreOffice is missing). Gap 8's remaining first-beta Office item re-estimated from 5–10 h to 3–6 h. |
