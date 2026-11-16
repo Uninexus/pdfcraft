@@ -566,6 +566,31 @@ impl Automation {
         Ok(json!({ "count": count, "tags": tags, "next": next }))
     }
 
+    /// The tagged content in logical reading order (every marked-content reference, inline
+    /// elements included), at most `limit` items; `truncated` says more follows.
+    pub(crate) fn accessibility_reading_order(&self, a: &Args) -> Result<Value> {
+        let limit = a.opt_int("limit")?.unwrap_or(500);
+        let limit = usize::try_from(limit)
+            .ok()
+            .filter(|l| (1..=10_000).contains(l))
+            .ok_or_else(|| ToolError::InvalidArgs("limit must be from 1 to 10000".into()))?;
+        let order = self.doc(a)?.reading_order(limit);
+        let items: Vec<Value> = order
+            .items
+            .into_iter()
+            .map(|i| {
+                json!({
+                    "index": i.index, "depth": i.depth, "type": &*i.kind, "standard_type": &*i.standard, "in_other_stream": i.in_stream,
+                    "element": i.element.map(|e| json!({ "object": e.num, "generation": e.generation })),
+                    "page": i.page.map(|p| p + 1), "mcid": i.mcid,
+                    "object": i.object.map(|e| json!({ "object": e.num, "generation": e.generation })),
+                    "text": i.text, "alternate_text": i.alt.as_deref(), "actual_text": i.actual_text.as_deref(), "language": i.language.as_deref(),
+                })
+            })
+            .collect();
+        Ok(json!({ "count": items.len(), "items": items, "truncated": order.truncated }))
+    }
+
     pub(crate) fn accessibility_tag_content(&self, a: &Args) -> Result<Value> {
         let object = u32::try_from(a.int("object")?).map_err(|_| ToolError::InvalidArgs("object must be a positive tag object number".into()))?;
         let generation =

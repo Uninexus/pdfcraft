@@ -9220,9 +9220,9 @@ tier = "P1"
 milestone = "M12"
 status = "partial"
 commands = []
-tools = ["accessibility_move_tag"]
-evidence = ["crates/a11y/src/tests.rs::sibling_tags_move_in_reading_order_without_changing_content", "crates/automation/tests/it/automation.rs::accessibility_check_report_and_fixes_through_tools"]
-notes = "The headless tool can move a reachable indirect tag before or after a direct sibling in their parent's /K array as one undoable edit. It preserves page content and rejects ambiguous children. The visual Reading Order tool, inline tags, arbitrary retagging, and moving across parents remain planned."
+tools = ["accessibility_move_tag", "accessibility_reading_order"]
+evidence = ["crates/a11y/src/tests.rs::sibling_tags_move_in_reading_order_without_changing_content", "crates/a11y/src/tests.rs::reading_order_lists_inline_and_indirect_content_once_with_inherited_properties", "crates/automation/tests/it/automation.rs::reading_order_follows_a_saved_reordering_and_is_bounded", "crates/automation/tests/it/automation.rs::accessibility_check_report_and_fixes_through_tools"]
+notes = "accessibility_reading_order lists the whole tree's content in logical order (read-only, bounded), inline tags included; editing or moving inline tags remains planned. The headless tool can move a reachable indirect tag before or after a direct sibling in their parent's /K array as one undoable edit. It preserves page content and rejects ambiguous children. The visual Reading Order tool, inline tags, arbitrary retagging, and moving across parents remain planned."
 
 [[feature]]
 id = "a11y.tags-panel"

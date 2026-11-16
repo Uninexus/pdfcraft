@@ -1519,6 +1519,9 @@ pub fn tools() -> Vec<ToolDef> {
                 }),
                 &["doc"],
             )),
+        t("accessibility_reading_order", "Read tagged reading order", "List the structure tree's content in logical reading order: each marked-content reference (and object reference, such as an annotation) with its owning element's type (as written and after the role map), depth, page, marked-content id, extracted text, and the alternate text, actual text and language of the element or its nearest ancestor with one. Includes inline (direct) elements that accessibility_tags cannot address. Read-only and bounded: each object is visited once, and truncated is true when limit or an internal limit stopped the walk.")
+            .ro()
+            .with(schema(json!({ "doc": doc(), "limit": { "type": "integer", "minimum": 1, "maximum": 10000, "description": "Most items to return (default 500)" } }), &["doc"])),
         t("accessibility_tag_content", "List tag content", "List the marked-content references directly owned by one reachable indirect structure tag, including page, MCID and extracted text.")
             .ro()
             .cmd("a11y.tags")

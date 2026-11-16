@@ -19,6 +19,7 @@ mod autotag_roles;
 mod content;
 mod headings;
 mod layout_table;
+mod reading_order;
 mod report;
 mod structure;
 mod tags;
@@ -44,6 +45,7 @@ pub use autotag::{AutoTagError, AutoTagResult, autotag_text};
 pub use autotag_fields::tag_form_fields;
 pub use headings::{Heading, headings};
 pub use layout_table::{LayoutTableError, layout_table_to_blocks};
+pub use reading_order::{ReadingItem, ReadingOrder, reading_order};
 pub use report::{REPORT_WORDS, report_html};
 pub use tags::{TagContentItem, TagError, TagInfo, TagPlacement, TagProperty, move_tag, set_tag_property, tag_content, tags};
 
