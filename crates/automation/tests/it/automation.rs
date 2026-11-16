@@ -10610,6 +10610,69 @@ fn pdfa_through_tools() {
     assert!(matches!(a.call("standards_remove_id", &json!({ "doc": doc, "standard": "pdfa" })), Err(ToolError::Failed(_))), "nothing left");
 }
 
+/// A small PDF/X-1a-shaped file: identification, a GTS_PDFX output intent, Trapped, a TrimBox and
+/// a file identifier, and nothing that needs a font.
+fn pdfx_fixture(with_trim: bool) -> Vec<u8> {
+    let trim = if with_trim { "/TrimBox [5 5 95 95]" } else { "" };
+    let objs = [
+        "<< /Type /Catalog /Pages 2 0 R /OutputIntents [5 0 R] >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
+        format!("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] {trim} >>"),
+        "<< /Title (X) /GTS_PDFXVersion (PDF/X-1:2001) /GTS_PDFXConformance (PDF/X-1a:2001) /Trapped /False >>".to_string(),
+        "<< /Type /OutputIntent /S /GTS_PDFX /OutputConditionIdentifier (CGATS TR 001) >>".to_string(),
+    ];
+    let mut out = b"%PDF-1.3\n".to_vec();
+    let mut offsets = Vec::new();
+    for (i, o) in objs.iter().enumerate() {
+        offsets.push(out.len());
+        out.extend_from_slice(format!("{} 0 obj\n{o}\nendobj\n", i + 1).as_bytes());
+    }
+    let xref = out.len();
+    out.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1).as_bytes());
+    for o in offsets {
+        out.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+    }
+    out.extend_from_slice(
+        format!("trailer\n<< /Size {} /Root 1 0 R /Info 4 0 R /ID [<aa> <bb>] >>\nstartxref\n{xref}\n%%EOF\n", objs.len() + 1).as_bytes(),
+    );
+    out
+}
+
+#[test]
+fn pdfx_verify_reports_identification_and_structure_through_tools() {
+    let dir = workdir("pdfx-verify");
+    std::fs::write(dir.join("x.pdf"), pdfx_fixture(true)).unwrap();
+    std::fs::write(dir.join("notrim.pdf"), pdfx_fixture(false)).unwrap();
+    let mut a = auto(&dir);
+    let good = ok(&mut a, "doc_open", json!({ "path": "x.pdf" }))["doc"].as_u64().unwrap();
+    let before = ok(&mut a, "doc_info", json!({ "doc": good }));
+    let r = ok(&mut a, "pdfx_verify", json!({ "doc": good }));
+    assert_eq!(r["declared"]["family"], "PDF/X-1a", "{r}");
+    assert_eq!(r["declared"]["version"], "PDF/X-1:2001", "{r}");
+    assert_eq!(r["checked_against"], "PDF/X-1a", "{r}");
+    assert_eq!(r["no_findings"], true, "{r}");
+    assert!(r["note"].as_str().unwrap().contains("does not make a file PDF/X"), "{r}");
+    // Asked for X-4, the same file is missing what X-4 states differently.
+    let r = ok(&mut a, "pdfx_verify", json!({ "doc": good, "version": "x4" }));
+    assert_eq!(r["no_findings"], false, "{r}");
+    let rules: Vec<&str> = r["findings"].as_array().unwrap().iter().map(|f| f["rule"].as_str().unwrap()).collect();
+    assert!(rules.contains(&"identification"), "{r}");
+    // A page without a TrimBox or ArtBox is a finding on that page (1-based).
+    let bad = ok(&mut a, "doc_open", json!({ "path": "notrim.pdf" }))["doc"].as_u64().unwrap();
+    let r = ok(&mut a, "pdfx_verify", json!({ "doc": bad }));
+    let f = &r["findings"].as_array().unwrap()[0];
+    assert_eq!((f["rule"].as_str(), f["page"].as_u64()), (Some("trim-or-art-box"), Some(1)), "{r}");
+    // A document that declares nothing says so once.
+    let plain = ok(&mut a, "doc_create", json!({ "from": "text", "text": "Plain" }))["doc"].as_u64().unwrap();
+    let r = ok(&mut a, "pdfx_verify", json!({ "doc": plain }));
+    assert!(r["checked_against"].is_null(), "{r}");
+    assert_eq!(r["findings"].as_array().unwrap().len(), 1, "{r}");
+    assert!(a.call("pdfx_verify", &json!({ "doc": good, "version": "x9" })).is_err());
+    assert!(a.call("pdfx_verify", &json!({ "doc": 999 })).is_err());
+    assert_eq!(ok(&mut a, "doc_info", json!({ "doc": good })), before, "verification doesn't change the document");
+    assert!(pdfcraft_automation::tools().iter().any(|t| t.name == "pdfx_verify" && t.read_only));
+}
+
 #[test]
 fn print_readiness_through_tools() {
     let dir = workdir("print-readiness");

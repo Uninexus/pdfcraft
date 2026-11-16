@@ -8094,11 +8094,11 @@ title = "Verify PDF/X compliance"
 area = "K"
 tier = "P1"
 milestone = "M11"
-status = "planned"
+status = "partial"
 commands = []
-tools = []
-evidence = []
-notes = ""
+tools = ["pdfx_verify"]
+evidence = ["crates/preflight/src/tests.rs::a_well_formed_x1a_file_has_no_findings_and_says_what_it_declares", "crates/preflight/src/tests.rs::missing_structure_is_reported_by_rule", "crates/preflight/src/tests.rs::both_boxes_and_a_bad_box_are_reported", "crates/preflight/src/tests.rs::x4_states_its_version_in_xmp_and_needs_trapped", "crates/preflight/src/tests.rs::trapped_must_be_the_name_true_or_false_in_every_family", "crates/preflight/src/tests.rs::x1_2001_needs_its_1a_conformance_and_plain_x1_is_not_x1a", "crates/preflight/src/tests.rs::transparency_is_refused_by_x1a_and_x3_and_allowed_by_x4", "crates/preflight/src/tests.rs::unembedded_fonts_are_reported_once_by_name", "crates/preflight/src/tests.rs::an_undeclared_or_unknown_version_is_one_finding_and_a_request_overrides_it", "crates/preflight/src/tests.rs::page_findings_are_bounded", "crates/automation/tests/it/automation.rs::pdfx_verify_reports_identification_and_structure_through_tools"]
+notes = "Headless first slice: pdfx_verify reads what the document declares (GTS_PDFXVersion and GTS_PDFXConformance in the document information or pdfxid: in XMP) and lists, for PDF/X-1a, PDF/X-3 or PDF/X-4 (the declared one, or version x1a, x3, x4), the structural conditions it can decide from the object graph: where the version is stated (document information for X-1a and X-3, XMP for X-4, and the two agreeing), a GTS_PDFX output intent naming its condition with a stream profile when it has one, Trapped True or False as a name in the document information or pdf:Trapped in XMP (every family; Unknown, booleans and strings are findings), PDF/X-1:2001 with GTS_PDFXConformance PDF/X-1a:2001 (plain PDF/X-1 is not read as X-1a), a TrimBox or ArtBox (a rectangle, not both) on every page, the file identifier, no encryption, fonts embedded (the PDF/A font rule) and no transparency (X-1a and X-3). Report only, never a claim of conformance: no findings means those checks found nothing. Not checked: colour spaces, DestOutputProfile contents, registered printing conditions, page box geometry, image and font internals, the other conditions of ISO 15930, PDF/X-5 and PDF/X-6; no dialog or command yet and no conversion (optimize.pdfx-convert). Written from the public ISO 15930 version and conformance keys; no Acrobat behaviour observed."
 
 [[feature]]
 id = "optimize.pdfx-convert"

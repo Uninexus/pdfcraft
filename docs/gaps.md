@@ -231,6 +231,12 @@ update the numbers.
 - **Evidence:** 12 Preflight features and 9 standards features planned; `optimize.pdfa-validate`,
   `optimize.pdfa-convert` partial (2b/3b structural rules; CMYK documents get no output intent).
   Acrobat ships hundreds of built-in Preflight profiles.
+- **Shipped slice:** `pdfx_verify` (headless, read-only) reports what a file declares as PDF/X
+  (`GTS_PDFXVersion`, `GTS_PDFXConformance`, `pdfxid:`) and the structural conditions of PDF/X-1a,
+  X-3 and X-4 it can decide from the object graph (identification, `GTS_PDFX` output intent,
+  Trapped (True or False), TrimBox or ArtBox, file ID, encryption, embedded fonts, transparency for X-1a and X-3).
+  It never claims conformance. `optimize.pdfx-validate` is partial: no dialog, no profile or colour
+  checks, no X-5/X-6, and no conversion.
 - **Impact:** blocks print shops, archives and accessibility compliance work.
 - **Estimate:** 65–115 h. **Doc:** [pdf-spec-parity.md](pdf-spec-parity.md).
 
