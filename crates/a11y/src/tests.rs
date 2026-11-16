@@ -3,6 +3,7 @@ use std::sync::Arc;
 use pdfcraft_cos::{Document, Object};
 
 use super::*;
+use crate::reading_order::{self, reading_order_within};
 
 /// A PDF from object bodies (object n = bodies[n - 1]) and extra trailer entries.
 fn pdf(bodies: &[String], trailer: &str) -> Document {
@@ -1493,6 +1494,130 @@ fn tag_content_reads_the_text_of_each_marked_content_reference() {
     assert_eq!(items(15), [(Some(1), 1, "AB".to_string())]);
 }
 
+#[test]
+fn reading_order_lists_inline_and_indirect_content_once_with_inherited_properties() {
+    let mut bodies = headings_doc();
+    // The Sect holding 13 carries a language and alternate text its content inherits.
+    bodies[9] = "<< /S /Document /Lang (en-GB) /K [12 0 R << /S /P /Pg 3 0 R /K 1 >> << /S /Sect /Alt (Group) /K << /S /Sect /K 13 0 R >> >> 14 0 R 15 0 R 16 0 R] >>".into();
+    let doc = pdf(&bodies, "");
+    let order = reading_order(&doc, 100);
+    assert!(!order.truncated);
+    let rows: Vec<_> = order.items.iter().map(|i| (i.index, i.depth, &*i.kind, &*i.standard, i.page, i.mcid, i.text.as_str())).collect();
+    assert_eq!(
+        rows,
+        [
+            // The role map turns Chapter into H1; the self-referencing H3 is walked once.
+            (0, 1, "Chapter", "H1", Some(0), Some(0), "Chapter One"),
+            (1, 1, "P", "P", Some(0), Some(1), "Body"),
+            (2, 3, "H", "H", Some(0), Some(2), "Sec A"),
+            (3, 1, "H2", "H2", Some(1), Some(0), "Ignored"),
+            (4, 1, "H3", "H3", Some(1), Some(1), "AB"),
+            (5, 1, "H1", "H1", Some(1), Some(9), ""),
+        ]
+    );
+    assert_eq!(order.items.first().and_then(|i| i.element), ref_(12));
+    assert_eq!(order.items.get(1).and_then(|i| i.element), None, "an inline element has no object");
+    let inherited = order.items.get(2).unwrap();
+    assert_eq!((inherited.alt.as_deref(), inherited.language.as_deref()), (Some("Group"), Some("en-GB")));
+    assert_eq!(order.items.get(3).and_then(|i| i.actual_text.as_deref()), Some("Override"));
+    let capped = reading_order(&doc, 2);
+    assert_eq!((capped.items.len(), capped.truncated), (2, true));
+    assert!(!reading_order(&doc, 6).truncated, "exactly the content is not truncated");
+}
+
+#[test]
+fn reading_order_of_a_document_without_tags_is_empty() {
+    let doc = pdf(&document_without_a_structure_tree(), "");
+    assert_eq!(reading_order(&doc, 10), ReadingOrder::default());
+}
+
+/// A one-page document whose structure root is `root` (object 8), with `extra` objects from 9.
+fn tree_doc(root: &str, extra: &[&str]) -> Document {
+    let mut bodies = vec![
+        "<< /Type /Catalog /Pages 2 0 R /StructTreeRoot 8 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>".into(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Contents 5 0 R /Resources << /Font << /F1 7 0 R >> >> >>".into(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Contents 6 0 R /Resources << /Font << /F1 7 0 R >> >> >>".into(),
+        stream("/P << /MCID 0 >> BDC BT /F1 12 Tf (One) Tj ET EMC"),
+        stream("/P << /MCID 0 >> BDC BT /F1 12 Tf (Two) Tj ET EMC"),
+        FONT.into(),
+        root.into(),
+    ];
+    bodies.extend(extra.iter().map(|e| e.to_string()));
+    pdf(&bodies, "")
+}
+
+fn limits() -> reading_order::Limits {
+    reading_order::Limits {
+        nodes: 1000,
+        depth: 64,
+        text_chars: 2000,
+        string_chars: 1000,
+        output_bytes: 1 << 20,
+        source_bytes: 1 << 20,
+        parsed_pages: 10,
+    }
+}
+
+#[test]
+fn reading_order_handles_object_references_page_overrides_streams_and_indirect_keys() {
+    let doc = tree_doc(
+        "<< /Type /StructTreeRoot /K 9 0 R /RoleMap << /A /B /B /A >> >>",
+        &[
+            "[10 0 R 12 0 R]",
+            "<< /S /A /Pg 3 0 R /K [0 << /Type /MCR /MCID 0 /Pg 4 0 R >> << /Type /MCR /MCID 0 /Stm 5 0 R >> << /Type /OBJR /Obj 11 0 R /Pg 3 0 R >>] >>",
+            "<< /Type /Annot /Subtype /Link /Rect [0 0 1 1] >>",
+            "<< /S 13 0 R /Pg 3 0 R /K 0 >>",
+            "/P",
+        ],
+    );
+    let order = reading_order(&doc, 100);
+    let rows: Vec<_> =
+        order.items.iter().map(|i| (&*i.kind, i.depth, i.page, i.mcid, i.object.map(|o| o.num), i.in_stream, i.text.as_str())).collect();
+    assert_eq!(
+        rows,
+        [
+            ("A", 0, Some(0), Some(0), None, false, "One"),
+            ("A", 0, Some(1), Some(0), None, false, "Two"),
+            ("A", 0, Some(0), Some(0), None, true, ""),
+            ("A", 0, Some(0), None, Some(11), false, ""),
+            ("P", 0, Some(0), Some(0), None, false, "One"),
+        ],
+        "the role map cycle ends, /Pg overrides the page, /Stm text is not read, an indirect /S and /K array resolve"
+    );
+    assert!(order.truncated, "the /Stm reference says its text was not read");
+}
+
+#[test]
+fn reading_order_limits_work_and_output() {
+    let long = "x".repeat(300);
+    let marks = vec!["0"; 50].join(" ");
+    // One element repeating a mark 50 times under a long alternate text.
+    let doc = tree_doc("<< /Type /StructTreeRoot /K 9 0 R >>", &[&format!("<< /S /P /Pg 3 0 R /Alt ({long}) /K [{marks}] >>")]);
+    let all = reading_order_within(&doc, 1000, limits());
+    assert_eq!((all.items.len(), all.truncated), (50, false));
+    assert!(all.items.iter().all(|i| i.alt.as_deref().is_some_and(|a| a.len() == 300)));
+    // Strings and text are cut; the output allowance ends the list.
+    let cut = reading_order_within(&doc, 1000, reading_order::Limits { string_chars: 10, text_chars: 2, output_bytes: 600, ..limits() });
+    assert!(cut.truncated && cut.items.len() < 50 && !cut.items.is_empty(), "{}", cut.items.len());
+    assert!(cut.items.iter().all(|i| i.alt.as_deref().map(str::len) == Some(10) && i.text.chars().count() <= 2));
+    // A string beyond the decoding allowance is left out.
+    let none = reading_order_within(&doc, 1000, reading_order::Limits { source_bytes: 100, ..limits() });
+    assert!(none.truncated && none.items.iter().all(|i| i.alt.is_none()));
+    // Nodes: a wide array stops at the allowance.
+    let wide = reading_order_within(&doc, 1000, reading_order::Limits { nodes: 10, ..limits() });
+    assert!(wide.truncated && wide.items.len() < 10);
+    // Depth: nested arrays past the limit are not followed.
+    let nested = tree_doc("<< /Type /StructTreeRoot /K 9 0 R >>", &["<< /S /P /Pg 3 0 R /K [[[[[[[[0]]]]]]]] >>"]);
+    assert_eq!(reading_order_within(&nested, 10, limits()).items.len(), 1);
+    let shallow = reading_order_within(&nested, 10, reading_order::Limits { depth: 4, ..limits() });
+    assert!(shallow.truncated && shallow.items.is_empty());
+    // Pages whose text is parsed: the second distinct page is not.
+    let two = tree_doc("<< /Type /StructTreeRoot /K [9 0 R] >>", &["<< /S /P /K [0 << /Type /MCR /MCID 0 /Pg 4 0 R >>] /Pg 3 0 R >>"]);
+    let parsed = reading_order_within(&two, 10, reading_order::Limits { parsed_pages: 1, ..limits() });
+    assert_eq!((parsed.items.iter().map(|i| i.text.as_str()).collect::<Vec<_>>(), parsed.truncated), (vec!["One", ""], true));
+}
+
 /// Helvetica advances (standard 14 metrics, per 1000 em) of the characters the tests below draw.
 fn helvetica_width(c: char) -> f64 {
     match c {
@@ -1920,4 +2045,8 @@ fn checker_reports_each_untagged_annotation_without_copying_shared_dictionaries(
     let pages = pdfcraft_model::pages(&doc);
     let found = content::page_rule(&doc, Rule::TaggedAnnotations, &pages, &[0], &Default::default(), false);
     assert_eq!(found.len(), 2, "the popup is skipped, each listed text annotation reported");
+}
+
+fn document_without_a_structure_tree() -> Vec<String> {
+    vec!["<< /Type /Catalog /Pages 2 0 R >>".into(), "<< /Type /Pages /Kids [] /Count 0 >>".into()]
 }

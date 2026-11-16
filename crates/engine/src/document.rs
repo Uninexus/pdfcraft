@@ -481,6 +481,11 @@ impl Document {
         self.editor.as_ref().map(|e| a11y::tags(&e.cos)).unwrap_or_default()
     }
 
+    /// The structure tree's content in logical reading order, at most `max_items` items.
+    pub fn reading_order(&self, max_items: usize) -> a11y::ReadingOrder {
+        self.editor.as_ref().map(|e| a11y::reading_order(&e.cos, max_items)).unwrap_or_default()
+    }
+
     /// Marked-content items directly owned by one reachable indirect structure tag.
     pub fn tag_content(&self, object: pdfcraft_cos::ObjRef) -> Result<Vec<a11y::TagContentItem>, a11y::TagError> {
         self.editor.as_ref().map(|e| a11y::tag_content(&e.cos, object)).unwrap_or_else(|| Ok(Vec::new()))

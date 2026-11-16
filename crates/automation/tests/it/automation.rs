@@ -6786,6 +6786,65 @@ fn an_applied_redaction_at_the_end_of_a_line_audits_clean() {
     assert_eq!(r["count"], 0, "{r}");
 }
 
+/// The reading-order tool lists inline and indirect content in tree order, bounded by `limit`,
+/// and follows a reordering that was saved and reopened.
+#[test]
+fn reading_order_follows_a_saved_reordering_and_is_bounded() {
+    let dir = workdir("reading-order");
+    let content = "/P << /MCID 0 >> BDC BT /F1 12 Tf 20 180 Td (First) Tj ET EMC /P << /MCID 1 >> BDC BT (Second) Tj ET EMC /Span << /MCID 2 >> BDC BT (Inline) Tj ET EMC";
+    let objs = [
+        "<< /Type /Catalog /Pages 2 0 R /StructTreeRoot 6 0 R /MarkInfo << /Marked true >> >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>".to_string(),
+        format!("<< /Length {} >>\nstream\n{content}\nendstream", content.len()),
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_string(),
+        "<< /Type /StructTreeRoot /K 7 0 R >>".to_string(),
+        "<< /S /Document /P 6 0 R /K [8 0 R 9 0 R << /S /Span /Alt (Note) /Pg 3 0 R /K 2 >>] >>".to_string(),
+        "<< /S /P /P 7 0 R /Pg 3 0 R /K 0 >>".to_string(),
+        "<< /S /P /P 7 0 R /Pg 3 0 R /K 1 >>".to_string(),
+    ];
+    let mut pdf = b"%PDF-1.7\n".to_vec();
+    let mut offsets = Vec::new();
+    for (i, o) in objs.iter().enumerate() {
+        offsets.push(pdf.len());
+        pdf.extend_from_slice(format!("{} 0 obj\n{o}\nendobj\n", i + 1).as_bytes());
+    }
+    let xref = pdf.len();
+    pdf.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1).as_bytes());
+    for o in offsets {
+        pdf.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+    }
+    pdf.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objs.len() + 1).as_bytes());
+    std::fs::write(dir.join("order.pdf"), pdf).unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "order.pdf" }))["doc"].as_u64().unwrap();
+    let texts = |v: &Value| v["items"].as_array().unwrap().iter().map(|i| i["text"].as_str().unwrap().to_string()).collect::<Vec<_>>();
+    let before = ok(&mut a, "accessibility_reading_order", json!({ "doc": doc }));
+    assert_eq!((texts(&before), before["truncated"].clone()), (vec!["First".to_string(), "Second".into(), "Inline".into()], json!(false)));
+    assert_eq!(
+        (before["items"][2]["type"].clone(), before["items"][2]["alternate_text"].clone(), before["items"][2]["element"].clone()),
+        (json!("Span"), json!("Note"), Value::Null)
+    );
+    assert_eq!(
+        (before["items"][0]["page"].clone(), before["items"][0]["mcid"].clone(), before["items"][0]["element"]["object"].clone()),
+        (json!(1), json!(0), json!(8))
+    );
+    let capped = ok(&mut a, "accessibility_reading_order", json!({ "doc": doc, "limit": 1 }));
+    assert_eq!((capped["count"].clone(), capped["truncated"].clone()), (json!(1), json!(true)));
+    for bad in [json!({ "doc": doc, "limit": 0 }), json!({ "doc": doc, "limit": 10001 })] {
+        assert!(matches!(a.call("accessibility_reading_order", &bad), Err(ToolError::InvalidArgs(_))), "{bad}");
+    }
+    ok(
+        &mut a,
+        "accessibility_move_tag",
+        json!({ "doc": doc, "object": 9, "generation": 0, "anchor": 8, "anchor_generation": 0, "placement": "before" }),
+    );
+    ok(&mut a, "doc_save", json!({ "doc": doc, "path": "moved.pdf" }));
+    let reopened = ok(&mut a, "doc_open", json!({ "path": "moved.pdf" }))["doc"].as_u64().unwrap();
+    let after = ok(&mut a, "accessibility_reading_order", json!({ "doc": reopened }));
+    assert_eq!(texts(&after), vec!["Second".to_string(), "First".into(), "Inline".into()]);
+}
+
 /// A long tagged document lists its tags a page at a time, and only the types, pages or depths
 /// asked for: a 20-page guide has hundreds of tags, more than one tool result should hold.
 #[test]

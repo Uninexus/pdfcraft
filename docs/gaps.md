@@ -268,7 +268,7 @@ update the numbers.
   a bounded auto-tag preview exist. Apply writes valid structure and parent-tree links for
   text-only files, tagging headings by size and weight; it refuses mixed content and existing tags;
   `accessibility_make_accessible` applies the safe fixes (title, language, tab order) in one undoable
-  step and reports what remains; `a11y.keyboard-only` (P0) planned, `a11y.app-screen-reader` partial.
+  step and reports what remains; `accessibility_reading_order` (headless, read-only) lists the tagged content in logical order, inline elements included, with type, page, MCID, text and inherited alternate text and language, bounded in items, nodes, depth, string and total output size; `a11y.keyboard-only` (P0) planned, `a11y.app-screen-reader` partial.
 - **Impact:** most untagged files still need another editor to build their structure; PdfCraft itself is
   not yet usable without a mouse.
 - **Estimate:** 40–70 h. **Doc:** [target-app-parity.md](target-app-parity.md).
@@ -503,6 +503,7 @@ update the numbers.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-16 | minor | Gap 11: `accessibility_reading_order` lists the tagged content in logical reading order, inline elements included, with type, page, MCID, text and inherited alt text and language (headless, read-only). Estimates unchanged. |
 | 2026-11-16 | minor | Gap 17: `redact_mark` finds Canadian Social Insurance Numbers (`sin`) and postal codes (`ca-postal-code`); other locales still missing. Estimates unchanged. |
 | 2026-11-16 | minor | Gap 18: `page_boxes` lists every page's media, crop, bleed, trim and art boxes, which the file sets, the rotation and the bleed past the trim (headless, read-only). Estimates unchanged. |
 | 2026-11-16 | minor | Gap 13: the signature listing reads the page tree only for a document that has a signature field (≈ 0.25 s less per edit of a 100,000-page file); measured that each save keeps one more copy of the file in undo history. Estimates unchanged. |
