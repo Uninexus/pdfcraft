@@ -166,6 +166,40 @@ fn the_forms_page_changes_highlighting_the_highlight_colour_and_tooltips() {
 }
 
 #[test]
+fn the_forms_page_has_a_required_field_border_colour_that_survives_a_restart() {
+    let mut h = preferences();
+    assert_eq!(h.state().required_field_color, [0xE3, 0x22, 0x22]);
+    h.get_by_label("Required field border").scroll_to_me();
+    h.run_steps(3);
+    h.state_mut().required_field_color = [1, 2, 3];
+    let again = restarted(&h);
+    assert_eq!(again.required_field_color, [1, 2, 3]);
+    assert_eq!(again.field_highlight_color, [0x6E, 0x8E, 0xF5], "the highlight colour is its own setting");
+}
+
+#[test]
+fn corrupt_saved_required_field_colours_and_control_values_are_refused() {
+    let mut app = PdfCraftApp::new();
+    app.required_field_color = [1, 2, 3];
+    for bad in [r#"[1,2]"#, r#"[1,2,300]"#, r#"[1,2,-3]"#, r#"[1.5,2,3]"#, r##""#ff0000""##, "null", r#"["a","b","c"]"#] {
+        app.restore(&format!(r#"{{"required_field_color": {bad}}}"#));
+        assert_eq!(app.required_field_color, [1, 2, 3], "{bad}");
+    }
+    // Settings written before the preference existed leave the default alone.
+    let mut fresh = PdfCraftApp::new();
+    fresh.restore(r#"{"field_highlight_color": [9, 9, 9]}"#);
+    assert_eq!(fresh.required_field_color, [0xE3, 0x22, 0x22]);
+    app.set_option("required-field-color", "#00FF80").unwrap();
+    assert_eq!(app.required_field_color, [0, 255, 128]);
+    for bad in ["00FF80", "#00FF", "#GG0000", "#ÿ0000", ""] {
+        let err = app.set_option("required-field-color", bad).unwrap_err();
+        assert!(err.contains("required-field-color"), "{err}");
+    }
+    assert_eq!(app.required_field_color, [0, 255, 128]);
+    assert_eq!(app.field_highlight_color, [0x6E, 0x8E, 0xF5], "the highlight colour is not touched");
+}
+
+#[test]
 fn corrupt_saved_form_preferences_and_control_values_are_refused() {
     let mut app = PdfCraftApp::new();
     app.field_highlight_color = [1, 2, 3];
