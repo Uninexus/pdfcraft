@@ -578,6 +578,21 @@ impl Document {
         Ok(MakeAccessible { edit, fixed, needs_language, needs_title, language_ignored, replaced_non_text_title, report })
     }
 
+    /// The `/AF` entries of the document and its pages (PDF 2.0 associated files).
+    pub fn associated_files(&self) -> Vec<pdfcraft_organize::AssociatedFile> {
+        self.editor.as_ref().map(|e| pdfcraft_organize::associated_files(&e.cos)).unwrap_or_default()
+    }
+
+    /// [`Self::associated_files`], with whether the list was cut at its bounds.
+    pub fn associated_list(&self) -> pdfcraft_organize::AssociatedList {
+        self.editor.as_ref().map(|e| pdfcraft_organize::list_associated_files(&e.cos)).unwrap_or_default()
+    }
+
+    /// Whether the catalog's `/AF` entry at 1-based `index` is also listed by another `/AF` array.
+    pub fn associated_file_is_shared(&self, index: usize) -> bool {
+        self.editor.as_ref().is_some_and(|e| pdfcraft_organize::associated_file_is_shared(&e.cos, index).unwrap_or(true))
+    }
+
     pub fn initial_view(&self) -> InitialView {
         self.editor.as_ref().map(|e| pdfcraft_organize::initial_view(&e.cos)).unwrap_or_default()
     }

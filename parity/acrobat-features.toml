@@ -427,11 +427,11 @@ title = "PDF 2.0 associated files (/AF)"
 area = "A"
 tier = "P1"
 milestone = "M2"
-status = "planned"
+status = "partial"
 commands = []
-tools = []
-evidence = []
-notes = ""
+tools = ["af_list", "af_add", "af_remove"]
+evidence = ["crates/organize/src/tests.rs::associated_files_are_written_as_filespecs_in_the_catalog_af_and_removed_again", "crates/organize/src/tests.rs::associated_files_refuse_before_changing_anything", "crates/organize/src/tests.rs::page_level_associated_files_are_listed_with_their_page", "crates/organize/src/tests.rs::listing_associated_files_is_bounded_and_reads_a_shared_array_once", "crates/organize/src/tests.rs::a_shared_af_array_is_copied_not_changed_and_shared_files_keep_their_attachment", "crates/organize/src/tests.rs::a_file_listed_on_a_page_or_twice_keeps_its_attachment_and_deletion_goes_by_reference", "crates/automation/tests/it/associated_files.rs::removal_is_one_undo_step_unknown_types_get_a_media_type_and_pdfa_is_warned_about", "crates/automation/tests/it/associated_files.rs::an_associated_file_is_added_listed_saved_undone_and_removed", "crates/automation/tests/it/associated_files.rs::refusals_change_nothing_and_a_modify_restriction_holds"]
+notes = "Headless only. af_list reads the /AF arrays of the catalog and of every page (relationship, name, description, mime, size, embedded). af_add embeds a file as an attachment and adds its Filespec (/F, /UF, /EF EmbeddedFile, /AFRelationship) to the catalog /AF; af_remove drops an entry and, unless keep_attachment or another /AF entry lists the same file, its attachment. Listing is capped at 2000 rows; af_add warns under PDF/A-1 and PDF/A-2. One undo step each; needs permission to modify; refuses unknown relationships, EncryptedPayload, a non-array /AF, more than 256 entries and files over 32 MiB. Not yet: adding to pages, annotations or other objects, EncryptedPayload, listing /AF of annotations and other objects, any UI, writing /AF when combining or optimizing"
 
 [[feature]]
 id = "core.pdf20-dpart"

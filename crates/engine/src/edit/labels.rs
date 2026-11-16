@@ -276,6 +276,8 @@ impl Edit {
             Edit::AliasInks { .. } => Label::of("Alias inks"),
             Edit::AddAttachment { name, .. } => Label::with("Attach {name}", name.as_str()),
             Edit::DeleteAttachment { key } => Label::with("Delete attachment {key}", key.as_str()),
+            Edit::AddAssociatedFile { name, .. } => Label::with("Associate {name}", name.as_str()),
+            Edit::RemoveAssociatedFile { .. } => Label::of("Remove associated file"),
             Edit::ConvertColours { .. } => Label::of("Convert colours"),
             Edit::EditAttachmentDescription { .. } => Label::of("Edit attachment description"),
             Edit::AutoTagText => Label::of("Automatically tag text"),

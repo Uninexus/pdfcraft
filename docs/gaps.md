@@ -486,6 +486,11 @@ update the numbers.
   linearization parameter dictionary and whether it still holds (the file's length against `/L`,
   hint streams and offsets inside the file); a linearized file saved incrementally reads as no
   longer valid. Hint tables, object order and writing a linearized file are not done.
+  `core.pdf20-associated-files` is partial: `af_list` reads the `/AF` arrays of the catalog and of
+  every page; `af_add` and `af_remove` add and remove a document-level associated file (an embedded
+  Filespec with `/AFRelationship`, in the catalog `/AF` and the attachments; one undo step, refusing
+  unknown relationships, EncryptedPayload, a non-array `/AF`, over 256 entries or 32 MiB; listing capped at 2,000 rows; the attachment of a removed file stays while another `/AF` lists it). Page,
+  annotation and other-object writing, EncryptedPayload and any UI are not done.
 - **Estimate:** 20–35 h. **Doc:** [pdf-spec-parity.md](pdf-spec-parity.md).
 
 ### 23. Local AI provider
@@ -507,6 +512,7 @@ update the numbers.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-16 | minor | Gap 22: `af_list`, `af_add` and `af_remove` list and edit PDF 2.0 associated files (`/AF`) at document level (`core.pdf20-associated-files` is partial). Estimates unchanged. |
 | 2026-11-16 | minor | Gap 22: `doc_linearization` reports a file's linearization parameter dictionary and whether it still holds (read-only; `core.linearization` is partial). Estimates unchanged. |
 | 2026-11-16 | minor | Gap 11: `accessibility_reading_order` lists the tagged content in logical reading order, inline elements included, with type, page, MCID, text and inherited alt text and language (headless, read-only). Estimates unchanged. |
 | 2026-11-16 | minor | Gap 17: `redact_mark` finds Canadian Social Insurance Numbers (`sin`) and postal codes (`ca-postal-code`); other locales still missing. Estimates unchanged. |

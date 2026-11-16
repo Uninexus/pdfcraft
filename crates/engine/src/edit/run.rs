@@ -146,6 +146,8 @@ pub(crate) fn check_permission(edit: &Edit, p: &pdfcraft_cos::Permissions) -> Re
         | Edit::AliasInks { .. }
         | Edit::AddAttachment { .. }
         | Edit::DeleteAttachment { .. }
+        | Edit::AddAssociatedFile { .. }
+        | Edit::RemoveAssociatedFile { .. }
         | Edit::ConvertColours { .. }
         | Edit::EditAttachmentDescription { .. }
         | Edit::AutoTagText
@@ -703,6 +705,12 @@ pub(crate) fn run_edit(doc: &mut pdfcraft_cos::Document, edit: &Edit, cx: &mut E
             pdfcraft_organize::add_attachment(doc, name, bytes, description.as_deref(), mime.as_deref(), cx.date.as_deref())?;
         }
         Edit::DeleteAttachment { key } => pdfcraft_organize::delete_attachment(doc, key)?,
+        Edit::AddAssociatedFile { name, bytes, relationship, description, mime } => {
+            pdfcraft_organize::add_associated_file(doc, name, bytes, relationship, description.as_deref(), mime.as_deref(), cx.date.as_deref())?;
+        }
+        Edit::RemoveAssociatedFile { index, keep_attachment } => {
+            pdfcraft_organize::remove_associated_file(doc, *index, *keep_attachment)?;
+        }
         Edit::ConvertColours { pages, settings } => {
             let mut recolour = |doc: &pdfcraft_cos::Document, s: &pdfcraft_cos::Stream, t: pdfcraft_edit::ColourTarget| {
                 let target = match t {

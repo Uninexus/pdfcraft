@@ -13,6 +13,7 @@
 
 use pdfcraft_cos::{Dict, Document, ObjRef, Object, PdfString, XrefEntry};
 
+mod associated;
 mod attachments;
 mod boxes;
 mod comments;
@@ -27,6 +28,10 @@ mod transition;
 pub mod view;
 mod xmp;
 
+pub use associated::{
+    AF_RELATIONSHIPS, AssociatedFile, AssociatedList, MAX_AF_BYTES, MAX_AF_ENTRIES, MAX_AF_ROWS, add_associated_file, associated_file_is_shared,
+    associated_files, list_associated_files, remove_associated_file,
+};
 pub use attachments::{add_attachment, attachment_keys, delete_attachment, mime_for_name, set_attachment_description};
 pub use boxes::{BoxSpec, PageBox, PageBoxReport, page_box_report, page_boxes, set_page_box};
 pub use comments::import_comments;
