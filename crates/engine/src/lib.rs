@@ -40,6 +40,7 @@ pub mod guides;
 mod history;
 pub mod js;
 mod layers;
+pub mod linearization;
 pub mod links;
 mod live_scripts;
 pub mod model3d;
