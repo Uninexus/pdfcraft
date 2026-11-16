@@ -407,7 +407,7 @@ status = "planned"
 commands = []
 tools = []
 evidence = []
-notes = "ByteSource (M1.5); files are buffered whole today. Viewing holds the file once and editing twice: edits let go of the previous working file before writing the next (a 1 GiB file peaked at three copies after a few edits, now two). Saving still peaks at three. Reading from disk on demand waits on the renderer (hayro parses one contiguous buffer, gap 2)."
+notes = "ByteSource (M1.5); files are buffered whole today. Viewing holds the file once and editing twice: edits let go of the previous working file before writing the next (a 1 GiB file peaked at three copies after a few edits, now two). Saving still peaks at three, and every save leaves one more copy alive in undo history (measured 2026-11-16, gap 13). Reading from disk on demand waits on the renderer (hayro parses one contiguous buffer, gap 2)."
 
 [[feature]]
 id = "core.pdf20-utf8-strings"
@@ -10483,7 +10483,7 @@ status = "planned"
 commands = []
 tools = []
 evidence = []
-notes = ""
+notes = "No budgets are checked on Tier-1 platforms yet. Measured so far (gap 13): re-inspection after an edit of a 100,000-page file is about 1.6 s inside the refresh; the signature listing no longer reads every page for a document without a signature field."
 
 [[feature]]
 id = "misc.send-email"

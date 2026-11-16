@@ -446,3 +446,37 @@ fn a_widget_shows_with_a_box_over_half_a_point_unless_hidden_or_noview() {
     endless.set(b"Rect".to_vec(), Object::Array(vec![Object::Int(0), Object::Int(0), Object::Real(f64::INFINITY), Object::Int(10)]));
     assert!(!widget_shown(&doc, &endless), "a box needs finite corners");
 }
+
+/// Which page holds a field's widget is read from the page tree, which costs a read of every page.
+/// A document with no signature field, nearly every document, is not made to read them: this was
+/// a quarter of a second after each edit of a 100,000-page file. One that has a field still gets
+/// its page, read once however many fields ask.
+#[test]
+fn the_page_tree_is_read_only_for_a_document_with_a_signature_field() {
+    use std::sync::atomic::Ordering;
+    let walks = |cache: &DigestCache| cache.page_walks.load(Ordering::Relaxed);
+    let trust = TrustStore::default();
+
+    let plain = Pdf::new()
+        .obj("<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [5 0 R] >> >>")
+        .obj("<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>")
+        .obj("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] >>")
+        .obj("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] >>")
+        .obj("<< /FT /Tx /T (text) >>");
+    let doc = Document::open(Arc::new(plain.build())).unwrap();
+    let cache = DigestCache::default();
+    assert!(list_cached(&doc, doc.bytes(), &trust, &cache).is_empty());
+    assert_eq!(walks(&cache), 0, "no signature field, so no page is read");
+
+    let signed = Pdf::new()
+        .obj("<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [4 0 R 5 0 R] >> >>")
+        .obj("<< /Type /Pages /Kids [3 0 R] /Count 1 >>")
+        .obj("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Annots [4 0 R 5 0 R] >>")
+        .obj("<< /FT /Sig /T (one) /Subtype /Widget /Rect [10 10 90 40] >>")
+        .obj("<< /FT /Sig /T (two) /Subtype /Widget /Rect [10 50 90 80] >>");
+    let doc = Document::open(Arc::new(signed.build())).unwrap();
+    let cache = DigestCache::default();
+    let listed = list_cached(&doc, doc.bytes(), &trust, &cache);
+    assert_eq!(listed.iter().map(|s| (s.field.as_str(), s.page)).collect::<Vec<_>>(), [("one", Some(0)), ("two", Some(0))]);
+    assert_eq!(walks(&cache), 1, "the pages are read once, for the first field");
+}
