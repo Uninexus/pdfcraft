@@ -45,6 +45,25 @@ impl Automation {
                 })?;
                 (format!("{title}.pdf"), bytes)
             }
+            "office" => {
+                // One Word, Excel, PowerPoint, OpenDocument or RTF file, converted by the installed
+                // LibreOffice. A file's kind is decided by its bytes, so anything else is refused
+                // before LibreOffice is started.
+                let Some(requested) = a.opt_str("path")? else {
+                    return Err(ToolError::InvalidArgs("office needs `path`, one Office document".into()));
+                };
+                let path = self.resolve(requested, false)?;
+                let bytes = Arc::new(read_input(&path)?);
+                let file = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                if pdfcraft_engine::source_kind(&file, &bytes) != Some(pdfcraft_engine::SourceKind::Office) {
+                    return Err(ToolError::InvalidArgs(format!(
+                        "{file} is not a Word, Excel, PowerPoint, OpenDocument or RTF file; use doc_open for a PDF, or doc_create from images or text"
+                    )));
+                }
+                let (_, pdf) = self.session.convert_to_pdf(&file, &bytes).map_err(failed)?;
+                let stem = path.file_stem().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "document".into());
+                (format!("{stem}.pdf"), pdf)
+            }
             other => return Err(ToolError::InvalidArgs(format!("unknown source {other:?}"))),
         };
         let name = a.opt_str("name")?.map(str::to_owned).unwrap_or(name);

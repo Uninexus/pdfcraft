@@ -258,3 +258,72 @@ fn create_multiple_files_takes_office_documents_combined_or_separate() {
     assert!(!f.work().join("never.pdf").exists());
     assert!(matches!(a.call("doc_create_multiple", &json!({ "paths": [] })), Err(ToolError::InvalidArgs(_))));
 }
+
+#[test]
+fn create_from_office_converts_one_document_into_a_new_unsaved_pdf() {
+    let f = Fixture::new();
+    f.office("Quarterly Report.docx", '2');
+    let mut a = f.tools();
+    let made = ok(&mut a, "doc_create", json!({ "from": "office", "path": "Quarterly Report.docx" }));
+    let doc = made["doc"].as_u64().unwrap();
+    assert_eq!(made["name"], json!("Quarterly Report.pdf"), "{made}");
+    assert_eq!(page_text(&mut a, doc), ["Converted two"]);
+    assert_eq!(f.converted(), "2");
+    assert!(f.all_work_dirs_removed());
+    // A name of the caller's choosing is used as given.
+    let named = ok(&mut a, "doc_create", json!({ "from": "office", "path": "Quarterly Report.docx", "name": "Q3.pdf" }));
+    assert_eq!(named["name"], json!("Q3.pdf"), "{named}");
+}
+
+#[test]
+fn create_from_office_refuses_other_files_without_starting_libreoffice() {
+    let f = Fixture::new();
+    f.file("really-a-pdf.docx", &Session::new().create_from_text("t", "Genuine PDF").unwrap());
+    f.file("notes.txt", b"Plain notes");
+    f.office("b.docx", 'X');
+    let mut a = f.tools();
+    for name in ["really-a-pdf.docx", "notes.txt"] {
+        let said = err(&mut a, "doc_create", json!({ "from": "office", "path": name }));
+        assert!(said.contains("is not a Word, Excel, PowerPoint, OpenDocument or RTF file"), "{said}");
+    }
+    assert!(err(&mut a, "doc_create", json!({ "from": "office" })).contains("needs `path`"));
+    assert!(err(&mut a, "doc_create", json!({ "from": "office", "path": "missing.docx" })).contains("missing.docx"));
+    assert_eq!(f.converted(), "", "LibreOffice was not run");
+    // A conversion that fails is reported, names the file and leaves nothing behind.
+    let said = err(&mut a, "doc_create", json!({ "from": "office", "path": "b.docx" }));
+    assert!(said.contains("b.docx"), "{said}");
+    assert!(f.all_work_dirs_removed());
+}
+
+#[test]
+fn create_from_office_without_libreoffice_says_what_to_install() {
+    let f = Fixture::new();
+    f.office("a.docx", '1');
+    let mut a = f.tools_without_libreoffice();
+    let said = err(&mut a, "doc_create", json!({ "from": "office", "path": "a.docx" }));
+    assert!(said.contains("a.docx") && said.contains("LibreOffice, which isn't installed") && said.contains("libreoffice.org"), "{said}");
+    assert_eq!(f.converted(), "");
+}
+
+#[test]
+fn create_from_office_stays_inside_the_root() {
+    let f = Fixture::new();
+    let outside = f.dir.path().join("outside.docx");
+    std::fs::write(&outside, b"PK\x03\x04\x14\x001").unwrap();
+    std::os::unix::fs::symlink(&outside, f.work().join("link.docx")).unwrap();
+    let mut a = f.tools();
+    for path in [outside.to_string_lossy().into_owned(), "../outside.docx".to_string(), "link.docx".to_string()] {
+        let said = err(&mut a, "doc_create", json!({ "from": "office", "path": path }));
+        assert!(said.contains("is outside the allowed directory"), "{path}: {said}");
+    }
+    assert_eq!(f.converted(), "", "LibreOffice was not run");
+}
+
+#[test]
+fn create_from_office_refuses_a_path_that_is_not_text() {
+    let f = Fixture::new();
+    let mut a = f.tools();
+    let said = err(&mut a, "doc_create", json!({ "from": "office", "path": 5 }));
+    assert!(said.contains("path"), "{said}");
+    assert_eq!(f.converted(), "");
+}

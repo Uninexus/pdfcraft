@@ -1768,15 +1768,15 @@ pub fn tools() -> Vec<ToolDef> {
         t(
             "doc_create",
             "Create a PDF",
-            "Create a new, unsaved document and return it like doc_open: `blank` (pages, width, height in points; default 1 US Letter page), `images` (paths of PNG, JPEG, TIFF (every page), GIF or BMP files, one page each at the image's resolution) or `text` (a .txt path, or `text` directly; set in Helvetica, or in the bundled Inter face when it has Latin, Greek or Cyrillic letters outside Western European (WinAnsi); other characters are refused). Save it with doc_save and a path.",
+            "Create a new, unsaved document and return it like doc_open: `blank` (pages, width, height in points; default 1 US Letter page), `images` (paths of PNG, JPEG, TIFF (every page), GIF or BMP files, one page each at the image's resolution) or `text` (a .txt path, or `text` directly; set in Helvetica, or in the bundled Inter face when it has Latin, Greek or Cyrillic letters outside Western European (WinAnsi); other characters are refused) or `office` (`path` of one Word, Excel, PowerPoint, OpenDocument or RTF file, converted by an installed LibreOffice; refused, with LibreOffice not started, for any other kind of file, and with a message saying what to install when LibreOffice is missing). Save it with doc_save and a path.",
         )
         .with(schema(
             json!({
-                "from": { "type": "string", "enum": ["blank", "images", "text"] },
+                "from": { "type": "string", "enum": ["blank", "images", "text", "office"] },
                 "paths": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
                 "dpi": { "type": "number", "minimum": 1, "maximum": 1200, "description": "For images: override the embedded resolution without resampling. 72 gives one point per pixel; omit to use each image's resolution (72 when absent)." },
                 "text": { "type": "string" },
-                "path": { "type": "string" },
+                "path": { "type": "string", "description": "For text: a .txt file. For office: the Office document." },
                 "pages": { "type": "integer", "minimum": 1, "maximum": 10000 },
                 "width": { "type": "number", "minimum": 3 },
                 "height": { "type": "number", "minimum": 3 },
