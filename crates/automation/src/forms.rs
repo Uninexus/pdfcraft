@@ -576,6 +576,34 @@ impl Automation {
         Ok(out)
     }
 
+    /// Copy field `field` into a grid of `rows` by `columns`, the field itself the first cell.
+    pub(crate) fn form_copy_field_grid(&mut self, a: &Args) -> Result<Value> {
+        use pdfcraft_engine::field_copies::{self, FieldGrid};
+        let field = a.str("field")?.to_owned();
+        let count = |key: &str| -> Result<usize> { a.int(key).map(|n| usize::try_from(n).unwrap_or(0)) };
+        let grid = FieldGrid {
+            rows: count("rows")?,
+            columns: count("columns")?,
+            row_gap: a.opt_num("row_gap")?.unwrap_or(0.0),
+            column_gap: a.opt_num("column_gap")?.unwrap_or(0.0),
+            pattern: a.opt_str("pattern")?.map(str::to_owned),
+        };
+        let (edit, names) = {
+            let doc = self.doc(a)?;
+            let edit = field_copies::edit(&field, &grid, &doc.info.pages, &doc.form).map_err(|e| bad(e.to_string()))?;
+            let names: Vec<String> = match &edit {
+                Edit::Batch { edits, .. } => {
+                    edits.iter().filter_map(|e| if let Edit::CopyField { new_name, .. } = e { Some(new_name.clone()) } else { None }).collect()
+                }
+                _ => Vec::new(),
+            };
+            (edit, names)
+        };
+        let mut out = self.apply(a, edit)?;
+        out["fields"] = json!(names);
+        Ok(out)
+    }
+
     pub(crate) fn form_set_props(&mut self, a: &Args) -> Result<Value> {
         if a.get("widget").is_some() && a.get("caption").is_none() && a.get("export_value").is_none() {
             return Err(bad("widget requires caption or export_value"));

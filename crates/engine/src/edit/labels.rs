@@ -100,6 +100,7 @@ pub const EDIT_LABELS: &[&str] = &[
     "Change field properties",
     "Delete field",
     "Duplicate field",
+    "Copy field",
     "Set tab order",
     "Set calculation order",
     "Change initial view",
@@ -179,6 +180,7 @@ pub const BATCH_LABELS: &[&str] = &[
     "Run JavaScript",
     "Recognize text",
     field_table::LABEL,
+    crate::field_copies::LABEL,
     "Style",
     crate::find_replace::REPLACE_ALL,
 ];
@@ -267,6 +269,7 @@ impl Edit {
             Edit::SetFieldProps { .. } => Label::of("Change field properties"),
             Edit::DeleteField { .. } | Edit::DeleteWidget { .. } => Label::of("Delete field"),
             Edit::DuplicateField { .. } => Label::of("Duplicate field"),
+            Edit::CopyField { .. } => Label::of("Copy field"),
             Edit::SetTabOrder { .. } | Edit::MoveInTabOrder { .. } => Label::of("Set tab order"),
             Edit::SetCalculationOrder { .. } => Label::of("Set calculation order"),
             Edit::SetInitialView(_) => Label::of("Change initial view"),

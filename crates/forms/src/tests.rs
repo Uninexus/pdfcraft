@@ -7973,3 +7973,71 @@ fn page_annotation_visits_are_limited() {
     objs.extend((0..pages).map(|_| format!("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 10 10] /Annots [{arr}] >>")));
     assert!(javascripts(&document(&objs)).capped);
 }
+
+/// A copy of a field is a field of its own with the same type, flags, limits and look, and none of
+/// the source's value; the source is not touched.
+#[test]
+fn copying_a_field_makes_a_new_field_with_the_same_properties_and_no_value() {
+    let mut doc = one_page();
+    let name = add_field(&mut doc, 0, [50.0, 700.0, 250.0, 720.0], &NewField::Text { multiline: false }, Some("Item")).unwrap();
+    let props = FieldProps { required: Some(true), max_len: Some(Some(12)), tooltip: Some("What it is".into()), ..Default::default() };
+    set_props(&mut doc, &name, &props).unwrap();
+    set_value(&mut doc, &name, &FieldValue::Text("pens".into())).unwrap();
+    let source = fields(&doc).into_iter().find(|f| f.name == "Item").unwrap();
+    let made = copy_field(&mut doc, "Item", 0, [50.0, 650.0, 250.0, 670.0], "Item_2").unwrap();
+    assert_eq!(made, "Item_2");
+    let doc = reopen(&doc);
+    let all = fields(&doc);
+    assert_eq!(all.len(), 2, "a second field, not a second widget");
+    let copy = all.iter().find(|f| f.name == "Item_2").unwrap();
+    let kept = all.iter().find(|f| f.name == "Item").unwrap();
+    assert_eq!((copy.kind, copy.max_len, copy.flags, copy.tooltip.as_deref()), (source.kind, Some(12), source.flags, Some("What it is")));
+    assert!(copy.value.is_empty(), "the value stays with the source: {:?}", copy.value);
+    assert_eq!(kept.value, vec!["pens".to_string()]);
+    assert_eq!(copy.widgets.len(), 1);
+    assert_eq!((copy.widgets[0].page, copy.widgets[0].rect), (Some(0), [50.0, 650.0, 250.0, 670.0]));
+    assert_eq!(kept.widgets[0].rect, [50.0, 700.0, 250.0, 720.0]);
+}
+
+#[test]
+fn copying_a_check_box_starts_it_off_and_a_drop_down_keeps_its_options() {
+    let mut doc = one_page();
+    add_field(&mut doc, 0, [50.0, 700.0, 70.0, 720.0], &NewField::CheckBox, Some("Agree")).unwrap();
+    set_value(&mut doc, "Agree", &FieldValue::Check(true)).unwrap();
+    add_field(&mut doc, 0, [100.0, 700.0, 200.0, 720.0], &NewField::Combo { options: vec!["a".into(), "b".into()], editable: false }, Some("Pick"))
+        .unwrap();
+    copy_field(&mut doc, "Agree", 0, [50.0, 650.0, 70.0, 670.0], "Agree_2").unwrap();
+    copy_field(&mut doc, "Pick", 0, [100.0, 650.0, 200.0, 670.0], "Pick_2").unwrap();
+    let doc = reopen(&doc);
+    let all = fields(&doc);
+    let get = |n: &str| all.iter().find(|f| f.name == n).unwrap();
+    assert!(get("Agree").value.iter().any(|v| v != "Off"), "the source stays checked");
+    assert!(get("Agree_2").value.is_empty() || get("Agree_2").value == vec!["Off".to_string()], "{:?}", get("Agree_2").value);
+    assert_eq!((get("Pick_2").kind, get("Pick_2").options.clone()), (FieldKind::Combo, get("Pick").options.clone()));
+    assert_eq!(get("Pick_2").options.len(), 2);
+}
+
+#[test]
+fn a_copy_that_cannot_be_made_is_refused_and_adds_nothing() {
+    let mut doc = one_page();
+    add_field(&mut doc, 0, [50.0, 700.0, 250.0, 720.0], &NewField::Text { multiline: false }, Some("Item")).unwrap();
+    add_field(&mut doc, 0, [50.0, 600.0, 70.0, 620.0], &NewField::Radio { group: Some("Size".into()), export: "S".into() }, None).unwrap();
+    let before = fields(&doc).len();
+    let area = [50.0, 650.0, 250.0, 670.0];
+    for (source, page, rect, name, why) in [
+        ("Nope", 0, area, "X", "no field named"),
+        ("Item", 0, area, "Item", "already exists"),
+        ("Item", 0, area, "", "empty"),
+        ("Item", 0, area, "a..b", "empty"),
+        ("Item", 5, area, "X", "does not exist"),
+        ("Item", 0, [0.0, 0.0, 2.0, 2.0], "X", "too small"),
+        ("Item", 0, [0.0, 0.0, f64::NAN, 9.0], "X", "too small"),
+        ("Size", 0, area, "X", "radio button"),
+    ] {
+        let err = copy_field(&mut doc, source, page, rect, name).unwrap_err().to_string();
+        assert!(err.to_lowercase().contains(why), "{source}/{name}: {err}");
+    }
+    // A name inside another field's is refused too.
+    assert!(copy_field(&mut doc, "Item", 0, area, "Item.sub").is_err());
+    assert_eq!(fields(&doc).len(), before);
+}

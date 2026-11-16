@@ -349,6 +349,14 @@ pub enum Edit {
         name: String,
         pages: Vec<usize>,
     },
+    /// Add a new field on `page` (0-based) in `rect` (user space) that has the same type, flags
+    /// and look as the field `name`, called `new_name`: one copy of a grid of copies.
+    CopyField {
+        name: String,
+        page: usize,
+        rect: [f64; 4],
+        new_name: String,
+    },
     DeleteField {
         name: String,
     },

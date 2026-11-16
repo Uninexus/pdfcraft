@@ -673,6 +673,23 @@ pub fn tools() -> Vec<ToolDef> {
             }),
             &["doc", "page", "rect", "rows"],
         )),
+        t(
+            "form_copy_field_grid",
+            "Prepare form: copy a field into a grid",
+            "Create multiple copies of a field (Acrobat: Create Multiple Copies): copy the field named field, of any type but a radio button, into a grid of rows by columns, as one undo step. The field itself stays and is the grid's first cell; the copies fill the rest of the grid below and to the right of it, row by row, each the field's own size, row_gap and column_gap points apart (default 0), laid out as the page is shown. Each copy is a field of its own with the same type, flags, options, look and actions, and an empty value. The copies are named field_1, field_2, … along the rows, or from pattern (item_N, {row}, {col}, {seq}: the row and column count from 1, and {seq} numbers the copies from 1 along the rows). Nothing is copied if the field is not there or is a radio button, the grid is 1 by 1 or makes over 1000 copies (rows 1-100, columns 1-50), a copy would run off the page, a name would contain a period, repeat or already exist; the error says which. Returns the new fields' names. Undoable.",
+        )
+        .with(schema(
+            json!({
+                "doc": doc(),
+                "field": { "type": "string", "minLength": 1 },
+                "rows": { "type": "integer", "minimum": 1, "maximum": 100 },
+                "columns": { "type": "integer", "minimum": 1, "maximum": 50 },
+                "row_gap": { "type": "number", "minimum": 0 },
+                "column_gap": { "type": "number", "minimum": 0 },
+                "pattern": { "type": "string", "minLength": 1 },
+            }),
+            &["doc", "field", "rows", "columns"],
+        )),
         t("stamp_custom", "Add a custom stamp", "Stamp a picture: a PDF page (file_page, default 1, kept as vector content in a form XObject) or an image file. Either centred at at [x, y] (points from the top-left of the displayed page) at its natural size, at most 200 pt, or fitted inside rect [x0, y0, x1, y1] (the same coordinates; each side 1–14400 pt), scaled to keep its shape and centred in the box. Like at, rect is not clipped to the page. Pass at or rect, not both. name labels it (default: the file name). line adds a text line under the picture with {name} (the author), {date} and {time} filled in now, as a dynamic stamp. Undoable.")
             .cmd("comment.stamp")
             .with(schema(
