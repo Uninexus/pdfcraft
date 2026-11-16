@@ -97,6 +97,31 @@ impl PdfCraftApp {
                 let g = pdfcraft_engine::catalog::group(value).ok_or_else(|| format!("unknown tool {value}"))?;
                 self.select_tool(g.id);
             }
+            ("javascripts-filter" | "javascripts-kind" | "javascripts-select", _) => {
+                // The JavaScripts window's own controls, for an agent that has opened it.
+                if self.dialog != Some(Dialog::JavaScripts) {
+                    return Err(format!("{key} needs the JavaScripts window: ui.set dialog=javascripts first"));
+                }
+                crate::javascripts_ui::sync(self);
+                let d = &mut self.javascripts_draft;
+                match key {
+                    "javascripts-filter" => d.set_filter(value),
+                    "javascripts-kind" => d.set_kind(match value {
+                        "all" => None,
+                        k => Some(pdfcraft_engine::JavaScriptKind::from_id(k).ok_or(
+                            "javascripts-kind must be all, document, open_action, document_action, field, link, annotation, page or bookmark",
+                        )?),
+                    }),
+                    _ => {
+                        if d.dirty() {
+                            return Err("the editor has unsaved changes: apply them or discard them first (ui.state javascripts.dirty)".into());
+                        }
+                        if !d.select_id(value) {
+                            return Err(format!("no script {value:?} in the list (ui.state javascripts.entries)"));
+                        }
+                    }
+                }
+            }
             ("left", _) => self.left_open = value != "closed",
             ("home", _) => {
                 self.active = None;
@@ -130,6 +155,11 @@ impl PdfCraftApp {
                     "enhance-scan" => Some(Dialog::EnhanceScan),
                     "js-console" => Some(Dialog::JsConsole),
                     "document-js" => Some(Dialog::DocumentJs),
+                    "javascripts" => {
+                        // Through the command, so it is refused with no document open, as the menu is.
+                        self.execute("tools.javascripts");
+                        self.dialog
+                    }
                     "preferences" => Some(Dialog::Preferences),
                     "compare-files" => Some(Dialog::CompareFiles),
                     "action-wizard" => Some(Dialog::ActionWizard),

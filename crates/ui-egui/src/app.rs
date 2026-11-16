@@ -373,6 +373,7 @@ impl PdfCraftApp {
             replace_draft: None,
             number_draft: NumberDraft { from: 1, to: 1, style: pdfcraft_engine::LabelStyle::Decimal, prefix: String::new(), start: 1 },
             word_count_draft: word_count_ui::Draft::default(),
+            javascripts_draft: Default::default(),
             ai: Default::default(),
             ai_draft: Default::default(),
             printer_marks_draft: Default::default(),

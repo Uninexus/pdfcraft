@@ -158,6 +158,7 @@ const EDIT: &[&str] = &[
     SEP,
     "edit.attach",
     "form.clear",
+    "tools.javascripts",
     SEP,
     "app.preferences",
 ];

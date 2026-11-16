@@ -360,11 +360,12 @@ update the numbers.
   actions, the Actions tab triggers that run JavaScript, form submission, the debugger, barcode
   fields, rich-text values; XFA flattening and complete dynamic-form fidelity. Auto-complete
   from previous entries is basic only: no Advanced mode (Acrobat's second level), and nothing is
-  remembered from date, number or formatted fields. Edit all JavaScripts is headless only:
-  `doc_javascripts` lists every script of a document (named, open action, document, field,
-  link, annotation, page and bookmark actions) and `doc_javascript_edit` replaces or removes one
-  by id, undoably and without running it; there is no editor window yet, and XFA scripts are
-  not listed.
+  remembered from date, number or formatted fields. Edit all JavaScripts: Edit ▸ JavaScripts…
+  lists every script of a document (named, open action, document, field, link, annotation,
+  page and bookmark actions) with filters, and edits or deletes one by id, undoably and without
+  running it (`doc_javascripts` and `doc_javascript_edit` do the same headlessly); code over
+  64 KiB is shown cut and can only be deleted. XFA scripts are not listed, and there is no
+  syntax colouring, search and replace across scripts or single combined editor.
 - **Evidence:** `form.edit-all-javascripts` partial, `form.js-host` partial, `form.document-actions`, `form.submit-form`,
   `edit.action-javascript`, `form.js-debugger`, `form.xfa-flatten` planned; `form.auto-complete` partial; XFA layout, FormCalc
   and data partial.
