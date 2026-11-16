@@ -70,7 +70,15 @@ impl Automation {
     }
 
     pub(crate) fn print_readiness(&self, a: &Args) -> Result<Value> {
-        let report = self.doc(a)?.print_readiness();
+        let doc = self.doc(a)?;
+        let limit = match a.get("ink_limit") {
+            None => None,
+            Some(v) => Some(v.as_f64().ok_or_else(|| ToolError::InvalidArgs("ink_limit must be a number from 100 to 400 percent".into()))?),
+        };
+        let report = match limit {
+            Some(limit) => doc.print_readiness_with_limit(limit).map_err(ToolError::InvalidArgs)?,
+            None => doc.print_readiness(),
+        };
         let findings: Vec<Value> =
             report.findings.iter().map(|f| json!({ "id": f.id, "severity": f.severity, "message": f.message, "page": f.page })).collect();
         let pages: Vec<Value> = report

@@ -8532,8 +8532,10 @@ evidence = [
     "crates/engine/src/printcheck.rs::total_ink_over_the_limit_is_a_warning_and_under_it_is_silent",
     "crates/engine/src/printcheck.rs::a_colour_a_form_sets_is_counted_where_it_is_drawn_and_a_self_drawing_form_is_flagged",
     "crates/automation/tests/it/automation.rs::print_readiness_reports_ink_through_tools",
+    "crates/engine/src/printcheck.rs::a_lower_limit_flags_what_the_default_lets_through",
+    "crates/engine/src/printcheck.rs::a_limit_outside_100_to_400_or_not_a_number_is_refused",
 ]
-notes = "First slice: print_readiness warns when a painted CMYK colour (k, K, or sc/scn in DeviceCMYK or a four-component ICCBased space, inside forms too) has more than 300% total ink, with the highest value found. Missing: ink inside images, shadings, patterns and annotation appearances, a settable limit, a per-pixel coverage map, a separations preview. Invisible text (Tr 3) is ignored."
+notes = "First slice: print_readiness warns when a painted CMYK colour (k, K, or sc/scn in DeviceCMYK or a four-component ICCBased space, inside forms too) has more than 300% total ink, with the highest value found. The limit is settable headlessly only: print_readiness takes ink_limit (100 to 400 percent, default 300; anything else is refused) and says which limit it used; the Print readiness dialog and the app have no setting. Missing: ink inside images, shadings, patterns and annotation appearances, a limit setting in the app, a per-pixel coverage map, a separations preview. Invisible text (Tr 3) is ignored."
 
 [[feature]]
 id = "print.color-warnings"

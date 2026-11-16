@@ -23,6 +23,9 @@ const MIN_BLEED_MM: f64 = 2.0;
 /// Total ink (C + M + Y + K, in percent) above which a painted CMYK colour is reported. Press
 /// conditions run from about 240% (uncoated) to 340% (coated); 300% is the usual SWOP limit.
 const TAC_LIMIT_PERCENT: f64 = 300.0;
+/// The limit a caller may set is a percentage of total ink. Below 100 every coloured object is
+/// flagged and above 400 (four full inks) nothing can be, so those are mistakes, not settings.
+pub const TAC_LIMIT_RANGE: std::ops::RangeInclusive<f64> = 100.0..=400.0;
 /// What the report says it does not check (the text report and the dialog both show it).
 pub const NOT_CHECKED: &str =
     "Not checked: PDF/X, ink inside images, shadings, patterns and annotation appearances, overprint effects, transparency flattening.";
@@ -151,11 +154,30 @@ impl PrintReadiness {
     }
 }
 
+/// Refuses a total-ink limit that is not a number within [`TAC_LIMIT_RANGE`] (NaN and infinities included).
+fn check_limit(limit_percent: f64) -> Result<(), String> {
+    if TAC_LIMIT_RANGE.contains(&limit_percent) {
+        return Ok(());
+    }
+    Err(format!("ink_limit must be a number from {} to {} percent (got {limit_percent}).", TAC_LIMIT_RANGE.start(), TAC_LIMIT_RANGE.end()))
+}
+
 impl OpenDocument {
     /// A print-readiness report. Reads the file and does not edit it.
     pub fn print_readiness(&self) -> PrintReadiness {
+        self.print_readiness_with_ink_limit(TAC_LIMIT_PERCENT)
+    }
+
+    /// Like [`Self::print_readiness`], with the total-ink limit (percent) the `ink-total` finding
+    /// uses instead of 300. Refuses a limit that is not a number within [`TAC_LIMIT_RANGE`].
+    pub fn print_readiness_with_limit(&self, limit_percent: f64) -> Result<PrintReadiness, String> {
+        check_limit(limit_percent)?;
+        Ok(self.print_readiness_with_ink_limit(limit_percent))
+    }
+
+    fn print_readiness_with_ink_limit(&self, limit_percent: f64) -> PrintReadiness {
         match &self.editor {
-            Some(editor) => inspect(&editor.cos),
+            Some(editor) => inspect(&editor.cos, limit_percent),
             None => PrintReadiness {
                 pages: Vec::new(),
                 images: Vec::new(),
@@ -174,7 +196,7 @@ impl OpenDocument {
     }
 }
 
-fn inspect(doc: &Document) -> PrintReadiness {
+fn inspect(doc: &Document, limit_percent: f64) -> PrintReadiness {
     let declared = pdfcraft_preflight::declared(doc);
     let pdfa_issues = pdfcraft_preflight::verify(doc, Level::A2b);
     let fonts_not_embedded = pdfa_issues
@@ -263,13 +285,13 @@ fn inspect(doc: &Document) -> PrintReadiness {
             page: None,
         });
     }
-    ink_findings(&ink::ink_pages(doc, &model_pages, TAC_LIMIT_PERCENT), &mut findings);
+    ink_findings(&ink::ink_pages(doc, &model_pages, limit_percent), limit_percent, &mut findings);
     findings.sort_by(|a, b| a.page.cmp(&b.page).then(a.id.cmp(b.id)).then(a.message.cmp(&b.message)));
     PrintReadiness { pages, images, output_intents: declared.output_intents, fonts_not_embedded, pdfa_issues, findings, resolution_unknown }
 }
 
 /// What the ink checks found, as findings. Colours in images and shadings are not measured.
-fn ink_findings(pages: &[ink::InkPage], findings: &mut Vec<Finding>) {
+fn ink_findings(pages: &[ink::InkPage], limit_percent: f64, findings: &mut Vec<Finding>) {
     let plural = |n: usize| if n == 1 { "" } else { "s" };
     let mut spot = std::collections::BTreeSet::new();
     let mut capped = false;
@@ -283,7 +305,7 @@ fn ink_findings(pages: &[ink::InkPage], findings: &mut Vec<Finding>) {
                     page.page,
                     page.over_limit,
                     plural(page.over_limit),
-                    TAC_LIMIT_PERCENT,
+                    limit_percent,
                     page.max_total_percent
                 ),
                 page: Some(page.page),
@@ -508,7 +530,7 @@ mod tests {
         })
         .unwrap();
 
-        let report = inspect(&doc);
+        let report = inspect(&doc, TAC_LIMIT_PERCENT);
         let soft = report.images.iter().find(|image| image.name == "Soft").unwrap();
         let sharp = report.images.iter().find(|image| image.name == "Sharp").unwrap();
         assert!((soft.ppi - 50.0).abs() < 0.5, "{}", soft.ppi);
@@ -533,7 +555,7 @@ mod tests {
         for _ in 0..3 {
             page(&mut doc, "Im", img, "q 72 0 0 72 36 36 cm /Im Do Q");
         }
-        let report = inspect(&doc);
+        let report = inspect(&doc, TAC_LIMIT_PERCENT);
         let notes: Vec<_> = report.findings.iter().filter(|f| f.id.starts_with("page-")).collect();
         assert_eq!(notes.len(), 1, "{notes:?}");
         assert_eq!(notes[0].message, "No page has a TrimBox, so bleed can't be measured.");
@@ -541,7 +563,7 @@ mod tests {
         // A TrimBox 1 pt inside the crop, with no BleedBox: 0.35 mm of bleed is a real warning.
         let tight = page(&mut doc, "Im", img, "q 72 0 0 72 36 36 cm /Im Do Q");
         doc.update_dict(tight, |d| d.set(b"TrimBox".to_vec(), Object::Array(vec![1.into(), 1.into(), 611.into(), 791.into()]))).unwrap();
-        let report = inspect(&doc);
+        let report = inspect(&doc, TAC_LIMIT_PERCENT);
         assert!(report.findings.iter().any(|f| f.id == "page-bleed" && f.severity == "warn" && f.page == Some(4)));
         assert_eq!(report.findings.iter().filter(|f| f.id == "page-bleed").count(), 1);
     }
@@ -560,7 +582,7 @@ mod tests {
         let img = image(&mut doc, 100, 100);
         let huge = format!("1{}", "0".repeat(400));
         page(&mut doc, "Im", img, &format!("q {huge} 0 0 {huge} 0 0 cm 0 1 1 0 0 0 cm /Im Do Q"));
-        let report = inspect(&doc);
+        let report = inspect(&doc, TAC_LIMIT_PERCENT);
         assert!(report.images.iter().all(|image| image.ppi.is_finite()), "{:?}", report.images);
         assert!(!report.findings.iter().any(|f| f.id == "image-ppi"), "{:?}", report.findings);
     }
@@ -598,7 +620,7 @@ mod tests {
         ink_page(&mut doc, Dict::new(), "0.2 0.2 0.1 0.1 k 10 10 100 100 re f");
         // A colour set inside q ... Q is gone after Q: nothing is painted in CMYK afterwards.
         ink_page(&mut doc, Dict::new(), "q 1 1 1 1 k Q 10 10 100 100 re f");
-        let report = inspect(&doc);
+        let report = inspect(&doc, TAC_LIMIT_PERCENT);
         let first: Vec<_> = report.findings.iter().filter(|f| f.id == "ink-total" && f.page == Some(1)).collect();
         assert_eq!(first.len(), 1, "{:?}", report.findings);
         assert_eq!(first[0].severity, "warn");
@@ -608,10 +630,31 @@ mod tests {
     }
 
     #[test]
+    fn a_lower_limit_flags_what_the_default_lets_through() {
+        let mut doc = Document::new_empty();
+        // 60 + 60 + 60 + 60 = 240%: silent at 300, flagged at 200.
+        ink_page(&mut doc, Dict::new(), "0.6 0.6 0.6 0.6 k 10 10 100 100 re f");
+        assert!(!inspect(&doc, TAC_LIMIT_PERCENT).findings.iter().any(|f| f.id == "ink-total"));
+        let low = inspect(&doc, 200.0);
+        let f = low.findings.iter().find(|f| f.id == "ink-total").expect("flagged at 200");
+        assert!(f.message.contains("more than 200% total ink") && f.message.contains("up to 240%"), "{}", f.message);
+        assert!(!inspect(&doc, 240.0).findings.iter().any(|f| f.id == "ink-total"), "equal is not over");
+    }
+
+    #[test]
+    fn a_limit_outside_100_to_400_or_not_a_number_is_refused() {
+        for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, 99.9, 400.1, -1.0, 0.0] {
+            let e = check_limit(bad).expect_err("refused");
+            assert!(e.contains("ink_limit") && e.contains("100") && e.contains("400"), "{e}");
+        }
+        assert!(check_limit(100.0).is_ok() && check_limit(400.0).is_ok() && check_limit(300.0).is_ok());
+    }
+
+    #[test]
     fn rich_black_text_is_reported_and_pure_black_text_is_not() {
         let mut doc = Document::new_empty();
         ink_page(&mut doc, Dict::new(), "BT 0.6 0.4 0.4 1 k (Rich) Tj ET BT 0 0 0 1 k (Plain) Tj ET");
-        let report = inspect(&doc);
+        let report = inspect(&doc, TAC_LIMIT_PERCENT);
         let rich: Vec<_> = report.findings.iter().filter(|f| f.id == "ink-rich-black-text").collect();
         assert_eq!(rich.len(), 1, "{:?}", report.findings);
         assert!(rich[0].message.contains("1 time in rich black"), "{}", rich[0].message);
@@ -635,7 +678,7 @@ mod tests {
         res.set(b"ExtGState".to_vec(), Object::Dict(states));
         res.set(b"ColorSpace".to_vec(), Object::Dict(spaces));
         ink_page(&mut doc, res, "/On gs /Gold cs 1 scn 10 10 100 100 re f");
-        let report = inspect(&doc);
+        let report = inspect(&doc, TAC_LIMIT_PERCENT);
         assert_eq!(ink_ids(&report, Some(1)), vec!["ink-overprint"], "{:?}", report.findings);
         let spot: Vec<_> = report.findings.iter().filter(|f| f.id == "ink-spot").collect();
         assert_eq!(spot.len(), 1, "{:?}", report.findings);
@@ -665,7 +708,7 @@ mod tests {
         let mut res = Dict::new();
         res.set(b"XObject".to_vec(), Object::Dict(xs));
         ink_page(&mut doc, res, "/Art Do /Self Do");
-        let report = inspect(&doc);
+        let report = inspect(&doc, TAC_LIMIT_PERCENT);
         assert!(report.findings.iter().any(|f| f.id == "ink-total" && f.page == Some(1)), "{:?}", report.findings);
         assert!(report.findings.iter().any(|f| f.id == "ink-incomplete" && f.page == Some(1)), "{:?}", report.findings);
     }
@@ -679,7 +722,7 @@ mod tests {
         // Tr 1 strokes: the fill colour is not what is painted.
         ink_page(&mut doc, Dict::new(), "BT 1 Tr 0 0 0 0 k 0.9 0.8 0.7 0.9 K (outlined) Tj ET");
         ink_page(&mut doc, Dict::new(), "BT 7 Tr 0.9 0.8 0.7 0.9 k (clip only) Tj ET");
-        let report = inspect(&doc);
+        let report = inspect(&doc, TAC_LIMIT_PERCENT);
         assert!(ink_ids(&report, Some(1)).is_empty(), "{:?}", report.findings);
         assert_eq!(ink_ids(&report, Some(2)), vec!["ink-rich-black-text"], "{:?}", report.findings);
         // The stroke colour is what is painted: 330% total, and rich black (K 90% with other inks).
@@ -715,7 +758,7 @@ mod tests {
             ],
             "/All cs /None cs /Process cs /Mixed cs",
         );
-        let report = inspect(&doc);
+        let report = inspect(&doc, TAC_LIMIT_PERCENT);
         let spot: Vec<_> = report.findings.iter().filter(|f| f.id == "ink-spot").collect();
         assert_eq!(spot.len(), 1, "{:?}", report.findings);
         assert!(spot[0].message.contains("PANTONE 185 C") && !spot[0].message.contains("Cyan"), "{}", spot[0].message);
@@ -727,7 +770,7 @@ mod tests {
         let mut doc = Document::new_empty();
         let names: Vec<Object> = (0..5_000).map(|i| Object::name(&format!("Spot{i:05}{}", "x".repeat(300)))).collect();
         spaces_page(&mut doc, vec![("Many", device_n(names))], "/Many cs");
-        let report = inspect(&doc);
+        let report = inspect(&doc, TAC_LIMIT_PERCENT);
         let spot = report.findings.iter().find(|f| f.id == "ink-spot").expect("a spot finding");
         assert!(spot.message.len() < 1_500, "{} bytes", spot.message.len());
         assert!(spot.message.contains(", and "), "{}", spot.message);
@@ -745,7 +788,7 @@ mod tests {
         spaces_page(&mut doc, vec![("Icc", space.clone())], "/Icc cs BT (plain) Tj ET");
         // A colour set with scn in the space is read.
         spaces_page(&mut doc, vec![("Icc", space)], "/Icc cs 0.9 0.8 0.7 0.9 scn 0 0 10 10 re f");
-        let report = inspect(&doc);
+        let report = inspect(&doc, TAC_LIMIT_PERCENT);
         assert!(ink_ids(&report, Some(1)).is_empty(), "{:?}", report.findings);
         assert_eq!(ink_ids(&report, Some(2)), vec!["ink-total"], "{:?}", report.findings);
     }
@@ -771,7 +814,7 @@ mod tests {
         let mut res = Dict::new();
         res.set(b"XObject".to_vec(), Object::Dict(xs));
         ink_page(&mut doc, res, "/X Do");
-        let report = inspect(&doc);
+        let report = inspect(&doc, TAC_LIMIT_PERCENT);
         assert!(report.findings.iter().any(|f| f.id == "ink-incomplete" && f.page == Some(1)), "{:?}", report.findings);
         assert!(!report.findings.iter().any(|f| f.id == "ink-total"), "the colour is past the depth limit: {:?}", report.findings);
     }
@@ -801,7 +844,7 @@ mod tests {
         let content = "/F Do ".repeat(20_000);
         ink_page(&mut doc, res, &content);
         let started = std::time::Instant::now();
-        let report = inspect(&doc);
+        let report = inspect(&doc, TAC_LIMIT_PERCENT);
         assert!(started.elapsed() < std::time::Duration::from_secs(10), "{:?}", started.elapsed());
         assert!(report.findings.iter().any(|f| f.id == "ink-total"), "{:?}", report.findings);
     }
@@ -813,11 +856,11 @@ mod tests {
         // the last Q nothing paints with it.
         let content = format!("{} 0.9 0.8 0.7 0.9 k {} 10 10 5 5 re f", "q ".repeat(300), "Q ".repeat(300));
         ink_page(&mut doc, Dict::new(), &content);
-        let report = inspect(&doc);
+        let report = inspect(&doc, TAC_LIMIT_PERCENT);
         assert!(ink_ids(&report, Some(1)).is_empty(), "the colour was restored away: {:?}", report.findings);
         let inside = format!("{} 0.9 0.8 0.7 0.9 k 10 10 5 5 re f {}", "q ".repeat(300), "Q ".repeat(300));
         ink_page(&mut doc, Dict::new(), &inside);
-        let report = inspect(&doc);
+        let report = inspect(&doc, TAC_LIMIT_PERCENT);
         assert_eq!(ink_ids(&report, Some(2)), vec!["ink-total"], "{:?}", report.findings);
     }
 }
