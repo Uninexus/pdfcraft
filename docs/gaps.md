@@ -1,5 +1,6 @@
 # Where PdfCraft falls short of Acrobat Pro
 
+> **Last reviewed:** 2026-11-16 | **Last updated:** 2026-11-16 | **Change:** minor (gap 13: listing signatures no longer reads every page when a document has no signature field, and measured that each save keeps one more copy of the file in undo history; estimates unchanged)
 > **Last reviewed:** 2026-11-16 | **Last updated:** 2026-11-16 | **Change:** minor (gap 8: `doc_create` from `office` makes a PDF from one Office document, headless; estimates unchanged)
 > **Last reviewed:** 2026-11-14 | **Last updated:** 2026-11-14 | **Change:** minor (gap 21: Compare files can be limited to replaced, inserted, deleted and visual changes in the dialog, panel, report, Mark as comments and tools; gap 19: Preferences gains Identity (name, email) and Forms (highlight fields and colour, field tooltips); estimates unchanged)
 > **Last reviewed:** 2026-11-13 | **Last updated:** 2026-11-13 | **Change:** minor (gap 21: the Compare Files dialog takes a page range for each file, and the report and Mark as comments follow them; estimates unchanged)
@@ -335,6 +336,25 @@ update the numbers.
   Saving still peaks at three copies (the saved file is assembled in memory beside the working
   one), and display appearances for comments without one add a copy. A 100,000-page file (28 MB)
   opens at 403 MiB in 5.5 s and each edit re-inspects it for ≈ 5 s.
+  Measured 2026-11-16 (release build, Linux, synthetic files, `pdfcraft-cli run --script`, peak
+  resident set from `getrusage`): a 400 MiB file with one 400 MiB stream opens at 416 MiB, peaks at
+  816 MiB after a page rotation and at 1,218 MiB when that edit is saved (three copies), whether
+  the save is incremental (+354 bytes) or a full rewrite to a new path. The writer already
+  allocates the saved file once at its exact size, so that third copy is the saved file itself.
+  What remains after a save is worse: every save leaves one more full copy alive, because the
+  undo history keeps the cos state of each earlier file and each state holds its own bytes. Five
+  rotate-and-save rounds on the same file peaked at 2,817 MiB, seven copies. Rebasing the history
+  onto the newest saved bytes needs a rebase call in `craft-pdf` (a saved incremental file starts
+  with the old one, so offsets stay valid); until then a long session on a large file pays one
+  file per save.
+  Re-inspection after an edit, measured on a 100,000-page file (21 MB, one rotation per edit):
+  ≈ 1.75 s inside the refresh (writing the revision 4 ms, inspecting 0.87 s, form fields 0.37 s,
+  signature listing 0.25 s, display copy 0.26 s) plus the edit itself, ≈ 3.2 s per edit in all.
+  The signature listing walked every page to map annotations to pages even when the document has
+  no signature field; it now reads the pages only for a signature field (same rows), which takes
+  that step from ≈ 0.25 s to under a millisecond (refresh 1.78 s to 1.62 s, mean of three runs,
+  ±0.1 s noise). Inspection (hayro and the lazy structure walk), form fields and the display
+  copy each still read every page on every full refresh.
 - **Blocked part:** reading a GB file from disk on demand (`ByteSource`) needs every reader to
   take ranges, but the `hayro` renderer parses one contiguous buffer (`Pdf::new(PdfData)`), so it
   waits on gap 2's renderer decision. Until then the budget is one copy of the file to view and two
@@ -473,6 +493,7 @@ update the numbers.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-16 | minor | Gap 13: the signature listing reads the page tree only for a document that has a signature field (≈ 0.25 s less per edit of a 100,000-page file); measured that each save keeps one more copy of the file in undo history. Estimates unchanged. |
 | 2026-11-16 | minor | Gap 8: `doc_create` from `office` converts one Office document into a new PDF through an installed LibreOffice (headless; no menu command yet). Estimates unchanged. |
 | 2026-11-14 | minor | Gap 21: Compare files filters by kind of change (replaced, inserted, deleted, visual) in the dialog, the panel, Mark as comments, the report and `doc_compare`, `doc_compare_report`, `doc_compare_mark` (`kinds`); images, annotations, formatting and background changes are still not told apart. Estimates unchanged. |
 | 2026-11-13 | minor | Gap 21: the Compare Files dialog has Old file pages and New file pages fields; the comparison, panel, report and Mark as comments use them (`doc_compare_report` and `doc_compare_mark` take the same range arguments as `doc_compare`). Estimates unchanged. |

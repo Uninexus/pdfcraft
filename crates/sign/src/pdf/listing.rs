@@ -19,6 +19,9 @@ pub struct DigestCache {
     pub(crate) discovery: std::sync::Mutex<Option<TimestampCandidates>>,
     #[cfg(test)]
     pub(crate) discovery_scans: std::sync::atomic::AtomicUsize,
+    /// How many times [`annot_pages`] walked the page tree.
+    #[cfg(test)]
+    pub(crate) page_walks: std::sync::atomic::AtomicUsize,
 }
 
 /// Keep only the most recently visited source/overlay. In particular, this must not retain
@@ -391,8 +394,14 @@ fn take(left: &mut usize) -> bool {
     some
 }
 
-/// Which page holds each annotation.
-fn annot_pages(doc: &Document) -> HashMap<ObjRef, usize> {
+/// Which page holds each annotation. Reads every page, so callers ask only when a signature field
+/// needs it: a document without one (nearly all of them) pays nothing, which on a 100,000-page
+/// file was a quarter of a second after every edit.
+fn annot_pages(doc: &Document, cache: &DigestCache) -> HashMap<ObjRef, usize> {
+    #[cfg(test)]
+    cache.page_walks.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    #[cfg(not(test))]
+    let _ = cache;
     let mut map = HashMap::new();
     for (i, p) in pdfcraft_annot::page_refs(doc).unwrap_or_default().into_iter().enumerate() {
         if let Some(a) = doc.get(p).as_dict().and_then(|d| d.get(b"Annots").map(|a| doc.resolve(a))).and_then(|a| a.as_array().cloned()) {
@@ -430,7 +439,8 @@ pub fn list(doc: &Document, bytes: &[u8], trust: &TrustStore) -> Vec<SignatureIn
 /// [`list`], reusing digests and standalone-timestamp discovery from `cache`. Field/widget
 /// structure and validation against `bytes` and `trust` are read again on every call.
 pub fn list_cached(doc: &Document, bytes: &[u8], trust: &TrustStore, cache: &DigestCache) -> Vec<SignatureInfo> {
-    let pages = annot_pages(doc);
+    // Built by the first field that needs it, so a document with no signature field never walks its pages.
+    let mut pages: Option<HashMap<ObjRef, usize>> = None;
     let mut out: Vec<SignatureInfo> = Vec::new();
     let mut field_values: HashSet<ObjRef> = HashSet::new();
     // Fields that name one signature value are judged once: validation does not depend on the
@@ -443,7 +453,10 @@ pub fn list_cached(doc: &Document, bytes: &[u8], trust: &TrustStore, cache: &Dig
             field_values.insert(v_ref);
         }
         let widget = f.widgets.first();
-        let page = widget.and_then(|(r, w)| r.and_then(|r| pages.get(&r).copied()).or_else(|| w.reference(b"P").and_then(|p| page_index(doc, p))));
+        let page = widget.and_then(|(r, w)| {
+            r.and_then(|r| pages.get_or_insert_with(|| annot_pages(doc, cache)).get(&r).copied())
+                .or_else(|| w.reference(b"P").and_then(|p| page_index(doc, p)))
+        });
         let rect = widget
             .and_then(|(_, w)| nums(doc, w, b"Rect"))
             .filter(|r| r.len() == 4)
