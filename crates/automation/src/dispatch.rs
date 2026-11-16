@@ -899,6 +899,7 @@ impl Automation {
             "accessibility_review_load" => self.a11y_review_load(&a)?,
             "accessibility_review_html" => self.a11y_review_html(&a)?,
             "accessibility_fix" => self.a11y_fix(&a)?,
+            "accessibility_make_accessible" => self.a11y_make_accessible(&a)?,
             "accessibility_figures" => self.accessibility_figures(&a)?,
             "accessibility_set_alt" => self.accessibility_set_alt(&a)?,
             "accessibility_tags" => self.accessibility_tags(&a)?,

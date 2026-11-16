@@ -15869,3 +15869,25 @@ fn inline_conversions_refuse_office_documents_without_running_libreoffice() {
     assert_eq!(s.convert_to_pdf_inline("notes.txt", &Arc::new(b"hello".to_vec())).unwrap().0, SourceKind::Text);
     assert!(s.as_pdf_inline("scan.jpg", &Arc::new(jpeg_bytes())).unwrap().starts_with(b"%PDF-"));
 }
+
+#[test]
+fn make_accessible_plans_only_confirmed_safe_fixes() {
+    let (mut s, id) = session_with(1);
+    let doc = s.get(id).unwrap();
+    assert!(doc.make_accessible(Some("not a tag")).is_err());
+    let plan = doc.make_accessible(None).unwrap();
+    assert!(plan.needs_language && !plan.needs_title);
+    assert_eq!(plan.fixed, [a11y::Rule::Title]);
+    s.apply(id, plan.edit.unwrap()).unwrap();
+    assert_eq!(s.get(id).unwrap().can_undo(), Some("Make accessible"));
+    let plan = s.get(id).unwrap().make_accessible(Some("en-US")).unwrap();
+    assert_eq!(plan.fixed, [a11y::Rule::PrimaryLanguage]);
+    s.apply(id, plan.edit.unwrap()).unwrap();
+    let plan = s.get(id).unwrap().make_accessible(Some("en-US")).unwrap();
+    assert!(plan.edit.is_none() && plan.fixed.is_empty() && plan.language_ignored);
+    // A name with nothing but a suffix gives no title to write.
+    let mut s = Session::new();
+    let id = s.open(".pdf", None, Arc::new(fixture(1)), None).unwrap();
+    let plan = s.get(id).unwrap().make_accessible(Some("en")).unwrap();
+    assert!(plan.needs_title && !plan.fixed.contains(&a11y::Rule::Title));
+}

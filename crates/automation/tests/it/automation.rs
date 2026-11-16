@@ -4461,6 +4461,68 @@ trailer << /Root 1 0 R >>
 }
 
 #[test]
+fn make_accessible_applies_the_safe_fixes_in_one_undoable_step() {
+    let dir = workdir("a11y-make");
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "a.pdf" }))["doc"].as_u64().unwrap();
+    let r = ok(&mut a, "accessibility_make_accessible", json!({ "doc": doc }));
+    let ids = |v: &Value| v.as_array().unwrap().iter().map(|x| x.as_str().unwrap().to_owned()).collect::<Vec<_>>();
+    assert!(ids(&r["fixed"]).contains(&"title".to_owned()));
+    assert_eq!(r["needs_language"], true);
+    let left = ids(&r["not_fixed"]);
+    assert!(left.contains(&"primary-language".to_owned()) && left.contains(&"tagged-pdf".to_owned()), "{left:?}");
+    assert!(!left.contains(&"title".to_owned()));
+    assert!(ids(&r["fixed"]).iter().all(|f| !left.contains(f)), "a rule is not both fixed and not fixed");
+    assert_eq!(ok(&mut a, "doc_info", json!({ "doc": doc }))["title"], "a");
+    let r = ok(&mut a, "accessibility_make_accessible", json!({ "doc": doc, "language": "en-GB" }));
+    assert_eq!(ids(&r["fixed"]), ["primary-language"]);
+    assert_eq!(r["needs_language"], false);
+    assert!(!ids(&r["not_fixed"]).contains(&"primary-language".to_owned()));
+    // Nothing left to fix: a language given now is ignored, and no undo step is added.
+    let r = ok(&mut a, "accessibility_make_accessible", json!({ "doc": doc, "language": "fr" }));
+    assert!(ids(&r["fixed"]).is_empty(), "nothing left to fix");
+    assert_eq!(r["language_ignored"], true);
+    assert_eq!(ok(&mut a, "edit_undo", json!({ "doc": doc }))["undone"], "Make accessible");
+    assert_eq!(ok(&mut a, "edit_undo", json!({ "doc": doc }))["undone"], "Make accessible");
+    assert_eq!(ok(&mut a, "accessibility_check", json!({ "doc": doc, "rules": ["title"] }))["failed"], 1);
+}
+
+#[test]
+fn make_accessible_refuses_a_bad_language_and_a_document_that_forbids_changes() {
+    use pdfcraft_engine::{Changes, Edit, Protection, Session};
+    let dir = workdir("a11y-make-refuse");
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "a.pdf" }))["doc"].as_u64().unwrap();
+    for bad in ["english please", "e", "en-", &"a".repeat(300)] {
+        let r = a.call("accessibility_make_accessible", &json!({ "doc": doc, "language": bad }));
+        assert!(matches!(r, Err(ToolError::InvalidArgs(_))), "{bad}");
+    }
+    assert!(ok(&mut a, "doc_info", json!({ "doc": doc }))["title"].is_null(), "nothing was changed");
+    let mut session = Session::new();
+    let id = session.open("p.pdf", None, std::sync::Arc::new(fixture(1)), None).unwrap();
+    session.apply(id, Edit::Protect(Protection { permissions_password: Some("boss".into()), changes: Changes::None, ..Default::default() })).unwrap();
+    std::fs::write(dir.join("p.pdf"), session.save_bytes(id).unwrap().as_ref()).unwrap();
+    let locked = ok(&mut a, "doc_open", json!({ "path": "p.pdf" }))["doc"].as_u64().unwrap();
+    assert!(matches!(a.call("accessibility_make_accessible", &json!({ "doc": locked })), Err(ToolError::Failed(_))));
+}
+
+#[test]
+fn make_accessible_sets_structure_tab_order_on_a_page_with_annotations() {
+    let dir = workdir("a11y-make-tabs");
+    let pdf = b"%PDF-1.7\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Annots [4 0 R] >> endobj\n4 0 obj << /Type /Annot /Subtype /Text /Rect [10 10 30 30] /Contents (x) >> endobj\ntrailer << /Root 1 0 R >>\n%%EOF";
+    std::fs::write(dir.join("t.pdf"), pdf).unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "t.pdf" }))["doc"].as_u64().unwrap();
+    assert_eq!(ok(&mut a, "accessibility_check", json!({ "doc": doc, "rules": ["tab-order"] }))["failed"], 1);
+    let r = ok(&mut a, "accessibility_make_accessible", json!({ "doc": doc }));
+    assert!(r["fixed"].as_array().unwrap().iter().any(|x| x == "tab-order"), "{r}");
+    assert_eq!(ok(&mut a, "accessibility_check", json!({ "doc": doc, "rules": ["tab-order"] }))["failed"], 0);
+    // Run again: nothing is left to fix.
+    let again = ok(&mut a, "accessibility_make_accessible", json!({ "doc": doc }));
+    assert!(again["fixed"].as_array().unwrap().is_empty());
+}
+
+#[test]
 fn accessibility_review_record_compares_two_versions_without_changing_them() {
     let dir = workdir("a11y-review-record");
     let source = std::fs::read(dir.join("a.pdf")).unwrap();

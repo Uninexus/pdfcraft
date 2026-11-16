@@ -439,6 +439,56 @@ impl Automation {
         Ok(with_warnings(out, warnings))
     }
 
+    /// Make Accessible: every safe automatic fix for a failing rule in one undoable step, then
+    /// what is still failing. It never writes tags or claims compliance.
+    pub(crate) fn a11y_make_accessible(&mut self, a: &Args) -> Result<Value> {
+        let language = a.opt_str("language")?;
+        if let Some(l) = language.map(str::trim).filter(|l| !l.is_empty())
+            && pdfcraft_engine::language_tag(Some(l)).is_none()
+        {
+            return Err(ToolError::InvalidArgs(format!("language {l:?} is not a language tag; use one like en-US or fr-CA")));
+        }
+        let plan = self.doc(a)?.make_accessible(language).map_err(failed)?;
+        let doc = self.doc(a)?.id;
+        let (report, warnings) = match plan.edit {
+            Some(edit) => {
+                let warnings = self.apply_with_warnings(doc, edit)?;
+                let after = self.doc(a)?.accessibility_check(&Options::default()).ok_or_else(|| failed("the document can't be read"))?;
+                (after, warnings)
+            }
+            None => (plan.report, Vec::new()),
+        };
+        let with = |s: Status| report.results.iter().filter(|r| r.status == s).map(|r| r.rule).collect::<Vec<_>>();
+        let ids = |rules: &[Rule]| rules.iter().map(|r| r.id()).collect::<Vec<_>>();
+        let not_fixed = with(Status::Failed);
+        // Only what the check confirms now.
+        let fixed: Vec<Rule> = plan.fixed.iter().copied().filter(|r| !not_fixed.contains(r)).collect();
+        let mut notes = Vec::new();
+        if plan.needs_language {
+            notes.push("primary-language was not fixed: pass language (for example en-US)".to_owned());
+        }
+        if plan.needs_title {
+            notes.push("title was not fixed: the file has no name to use; set a title with accessibility_fix".to_owned());
+        }
+        if plan.language_ignored {
+            notes.push("language was ignored: the document already has a valid language".to_owned());
+        }
+        if plan.replaced_non_text_title {
+            notes.push("the title entry was not text and was replaced".to_owned());
+        }
+        notes.push("Tags, alternate text, tables and reading order need review; this does not certify accessibility".to_owned());
+        let out = json!({
+            "fixed": ids(&fixed),
+            "not_fixed": ids(&not_fixed),
+            "needs_language": plan.needs_language,
+            "needs_title": plan.needs_title,
+            "language_ignored": plan.language_ignored,
+            "manual_review": ids(&with(Status::Manual)),
+            "notes": notes,
+        });
+        Ok(with_warnings(out, warnings))
+    }
+
     pub(crate) fn accessibility_figures(&self, a: &Args) -> Result<Value> {
         let doc = self.doc(a)?;
         let list: Vec<Value> = doc
