@@ -6409,6 +6409,44 @@ fn redacting_italian_international_slash_numbers_through_tools() {
 }
 
 #[test]
+/// Canadian SINs and postal codes are removed from the saved content stream, not just covered; a
+/// non-checksummed digit run, a bare nine-digit order number and a bad postal code stay.
+fn redacting_canadian_sin_and_postal_codes_through_tools() {
+    let table = tools();
+    let advertised: Vec<&str> = table.iter().find(|t| t.name == "redact_mark").unwrap().input_schema["properties"]["pattern"]["enum"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+    assert!(advertised.contains(&"sin") && advertised.contains(&"ca-postal-code"), "{advertised:?}");
+    let dir = workdir("redact-canadian");
+    std::fs::write(
+        dir.join("form.txt"),
+        "SIN 130-692-544 for Ada\nSocial Insurance Number: 130692544 too\nBad SIN 130-692-545\nOrder 130692544 shipped\nShip to Ottawa K1A 0B1\nNot D1A 9Z9 or 90210",
+    )
+    .unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_create", json!({ "from": "text", "path": "form.txt" }))["doc"].as_u64().unwrap();
+    let sins = ok(&mut a, "redact_mark", json!({ "doc": doc, "pattern": "sin" }));
+    assert_eq!(sins["marked"], 2, "the separated SIN and the labelled plain one");
+    let codes = ok(&mut a, "redact_mark", json!({ "doc": doc, "pattern": "ca-postal-code" }));
+    assert_eq!(codes["marked"], 1, "only the valid postal code");
+    assert!(page_text(&mut a, doc)[0].contains("130-692-544"), "marks alone remove nothing");
+    assert_eq!(ok(&mut a, "redact_apply", json!({ "doc": doc }))["applied"], 3);
+    ok(&mut a, "doc_save", json!({ "doc": doc, "path": "redacted.pdf" }));
+    let reopened = ok(&mut a, "doc_open", json!({ "path": "redacted.pdf" }))["doc"].as_u64().unwrap();
+    let text = &page_text(&mut a, reopened)[0];
+    for gone in ["130-692-544", "130692544 too", "K1A", "0B1"] {
+        assert!(!text.contains(gone), "{gone} must be removed from the saved page: {text}");
+    }
+    for kept in ["Bad SIN 130-692-545", "Order 130692544 shipped", "Social Insurance Number:", "Not D1A 9Z9 or 90210", "Ottawa"] {
+        assert!(text.contains(kept), "{kept} must remain: {text}");
+    }
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
 /// A client obeying the advertised schema can select iban, and the mark made through the tool
 /// covers the spaced number and nothing else.
 fn redacting_an_iban_through_tools() {

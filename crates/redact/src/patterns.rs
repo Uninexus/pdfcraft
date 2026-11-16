@@ -12,9 +12,14 @@ pub enum Pattern {
     Ssn,
     Date,
     Iban,
+    /// Canadian Social Insurance Number (nine digits, Luhn checksum).
+    Sin,
+    /// Canadian postal code ("K1A 0B1").
+    CaPostalCode,
 }
 
-pub const PATTERNS: [Pattern; 6] = [Pattern::Phone, Pattern::Email, Pattern::CreditCard, Pattern::Ssn, Pattern::Date, Pattern::Iban];
+pub const PATTERNS: [Pattern; 8] =
+    [Pattern::Phone, Pattern::Email, Pattern::CreditCard, Pattern::Ssn, Pattern::Date, Pattern::Iban, Pattern::Sin, Pattern::CaPostalCode];
 
 impl Pattern {
     pub fn label(self) -> &'static str {
@@ -25,6 +30,8 @@ impl Pattern {
             Pattern::Ssn => "Social Security Numbers",
             Pattern::Date => "Dates",
             Pattern::Iban => "IBAN Numbers",
+            Pattern::Sin => "Canadian Social Insurance Numbers",
+            Pattern::CaPostalCode => "Canadian Postal Codes",
         }
     }
 
@@ -36,6 +43,8 @@ impl Pattern {
             Pattern::Ssn => "ssn",
             Pattern::Date => "date",
             Pattern::Iban => "iban",
+            Pattern::Sin => "sin",
+            Pattern::CaPostalCode => "ca-postal-code",
         }
     }
 
@@ -300,6 +309,85 @@ fn ssn(s: &[char], i: usize) -> Option<usize> {
     }
     let area: String = s[i..i + 3].iter().collect();
     (area != "000" && area != "666" && !area.starts_with('9')).then_some(11)
+}
+
+/// Characters that may join the groups of a SIN: hyphen, space, no-break space, non-breaking
+/// hyphen, en dash and full stop ("130-692-544", "130.692.544").
+fn sin_separator(c: char) -> bool {
+    matches!(c, '-' | ' ' | '\u{a0}' | '\u{2011}' | '\u{2013}' | '.')
+}
+
+/// A Canadian Social Insurance Number: three groups of three digits joined by one consistent
+/// separator ([`sin_separator`]), or nine plain digits after a label ([`sin_labelled`]); Luhn
+/// checksum valid and a first digit that Canada issues (not 0 or 8). The number may not touch
+/// other digits. A SIN left unredacted is a privacy leak, so the labels are generous.
+fn sin(s: &[char], i: usize) -> Option<usize> {
+    if digit(i.checked_sub(1).and_then(|p| s.get(p))) {
+        return None;
+    }
+    let g = |from: usize, n: usize| (from..from + n).all(|k| digit(s.get(k)));
+    let (len, ok) = match s.get(i + 3) {
+        Some(&c) if sin_separator(c) => (11, g(i, 3) && s.get(i + 7) == Some(&c) && g(i + 4, 3) && g(i + 8, 3)),
+        _ => (9, g(i, 9) && sin_labelled(s, i)),
+    };
+    // A longer digit run is another number.
+    if !ok || digit(s.get(i + len)) {
+        return None;
+    }
+    let digits: Vec<u32> = s.get(i..i + len)?.iter().filter_map(|c| c.to_digit(10)).collect();
+    (digits.first().is_some_and(|d| !matches!(d, 0 | 8)) && luhn(&digits)).then_some(len)
+}
+
+/// Labels (lowercase) that name the number after them a SIN; French "NAS" included.
+const SIN_LABELS: [&str; 14] = [
+    "sin",
+    "s.i.n",
+    "sin no",
+    "sin num",
+    "sin number",
+    "social insurance number",
+    "social insurance no",
+    "social insurance num",
+    "nas",
+    "n.a.s",
+    "numéro d'assurance sociale",
+    "numero d'assurance sociale",
+    "numéro d\u{2019}assurance sociale",
+    "numero d\u{2019}assurance sociale",
+];
+
+/// Whether a SIN label, in any case, stands directly before `i` with up to six spaces, no-break
+/// spaces, colons, dots, hyphens or hashes between, so nine unseparated digits are read as a SIN.
+fn sin_labelled(s: &[char], i: usize) -> bool {
+    let mut k = i;
+    let mut gap = 0;
+    while let Some(c) = k.checked_sub(1).and_then(|p| s.get(p)) {
+        if !matches!(c, ' ' | '\u{a0}' | ':' | '#' | '.' | '-') || gap == 6 {
+            break;
+        }
+        gap += 1;
+        k -= 1;
+    }
+    let head = s.get(..k).unwrap_or_default();
+    let tail: Vec<char> = head.iter().rev().take(30).rev().flat_map(|c| c.to_lowercase()).collect();
+    let tail: String = tail.into_iter().map(|c| if c == '\u{a0}' { ' ' } else { c }).collect();
+    SIN_LABELS.iter().any(|l| tail.strip_suffix(l).is_some_and(|rest| !rest.chars().last().is_some_and(char::is_alphanumeric)))
+}
+
+/// A Canadian postal code: letter, digit, letter, an optional space or hyphen, digit, letter,
+/// digit ("K1A 0B1"), in either case. The first letter is one of Canada's postal districts and D,
+/// F, I, O, Q and U are never used; neither end may touch a letter or digit.
+fn ca_postal_code(s: &[char], i: usize) -> Option<usize> {
+    if word(i.checked_sub(1).and_then(|p| s.get(p))) {
+        return None;
+    }
+    let at = |k: usize| s.get(k).map(char::to_ascii_uppercase);
+    let letter = |k: usize| at(k).is_some_and(|c| c.is_ascii_uppercase() && !"DFIOQU".contains(c));
+    let first = at(i).is_some_and(|c| "ABCEGHJKLMNPRSTVXY".contains(c));
+    let gap = usize::from(matches!(s.get(i + 3), Some(' ' | '-' | '\u{a0}')));
+    let n = i + 3 + gap;
+    let ok = first && digit(s.get(i + 1)) && letter(i + 2) && digit(s.get(n)) && letter(n + 1) && digit(s.get(n + 2));
+    (ok && !word(s.get(n + 3))).then_some(n + 3 - i)
 }
 
 /// Month names the date pattern knows: English, then the languages whose dates are written
@@ -576,6 +664,8 @@ pub fn find(pattern: Pattern, text: &[char]) -> Vec<Range<usize>> {
         Pattern::Ssn => ssn,
         Pattern::Date => date,
         Pattern::Iban => iban,
+        Pattern::Sin => sin,
+        Pattern::CaPostalCode => ca_postal_code,
     };
     let mut out = Vec::new();
     let mut i = 0;
@@ -793,6 +883,66 @@ mod tests {
         assert_eq!(
             found(Pattern::Ssn, "SSN 123-45-6789 and 123 45 6789; invalid 000-12-3456, 666-12-3456, 912-12-3456, 1234-56-7890"),
             ["123-45-6789", "123 45 6789"]
+        );
+    }
+
+    #[test]
+    fn canadian_social_insurance_numbers() {
+        // 130 692 544 is Luhn-valid.
+        assert_eq!(
+            found(Pattern::Sin, "SIN 130-692-544 and 130 692 544 and SIN: 130692544; bad 130-692-545, 130-692 544"),
+            ["130-692-544", "130 692 544", "130692544"].map(String::from)
+        );
+        // Other joiners: no-break space, non-breaking hyphen, en dash, full stop.
+        assert_eq!(
+            found(Pattern::Sin, "130\u{a0}692\u{a0}544 130\u{2011}692\u{2011}544 130\u{2013}692\u{2013}544 130.692.544"),
+            ["130\u{a0}692\u{a0}544", "130\u{2011}692\u{2011}544", "130\u{2013}692\u{2013}544", "130.692.544"].map(String::from)
+        );
+        // Labels in other forms and cases.
+        for label in [
+            "SIN.",
+            "SIN No.",
+            "sin number:",
+            "S.I.N.",
+            "Social Insurance Number:",
+            "social insurance no.",
+            "NAS",
+            "nas :",
+            "Numéro d'assurance sociale",
+            "NUMÉRO D\u{2019}ASSURANCE SOCIALE :",
+            "SIN#",
+            "SIN\u{a0}",
+        ] {
+            let text = format!("{label} 130692544");
+            assert_eq!(found(Pattern::Sin, &text), ["130692544"], "{text}");
+        }
+        // Unlabelled nine digits, a label glued to a word, a longer run (labelled or not), a first
+        // digit of 8, mixed joiners and a leading 0 (046 454 286 is Luhn-valid but never issued).
+        for text in [
+            "order 130692544",
+            "basin 130692544",
+            "SIN 1306925441",
+            "1306925441",
+            "1130-692-544",
+            "130-692-5441",
+            "800-000-002",
+            "SIN 046 454 286",
+            "SIN 046454286",
+            "130-692 544",
+            "130.692-544",
+        ] {
+            assert!(found(Pattern::Sin, text).is_empty(), "{text}");
+        }
+    }
+
+    #[test]
+    fn canadian_postal_codes() {
+        assert_eq!(
+            found(
+                Pattern::CaPostalCode,
+                "K1A 0B1, K1A\u{a0}0B1, m5v-3l9 and V6B2W9. Bad: D1A 0B1, K1A 0U1, K1A0B, AK1A 0B1, K1A 0B1X, 12345, W1A 0B1, Z1A 0B1"
+            ),
+            ["K1A 0B1", "K1A\u{a0}0B1", "m5v-3l9", "V6B2W9"].map(String::from)
         );
     }
 

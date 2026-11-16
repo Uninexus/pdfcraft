@@ -5859,11 +5859,11 @@ title = "Pattern sets per locale"
 area = "G"
 tier = "P1"
 milestone = "M8"
-status = "planned"
+status = "partial"
 commands = []
-tools = []
-evidence = []
-notes = ""
+tools = ["redact_mark"]
+evidence = ["crates/redact/src/patterns.rs::canadian_social_insurance_numbers", "crates/redact/src/patterns.rs::canadian_postal_codes", "crates/automation/tests/it/automation.rs::redacting_canadian_sin_and_postal_codes_through_tools"]
+notes = "Canadian patterns added to redact_mark and the UI pattern list (ids sin and ca-postal-code): a Social Insurance Number as 3-3-3 digits with one consistent hyphen, space, no-break space, non-breaking hyphen, en dash or full stop, or nine plain digits only after a label (SIN, S.I.N., SIN No., SIN number, Social Insurance Number, NAS, numéro d'assurance sociale; any case), Luhn-checked, first digit not 0 or 8; a postal code (K1A 0B1, either case, optional space or hyphen, real district and letter set). Not yet: UK, EU and other national identifiers beyond the existing phone, IBAN and date forms, French and Quebec phrasing beyond the NAS label, a locale picker that groups patterns, and a check against Acrobat's own locale sets (not observed)."
 
 [[feature]]
 id = "protect.redact-partial-words"

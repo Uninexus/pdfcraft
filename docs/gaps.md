@@ -1,5 +1,6 @@
 # Where PdfCraft falls short of Acrobat Pro
 
+> **Last reviewed:** 2026-11-16 | **Last updated:** 2026-11-16 | **Change:** minor (gap 17: redact_mark patterns sin and ca-postal-code, Canadian Social Insurance Numbers and postal codes; estimates unchanged)
 > **Last reviewed:** 2026-11-16 | **Last updated:** 2026-11-16 | **Change:** minor (gap 19: Preferences ▸ Forms gains a Required field border colour; estimates unchanged)
 > **Last reviewed:** 2026-11-16 | **Last updated:** 2026-11-16 | **Change:** minor (gap 13: listing signatures no longer reads every page when a document has no signature field, and measured that each save keeps one more copy of the file in undo history; estimates unchanged)
 > **Last reviewed:** 2026-11-16 | **Last updated:** 2026-11-16 | **Change:** minor (gap 8: `doc_create` from `office` makes a PDF from one Office document, headless; estimates unchanged)
@@ -502,6 +503,7 @@ update the numbers.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-16 | minor | Gap 17: `redact_mark` finds Canadian Social Insurance Numbers (`sin`) and postal codes (`ca-postal-code`); other locales still missing. Estimates unchanged. |
 | 2026-11-16 | minor | Gap 18: `page_boxes` lists every page's media, crop, bleed, trim and art boxes, which the file sets, the rotation and the bleed past the trim (headless, read-only). Estimates unchanged. |
 | 2026-11-16 | minor | Gap 13: the signature listing reads the page tree only for a document that has a signature field (≈ 0.25 s less per edit of a 100,000-page file); measured that each save keeps one more copy of the file in undo history. Estimates unchanged. |
 | 2026-11-16 | minor | Gap 8: `doc_create` from `office` converts one Office document into a new PDF through an installed LibreOffice (headless; no menu command yet). Estimates unchanged. |
