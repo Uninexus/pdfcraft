@@ -140,6 +140,25 @@ impl crate::Document {
         self.editor.as_ref().map(|e| pdfcraft_preflight::verify(&e.cos, level)).unwrap_or_default()
     }
 
+    /// Standards ▸ Verify PDF/X: what the document declares and what stands between it and the
+    /// PDF/X family `family` (the one it declares when `None`). Reads the file; claims nothing.
+    pub fn pdfx_verify(&self, family: Option<pdfcraft_preflight::pdfx::Family>) -> pdfcraft_preflight::pdfx::Report {
+        match &self.editor {
+            Some(e) => pdfcraft_preflight::pdfx::verify(&e.cos, family),
+            None => pdfcraft_preflight::pdfx::Report {
+                version: None,
+                conformance: None,
+                declared: None,
+                checked: family,
+                findings: vec![pdfcraft_preflight::pdfx::Finding {
+                    rule: "document",
+                    message: "The document has no object graph to check.".into(),
+                    page: None,
+                }],
+            },
+        }
+    }
+
     /// The standards the document declares (Standards panel).
     pub fn standards(&self) -> pdfcraft_preflight::Declared {
         self.editor.as_ref().map(|e| pdfcraft_preflight::declared(&e.cos)).unwrap_or_default()

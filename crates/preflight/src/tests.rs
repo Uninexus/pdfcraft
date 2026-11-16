@@ -2367,3 +2367,172 @@ fn a_form_cut_short_on_one_page_is_read_again_on_the_next() {
     let said: Vec<String> = verify(&build(&objs, ""), Level::A2b).into_iter().filter(|i| i.clause == "6.2.10").map(|i| i.message).collect();
     assert_eq!(said, ["Page 2 has transparency but no device-independent blending colour space or PDF/A output intent"]);
 }
+
+// PDF/X verification (identification and structure).
+use crate::pdfx::{self, Family};
+
+const PDFX_ID: &str = "/ID [<aa> <bb>]";
+
+/// A one-page document: catalog, pages, page (`page_extra` added), info (`info_extra`) and an
+/// output intent (`intent`), with an embedded-font-free page and no XMP unless `xmp` is set.
+fn pdfx_doc(info_extra: &str, page_extra: &str, intent: &str, catalog_extra: &str, trailer_extra: &str) -> Document {
+    let catalog = format!("<< /Type /Catalog /Pages 2 0 R /OutputIntents [{intent}] {catalog_extra} >>");
+    let page = format!("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] {page_extra} >>");
+    let info = format!("<< /Title (t) {info_extra} >>");
+    build(
+        &[
+            &catalog,
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            &page,
+            &info,
+            "<< /Type /OutputIntent /S /GTS_PDFX /OutputConditionIdentifier (CGATS TR 001) >>",
+            "<< /N 4 /Length 0 >>\nstream\n\nendstream",
+        ],
+        &format!("/Info 4 0 R {trailer_extra}"),
+    )
+}
+
+fn pdfx_good_x1a() -> Document {
+    pdfx_doc("/GTS_PDFXVersion (PDF/X-1:2001) /GTS_PDFXConformance (PDF/X-1a:2001) /Trapped /False", "/TrimBox [5 5 95 95]", "5 0 R", "", PDFX_ID)
+}
+
+fn pdfx_rules(r: &pdfx::Report) -> Vec<&'static str> {
+    r.findings.iter().map(|f| f.rule).collect()
+}
+
+#[test]
+fn a_well_formed_x1a_file_has_no_findings_and_says_what_it_declares() {
+    let r = pdfx::verify(&pdfx_good_x1a(), None);
+    assert_eq!(r.declared, Some(Family::X1a));
+    assert_eq!(r.checked, Some(Family::X1a));
+    assert_eq!(r.version.as_deref(), Some("PDF/X-1:2001"));
+    assert_eq!(r.conformance.as_deref(), Some("PDF/X-1a:2001"));
+    assert!(r.clean(), "{:#?}", r.findings);
+}
+
+#[test]
+fn missing_structure_is_reported_by_rule() {
+    let mut d = pdfx_doc("/GTS_PDFXVersion (PDF/X-3:2003)", "", "", "", "");
+    d.trailer_mut().set(b"Encrypt".to_vec(), Object::Dict(Dict::new()));
+    let r = pdfx::verify(&d, None);
+    assert_eq!(r.declared, Some(Family::X3));
+    let got = pdfx_rules(&r);
+    for rule in ["trapped", "encryption", "file-id", "output-intent", "trim-or-art-box"] {
+        assert!(got.contains(&rule), "{rule} missing from {:#?}", r.findings);
+    }
+    let page = r.findings.iter().find(|f| f.rule == "trim-or-art-box").unwrap();
+    assert_eq!(page.page, Some(0));
+    assert!(page.message.starts_with("Page 1 "), "{}", page.message);
+}
+
+#[test]
+fn both_boxes_and_a_bad_box_are_reported() {
+    let both = pdfx_doc("/GTS_PDFXVersion (PDF/X-4)", "/TrimBox [0 0 9 9] /ArtBox [0 0 9 9]", "5 0 R", "", PDFX_ID);
+    assert!(pdfx_rules(&pdfx::verify(&both, Some(Family::X4))).contains(&"trim-or-art-box"));
+    let bad = pdfx_doc("/GTS_PDFXVersion (PDF/X-4)", "/TrimBox [0 0 9]", "5 0 R", "", PDFX_ID);
+    assert!(pdfx_rules(&pdfx::verify(&bad, Some(Family::X4))).contains(&"trim-or-art-box"));
+}
+
+#[test]
+fn x4_states_its_version_in_xmp_and_needs_trapped() {
+    let d = pdfx_doc("/GTS_PDFXVersion (PDF/X-4)", "/TrimBox [5 5 95 95]", "5 0 R", "", PDFX_ID);
+    let got = pdfx_rules(&pdfx::verify(&d, None));
+    assert_eq!(got, ["identification", "trapped"], "XMP carries no pdfxid, and Trapped is absent");
+    let xmp = "<x:xmpmeta xmlns:x=\"adobe:ns:meta/\"><rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\">\
+        <rdf:Description rdf:about=\"\" xmlns:p=\"http://www.npes.org/pdfx/ns/id/\" xmlns:pdf=\"http://ns.adobe.com/pdf/1.3/\" p:GTS_PDFXVersion=\"PDF/X-4\" pdf:Trapped=\"False\"/></rdf:RDF></x:xmpmeta>";
+    let with_xmp = build(
+        &[
+            "<< /Type /Catalog /Pages 2 0 R /OutputIntents [5 0 R] /Metadata 7 0 R >>",
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] /TrimBox [5 5 95 95] >>",
+            "<< /Title (t) >>",
+            "<< /Type /OutputIntent /S /GTS_PDFX /OutputConditionIdentifier (CGATS TR 001) >>",
+            "null",
+            &format!("<< /Type /Metadata /Subtype /XML /Length {} >>\nstream\n{xmp}\nendstream", xmp.len() + 1),
+        ],
+        &format!("/Info 4 0 R {PDFX_ID}"),
+    );
+    let r = pdfx::verify(&with_xmp, None);
+    assert_eq!((r.declared, r.version.as_deref()), (Some(Family::X4), Some("PDF/X-4")));
+    assert!(r.clean(), "{:#?}", r.findings);
+}
+
+#[test]
+fn trapped_must_be_the_name_true_or_false_in_every_family() {
+    for bad in ["/Trapped /Unknown", "/Trapped true", "/Trapped (True)"] {
+        let d = pdfx_doc(&format!("/GTS_PDFXVersion (PDF/X-4) {bad}"), "/TrimBox [5 5 95 95]", "5 0 R", "", PDFX_ID);
+        assert!(pdfx_rules(&pdfx::verify(&d, Some(Family::X4))).contains(&"trapped"), "{bad}");
+    }
+    let ok = pdfx_doc("/GTS_PDFXVersion (PDF/X-4) /Trapped /True", "/TrimBox [5 5 95 95]", "5 0 R", "", PDFX_ID);
+    assert!(!pdfx_rules(&pdfx::verify(&ok, Some(Family::X4))).contains(&"trapped"));
+}
+
+#[test]
+fn x1_2001_needs_its_1a_conformance_and_plain_x1_is_not_x1a() {
+    let no_conf = pdfx_doc("/GTS_PDFXVersion (PDF/X-1:2001) /Trapped /False", "/TrimBox [5 5 95 95]", "5 0 R", "", PDFX_ID);
+    let r = pdfx::verify(&no_conf, None);
+    assert_eq!(r.declared, Some(Family::X1a));
+    assert!(r.findings.iter().any(|f| f.message.contains("PDF/X-1a:2001")), "{:#?}", r.findings);
+    for plain in ["/GTS_PDFXVersion (PDF/X-1:1999)", "/GTS_PDFXVersion (PDF/X-1) /GTS_PDFXConformance (PDF/X-1:1999)"] {
+        let d = pdfx_doc(plain, "/TrimBox [5 5 95 95]", "5 0 R", "", PDFX_ID);
+        assert_eq!(pdfx::verify(&d, None).declared, None, "{plain}");
+    }
+}
+
+#[test]
+fn transparency_is_refused_by_x1a_and_x3_and_allowed_by_x4() {
+    let page = "/TrimBox [5 5 95 95] /Resources << /ExtGState << /G << /ca 0.5 >> >> >> /Contents 7 0 R";
+    let mut d = pdfx_doc("/GTS_PDFXVersion (PDF/X-4)", page, "5 0 R", "", PDFX_ID);
+    let id = d.add(Object::Stream(Stream::from_raw(Dict::new(), b"/G gs 0 0 10 10 re f".to_vec())));
+    assert_eq!(id.num, 7, "the content stream is object 7");
+    let r4 = pdfx::verify(&d, Some(Family::X4));
+    assert!(!pdfx_rules(&r4).contains(&"transparency"), "{:#?}", r4.findings);
+    let r1 = pdfx::verify(&d, Some(Family::X1a));
+    assert!(pdfx_rules(&r1).contains(&"transparency"), "{:#?}", r1.findings);
+}
+
+#[test]
+fn unembedded_fonts_are_reported_once_by_name() {
+    let page = "/TrimBox [5 5 95 95] /Resources << /Font << /F1 8 0 R >> >> /Contents 7 0 R";
+    let mut d = pdfx_doc("/GTS_PDFXVersion (PDF/X-4)", page, "5 0 R", "", PDFX_ID);
+    d.add(Object::Stream(Stream::from_raw(Dict::new(), b"BT /F1 12 Tf (x) Tj ET".to_vec())));
+    let mut font = Dict::new();
+    font.set(b"Type".to_vec(), Object::name("Font"));
+    font.set(b"Subtype".to_vec(), Object::name("Type1"));
+    font.set(b"BaseFont".to_vec(), Object::name("Helvetica"));
+    assert_eq!(d.add(Object::Dict(font)).num, 8);
+    let r = pdfx::verify(&d, Some(Family::X4));
+    let fonts: Vec<_> = r.findings.iter().filter(|f| f.rule == "fonts-embedded").map(|f| f.message.as_str()).collect();
+    assert_eq!(fonts, ["The font Helvetica isn't embedded."]);
+}
+
+#[test]
+fn an_undeclared_or_unknown_version_is_one_finding_and_a_request_overrides_it() {
+    let none = pdfx_doc("", "/TrimBox [5 5 95 95]", "5 0 R", "", PDFX_ID);
+    let r = pdfx::verify(&none, None);
+    assert_eq!((r.checked, pdfx_rules(&r)), (None, vec!["identification"]));
+    assert!(!r.clean());
+    let unknown = pdfx_doc("/GTS_PDFXVersion (PDF/X-9)", "", "", "", "");
+    let r = pdfx::verify(&unknown, None);
+    assert_eq!(pdfx_rules(&r), ["identification"]);
+    assert!(r.findings[0].message.contains("PDF/X-9"));
+    let r = pdfx::verify(&pdfx_good_x1a(), Some(Family::X4));
+    assert!(r.findings.iter().any(|f| f.message.contains("declares PDF/X-1a, not PDF/X-4")), "{:#?}", r.findings);
+}
+
+#[test]
+fn page_findings_are_bounded() {
+    // 120 pages without a box: 50 listed and one that counts the rest.
+    let kids: String = (3..123).map(|n| format!("{n} 0 R ")).collect();
+    let mut objs =
+        vec!["<< /Type /Catalog /Pages 2 0 R /OutputIntents [123 0 R] >>".to_string(), format!("<< /Type /Pages /Kids [{kids}] /Count 120 >>")];
+    objs.extend((0..120).map(|_| "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 9 9] >>".to_string()));
+    objs.push("<< /Type /OutputIntent /S /GTS_PDFX /OutputConditionIdentifier (x) >>".into());
+    objs.push("<< /GTS_PDFXVersion (PDF/X-4) >>".into());
+    let refs: Vec<&str> = objs.iter().map(String::as_str).collect();
+    let d = build(&refs, &format!("/Info 124 0 R {PDFX_ID}"));
+    let r = pdfx::verify(&d, Some(Family::X4));
+    let boxes = r.findings.iter().filter(|f| f.rule == "trim-or-art-box").count();
+    assert_eq!(boxes, 51);
+    assert!(r.findings.iter().any(|f| f.message == "70 more pages have the same problem."));
+}

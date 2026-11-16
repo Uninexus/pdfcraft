@@ -8,6 +8,8 @@ pub(crate) const MAX_XMP_BYTES: usize = 8 * 1024 * 1024;
 /// Namespace URIs of the PDF/A and PDF/UA identification schemas.
 pub(crate) const PDFA_ID: &str = "http://www.aiim.org/pdfa/ns/id/";
 pub(crate) const PDFUA_ID: &str = "http://www.aiim.org/pdfua/ns/id/";
+/// The PDF/X identification schema (`pdfxid:`).
+pub(crate) const PDFX_ID: &str = "http://www.npes.org/pdfx/ns/id/";
 
 /// Read an identification property by its expanded XML name, not its arbitrary prefix. A packet
 /// that is not well-formed XML (an undeclared prefix, an illegal character) or is too deep or wide
@@ -22,6 +24,7 @@ pub(crate) fn identifier(xmp: &str, namespace: &str, local: &str) -> Option<Stri
             let prefix = match namespace {
                 PDFA_ID => "pdfaid",
                 PDFUA_ID => "pdfuaid",
+                PDFX_ID => "pdfxid",
                 _ => return None,
             };
             value(xmp, &format!("{prefix}:{local}"))

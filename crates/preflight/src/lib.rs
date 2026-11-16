@@ -30,6 +30,7 @@ mod limits;
 mod spot;
 /// The colorants of DeviceCMYK: not spot colours, however a DeviceN space names them.
 pub use spot::PROCESS as PROCESS_COLORANTS;
+pub mod pdfx;
 mod trailer;
 mod transparency;
 mod xmp;

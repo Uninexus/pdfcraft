@@ -50,6 +50,25 @@ impl Automation {
         }))
     }
 
+    pub(crate) fn pdfx_verify(&self, a: &Args) -> Result<Value> {
+        use pdfcraft_engine::pdfa::pdfx::Family;
+        let family = match a.opt_str("version")? {
+            Some(v) => Some(Family::from_id(v).ok_or_else(|| ToolError::InvalidArgs(format!("unknown PDF/X version {v:?} (x1a, x3 or x4)")))?),
+            None => None,
+        };
+        let r = self.doc(a)?.pdfx_verify(family);
+        let label = |f: Option<Family>| f.map(|f| f.label());
+        let findings: Vec<Value> =
+            r.findings.iter().map(|f| json!({ "rule": f.rule, "message": f.message, "page": f.page.map(|p| p + 1) })).collect();
+        Ok(json!({
+            "declared": { "version": r.version, "conformance": r.conformance, "family": label(r.declared) },
+            "checked_against": label(r.checked),
+            "no_findings": r.clean(),
+            "findings": findings,
+            "note": pdfcraft_engine::pdfa::pdfx::NOT_CHECKED,
+        }))
+    }
+
     pub(crate) fn print_readiness(&self, a: &Args) -> Result<Value> {
         let report = self.doc(a)?.print_readiness();
         let findings: Vec<Value> =
