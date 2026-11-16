@@ -9,12 +9,12 @@
 use std::collections::HashSet;
 
 use pdfcraft_forms::table::cell_name;
-use pdfcraft_forms::{FieldKind, FormError};
+use pdfcraft_forms::{FieldCopy, FieldKind, FormError};
 use pdfcraft_render::PageInfo;
 
 use crate::{Edit, EditError, FormField};
 
-/// The edit's name in the history ("Undo Copy field into a grid"), one of [`crate::BATCH_LABELS`].
+/// The edit's name in the history ("Undo Copy field into a grid"), as [`Edit::label`] words it.
 pub const LABEL: &str = "Copy field into a grid";
 /// The most rows a grid can have.
 pub const MAX_ROWS: usize = 100;
@@ -85,17 +85,23 @@ pub fn edit(source: &str, grid: &FieldGrid, pages: &[PageInfo], form: &[FormFiel
         taken.extend(f.name.match_indices('.').filter_map(|(at, _)| f.name.get(..at)));
     }
     let mut seen: HashSet<String> = HashSet::with_capacity(copies);
-    let mut edits = Vec::with_capacity(copies);
+    let mut places = Vec::with_capacity(copies);
     for row in 0..grid.rows {
         for column in 0..grid.columns {
             if row == 0 && column == 0 {
                 continue;
             }
             let seq = row * grid.columns + column;
+            // As the form stores it: a name's own spaces at either end are not part of it.
             let name = match &grid.pattern {
                 None => format!("{source}_{seq}"),
                 Some(pattern) => cell_name(pattern, row + 1, column + 1, seq),
-            };
+            }
+            .trim()
+            .to_owned();
+            if name.is_empty() {
+                return Err(refuse("a copy would have no name"));
+            }
             // A field that sits under a parent (a.b) copies to a sibling (a.b_1), and the pattern
             // is not allowed to make one.
             if grid.pattern.is_some() && name.contains('.') {
@@ -118,10 +124,10 @@ pub fn edit(source: &str, grid: &FieldGrid, pages: &[PageInfo], form: &[FormFiel
             if !rect.iter().all(|v| v.is_finite()) {
                 return Err(refuse("the copies are outside the numbers a page can hold"));
             }
-            edits.push(Edit::CopyField { name: source.to_owned(), page, rect, new_name: name });
+            places.push(FieldCopy { page, rect, name });
         }
     }
-    Ok(Edit::Batch { label: LABEL.to_owned(), edits })
+    Ok(Edit::CopyField { name: source.to_owned(), copies: places })
 }
 
 #[cfg(test)]
@@ -238,5 +244,57 @@ mod tests {
         let near = |got: [f32; 2], want: [f32; 2]| got.iter().zip(want).all(|(g, w)| (g - w).abs() < 0.01);
         assert!(near(shown("item_1"), [origin[0] + 40.0, origin[1]]), "the next column is to the right as shown: {:?}", shown("item_1"));
         assert!(near(shown("item_2"), [origin[0], origin[1] + 70.0]), "the next row is below as shown: {:?}", shown("item_2"));
+    }
+
+    /// What the copies hold survives a save and reopen: a check box keeps its on state and starts
+    /// off, a list box has no selection, and a name with spaces round the pattern is stored, and
+    /// reported, trimmed.
+    #[test]
+    fn copies_survive_a_save_and_reopen() {
+        let (mut s, id) = open_with_field();
+        let info = s.get(id).unwrap().info.pages[0].clone();
+        let at = |view: [f32; 4]| info.view_rect_to_user(view).map(f64::from);
+        s.apply(id, Edit::AddField { page: 0, rect: at([50.0, 100.0, 70.0, 120.0]), kind: NewField::CheckBox, name: Some("agree".into()) }).unwrap();
+        s.apply(id, Edit::SetFieldValue { name: "agree".into(), value: pdfcraft_forms::FieldValue::Check(true) }).unwrap();
+        let options = vec!["a".to_owned(), "b".to_owned()];
+        s.apply(
+            id,
+            Edit::AddField {
+                page: 0,
+                rect: at([100.0, 100.0, 160.0, 150.0]),
+                kind: NewField::List { options, multi: false },
+                name: Some("pick".into()),
+            },
+        )
+        .unwrap();
+        s.apply(id, Edit::SetFieldValue { name: "pick".into(), value: pdfcraft_forms::FieldValue::Choice(vec!["b".into()]) }).unwrap();
+        let spaced = FieldGrid { rows: 1, columns: 2, row_gap: 0.0, column_gap: 10.0, pattern: Some(" copy {seq} ".into()) };
+        for source in ["agree", "pick"] {
+            let doc = s.get(id).unwrap();
+            let Edit::CopyField { copies, .. } = edit(source, &spaced, &doc.info.pages, &doc.form).unwrap() else { panic!("a copy edit") };
+            assert_eq!(copies.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["copy 1"], "trimmed in the edit, so reported as stored");
+            let mut again = spaced.clone();
+            again.pattern = Some(format!(" {source}_{{seq}} "));
+            s.apply(id, plan_for(&s, id, source, &again).unwrap()).unwrap();
+        }
+        let bytes = s.save_bytes(id).unwrap();
+        let mut reopened = Session::new();
+        let id2 = reopened.open("t.pdf", None, bytes, None).unwrap();
+        let form = &reopened.get(id2).unwrap().form;
+        let get = |name: &str| {
+            form.iter().find(|f| f.name == name).unwrap_or_else(|| panic!("{name} in {:?}", form.iter().map(|f| &f.name).collect::<Vec<_>>()))
+        };
+        assert_eq!(get("agree").widgets[0].state.as_deref(), Some("Yes"), "the source stays on");
+        let copy = get("agree_1");
+        assert_eq!((copy.widgets[0].on_state.as_deref(), copy.widgets[0].state.as_deref()), (Some("Yes"), Some("Off")));
+        assert!(copy.value.is_empty(), "{:?}", copy.value);
+        assert!(!get("pick").selected.is_empty());
+        assert!(get("pick_1").selected.is_empty() && get("pick_1").value.is_empty());
+        assert_eq!(get("pick_1").options.len(), 2);
+    }
+
+    fn plan_for(s: &Session, id: crate::DocId, source: &str, grid: &FieldGrid) -> Result<Edit, EditError> {
+        let doc = s.get(id).unwrap();
+        edit(source, grid, &doc.info.pages, &doc.form)
     }
 }

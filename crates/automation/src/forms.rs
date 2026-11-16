@@ -592,9 +592,7 @@ impl Automation {
             let doc = self.doc(a)?;
             let edit = field_copies::edit(&field, &grid, &doc.info.pages, &doc.form).map_err(|e| bad(e.to_string()))?;
             let names: Vec<String> = match &edit {
-                Edit::Batch { edits, .. } => {
-                    edits.iter().filter_map(|e| if let Edit::CopyField { new_name, .. } = e { Some(new_name.clone()) } else { None }).collect()
-                }
+                Edit::CopyField { copies, .. } => copies.iter().map(|c| c.name.clone()).collect(),
                 _ => Vec::new(),
             };
             (edit, names)

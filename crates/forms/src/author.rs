@@ -19,7 +19,7 @@ mod tree;
 
 pub(crate) use tree::ancestor_sets;
 
-pub use copy::copy_field;
+pub use copy::{FieldCopy, copy_field, copy_field_to};
 pub use edit::set_props;
 pub(crate) use edit::set_props_object;
 pub use lifecycle::{add_field, delete_field, delete_field_object, delete_widget, duplicate_field};

@@ -868,8 +868,8 @@ pub(crate) fn run_edit(doc: &mut pdfcraft_cos::Document, edit: &Edit, cx: &mut E
             }
             invalidate_form_script_snapshot(cx);
         }
-        Edit::CopyField { name, page, rect, new_name } => {
-            pdfcraft_forms::copy_field(doc, name, *page, *rect, new_name)?;
+        Edit::CopyField { name, copies } => {
+            pdfcraft_forms::copy_field_to(doc, name, copies)?;
             invalidate_form_script_snapshot(cx);
         }
         Edit::DeleteField { name } => {

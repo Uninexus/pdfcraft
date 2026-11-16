@@ -6178,7 +6178,7 @@ fn copying_a_field_into_a_grid_through_tools() {
     assert!(get("qty_3")["value"].is_null() || get("qty_3")["value"] == "", "the value is not copied: {}", get("qty_3"));
     assert_eq!(get("qty_3")["required"], get("qty")["required"], "the properties are: {}", get("qty_3"));
     // A pattern names the copies.
-    let by = json!({ "doc": doc, "field": "qty", "rows": 3, "columns": 1, "row_gap": 5, "pattern": "box_{row}" });
+    let by = json!({ "doc": doc, "field": "qty", "rows": 3, "columns": 1, "row_gap": 5, "pattern": " box_{row} " });
     assert_eq!(ok(&mut a, "form_copy_field_grid", by)["fields"], json!(["box_2", "box_3"]));
     assert_eq!(fields(&mut a).len(), 6);
     // Refused whole, saying why: nothing is added.
@@ -6197,6 +6197,19 @@ fn copying_a_field_into_a_grid_through_tools() {
             .contains("off the page")
     );
     assert_eq!(fields(&mut a).len(), 6);
+    // Saved and opened again, the copies are there with the source's properties and no value, under
+    // the names the tool reported.
+    ok(&mut a, "doc_save", json!({ "doc": doc, "path": "copies.pdf" }));
+    let again = ok(&mut a, "doc_open", json!({ "path": "copies.pdf" }))["doc"].as_u64().unwrap();
+    let reopened = ok(&mut a, "form_fields", json!({ "doc": again }))["fields"].as_array().unwrap().clone();
+    let names: Vec<&str> = reopened.iter().filter_map(|f| f["name"].as_str()).collect();
+    for n in ["qty", "qty_1", "qty_2", "qty_3", "box_2", "box_3"] {
+        assert!(names.contains(&n), "{n} in {names:?}");
+    }
+    let saved = |n: &str| reopened.iter().find(|f| f["name"] == n).unwrap().clone();
+    assert_eq!(saved("qty")["value"], "7");
+    assert!(saved("box_3")["value"].is_null() || saved("box_3")["value"] == "", "{}", saved("box_3"));
+    assert_eq!(saved("box_3")["required"], saved("qty")["required"]);
     assert_eq!(ok(&mut a, "edit_undo", json!({ "doc": doc }))["undone"], "Copy field into a grid");
     assert_eq!(fields(&mut a).len(), 4, "one undo takes back the whole last grid");
     assert!(pdfcraft_automation::tools().iter().any(|t| t.name == "form_copy_field_grid" && !t.read_only));
