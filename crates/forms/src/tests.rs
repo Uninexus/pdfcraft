@@ -7973,3 +7973,220 @@ fn page_annotation_visits_are_limited() {
     objs.extend((0..pages).map(|_| format!("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 10 10] /Annots [{arr}] >>")));
     assert!(javascripts(&document(&objs)).capped);
 }
+
+/// A copy of a field is a field of its own with the same type, flags, limits and look, and none of
+/// the source's value; the source is not touched.
+#[test]
+fn copying_a_field_makes_a_new_field_with_the_same_properties_and_no_value() {
+    let mut doc = one_page();
+    let name = add_field(&mut doc, 0, [50.0, 700.0, 250.0, 720.0], &NewField::Text { multiline: false }, Some("Item")).unwrap();
+    let props = FieldProps { required: Some(true), max_len: Some(Some(12)), tooltip: Some("What it is".into()), ..Default::default() };
+    set_props(&mut doc, &name, &props).unwrap();
+    set_value(&mut doc, &name, &FieldValue::Text("pens".into())).unwrap();
+    let source = fields(&doc).into_iter().find(|f| f.name == "Item").unwrap();
+    let made = copy_field(&mut doc, "Item", 0, [50.0, 650.0, 250.0, 670.0], "Item_2").unwrap();
+    assert_eq!(made, "Item_2");
+    let doc = reopen(&doc);
+    let all = fields(&doc);
+    assert_eq!(all.len(), 2, "a second field, not a second widget");
+    let copy = all.iter().find(|f| f.name == "Item_2").unwrap();
+    let kept = all.iter().find(|f| f.name == "Item").unwrap();
+    assert_eq!((copy.kind, copy.max_len, copy.flags, copy.tooltip.as_deref()), (source.kind, Some(12), source.flags, Some("What it is")));
+    assert!(copy.value.is_empty(), "the value stays with the source: {:?}", copy.value);
+    assert_eq!(kept.value, vec!["pens".to_string()]);
+    assert_eq!(copy.widgets.len(), 1);
+    assert_eq!((copy.widgets[0].page, copy.widgets[0].rect), (Some(0), [50.0, 650.0, 250.0, 670.0]));
+    assert_eq!(kept.widgets[0].rect, [50.0, 700.0, 250.0, 720.0]);
+}
+
+#[test]
+fn copying_a_check_box_starts_it_off_and_a_drop_down_keeps_its_options() {
+    let mut doc = one_page();
+    add_field(&mut doc, 0, [50.0, 700.0, 70.0, 720.0], &NewField::CheckBox, Some("Agree")).unwrap();
+    set_value(&mut doc, "Agree", &FieldValue::Check(true)).unwrap();
+    add_field(&mut doc, 0, [100.0, 700.0, 200.0, 720.0], &NewField::Combo { options: vec!["a".into(), "b".into()], editable: false }, Some("Pick"))
+        .unwrap();
+    copy_field(&mut doc, "Agree", 0, [50.0, 650.0, 70.0, 670.0], "Agree_2").unwrap();
+    copy_field(&mut doc, "Pick", 0, [100.0, 650.0, 200.0, 670.0], "Pick_2").unwrap();
+    let doc = reopen(&doc);
+    let all = fields(&doc);
+    let get = |n: &str| all.iter().find(|f| f.name == n).unwrap();
+    assert!(get("Agree").value.iter().any(|v| v != "Off"), "the source stays checked");
+    assert!(get("Agree_2").value.is_empty() || get("Agree_2").value == vec!["Off".to_string()], "{:?}", get("Agree_2").value);
+    assert_eq!((get("Pick_2").kind, get("Pick_2").options.clone()), (FieldKind::Combo, get("Pick").options.clone()));
+    assert_eq!(get("Pick_2").options.len(), 2);
+}
+
+#[test]
+fn a_copy_that_cannot_be_made_is_refused_and_adds_nothing() {
+    let mut doc = one_page();
+    add_field(&mut doc, 0, [50.0, 700.0, 250.0, 720.0], &NewField::Text { multiline: false }, Some("Item")).unwrap();
+    add_field(&mut doc, 0, [50.0, 600.0, 70.0, 620.0], &NewField::Radio { group: Some("Size".into()), export: "S".into() }, None).unwrap();
+    let before = fields(&doc).len();
+    let area = [50.0, 650.0, 250.0, 670.0];
+    for (source, page, rect, name, why) in [
+        ("Nope", 0, area, "X", "no field named"),
+        ("Item", 0, area, "Item", "already exists"),
+        ("Item", 0, area, "", "empty"),
+        ("Item", 0, area, "a..b", "empty"),
+        ("Item", 5, area, "X", "does not exist"),
+        ("Item", 0, [0.0, 0.0, 2.0, 2.0], "X", "too small"),
+        ("Item", 0, [0.0, 0.0, f64::NAN, 9.0], "X", "too small"),
+        ("Size", 0, area, "X", "radio button"),
+    ] {
+        let err = copy_field(&mut doc, source, page, rect, name).unwrap_err().to_string();
+        assert!(err.to_lowercase().contains(why), "{source}/{name}: {err}");
+    }
+    // A name inside another field's is refused too.
+    assert!(copy_field(&mut doc, "Item", 0, area, "Item.sub").is_err());
+    assert_eq!(fields(&doc).len(), before);
+}
+
+fn js_action(code: &str) -> Object {
+    let mut a = pdfcraft_cos::Dict::new();
+    a.set(b"S".to_vec(), Object::name("JavaScript"));
+    a.set(b"JS".to_vec(), Object::String(pdfcraft_cos::PdfString::literal(code.as_bytes().to_vec())));
+    Object::Dict(a)
+}
+
+fn aa_keys(doc: &Document, widget: pdfcraft_cos::ObjRef) -> Vec<Vec<u8>> {
+    let d = doc.get(widget).as_dict().cloned().unwrap();
+    let aa = d.get(b"AA").map(|o| doc.resolve(o)).and_then(|o| o.as_dict().cloned()).unwrap_or_default();
+    let mut keys: Vec<Vec<u8>> = aa.iter().map(|(k, _)| k.clone()).collect();
+    keys.sort();
+    keys
+}
+
+/// A check box keeps its on state's name in the copy and starts off, after a save and reopen.
+#[test]
+fn a_copied_check_box_keeps_its_on_state_and_starts_off() {
+    let mut doc = one_page();
+    add_field(&mut doc, 0, [50.0, 700.0, 70.0, 720.0], &NewField::CheckBox, Some("Agree")).unwrap();
+    // A file whose check box says On where PdfCraft says Yes: the appearance's on state is renamed.
+    let widget = fields(&doc).into_iter().find(|f| f.name == "Agree").unwrap().widgets[0].obj;
+    let d = doc.get(widget).as_dict().cloned().unwrap();
+    let ap = d.get(b"AP").map(|o| doc.resolve(o)).and_then(|o| o.as_dict().cloned()).unwrap();
+    let states = ap.get(b"N").map(|o| doc.resolve(o)).and_then(|o| o.as_dict().cloned()).unwrap();
+    let mut renamed = pdfcraft_cos::Dict::new();
+    for (key, value) in states.iter() {
+        let key = if key == b"Yes" { b"On".to_vec() } else { key.clone() };
+        renamed.set(key, value.clone());
+    }
+    let mut new_ap = ap.clone();
+    new_ap.set(b"N".to_vec(), Object::Dict(renamed));
+    doc.update_dict(widget, |d| d.set(b"AP".to_vec(), Object::Dict(new_ap))).unwrap();
+    set_value(&mut doc, "Agree", &FieldValue::Check(true)).unwrap();
+    copy_field(&mut doc, "Agree", 0, [50.0, 650.0, 70.0, 670.0], "Agree_2").unwrap();
+    let doc = reopen(&doc);
+    let all = fields(&doc);
+    let source = all.iter().find(|f| f.name == "Agree").unwrap();
+    let copy = all.iter().find(|f| f.name == "Agree_2").unwrap();
+    assert_eq!((source.widgets[0].on_state.as_deref(), source.widgets[0].state.as_deref()), (Some("On"), Some("On")));
+    assert_eq!(copy.widgets[0].on_state.as_deref(), Some("On"), "the on state keeps its name");
+    assert_eq!(copy.widgets[0].state.as_deref(), Some("Off"), "and it starts off");
+    assert!(copy.value.is_empty(), "{:?}", copy.value);
+}
+
+/// A field with separate widgets (after Duplicate) has actions on the field and on the widget; the
+/// copy has both, the widget's winning where they share a trigger.
+#[test]
+fn a_copy_of_a_field_with_separate_widgets_merges_both_sets_of_actions() {
+    let mut doc = one_page();
+    let pages = doc.get(doc.root().unwrap()).as_dict().unwrap().reference(b"Pages").unwrap();
+    let mut p = pdfcraft_cos::Dict::new();
+    p.set(b"Type".to_vec(), Object::name("Page"));
+    p.set(b"Parent".to_vec(), Object::Ref(pages));
+    p.set(b"MediaBox".to_vec(), Object::Array(vec![0.into(), 0.into(), 600.into(), 800.into()]));
+    let r = doc.add(p);
+    doc.update_dict(pages, |d| {
+        let mut kids = d.get(b"Kids").unwrap().as_array().unwrap().clone();
+        kids.push(Object::Ref(r));
+        d.set(b"Count".to_vec(), Object::Int(kids.len() as i64));
+        d.set(b"Kids".to_vec(), Object::Array(kids));
+    })
+    .unwrap();
+    add_field(&mut doc, 0, [50.0, 700.0, 250.0, 720.0], &NewField::Text { multiline: false }, Some("Split")).unwrap();
+    duplicate_field(&mut doc, "Split", &[1]).unwrap();
+    let f = fields(&doc).into_iter().find(|f| f.name == "Split").unwrap();
+    assert!(f.widgets.len() == 2 && f.widgets[0].obj != f.obj, "the field and its widgets are separate objects");
+    // The field has K and F; its first widget has F and V.
+    let mut field_aa = pdfcraft_cos::Dict::new();
+    field_aa.set(b"K".to_vec(), js_action("event.rc = true;"));
+    field_aa.set(b"F".to_vec(), js_action("event.value = \"from the field\";"));
+    doc.update_dict(f.obj, |d| d.set(b"AA".to_vec(), Object::Dict(field_aa))).unwrap();
+    let mut widget_aa = pdfcraft_cos::Dict::new();
+    widget_aa.set(b"V".to_vec(), js_action("event.rc = true;"));
+    widget_aa.set(b"F".to_vec(), js_action("event.value = \"from the widget\";"));
+    doc.update_dict(f.widgets[0].obj, |d| d.set(b"AA".to_vec(), Object::Dict(widget_aa))).unwrap();
+    copy_field(&mut doc, "Split", 0, [50.0, 650.0, 250.0, 670.0], "Split_2").unwrap();
+    let doc = reopen(&doc);
+    let copy = fields(&doc).into_iter().find(|f| f.name == "Split_2").unwrap();
+    assert_eq!(copy.widgets.len(), 1);
+    assert_eq!(aa_keys(&doc, copy.obj), vec![b"F".to_vec(), b"K".to_vec(), b"V".to_vec()]);
+    let d = doc.get(copy.obj).as_dict().cloned().unwrap();
+    let aa = d.get(b"AA").map(|o| doc.resolve(o)).and_then(|o| o.as_dict().cloned()).unwrap();
+    let format = doc.resolve(aa.get(b"F").unwrap());
+    let js = format.as_dict().and_then(|a| a.get(b"JS")).map(|j| doc.resolve(j));
+    let text = js.as_ref().and_then(|j| crate::text_of(j)).unwrap();
+    assert!(text.contains("from the widget"), "the widget's own action wins: {text}");
+}
+
+/// A copy of a calculated field calculates too, and joins the calculation order.
+#[test]
+fn a_copy_of_a_calculated_field_joins_the_calculation_order() {
+    let mut doc = one_page();
+    add_field(&mut doc, 0, [50.0, 700.0, 250.0, 720.0], &NewField::Text { multiline: false }, Some("Total")).unwrap();
+    set_field_script(&mut doc, "Total", "calculate", Some("event.value = 1 + 1;")).unwrap();
+    copy_field(&mut doc, "Total", 0, [50.0, 650.0, 250.0, 670.0], "Total_2").unwrap();
+    let doc = reopen(&doc);
+    let all = fields(&doc);
+    let order = calculation_order(&doc, &all);
+    let names: Vec<&str> = order.fields.iter().map(|c| c.name.as_str()).collect();
+    assert_eq!(names, vec!["Total", "Total_2"], "{names:?}");
+    assert!(order.fields.iter().all(|c| c.listed && !c.issues.contains(&CalculationIssue::NotInOrder)), "{:?}", order.fields);
+}
+
+/// A list box's selection (/V and /I) is not copied, and nor are a name that must be unique
+/// (/NM) or a modification date (/M).
+#[test]
+fn a_copy_of_a_list_box_has_no_selection_and_no_identity_keys() {
+    let mut doc = one_page();
+    let options = vec!["a".to_owned(), "b".to_owned(), "c".to_owned()];
+    add_field(&mut doc, 0, [50.0, 700.0, 150.0, 760.0], &NewField::List { options, multi: true }, Some("Pick")).unwrap();
+    set_value(&mut doc, "Pick", &FieldValue::Choice(vec!["b".into(), "c".into()])).unwrap();
+    let source = fields(&doc).into_iter().find(|f| f.name == "Pick").unwrap();
+    doc.update_dict(source.widgets[0].obj, |d| {
+        d.set(b"NM".to_vec(), Object::String(pdfcraft_cos::PdfString::text("unique-1")));
+        d.set(b"M".to_vec(), Object::String(pdfcraft_cos::PdfString::text("D:20260101000000Z")));
+    })
+    .unwrap();
+    assert!(!source.selected.is_empty());
+    copy_field(&mut doc, "Pick", 0, [200.0, 700.0, 300.0, 760.0], "Pick_2").unwrap();
+    let doc = reopen(&doc);
+    let all = fields(&doc);
+    let copy = all.iter().find(|f| f.name == "Pick_2").unwrap();
+    assert!(copy.value.is_empty() && copy.selected.is_empty(), "{:?} {:?}", copy.value, copy.selected);
+    assert_eq!(copy.options.len(), 3);
+    let d = doc.get(copy.obj).as_dict().cloned().unwrap();
+    for key in [&b"V"[..], b"I", b"NM", b"M"] {
+        assert!(!d.contains(key), "{} was copied", String::from_utf8_lossy(key));
+    }
+    assert!(!all.iter().find(|f| f.name == "Pick").unwrap().selected.is_empty(), "the source keeps its selection");
+}
+
+/// Many copies are made in one call, in order, and each is checked against the names of the ones
+/// before it; a bad one among them leaves the form as it was.
+#[test]
+fn copies_are_made_in_one_call_and_a_bad_one_changes_nothing() {
+    let mut doc = one_page();
+    add_field(&mut doc, 0, [50.0, 700.0, 250.0, 720.0], &NewField::Text { multiline: false }, Some("Item")).unwrap();
+    let at = |i: usize, name: &str| FieldCopy { page: 0, rect: [50.0, 600.0 - 30.0 * i as f64, 250.0, 620.0 - 30.0 * i as f64], name: name.into() };
+    let bad = [at(0, "A"), at(1, " B "), at(2, "A")];
+    let before = fields(&doc).len();
+    assert!(copy_field_to(&mut doc, "Item", &bad).is_err(), "the third repeats the first");
+    assert_eq!(fields(&doc).len(), before, "nothing was added");
+    let made = copy_field_to(&mut doc, "Item", &[at(0, "A"), at(1, " B ")]).unwrap();
+    assert_eq!(made, vec!["A".to_owned(), "B".to_owned()], "names come back trimmed");
+    let names: Vec<_> = fields(&reopen(&doc)).into_iter().map(|f| f.name).collect();
+    assert!(names.contains(&"B".to_owned()), "{names:?}");
+}

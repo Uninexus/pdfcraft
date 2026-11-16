@@ -137,6 +137,7 @@ pub(crate) fn check_permission(edit: &Edit, p: &pdfcraft_cos::Permissions) -> Re
         | Edit::DeleteField { .. }
         | Edit::DeleteWidget { .. }
         | Edit::DuplicateField { .. }
+        | Edit::CopyField { .. }
         | Edit::SetTabOrder { .. }
         | Edit::MoveInTabOrder { .. }
         | Edit::SetCalculationOrder { .. }
@@ -865,6 +866,10 @@ pub(crate) fn run_edit(doc: &mut pdfcraft_cos::Document, edit: &Edit, cx: &mut E
             if pdfcraft_forms::duplicate_field(doc, name, pages)? == 0 {
                 return Err(EditError::Form(pdfcraft_forms::FormError::Invalid(format!("{name} is already on those pages"))));
             }
+            invalidate_form_script_snapshot(cx);
+        }
+        Edit::CopyField { name, copies } => {
+            pdfcraft_forms::copy_field_to(doc, name, copies)?;
             invalidate_form_script_snapshot(cx);
         }
         Edit::DeleteField { name } => {

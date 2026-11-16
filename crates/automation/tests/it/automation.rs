@@ -6153,6 +6153,68 @@ fn adding_a_field_table_through_tools() {
     assert_eq!(count(&mut a), 8, "one undo takes back the whole last table");
 }
 
+/// Create multiple copies of a field: a field copied into a grid, each copy a field of its own with
+/// the same properties and no value, one undo step, and refused whole, with the reason, otherwise.
+#[test]
+fn copying_a_field_into_a_grid_through_tools() {
+    let dir = workdir("field-copies");
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "a.pdf" }))["doc"].as_u64().unwrap();
+    ok(&mut a, "form_add_field", json!({ "doc": doc, "page": 1, "type": "text", "name": "qty", "rect": [20, 20, 80, 40] }));
+    ok(&mut a, "form_set_props", json!({ "doc": doc, "field": "qty", "required": true }));
+    ok(&mut a, "form_fill", json!({ "doc": doc, "values": { "qty": "7" } }));
+    let made = ok(&mut a, "form_copy_field_grid", json!({ "doc": doc, "field": "qty", "rows": 2, "columns": 2, "row_gap": 10, "column_gap": 20 }));
+    assert_eq!(made["fields"], json!(["qty_1", "qty_2", "qty_3"]), "{made}");
+    let fields = |a: &mut Automation| ok(a, "form_fields", json!({ "doc": doc }))["fields"].as_array().unwrap().clone();
+    let all = fields(&mut a);
+    let get = |name: &str| all.iter().find(|f| f["name"] == name).unwrap_or_else(|| panic!("{name} in {all:?}")).clone();
+    let near = |v: &Value, want: [f64; 4]| v.as_array().unwrap().iter().zip(want).all(|(g, w)| (g.as_f64().unwrap() - w).abs() < 0.01);
+    // 60 wide and 20 high, 20 and 10 apart, from the top left of the page as shown.
+    assert!(near(&get("qty")["rect"], [20.0, 20.0, 80.0, 40.0]), "{}", get("qty"));
+    assert!(near(&get("qty_1")["rect"], [100.0, 20.0, 160.0, 40.0]), "{}", get("qty_1"));
+    assert!(near(&get("qty_2")["rect"], [20.0, 50.0, 80.0, 70.0]), "{}", get("qty_2"));
+    assert!(near(&get("qty_3")["rect"], [100.0, 50.0, 160.0, 70.0]), "{}", get("qty_3"));
+    assert_eq!(get("qty")["value"], "7");
+    assert!(get("qty_3")["value"].is_null() || get("qty_3")["value"] == "", "the value is not copied: {}", get("qty_3"));
+    assert_eq!(get("qty_3")["required"], get("qty")["required"], "the properties are: {}", get("qty_3"));
+    // A pattern names the copies.
+    let by = json!({ "doc": doc, "field": "qty", "rows": 3, "columns": 1, "row_gap": 5, "pattern": " box_{row} " });
+    assert_eq!(ok(&mut a, "form_copy_field_grid", by)["fields"], json!(["box_2", "box_3"]));
+    assert_eq!(fields(&mut a).len(), 6);
+    // Refused whole, saying why: nothing is added.
+    let refused = |a: &mut Automation, args: Value| match a.call("form_copy_field_grid", &args) {
+        Err(ToolError::InvalidArgs(m)) => m,
+        other => panic!("refused, not {other:?}"),
+    };
+    let grid = |rows: i64, columns: i64| json!({ "doc": doc, "field": "qty", "rows": rows, "columns": columns });
+    assert!(refused(&mut a, grid(2, 2)).contains("already exists"));
+    assert!(refused(&mut a, grid(1, 1)).contains("no copies"));
+    assert!(refused(&mut a, grid(0, 2)).contains("1 to 100 rows"));
+    assert!(refused(&mut a, grid(100, 50)).contains("at most 1000"));
+    assert!(refused(&mut a, json!({ "doc": doc, "field": "nope", "rows": 2, "columns": 2 })).contains("no field named"));
+    assert!(
+        refused(&mut a, json!({ "doc": doc, "field": "qty", "rows": 1, "columns": 20, "column_gap": 100, "pattern": "z_N" }))
+            .contains("off the page")
+    );
+    assert_eq!(fields(&mut a).len(), 6);
+    // Saved and opened again, the copies are there with the source's properties and no value, under
+    // the names the tool reported.
+    ok(&mut a, "doc_save", json!({ "doc": doc, "path": "copies.pdf" }));
+    let again = ok(&mut a, "doc_open", json!({ "path": "copies.pdf" }))["doc"].as_u64().unwrap();
+    let reopened = ok(&mut a, "form_fields", json!({ "doc": again }))["fields"].as_array().unwrap().clone();
+    let names: Vec<&str> = reopened.iter().filter_map(|f| f["name"].as_str()).collect();
+    for n in ["qty", "qty_1", "qty_2", "qty_3", "box_2", "box_3"] {
+        assert!(names.contains(&n), "{n} in {names:?}");
+    }
+    let saved = |n: &str| reopened.iter().find(|f| f["name"] == n).unwrap().clone();
+    assert_eq!(saved("qty")["value"], "7");
+    assert!(saved("box_3")["value"].is_null() || saved("box_3")["value"] == "", "{}", saved("box_3"));
+    assert_eq!(saved("box_3")["required"], saved("qty")["required"]);
+    assert_eq!(ok(&mut a, "edit_undo", json!({ "doc": doc }))["undone"], "Copy field into a grid");
+    assert_eq!(fields(&mut a).len(), 4, "one undo takes back the whole last grid");
+    assert!(pdfcraft_automation::tools().iter().any(|t| t.name == "form_copy_field_grid" && !t.read_only));
+}
+
 #[test]
 fn redact_mark_respects_single_page_and_rejects_conflicting_selectors() {
     let dir = workdir("redact-single-page");

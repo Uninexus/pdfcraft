@@ -349,6 +349,12 @@ pub enum Edit {
         name: String,
         pages: Vec<usize>,
     },
+    /// Add new fields that have the same type, flags and look as the field `name`, one at each of
+    /// `copies` (a page, a box in user space and a name each): Create Multiple Copies.
+    CopyField {
+        name: String,
+        copies: Vec<pdfcraft_forms::FieldCopy>,
+    },
     DeleteField {
         name: String,
     },

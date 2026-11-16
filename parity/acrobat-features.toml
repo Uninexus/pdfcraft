@@ -5249,14 +5249,17 @@ tier = "P2"
 milestone = "M6"
 status = "partial"
 commands = ["form.add.text_table"]
-tools = ["form_add_field_table"]
+tools = ["form_add_field_table", "form_copy_field_grid"]
 evidence = [
   "crates/forms/src/table.rs::a_grid_fills_its_area_with_gaps_between_the_cells",
   "crates/engine/src/field_table.rs::a_table_is_added_and_undone_as_one_step",
   "crates/automation/tests/it/automation.rs::adding_a_field_table_through_tools",
+  "crates/forms/src/tests.rs::copying_a_field_makes_a_new_field_with_the_same_properties_and_no_value",
+  "crates/engine/src/field_copies.rs::a_grid_of_copies_is_added_and_undone_as_one_step",
+  "crates/automation/tests/it/automation.rs::copying_a_field_into_a_grid_through_tools",
   "crates/ui-egui/tests/it/prepare.rs::a_text_field_table_is_drawn_set_up_and_added_in_one_step",
 ]
-notes = "Prepare a form ▸ Text field table: drag an area, then set rows, columns, spacing, column widths (draggable dividers) and a name pattern per column in a movable window, with the table previewed on the page. Added as one undoable edit, or refused whole with the reason (a cell under 4 pt, a name with a period, a repeated or existing name); form_add_field_table does the same headlessly. Missing: copying an existing field of any type, with its properties, into a grid from its context menu, which is what this entry describes; the table only creates new text fields."
+notes = "Prepare a form ▸ Text field table: drag an area, then set rows, columns, spacing, column widths (draggable dividers) and a name pattern per column in a movable window, with the table previewed on the page. Added as one undoable edit, or refused whole with the reason (a cell under 4 pt, a name with a period, a repeated or existing name); form_add_field_table does the same headlessly. Headless: form_copy_field_grid copies an existing field of any type but a radio button into a grid of rows by columns as one undoable edit, the field staying as the first cell and each copy a field of its own with the same type, flags, options, look and actions and an empty value; copies are named field_1, field_2, … or from a pattern, laid out as the page is shown (turned pages too), and refused whole when a copy would run off the page or a name repeats, has a period or exists. Missing: the right-click Create Multiple Copies window with a preview on the page, and copying several fields at once."
 
 [[feature]]
 id = "form.rename-lock-fields"

@@ -30,6 +30,7 @@ mod document;
 mod edit;
 mod error;
 pub mod export;
+pub mod field_copies;
 pub mod field_table;
 mod fill_sign;
 pub mod find_replace;
