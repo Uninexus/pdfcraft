@@ -766,6 +766,8 @@ impl Automation {
             "content_copy" => self.content_copy(&a)?,
             "doc_print" => self.doc_print(&a)?,
             "doc_fix_hairlines" => self.fix_hairlines(&a)?,
+            "doc_inks" => self.doc_inks(&a)?,
+            "doc_ink_aliases" => self.doc_ink_aliases(&a)?,
             "attachment_add" => {
                 let path = self.resolve(a.str("path")?, false)?;
                 let bytes = read_input(&path)?;

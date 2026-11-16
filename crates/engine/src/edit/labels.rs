@@ -271,6 +271,7 @@ impl Edit {
             Edit::SetCalculationOrder { .. } => Label::of("Set calculation order"),
             Edit::SetInitialView(_) => Label::of("Change initial view"),
             Edit::FixHairlines { .. } => Label::of("Fix hairlines"),
+            Edit::AliasInks { .. } => Label::of("Alias inks"),
             Edit::AddAttachment { name, .. } => Label::with("Attach {name}", name.as_str()),
             Edit::DeleteAttachment { key } => Label::with("Delete attachment {key}", key.as_str()),
             Edit::ConvertColours { .. } => Label::of("Convert colours"),

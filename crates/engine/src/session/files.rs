@@ -374,6 +374,18 @@ impl Session {
         pdfcraft_edit::fix_hairlines(&mut cos, pages, settings).unwrap_or_default()
     }
 
+    /// The spot colorants the document's colour spaces name, with how many spaces name each
+    /// (what Ink aliases would work on). Nothing is changed.
+    pub fn list_inks(&self, id: DocId) -> Result<Vec<pdfcraft_edit::SpotInk>, EditError> {
+        Ok(pdfcraft_edit::list_inks(self.cos(id)?))
+    }
+
+    /// What [`Edit::AliasInks`] would do (colour spaces renamed, objects rewritten, inks left with
+    /// two definitions), without changing the document.
+    pub fn preview_ink_aliases(&self, id: DocId, aliases: &pdfcraft_edit::InkAliases) -> Result<pdfcraft_edit::InksAliased, EditError> {
+        Ok(pdfcraft_edit::preview_aliases(self.cos(id)?, aliases)?)
+    }
+
     /// XFDF with these comments (0-based page, position in the page's `/Annots`) and their
     /// replies: what Copy puts on the clipboard; [`Edit::PasteComments`] takes it back in.
     pub fn export_comments(&self, id: DocId, which: &[(usize, usize)]) -> Result<String, EditError> {

@@ -379,6 +379,11 @@ pub enum Edit {
         pages: Vec<usize>,
         settings: Hairlines,
     },
+    /// Print production ▸ Ink Manager ▸ Ink aliases: spot colorants renamed in every Separation
+    /// and DeviceN colour space, so that inks given one name print as one.
+    AliasInks {
+        aliases: pdfcraft_edit::InkAliases,
+    },
     /// Edit ▸ Attach a file: a document-level attachment (`/Names /EmbeddedFiles`) under
     /// `name`, made unique; `mime` is the embedded file's `/Subtype` when known.
     AddAttachment {

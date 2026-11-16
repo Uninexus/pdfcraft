@@ -10667,6 +10667,66 @@ trailer << /Root 1 0 R >>
     assert_eq!(ok(&mut a, "doc_info", json!({ "doc": doc })), before, "verification doesn't change the document");
 }
 
+/// Ink aliases through the tools: the spot inks are listed, two names become one, the page looks
+/// the same (each space keeps its alternate space and tint transform), and one undo restores them.
+#[test]
+fn ink_aliases_through_tools() {
+    let dir = workdir("ink-aliases");
+    let content = "/Gold cs 1 scn 20 20 100 100 re f /Gold2 cs 1 scn 130 20 60 100 re f";
+    let pdf = format!(
+        "%PDF-1.7
+1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
+2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Contents 4 0 R /Resources << /ColorSpace << /Gold [/Separation /PANTONE#20871#20C /DeviceCMYK 5 0 R] /Gold2 [/Separation /Gold#20Foil /DeviceCMYK 5 0 R] >> >> >> endobj
+4 0 obj << /Length {} >> stream
+{content}
+endstream endobj
+5 0 obj << /FunctionType 2 /Domain [0 1] /C0 [0 0 0 0] /C1 [0 0.3 0.8 0.2] /N 1 >> endobj
+trailer << /Root 1 0 R >>
+%%EOF",
+        content.len()
+    );
+    std::fs::write(dir.join("inks.pdf"), pdf).unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "inks.pdf" }))["doc"].as_u64().unwrap();
+    let inks = ok(&mut a, "doc_inks", json!({ "doc": doc }));
+    let names: Vec<_> = inks["inks"].as_array().unwrap().iter().map(|i| i["name"].as_str().unwrap().to_owned()).collect();
+    assert_eq!(names, vec!["Gold Foil", "PANTONE 871 C"], "{inks}");
+    assert_eq!(inks["inks"][0]["aliasable"], true);
+    assert!(pdfcraft_automation::tools().iter().any(|t| t.name == "doc_inks" && t.read_only));
+
+    let before = a.call("page_render", &json!({ "doc": doc, "page": 1, "dpi": 72 })).unwrap();
+    let aliased = ok(&mut a, "doc_ink_aliases", json!({ "doc": doc, "aliases": [{ "from": "Gold Foil", "to": "PANTONE 871 C" }] }));
+    assert_eq!(aliased["renamed"], 1, "{aliased}");
+    let inks = ok(&mut a, "doc_inks", json!({ "doc": doc }));
+    assert_eq!(inks["inks"], json!([{ "name": "PANTONE 871 C", "spaces": 2, "aliasable": true }]), "{inks}");
+    assert_eq!(aliased["different_alternates"], json!([]), "{aliased}");
+    let after = a.call("page_render", &json!({ "doc": doc, "page": 1, "dpi": 72 })).unwrap();
+    assert_eq!(format!("{before:?}"), format!("{after:?}"), "the page looks the same");
+
+    // Nothing to rename is not an error and makes no edit.
+    let none = ok(&mut a, "doc_ink_aliases", json!({ "doc": doc, "aliases": [{ "from": "Silver", "to": "Gold Foil" }] }));
+    assert_eq!(none["renamed"], 0, "{none}");
+    // Bad arguments are refused.
+    for (bad, why) in [
+        (json!([]), "give at least one"),
+        (json!([{ "from": "A" }]), "needs a from and a to"),
+        (json!([{ "from": "A", "to": "B" }, { "from": "A", "to": "C" }]), "aliased twice"),
+        (json!([{ "from": "", "to": "B" }]), "1 to 127 bytes"),
+        (json!([{ "from": "PANTONE 871 C", "to": "None" }]), "not a name an ink can be given"),
+    ] {
+        match err(&mut a, "doc_ink_aliases", json!({ "doc": doc, "aliases": bad })) {
+            ToolError::InvalidArgs(m) => assert!(m.contains(why), "{bad}: {m}"),
+            other => panic!("{bad}: {other:?}"),
+        }
+    }
+    // One undo step puts the names back.
+    ok(&mut a, "edit_undo", json!({ "doc": doc }));
+    let inks = ok(&mut a, "doc_inks", json!({ "doc": doc }));
+    let names: Vec<_> = inks["inks"].as_array().unwrap().iter().map(|i| i["name"].as_str().unwrap().to_owned()).collect();
+    assert_eq!(names, vec!["Gold Foil", "PANTONE 871 C"], "{inks}");
+}
+
 #[test]
 fn exporting_to_word_html_and_rtf() {
     let dir = workdir("office");
