@@ -970,7 +970,14 @@ fn card_forms(ui: &mut egui::Ui, app: &mut PdfCraftApp, t: &Tokens, ctx: &mut Pr
             app.field_highlight_color = crate::FIELD_HIGHLIGHT_DEFAULT;
         }
     });
-    ctx.label_secondary(ui, tl!("Required fields keep their red border."), t);
+    ui.horizontal(|ui| {
+        let label = ctx.label_primary(ui, tl!("Required field border"), t);
+        ui.color_edit_button_srgb(&mut app.required_field_color).labelled_by(label.id);
+        if app.required_field_color != crate::REQUIRED_FIELD_DEFAULT && ctx.button(ui, tl!("Default"), t).clicked() {
+            app.required_field_color = crate::REQUIRED_FIELD_DEFAULT;
+        }
+    });
+    ctx.label_secondary(ui, tl!("Fields marked required get a thicker border in this colour (red unless changed)."), t);
     ctx.checkbox(ui, &mut app.form_tooltips, tl!("Show a field's tooltip when the pointer rests on it"), t);
     // Auto-Complete (Basic): offers what was typed into text fields before. Off by default.
     ui.horizontal(|ui| {

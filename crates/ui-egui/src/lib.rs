@@ -328,6 +328,9 @@ pub type WindowSpawner = fn(&str, usize) -> Result<(), String>;
 /// The colour Highlight fields draws over form fields until Preferences ▸ Forms changes it.
 pub(crate) const FIELD_HIGHLIGHT_DEFAULT: [u8; 3] = [0x6E, 0x8E, 0xF5];
 
+/// The colour of a required field's border until Preferences ▸ Forms changes it.
+pub(crate) const REQUIRED_FIELD_DEFAULT: [u8; 3] = [0xE3, 0x22, 0x22];
+
 pub struct PdfCraftApp {
     /// Split view (`panes`); which pane shows each tab is its view's.
     pub panes: panes::Panes,
@@ -520,9 +523,11 @@ pub struct PdfCraftApp {
     pub identity_email: String,
     /// Preferences ▸ Forms: show a field's tooltip (its `/TU`) when the pointer rests on it.
     pub form_tooltips: bool,
-    /// Preferences ▸ Forms: the colour Highlight fields draws over fields (a required field
-    /// keeps its red border).
+    /// Preferences ▸ Forms: the colour Highlight fields draws over fields.
     pub field_highlight_color: [u8; 3],
+    /// Preferences ▸ Forms: the border Highlight fields draws on a required field (red unless
+    /// changed).
+    pub required_field_color: [u8; 3],
     /// Preferences: open every document at Default zoom and Default page display, whatever
     /// layout or zoom it asks for (#1618).
     pub always_default_view: bool,

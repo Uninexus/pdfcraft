@@ -2339,6 +2339,24 @@ fn required_fields_get_a_red_border_when_highlighting() {
     assert!(px[0] > 180 && px[1] < 100 && px[2] < 100, "a red border: {px:?}");
 }
 
+#[test]
+fn the_required_field_border_follows_the_preference() {
+    let _gpu = gpu();
+    let mut h = form_harness();
+    h.state_mut().set_option("panel", "none").unwrap();
+    h.state_mut().set_option("fields", "on").unwrap();
+    h.state_mut().set_option("required-field-color", "#00FF00").unwrap();
+    let props = pdfcraft_engine::FieldProps { required: Some(true), ..Default::default() };
+    h.state_mut().apply_edit(pdfcraft_engine::Edit::SetFieldProps { name: "fullname".into(), props: Box::new(props) });
+    crate::support::settle(&mut h);
+    let r = rect(&h, 0).expect("page 1");
+    let ppp = h.ctx.pixels_per_point();
+    let at = egui::pos2(r.min.x + r.width() * (50.0 / 300.0) + 0.75, r.min.y + r.height() * (1.0 - 315.0 / 400.0));
+    let img = h.render().expect("renders");
+    let px = *img.get_pixel((at.x * ppp) as u32, (at.y * ppp) as u32);
+    assert!(px[1] > 180 && px[0] < 100 && px[2] < 100, "a green border: {px:?}");
+}
+
 /// The page raster is shown texel for texel. At a zoom whose device scale isn't on the old 1/64
 /// grid (87 % at 1 px per point: 1.16, rendered at 1.15625) the page was rendered at the
 /// quantized scale and stretched onto a rectangle that didn't start on a whole pixel, so every

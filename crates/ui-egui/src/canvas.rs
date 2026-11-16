@@ -1397,6 +1397,8 @@ struct PageEnv<'a> {
     form_suggestions: &'a [String],
     /// Preferences ▸ Forms: the Highlight fields colour.
     field_highlight_color: [u8; 3],
+    /// Preferences ▸ Forms: the border of a required field.
+    required_field_color: [u8; 3],
     tool: QuickTool,
     units: crate::units::Unit,
     unobstructed: bool,
@@ -3476,6 +3478,7 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
         form_tooltips: app.form_tooltips,
         form_suggestions: &form_suggestions,
         field_highlight_color: app.field_highlight_color,
+        required_field_color: app.required_field_color,
         tool,
         units,
         unobstructed,

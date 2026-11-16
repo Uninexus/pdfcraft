@@ -917,6 +917,7 @@ pub(super) fn page_overlays(ui: &mut egui::Ui, view: &mut DocView, frame: &mut P
         unobstructed,
         form_tooltips,
         field_highlight_color,
+        required_field_color,
         ..
     } = frame.env;
     let PageSlot { i, r, xf } = *slot;
@@ -985,10 +986,10 @@ pub(super) fn page_overlays(ui: &mut egui::Ui, view: &mut DocView, frame: &mut P
     }
 
     // Form-field highlight (Acrobat's "Highlight existing fields"); required fields get a
-    // red border. Radio buttons and round XFA check boxes are round, and so is theirs (as
+    // border in the Preferences ▸ Forms required-field colour (red unless changed). Radio buttons and round XFA check boxes are round, and so is theirs (as
     // in Acrobat). Only what can be filled is marked: a read-only widget (its field's, or a
     // radio button's own) is left as it is drawn.
-    paint_field_highlights(painter, &xf, info, form.as_slice(), i, view.highlight_fields, field_highlight_color);
+    paint_field_highlights(painter, &xf, info, form.as_slice(), i, view.highlight_fields, [field_highlight_color, required_field_color]);
     // Links: the hand and the link's target, which count only for the tools that follow or
     // edit links (`Layer::reached_by`). Tips draw above the palette, so none shows while it is
     // open, even beside it. A click follows the link its press was on, released over it: one that
@@ -1078,6 +1079,13 @@ pub(super) fn page_overlays(ui: &mut egui::Ui, view: &mut DocView, frame: &mut P
     }
 }
 
+/// The border Highlight fields draws on a field: the highlight colour, or for a required field a
+/// thicker border in the required-field colour (Preferences ▸ Forms).
+fn highlight_border(required: bool, color: [u8; 3], required_color: [u8; 3]) -> (f32, Color32) {
+    let [r, g, b] = if required { required_color } else { color };
+    (if required { 2.0 } else { 1.0 }, Color32::from_rgb(r, g, b))
+}
+
 fn paint_field_highlights(
     painter: &egui::Painter,
     xf: &PageXform,
@@ -1085,7 +1093,8 @@ fn paint_field_highlights(
     form: &[pdfcraft_engine::FormField],
     page: usize,
     enabled: bool,
-    color: [u8; 3],
+    // The highlight colour, then the border colour of a required field.
+    [color, required_color]: [[u8; 3]; 2],
 ) {
     if !enabled {
         return;
@@ -1098,8 +1107,7 @@ fn paint_field_highlights(
             let rect = widget.rect;
             let screen_rect = xf.user_rect(info, page, [rect[0] as f32, rect[1] as f32, rect[2] as f32, rect[3] as f32]);
             let tint = Color32::from_rgba_unmultiplied(color[0], color[1], color[2], 48);
-            let (width, color) =
-                if required { (2.0, Color32::from_rgb(0xE3, 0x22, 0x22)) } else { (1.0, Color32::from_rgb(color[0], color[1], color[2])) };
+            let (width, color) = highlight_border(required, color, required_color);
             if widget.round {
                 let radius = screen_rect.width().min(screen_rect.height()) / 2.0;
                 painter.circle_filled(screen_rect.center(), radius, tint);
@@ -1131,5 +1139,17 @@ pub(super) fn cancel_on_escape(ctx: &egui::Context, view: &mut DocView, ptr: &Pa
         }
         view.cancel_pointer_gestures();
         view.press_cancelled = true;
+    }
+}
+
+#[cfg(test)]
+mod field_highlight_tests {
+    use super::*;
+
+    #[test]
+    fn a_required_field_takes_the_required_colour_and_a_thicker_border() {
+        let (highlight, required) = ([1, 2, 3], [4, 5, 6]);
+        assert_eq!(highlight_border(true, highlight, required), (2.0, Color32::from_rgb(4, 5, 6)));
+        assert_eq!(highlight_border(false, highlight, required), (1.0, Color32::from_rgb(1, 2, 3)));
     }
 }

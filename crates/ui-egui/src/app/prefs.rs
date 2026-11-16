@@ -204,6 +204,7 @@ impl PdfCraftApp {
         v["identity_email"] = serde_json::Value::String(self.identity_email.clone());
         v["form_tooltips"] = serde_json::Value::Bool(self.form_tooltips);
         v["field_highlight_color"] = serde_json::json!(self.field_highlight_color);
+        v["required_field_color"] = serde_json::json!(self.required_field_color);
         // Auto-Complete (Preferences ▸ Forms) and what it remembered: plain text the person typed,
         // kept in the local settings only, and removable from the same page.
         v["form_autocomplete"] = serde_json::Value::Bool(self.session.form_autocomplete());
@@ -313,6 +314,9 @@ impl PdfCraftApp {
         }
         if let Some(c) = rgb_bytes(&v["field_highlight_color"]) {
             self.field_highlight_color = c;
+        }
+        if let Some(c) = rgb_bytes(&v["required_field_color"]) {
+            self.required_field_color = c;
         }
         if let Some(on) = v["text_links"].as_bool() {
             self.text_links = on;

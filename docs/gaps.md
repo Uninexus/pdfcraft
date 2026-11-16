@@ -1,5 +1,6 @@
 # Where PdfCraft falls short of Acrobat Pro
 
+> **Last reviewed:** 2026-11-16 | **Last updated:** 2026-11-16 | **Change:** minor (gap 19: Preferences ▸ Forms gains a Required field border colour; estimates unchanged)
 > **Last reviewed:** 2026-11-16 | **Last updated:** 2026-11-16 | **Change:** minor (gap 13: listing signatures no longer reads every page when a document has no signature field, and measured that each save keeps one more copy of the file in undo history; estimates unchanged)
 > **Last reviewed:** 2026-11-16 | **Last updated:** 2026-11-16 | **Change:** minor (gap 8: `doc_create` from `office` makes a PDF from one Office document, headless; estimates unchanged)
 > **Last reviewed:** 2026-11-14 | **Last updated:** 2026-11-14 | **Change:** minor (gap 21: Compare files can be limited to replaced, inserted, deleted and visual changes in the dialog, panel, report, Mark as comments and tools; gap 19: Preferences gains Identity (name, email) and Forms (highlight fields and colour, field tooltips); estimates unchanged)
@@ -439,10 +440,10 @@ update the numbers.
 
 - **Missing:** most of Acrobat's twenty or so preference pages (General, Documents, Commenting, Forms, Identity,
   Signatures, Security, Measuring, Units and guides, Convert, …). Today: Interface language,
-  Documents and view, Units and paper, Identity (name, email), Comment, Forms (highlight fields and
-  colour, field tooltips, Auto-Complete Off or Basic), Fill & Sign, JavaScript. Identity has no
+  Documents and view, Units and paper, Identity (name, email), Comment, Forms (highlight fields,
+  highlight colour, required-field border colour, field tooltips, Auto-Complete Off or Basic), Fill & Sign, JavaScript. Identity has no
   login name, title or organization: nothing in PdfCraft reads them yet. Forms has no Advanced
-  auto-complete, no separate colour for required fields, spelling or calculation-order options.
+  auto-complete, spelling or calculation-order options.
 - **Estimate:** 15–25 h. **Doc:** [ui-parity.md](ui-parity.md).
 
 ### 20. Scanners, GPU page rendering, pen pressure, Read Out Loud

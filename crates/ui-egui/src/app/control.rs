@@ -451,15 +451,21 @@ impl PdfCraftApp {
                     _ => return Err("form-autocomplete must be off or basic".into()),
                 });
             }
-            // `--field-highlight-color #RRGGBB`: what Highlight fields draws over fields.
-            ("field-highlight-color", _) => {
+            // `--field-highlight-color #RRGGBB` and `--required-field-color #RRGGBB`: what Highlight
+            // fields draws over fields, and the border it draws on required ones.
+            (key @ ("field-highlight-color" | "required-field-color"), _) => {
                 let hex = value
                     .strip_prefix('#')
                     .filter(|h| h.len() == 6 && h.bytes().all(|b| b.is_ascii_hexdigit()))
-                    .ok_or("field-highlight-color must be #RRGGBB")?;
+                    .ok_or_else(|| format!("{key} must be #RRGGBB"))?;
                 // All six bytes are ASCII hex digits, so every two-byte slice is on a char boundary.
-                let byte = |i: usize| hex.get(i..i + 2).and_then(|p| u8::from_str_radix(p, 16).ok()).ok_or("field-highlight-color must be #RRGGBB");
-                self.field_highlight_color = [byte(0)?, byte(2)?, byte(4)?];
+                let byte = |i: usize| hex.get(i..i + 2).and_then(|p| u8::from_str_radix(p, 16).ok()).ok_or_else(|| format!("{key} must be #RRGGBB"));
+                let rgb = [byte(0)?, byte(2)?, byte(4)?];
+                if key == "field-highlight-color" {
+                    self.field_highlight_color = rgb;
+                } else {
+                    self.required_field_color = rgb;
+                }
             }
             ("text-links", _) => {
                 self.text_links = match value {
