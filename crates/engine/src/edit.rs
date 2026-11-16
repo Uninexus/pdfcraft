@@ -402,6 +402,20 @@ pub enum Edit {
     DeleteAttachment {
         key: String,
     },
+    /// PDF 2.0 associated file (`/AF`, ISO 32000-2 §14.13): `bytes` embedded as `name` (as an
+    /// attachment) and listed in the catalog's `/AF` with `/AFRelationship` `relationship`.
+    AddAssociatedFile {
+        name: String,
+        bytes: Vec<u8>,
+        relationship: String,
+        description: Option<String>,
+        mime: Option<String>,
+    },
+    /// Remove the catalog's `/AF` entry at 1-based `index`, and its attachment unless `keep_attachment`.
+    RemoveAssociatedFile {
+        index: usize,
+        keep_attachment: bool,
+    },
     /// Print production ▸ Convert colours: every colour on the pages in grayscale, RGB or CMYK.
     ConvertColours {
         pages: Vec<usize>,

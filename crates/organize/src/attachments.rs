@@ -4,7 +4,7 @@
 //! A FileAttachment annotation (a paper clip on a page) is a comment and lives in the annot
 //! crate; this is the document level only.
 
-use pdfcraft_cos::{Dict, Document, Object, PdfString, Stream};
+use pdfcraft_cos::{Dict, Document, ObjRef, Object, PdfString, Stream};
 
 use crate::OrganizeError;
 use crate::import::{name_tree_entries, set_attachments, set_attachments_exact};
@@ -26,6 +26,18 @@ pub fn add_attachment(
     mime: Option<&str>,
     date: Option<&str>,
 ) -> Result<String, OrganizeError> {
+    add_attachment_spec(doc, name, bytes, description, mime, date).map(|(key, _)| key)
+}
+
+/// [`add_attachment`], also returning the new file specification (what `/AF` arrays point at).
+pub(crate) fn add_attachment_spec(
+    doc: &mut Document,
+    name: &str,
+    bytes: &[u8],
+    description: Option<&str>,
+    mime: Option<&str>,
+    date: Option<&str>,
+) -> Result<(String, ObjRef), OrganizeError> {
     let name = file_name(name);
     if name.is_empty() {
         return Err(OrganizeError::Invalid("the attachment needs a file name".into()));
@@ -67,7 +79,7 @@ pub fn add_attachment(
 
     all.push((PdfString::text(&key).bytes, Object::Ref(spec)));
     set_attachments(doc, all)?;
-    Ok(key)
+    Ok((key, spec))
 }
 
 /// Remove the document-level attachment whose name-tree key is `key`. The embedded stream is
@@ -80,6 +92,23 @@ pub fn delete_attachment(doc: &mut Document, key: &str) -> Result<(), OrganizeEr
         return Err(OrganizeError::Invalid(format!("there is no attachment named {key}")));
     }
     if all.is_empty() { clear_embedded_files(doc) } else { set_attachments(doc, all) }
+}
+
+/// Remove the document-level attachment entries whose value is the file specification `spec`
+/// itself, whatever their keys read as. Returns whether any was removed.
+pub(crate) fn delete_attachment_by_ref(doc: &mut Document, spec: ObjRef) -> Result<bool, OrganizeError> {
+    let mut all = entries(doc);
+    let before = all.len();
+    all.retain(|(_, v)| *v != Object::Ref(spec));
+    if all.len() == before {
+        return Ok(false);
+    }
+    if all.is_empty() {
+        clear_embedded_files(doc)?
+    } else {
+        set_attachments_exact(doc, all)?
+    }
+    Ok(true)
 }
 
 /// Set or clear the description of a document-level attachment without replacing its file
@@ -114,7 +143,7 @@ pub fn set_attachment_description(doc: &mut Document, key: &str, description: Op
 }
 
 /// The `/EmbeddedFiles` entries (key, file specification), in tree order.
-fn entries(doc: &Document) -> Vec<(Vec<u8>, Object)> {
+pub(crate) fn entries(doc: &Document) -> Vec<(Vec<u8>, Object)> {
     let Some(tree) = doc
         .root()
         .and_then(|r| doc.get(r).as_dict().cloned())

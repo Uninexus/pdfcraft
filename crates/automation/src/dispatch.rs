@@ -789,6 +789,9 @@ impl Automation {
                 let key = document_attachment_keys(self.doc(&a)?).into_iter().find(|n| !before.contains(n)).unwrap_or_default();
                 json!({ "name": key, "document": out })
             }
+            "af_list" => self.af_list(&a)?,
+            "af_add" => self.af_add(&a)?,
+            "af_remove" => self.af_remove(&a)?,
             "attachment_delete" => {
                 let edit = Edit::DeleteAttachment { key: a.str("name")?.into() };
                 self.apply(&a, edit)?

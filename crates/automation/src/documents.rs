@@ -218,6 +218,80 @@ impl Automation {
         Ok(json!({ "revisions": list, "unsaved_changes": doc.dirty }))
     }
 
+    pub(crate) fn af_list(&mut self, a: &Args) -> Result<Value> {
+        let doc = self.doc(a)?;
+        let list = doc.associated_list();
+        let rows: Vec<Value> = list
+            .files
+            .into_iter()
+            .map(|f| {
+                json!({
+                    "level": if f.page.is_some() { "page" } else { "document" },
+                    "page": f.page.map(|p| p + 1),
+                    "index": f.index,
+                    "relationship": f.relationship,
+                    "name": f.name,
+                    "description": f.description,
+                    "mime": f.mime,
+                    "size": f.size,
+                    "embedded": f.embedded,
+                })
+            })
+            .collect();
+        Ok(json!({ "associated_files": rows, "count": rows.len(), "truncated": list.truncated, "unsaved_changes": doc.dirty }))
+    }
+
+    pub(crate) fn af_add(&mut self, a: &Args) -> Result<Value> {
+        let path = self.resolve(a.str("path")?, false)?;
+        let relationship = a.str("relationship")?.to_string();
+        // Refuse a file past the cap before reading it, as the engine would after.
+        let limit = pdfcraft_engine::MAX_AF_BYTES as u64;
+        if std::fs::metadata(&path).is_ok_and(|m| m.len() > limit) {
+            return Err(ToolError::InvalidArgs(format!("the file is larger than the {limit}-byte limit for an associated file")));
+        }
+        let bytes = read_input(&path)?;
+        let name = match a.opt_str("name")? {
+            Some(n) => n.to_string(),
+            None => path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+        };
+        // Without a known type the file is stored as application/octet-stream (PDF/A-3 wants a media type).
+        let mime = Some(pdfcraft_engine::mime_for_name(&name).unwrap_or("application/octet-stream").to_string());
+        let description = a.opt_str("description")?.map(str::to_string);
+        // PDF/A-1 forbids embedded files and PDF/A-2 allows only PDF/A ones: say so, and add anyway.
+        let mut warnings = Vec::new();
+        if let Some((part @ (1 | 2), _)) = self.doc(a)?.standards().pdfa {
+            warnings.push(format!(
+                "the document declares PDF/A-{part}, which {}; the file was added and the document may no longer conform (standards_remove_id takes the claim off)",
+                if part == 1 { "forbids embedded files" } else { "allows only embedded PDF/A files" }
+            ));
+        }
+        let before = self.doc(a)?.associated_files().into_iter().filter(|f| f.page.is_none()).count();
+        let out = self.apply(a, pdfcraft_engine::Edit::AddAssociatedFile { name, bytes, relationship, description, mime })?;
+        let added = self.doc(a)?.associated_files().into_iter().filter(|f| f.page.is_none()).nth(before);
+        Ok(json!({
+            "index": added.as_ref().map(|f| f.index),
+            "name": added.as_ref().and_then(|f| f.name.clone()),
+            "relationship": added.and_then(|f| f.relationship),
+            "warnings": warnings,
+            "document": out,
+        }))
+    }
+
+    pub(crate) fn af_remove(&mut self, a: &Args) -> Result<Value> {
+        let index = usize::try_from(a.int("index")?).map_err(|_| ToolError::InvalidArgs("index counts from 1".into()))?;
+        let keep_attachment = a.opt_bool("keep_attachment")?.unwrap_or(false);
+        let shared = self.doc(a)?.associated_file_is_shared(index);
+        let out = self.apply(a, pdfcraft_engine::Edit::RemoveAssociatedFile { index, keep_attachment })?;
+        let note = if keep_attachment {
+            "the attachment was kept as asked"
+        } else if shared {
+            "the attachment was kept because another /AF entry (the catalog's or a page's) still lists the same file"
+        } else {
+            "the attachment of this file, if it had one, was removed"
+        };
+        Ok(json!({ "attachment_kept": keep_attachment || shared, "shared_with_other_af": shared, "note": note, "document": out }))
+    }
+
     pub(crate) fn doc_linearization(&mut self, a: &Args) -> Result<Value> {
         let doc = self.doc(a)?;
         let r = doc.linearization();

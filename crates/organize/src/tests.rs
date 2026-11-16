@@ -5042,3 +5042,222 @@ fn combining_some_pages_brings_only_their_bookmarks_and_no_attachments() {
     assert_eq!(source_bookmarks(&all), [("Chapter one".to_string(), vec!["Section".to_string()])]);
     assert!(attachments(&all));
 }
+
+fn af_catalog(doc: &Document) -> pdfcraft_cos::Dict {
+    doc.get(doc.root().unwrap()).as_dict().unwrap().clone()
+}
+
+#[test]
+fn associated_files_are_written_as_filespecs_in_the_catalog_af_and_removed_again() {
+    let mut doc = Document::open(Arc::new(fixture())).unwrap();
+    assert!(associated_files(&doc).is_empty());
+    let (key, index) = add_associated_file(&mut doc, "/tmp/data.csv", b"a,b\n1,2\n", "Data", Some("Table"), Some("text/csv"), None).unwrap();
+    assert_eq!((key.as_str(), index), ("data.csv", 1));
+    let (_, index) = add_associated_file(&mut doc, "source.xml", b"<a/>", "Source", None, None, None).unwrap();
+    assert_eq!(index, 2);
+    let mut doc = save_and_reopen(&doc);
+
+    // The object contents: /AF is an array of Filespecs with the embedded stream and the relationship.
+    let catalog = af_catalog(&doc);
+    let list = doc.resolve(catalog.get(b"AF").unwrap()).as_array().cloned().unwrap();
+    assert_eq!(list.len(), 2);
+    let spec = doc.resolve(&list[0]);
+    let spec = spec.as_dict().unwrap();
+    assert_eq!(spec.get(b"Type"), Some(&Object::name("Filespec")));
+    assert_eq!(spec.get(b"AFRelationship"), Some(&Object::name("Data")));
+    assert_eq!(spec.get(b"F").and_then(Object::as_string).map(PdfString::to_text).as_deref(), Some("data.csv"));
+    assert_eq!(spec.get(b"UF").and_then(Object::as_string).map(PdfString::to_text).as_deref(), Some("data.csv"));
+    let ef = spec.get(b"EF").and_then(Object::as_dict).unwrap().get(b"F").cloned().unwrap();
+    let ef = doc.resolve(&ef);
+    let Object::Stream(stream) = ef.as_ref() else { panic!("the embedded file is a stream") };
+    assert_eq!(stream.dict.get(b"Type"), Some(&Object::name("EmbeddedFile")));
+    assert_eq!(stream.decoded().unwrap(), b"a,b\n1,2\n");
+    let second = doc.resolve(&list[1]);
+    assert_eq!(second.as_dict().unwrap().get(b"AFRelationship"), Some(&Object::name("Source")));
+
+    let found = associated_files(&doc);
+    assert_eq!(found.len(), 2);
+    assert_eq!(found[0].relationship.as_deref(), Some("Data"));
+    assert_eq!(found[0].name.as_deref(), Some("data.csv"));
+    assert_eq!(found[0].description.as_deref(), Some("Table"));
+    assert_eq!(found[0].mime.as_deref(), Some("text/csv"));
+    assert_eq!(found[0].size, Some(8));
+    assert!(found[0].embedded && found[0].page.is_none());
+    // The files are attachments too.
+    assert_eq!(attachment_keys(&doc), ["data.csv", "source.xml"]);
+
+    // Removing the first drops its /AF entry and its attachment; the other stays.
+    remove_associated_file(&mut doc, 1, false).unwrap();
+    let doc2 = save_and_reopen(&doc);
+    let left = associated_files(&doc2);
+    assert_eq!(left.len(), 1);
+    assert_eq!(left[0].name.as_deref(), Some("source.xml"));
+    assert_eq!(attachment_keys(&doc2), ["source.xml"]);
+    // Keeping the attachment removes only the association, and the last entry takes /AF with it.
+    let mut doc2 = doc2;
+    assert!(remove_associated_file(&mut doc2, 2, false).is_err());
+    assert!(remove_associated_file(&mut doc2, 0, false).is_err());
+    remove_associated_file(&mut doc2, 1, true).unwrap();
+    let doc2 = save_and_reopen(&doc2);
+    assert!(af_catalog(&doc2).get(b"AF").is_none());
+    assert_eq!(attachment_keys(&doc2), ["source.xml"]);
+}
+
+#[test]
+fn associated_files_refuse_before_changing_anything() {
+    let mut doc = Document::open(Arc::new(fixture())).unwrap();
+    for bad in ["Banana", "", "data", "EncryptedPayload"] {
+        assert!(matches!(add_associated_file(&mut doc, "a.txt", b"x", bad, None, None, None), Err(OrganizeError::Invalid(_))), "{bad}");
+    }
+    assert!(add_associated_file(&mut doc, " / ", b"x", "Data", None, None, None).is_err());
+    let big = vec![0u8; MAX_AF_BYTES + 1];
+    assert!(add_associated_file(&mut doc, "big.bin", &big, "Data", None, None, None).is_err());
+    assert!(attachment_keys(&doc).is_empty());
+    assert!(af_catalog(&doc).get(b"AF").is_none());
+
+    // A catalog /AF that is not an array is left alone.
+    let root = doc.root().unwrap();
+    doc.update_dict(root, |c| c.set(b"AF".to_vec(), Object::Int(3))).unwrap();
+    assert!(add_associated_file(&mut doc, "a.txt", b"x", "Data", None, None, None).is_err());
+    assert!(remove_associated_file(&mut doc, 1, false).is_err());
+    assert_eq!(af_catalog(&doc).get(b"AF"), Some(&Object::Int(3)));
+    assert!(attachment_keys(&doc).is_empty());
+    assert!(associated_files(&doc).is_empty());
+
+    // The array may not grow past the cap.
+    let mut doc = Document::open(Arc::new(fixture())).unwrap();
+    let filler: Vec<Object> = (0..MAX_AF_ENTRIES).map(|_| Object::Null).collect();
+    doc.update_dict(root, |c| c.set(b"AF".to_vec(), Object::Array(filler))).unwrap();
+    assert!(add_associated_file(&mut doc, "a.txt", b"x", "Data", None, None, None).is_err());
+    assert!(attachment_keys(&doc).is_empty());
+}
+
+#[test]
+fn page_level_associated_files_are_listed_with_their_page() {
+    let mut doc = Document::open(Arc::new(fixture())).unwrap();
+    let page = pages(&doc).unwrap()[1].obj;
+    let mut spec = pdfcraft_cos::Dict::new();
+    spec.set(b"Type".to_vec(), Object::name("Filespec"));
+    spec.set(b"F".to_vec(), Object::String(PdfString::text("ext.xml")));
+    spec.set(b"AFRelationship".to_vec(), Object::name("Schema"));
+    doc.update_dict(page, |p| p.set(b"AF".to_vec(), Object::Array(vec![Object::Dict(spec), Object::Int(7)]))).unwrap();
+    let found = associated_files(&doc);
+    assert_eq!(found.len(), 1);
+    assert_eq!((found[0].page, found[0].index), (Some(1), 1));
+    assert_eq!(found[0].relationship.as_deref(), Some("Schema"));
+    assert_eq!(found[0].name.as_deref(), Some("ext.xml"));
+    assert!(!found[0].embedded);
+}
+
+fn spec_body(name: &str) -> String {
+    format!("<< /Type /Filespec /F ({name}) /UF ({name}) >>")
+}
+
+#[test]
+fn listing_associated_files_is_bounded_and_reads_a_shared_array_once() {
+    // One indirect /AF array of 256 files shared by 50 pages and the catalog: read once.
+    let files = (0..MAX_AF_ENTRIES).map(|i| spec_body(&format!("f{i}"))).collect::<Vec<_>>().join(" ");
+    let mut bodies = vec!["<< /Type /Catalog /Pages 2 0 R /AF 3 0 R >>".to_string()];
+    let kids: String = (0..50).map(|i| format!("{} 0 R ", 4 + i)).collect();
+    bodies.push(format!("<< /Type /Pages /Kids [{kids}] /Count 50 /MediaBox [0 0 10 10] >>"));
+    bodies.push(format!("[{files}]"));
+    for _ in 0..50 {
+        bodies.push("<< /Type /Page /Parent 2 0 R /AF 3 0 R >>".to_string());
+    }
+    let doc = open(build(&bodies, "/Root 1 0 R"));
+    let listed = list_associated_files(&doc);
+    assert_eq!((listed.files.len(), listed.truncated), (MAX_AF_ENTRIES, false));
+    assert!(listed.files.iter().all(|f| f.page.is_none()));
+
+    // Ten pages with an array of their own each: 2,560 entries, cut at the row cap.
+    let mut bodies = vec!["<< /Type /Catalog /Pages 2 0 R >>".to_string()];
+    let kids: String = (0..10).map(|i| format!("{} 0 R ", 3 + i)).collect();
+    bodies.push(format!("<< /Type /Pages /Kids [{kids}] /Count 10 /MediaBox [0 0 10 10] >>"));
+    for _ in 0..10 {
+        bodies.push(format!("<< /Type /Page /Parent 2 0 R /AF [{files}] >>"));
+    }
+    let doc = open(build(&bodies, "/Root 1 0 R"));
+    let listed = list_associated_files(&doc);
+    assert_eq!((listed.files.len(), listed.truncated), (MAX_AF_ROWS, true));
+}
+
+#[test]
+fn a_shared_af_array_is_copied_not_changed_and_shared_files_keep_their_attachment() {
+    let bodies = vec![
+        "<< /Type /Catalog /Pages 2 0 R /AF 4 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 10 10] >>".to_string(),
+        "<< /Type /Page /Parent 2 0 R /AF 4 0 R >>".to_string(),
+        "[5 0 R]".to_string(),
+        spec_body("old.txt"),
+    ];
+    let mut doc = open(build(&bodies, "/Root 1 0 R"));
+    let page = pages(&doc).unwrap()[0].obj;
+    add_associated_file(&mut doc, "new.txt", b"n", "Data", None, None, None).unwrap();
+    let doc = save_and_reopen(&doc);
+    // The catalog has both; the page still has the one array it had, untouched.
+    let found = associated_files(&doc);
+    assert_eq!(found.iter().filter(|f| f.page.is_none()).count(), 2);
+    let on_page: Vec<_> = found.iter().filter(|f| f.page == Some(0)).collect();
+    assert_eq!((on_page.len(), on_page[0].name.as_deref()), (1, Some("old.txt")));
+    let page_af = doc.get(page).as_dict().unwrap().get(b"AF").cloned();
+    assert_eq!(page_af.and_then(|o| o.as_ref()).map(|r| r.num), Some(4));
+    let array = doc.get(pdfcraft_cos::ObjRef { num: 4, generation: 0 });
+    assert_eq!(array.as_array().map(Vec::len), Some(1));
+
+    // Removing the catalog's first entry (old.txt, which the page lists too) and the second.
+    let mut doc = doc;
+    assert!(associated_file_is_shared(&doc, 1).unwrap());
+    assert!(!associated_file_is_shared(&doc, 2).unwrap());
+    remove_associated_file(&mut doc, 1, false).unwrap();
+    // new.txt is listed by nothing else: it goes with its attachment.
+    assert!(remove_associated_file(&mut doc, 1, false).unwrap());
+    assert!(attachment_keys(&doc).is_empty());
+    let doc = save_and_reopen(&doc);
+    let found = associated_files(&doc);
+    assert_eq!((found.len(), found[0].page, found[0].name.as_deref()), (1, Some(0), Some("old.txt")));
+    assert!(af_catalog(&doc).get(b"AF").is_none());
+}
+
+#[test]
+fn a_file_listed_on_a_page_or_twice_keeps_its_attachment_and_deletion_goes_by_reference() {
+    let mut doc = open(fixture());
+    add_associated_file(&mut doc, "a.txt", b"a", "Data", None, None, None).unwrap();
+    let spec = {
+        let (_, list) = catalog_af_for_test(&doc);
+        list[0].as_ref().unwrap()
+    };
+    // The same file listed on a page: removing it from the catalog keeps the attachment.
+    let page = pages(&doc).unwrap()[0].obj;
+    doc.update_dict(page, |p| p.set(b"AF".to_vec(), Object::Array(vec![Object::Ref(spec)]))).unwrap();
+    assert!(!remove_associated_file(&mut doc, 1, false).unwrap());
+    assert_eq!(attachment_keys(&doc), ["a.txt"]);
+
+    // Listed twice in the catalog: removing one entry keeps the attachment, the last deletes it.
+    let mut doc = open(fixture());
+    add_associated_file(&mut doc, "a.txt", b"a", "Data", None, None, None).unwrap();
+    let root = doc.root().unwrap();
+    doc.update_dict(root, |c| c.set(b"AF".to_vec(), Object::Array(vec![Object::Ref(spec), Object::Ref(spec)]))).unwrap();
+    assert!(!remove_associated_file(&mut doc, 1, false).unwrap());
+    assert_eq!(attachment_keys(&doc), ["a.txt"]);
+    assert!(remove_associated_file(&mut doc, 1, false).unwrap());
+    assert!(attachment_keys(&doc).is_empty());
+
+    // Two attachments whose keys read the same: only the one holding this specification goes.
+    let mut doc = open(fixture());
+    add_associated_file(&mut doc, "a.txt", b"first", "Data", None, None, None).unwrap();
+    add_associated_file(&mut doc, "b.txt", b"second", "Data", None, None, None).unwrap();
+    let mut all = crate::attachments::entries(&doc);
+    let key = all[0].0.clone();
+    all[1].0 = key;
+    crate::import::set_attachments_exact(&mut doc, all.clone()).unwrap();
+    assert!(remove_associated_file(&mut doc, 2, false).unwrap());
+    let left = crate::attachments::entries(&doc);
+    assert_eq!(left.len(), 1);
+    assert_eq!(left[0].1, all[0].1);
+    assert_eq!(associated_files(&doc).len(), 1);
+}
+
+fn catalog_af_for_test(doc: &Document) -> ((), Vec<Object>) {
+    let c = af_catalog(doc);
+    ((), doc.resolve(c.get(b"AF").unwrap()).as_array().cloned().unwrap())
+}

@@ -212,6 +212,20 @@ pub fn tools() -> Vec<ToolDef> {
         t("attachment_add", "Attach a file", "Attach the file at path to the document (document level, the Attachments panel; not a paper-clip comment on a page). name defaults to the file's name; the attachment's key, unique in the document, is returned. Undoable.")
             .cmd("edit.attach")
             .with(schema(json!({"doc": doc(), "path": {"type": "string"}, "name": {"type": "string"}, "description": {"type": "string"}}), &["doc", "path"])),
+        t("af_list", "List associated files", "Read-only list of the PDF 2.0 associated files (/AF, ISO 32000-2 14.13) of the document (the catalog) and of every page (at most 2000 rows in all, an /AF array shared by reference is listed once; `truncated` says rows or pages were left out): level, page (1-based, pages only), index (1-based position in that /AF array), relationship (the /AFRelationship as written: Source, Data, Alternative, Supplement, EncryptedPayload, FormData, Schema, Unspecified; null when missing), name (/UF, else /F), description, mime, size (the embedded file's /Params /Size) and embedded (false for a link to an outside file). Associated files of annotations and other objects are not listed. Changes nothing.")
+            .ro()
+            .with(schema(json!({"doc": doc()}), &["doc"])),
+        t("af_add", "Add an associated file", "Embed the file at path as an attachment and associate it with the document: its file specification (/Type /Filespec with /F, /UF and /EF) gets /AFRelationship and joins the catalog's /AF, so it also appears in the Attachments panel. A file of unknown type is stored as application/octet-stream; `warnings` says so when the document declares PDF/A-1 or PDF/A-2, which restrict embedded files. relationship (required): Source, Data, Alternative, Supplement, FormData, Schema or Unspecified; EncryptedPayload and any other name are refused. At most 256 associated files and 33554432 bytes per file; refused with nothing changed when the catalog's /AF is not an array. name defaults to the file's name (made unique); returns its index in /AF. Needs permission to modify the document. One undo step.")
+            .with(schema(
+                json!({
+                    "doc": doc(), "path": {"type": "string"}, "name": {"type": "string"}, "description": {"type": "string"},
+                    "relationship": {"type": "string", "enum": ["Source", "Data", "Alternative", "Supplement", "FormData", "Schema", "Unspecified"]},
+                }),
+                &["doc", "path", "relationship"],
+            )),
+        t("af_remove", "Remove an associated file", "Remove the document-level associated file at index (1-based, from af_list) from the catalog's /AF, and its attachment too (found by the file specification, not its name) unless keep_attachment is true or another /AF entry, the catalog's or a page's, lists the same file, in which case the attachment stays and the result says so. Needs permission to modify the document. One undo step.")
+            .destructive()
+            .with(schema(json!({"doc": doc(), "index": {"type": "integer", "minimum": 1}, "keep_attachment": {"type": "boolean"}}), &["doc", "index"])),
         t("attachment_delete", "Delete an attachment", "Remove the document-level attachment with this name (as doc_info lists it). Undoable.")
             .destructive()
             .with(schema(json!({"doc": doc(), "name": {"type": "string"}}), &["doc", "name"])),

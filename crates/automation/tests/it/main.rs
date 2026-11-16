@@ -2,6 +2,7 @@
 
 mod action_failures;
 mod ai;
+mod associated_files;
 mod attachment_key;
 mod automation;
 mod automation_roots;
