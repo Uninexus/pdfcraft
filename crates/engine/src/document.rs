@@ -866,6 +866,12 @@ impl Document {
         self.editor.as_ref().map_or_else(|| self.bytes.clone(), |e| e.saved.clone())
     }
 
+    /// What the file as last opened or saved declares about its linearization, and whether that
+    /// still holds ([`crate::linearization::report`]); unsaved edits are not part of it.
+    pub fn linearization(&self) -> crate::linearization::Linearization {
+        crate::linearization::report(&self.saved_bytes())
+    }
+
     /// Notes about damage repaired while opening (Document Properties ▸ Advanced, notices).
     pub fn repair_log(&self) -> Vec<String> {
         self.editor.as_ref().map(|e| e.cos.repair_log().to_vec()).unwrap_or_default()

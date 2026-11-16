@@ -218,6 +218,28 @@ impl Automation {
         Ok(json!({ "revisions": list, "unsaved_changes": doc.dirty }))
     }
 
+    pub(crate) fn doc_linearization(&mut self, a: &Args) -> Result<Value> {
+        let doc = self.doc(a)?;
+        let r = doc.linearization();
+        let hints: Vec<Value> = r.hint_streams.iter().map(|h| json!({ "offset": h.offset, "length": h.length })).collect();
+        Ok(json!({
+            "linearized": r.linearized,
+            "valid": r.valid,
+            "version": r.version,
+            "file_length": r.file_length,
+            "declared_length": r.declared_length,
+            "appended_bytes": r.appended_bytes,
+            "first_page_object": r.first_page_object,
+            "first_page_end": r.first_page_end,
+            "page_count": r.page_count,
+            "main_xref_offset": r.main_xref_offset,
+            "first_page_number": r.first_page_number,
+            "hint_streams": hints,
+            "problems": r.problems,
+            "unsaved_changes": doc.dirty,
+        }))
+    }
+
     pub(crate) fn doc_initial_view(&mut self, a: &Args) -> Result<Value> {
         use pdfcraft_engine::{InitialLayout as L, Magnification as M, Navigation as N};
         let bad = |m: String| ToolError::InvalidArgs(m);

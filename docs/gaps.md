@@ -482,6 +482,10 @@ update the numbers.
 - **Missing:** UTF-8 text strings, associated files (`/AF`), document parts, structure namespaces;
   linearized save (Fast Web View); deterministic save; structural validation against the Arlington
   model.
+- **Evidence:** `core.linearization` is partial: `doc_linearization` (read-only) reports a file's
+  linearization parameter dictionary and whether it still holds (the file's length against `/L`,
+  hint streams and offsets inside the file); a linearized file saved incrementally reads as no
+  longer valid. Hint tables, object order and writing a linearized file are not done.
 - **Estimate:** 20–35 h. **Doc:** [pdf-spec-parity.md](pdf-spec-parity.md).
 
 ### 23. Local AI provider
@@ -503,6 +507,7 @@ update the numbers.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-16 | minor | Gap 22: `doc_linearization` reports a file's linearization parameter dictionary and whether it still holds (read-only; `core.linearization` is partial). Estimates unchanged. |
 | 2026-11-16 | minor | Gap 11: `accessibility_reading_order` lists the tagged content in logical reading order, inline elements included, with type, page, MCID, text and inherited alt text and language (headless, read-only). Estimates unchanged. |
 | 2026-11-16 | minor | Gap 17: `redact_mark` finds Canadian Social Insurance Numbers (`sin`) and postal codes (`ca-postal-code`); other locales still missing. Estimates unchanged. |
 | 2026-11-16 | minor | Gap 18: `page_boxes` lists every page's media, crop, bleed, trim and art boxes, which the file sets, the rotation and the bleed past the trim (headless, read-only). Estimates unchanged. |

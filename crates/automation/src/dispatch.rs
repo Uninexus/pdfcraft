@@ -348,6 +348,7 @@ impl Automation {
             "doc_optimize" => self.doc_optimize(&a)?,
             "doc_initial_view" => self.doc_initial_view(&a)?,
             "doc_revisions" => self.doc_revisions(&a)?,
+            "doc_linearization" => self.doc_linearization(&a)?,
             "text_lines" => {
                 let page = self.page(&a)?;
                 let doc = self.doc_to_copy(&a)?;

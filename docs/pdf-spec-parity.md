@@ -24,7 +24,7 @@ are borrowed; PDF 2.0 additions and most subset standards are missing. **150–2
 | §7.2–7.5 | Syntax, objects, file structure, xref tables and streams, object streams, hybrid files, incremental updates | full | **own**, tolerant, repairs damaged files | `crates/cos`; corpus 958 files; fuzzed nightly |
 | §7.4 | Stream filters: Flate, LZW, ASCII85, ASCIIHex, RunLength, predictors | full | **own** | `crates/filters` |
 | §7.4 | Image filters: DCT, JPX, JBIG2, CCITTFax | full | **borrowed** (decode); CCITT Group 4 and lossless JBIG2 encoding | `core.image-filters` partial; own codecs M1.1/M1.2; CCITT decoding in `pdfcraft-filters` (`decode_ccitt`, through `hayro-ccitt`) for export, redaction and the Optimizer, which encodes Group 4 (`optimize.mono-compression`); JBIG2 decoding there too (`decode_jbig2`, through `hayro-jbig2`) for export and redaction; lossless JBIG2 generic-region or exact-copy symbol encoding; no lossy substitution |
-| §7.5.8 | Linearization | R W | R only | `core.linearization` planned |
+| §7.5.8 | Linearization | R W | R only; `doc_linearization` reports the parameter dictionary | `core.linearization` partial |
 | §7.6.4 | Standard security handler R2–R6 (RC4 40/128, AES-128, AES-256), crypt filters, `/EncryptMetadata`, SASLprep | full | **own**, read and write | `crates/crypt`; written files open in Acrobat DC since #836 (#774: Acrobat needs the catalog outside object streams) |
 | §7.6.5 | Public-key security handler | full | none | `core.open-public-key`, `protect.certificate-encryption` planned |
 | §7.6.2 | Unencrypted signature `/Contents` | yes | yes | signing encrypted documents (#753) |

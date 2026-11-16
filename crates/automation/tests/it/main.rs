@@ -17,6 +17,7 @@ mod find_text;
 mod form_bulk;
 mod guides;
 mod hostile_args;
+mod linearization;
 mod link_javascript;
 mod list_selection;
 mod model_3d;

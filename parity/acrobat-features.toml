@@ -367,11 +367,11 @@ title = "Linearized save (Fast Web View)"
 area = "A"
 tier = "P1"
 milestone = "M11"
-status = "planned"
+status = "partial"
 commands = []
-tools = []
-evidence = []
-notes = ""
+tools = ["doc_linearization"]
+evidence = ["crates/engine/src/linearization.rs::bytes_appended_after_it_was_written_invalidate_it", "crates/engine/src/linearization.rs::hostile_dictionaries_are_reported_not_trusted", "crates/automation/tests/it/linearization.rs::a_linearized_file_reads_valid_until_an_incremental_save_appends_to_it"]
+notes = "Read-only: doc_linearization reports the linearization parameter dictionary (ISO 32000-2 Annex F: /Linearized, /L, /H, /O, /E, /N, /T, /P) of the file as last opened or saved and whether it still holds (length, offsets, hint streams inside the file); an incremental save appends bytes after /L and the report then says so. It reads the first 4 KiB only. Not yet: decoding the hint tables, checking the order of the objects, writing a linearized file (a full save writes an ordinary file) and any UI"
 
 [[feature]]
 id = "core.revision-list"
