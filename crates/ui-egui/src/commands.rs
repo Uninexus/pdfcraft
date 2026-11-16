@@ -336,6 +336,21 @@ impl PdfCraftApp {
                     self.set_active_page_gaps(!view.show_page_gaps);
                 }
             }
+            "view.show_guides" => {
+                if let Some(view) = active.and_then(|i| self.views.get_mut(i)) {
+                    view.show_guides = !view.show_guides;
+                }
+            }
+            "view.clear_guides" => {
+                if let Some((_, doc)) = self.active_ids() {
+                    match self.session.clear_guides(doc, None) {
+                        Ok(0) => self.notify_tr("There are no guides to clear"),
+                        Ok(1) => self.notify_tr("Cleared 1 guide"),
+                        Ok(n) => self.notify_fmt("Cleared {n} guides", &[("n", &n.to_string())]),
+                        Err(e) => self.notify_error(e),
+                    }
+                }
+            }
             "view.layout.cover" => {
                 if let Some(i) = active {
                     let v = &mut self.views[i];

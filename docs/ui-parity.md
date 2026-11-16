@@ -53,7 +53,7 @@ No dump of Acrobat's menu tree has been diffed against the registry yet (gap 24)
 | Object handles: corners keep proportion, edges free | yes | yes for added images and signatures; Shift on a corner keeps the proportions of comments, stamps and form fields (#2199); no Alt resize from the centre | shipped |
 | Shift while drawing a line | holds it to 45° steps | holds it level or plumb (a CAD drawing's ortho): new lines and arrows, each side of connected lines, polygons and clouds, and a dragged end or corner | shipped |
 | Arrange, align and distribute page objects | yes | fields only | partial |
-| Rulers, grids, snap to grid, guides | yes | no | planned |
+| Rulers, grids, snap to grid, guides | yes | guides can be shown and cleared (View ▸ Guides); no rulers, dragging out of rulers, grid or snapping | partial |
 | Cursor coordinates, line weights | yes | no | planned |
 | Measuring snap to paths, endpoints, midpoints, intersections | yes | yes | shipped |
 | Nudge selected objects with arrow keys (Shift for larger steps) | yes | yes in Edit text: a point, Shift ten points, for selected objects, images and an open paragraph's box (#1520); and in Prepare a form, for the selected field (#2608); a selected comment: a screen pixel, ⌘/Ctrl or Shift ten | shipped |
