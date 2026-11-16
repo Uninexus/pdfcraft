@@ -98,6 +98,8 @@ pub struct Document {
     /// applied redactions left that still hold the removed text. The interface shows it; tools
     /// return it.
     pub edit_notices: Vec<EditNotice>,
+    /// View ▸ Guides: view state only, never saved (see [`crate::guides`]).
+    pub(crate) guides: crate::guides::Guides,
 }
 
 /// Something the last successful edit did that the user should hear about, never left silent

@@ -375,7 +375,8 @@ update the numbers.
 ### 16. UI precision gaps
 
 - **Missing:** moving several selected objects across pages (same-page moves shipped, #844), single-key accelerators for the remaining tools (V, H, and the opt-in Z and G shipped),
-  rulers, grids and guides, loupe and dynamic zoom, multiple windows and spreadsheet split (split
+  rulers and grids (ruler guides are in as a headless slice: `doc_guides`, `doc_guide_add`, `doc_guide_remove`, per page and
+  session-only; the app has no rulers to drag them from, draws none and snaps to none), loupe and dynamic zoom, multiple windows and spreadsheet split (split
   view shipped), comment
   pop-ups that can be moved, connector lines, customisable quick tools; shortcut display and tool-mode bugs (#746, #721), macOS window controls
   (#789).

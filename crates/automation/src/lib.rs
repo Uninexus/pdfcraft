@@ -24,6 +24,7 @@ mod conventions;
 pub mod file_access;
 mod folder_find;
 mod forms;
+mod guides;
 mod hairlines;
 mod ink_aliases;
 mod layers;

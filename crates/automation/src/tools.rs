@@ -166,6 +166,29 @@ pub fn tools() -> Vec<ToolDef> {
                 }),
                 &["doc"],
             )),
+        t("doc_guides", "List guides", "View, Guides: the ruler guides of a document, each { id, page, axis, position }, in the order they were added; page limits them to one page. Guides are view state kept for as long as the document stays open: never saved into the PDF, never rendered or printed, and not an edit (no undo step, the document is not marked changed). Position is in points on the displayed page (after rotation): a vertical guide's from the left edge, a horizontal guide's from the top edge, to a thousandth of a point. Guides do not follow pages that are inserted, deleted or reordered, nor rotation or cropping, so one may name a page the document no longer has: such guides are still listed and can be removed by id or by that page number.")
+            .ro()
+            .with(schema(json!({ "doc": doc(), "page": { "type": "integer", "minimum": 1, "description": "Only this 1-based page's guides." } }), &["doc"])),
+        t("doc_guide_add", "Add a guide", "View, Guides: add a ruler guide to a page. axis vertical is measured in points from the page's left edge, horizontal from its top edge, on the displayed page (after rotation). It must lie on the page, edges included. A position is rounded to a thousandth of a point (-0 becomes 0), and a guide already at that rounded place is returned with created false instead of being doubled. At most 200 guides per document. View state only (see doc_guides): not saved into the PDF and not undoable; guides are kept by page number and do not follow pages that are inserted, deleted or reordered.")
+            .with(schema(
+                json!({
+                    "doc": doc(),
+                    "page": { "type": "integer", "minimum": 1, "description": "1-based page." },
+                    "axis": { "type": "string", "enum": ["vertical", "horizontal"] },
+                    "position": { "type": "number", "minimum": 0, "description": "Points from the left edge (vertical) or top edge (horizontal) of the displayed page." },
+                }),
+                &["doc", "page", "axis", "position"],
+            )),
+        t("doc_guide_remove", "Remove guides", "View, Guides: remove one guide by id (from doc_guides), or clear them: all: true removes every guide of the document, or only those of page when it is given. Give id, or all. Returns how many were removed; an id that is not there removes 0. page need not exist any more. Guides do not follow pages that are inserted, deleted or reordered, nor rotation or cropping, so one may name a page the document no longer has: such guides are still listed and can be removed by id or by that page number. View state only, not undoable.")
+            .with(schema(
+                json!({
+                    "doc": doc(),
+                    "id": { "type": "integer", "minimum": 1, "description": "A guide id from doc_guides." },
+                    "all": { "type": "boolean", "description": "Remove every guide (of page, when given)." },
+                    "page": { "type": "integer", "minimum": 1, "description": "With all: only this 1-based page's guides." },
+                }),
+                &["doc"],
+            )),
         t("doc_inks", "List spot inks", "Print production: the spot colorants (Separation and DeviceN colour spaces) the document uses, each with how many colour spaces name it, and aliasable false for a name that is not UTF-8 (shown as 0x and hex bytes), which no alias can name. Process colorants (Cyan, Magenta, Yellow, Black), All and None are not listed. Changes nothing.")
             .ro()
             .with(schema(json!({ "doc": doc() }), &["doc"])),
