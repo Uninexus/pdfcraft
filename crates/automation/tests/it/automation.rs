@@ -10459,6 +10459,53 @@ fn detecting_comb_boxes_through_tools() {
 }
 
 #[test]
+fn comparing_documents_tells_annotation_changes_from_other_visual_changes() {
+    let dir = workdir("compare_annotation_cause");
+    let mut a = auto(&dir);
+    let make = |a: &mut Automation, text: &str| ok(a, "doc_create", json!({ "from": "text", "text": text }))["doc"].as_u64().unwrap();
+    let v1 = make(&mut a, "Rent is 900 per month.");
+    let v2 = make(&mut a, "Rent is 900 per month.");
+    // Same words; the newer file has a box drawn far below the text.
+    ok(&mut a, "comment_add", json!({ "doc": v2, "page": 1, "type": "rectangle", "rect": [300, 100, 400, 160] }));
+    let r = ok(&mut a, "doc_compare", json!({ "doc": v2, "other": v1, "visual": true }));
+    let regions = r["visual"].as_array().unwrap();
+    assert!(!regions.is_empty() && regions.iter().all(|v| v["cause"] == "annotation"), "{r}");
+    // A text change in the same page is another cause.
+    let v3 = make(&mut a, "Rent is 950 per month.");
+    ok(&mut a, "comment_add", json!({ "doc": v3, "page": 1, "type": "rectangle", "rect": [300, 100, 400, 160] }));
+    let r = ok(&mut a, "doc_compare", json!({ "doc": v3, "other": v1, "visual": true }));
+    let causes: Vec<&str> = r["visual"].as_array().unwrap().iter().map(|v| v["cause"].as_str().unwrap()).collect();
+    assert!(causes.contains(&"annotation") && causes.contains(&"other"), "{r}");
+    // The same annotation in both files is not a change: identical pages, no regions.
+    ok(&mut a, "comment_add", json!({ "doc": v1, "page": 1, "type": "rectangle", "rect": [300, 100, 400, 160] }));
+    let r = ok(&mut a, "doc_compare", json!({ "doc": v2, "other": v1, "visual": true }));
+    assert!(r["visual"].as_array().unwrap().is_empty(), "{r}");
+    // Matching: a text change beside the same annotation in both files is only `other`.
+    let r = ok(&mut a, "doc_compare", json!({ "doc": v3, "other": v1, "visual": true }));
+    let regions = r["visual"].as_array().unwrap();
+    assert!(!regions.is_empty() && regions.iter().all(|v| v["cause"] == "other"), "{r}");
+}
+
+#[test]
+fn comparing_many_annotations_stays_bounded() {
+    let dir = workdir("compare_many_annotations");
+    let mut a = auto(&dir);
+    let make = |a: &mut Automation| ok(a, "doc_create", json!({ "from": "text", "text": "Rent is 900 per month." }))["doc"].as_u64().unwrap();
+    let (v1, v2) = (make(&mut a), make(&mut a));
+    for i in 0..300 {
+        let (x, y) = (20 + (i % 20) * 25, 200 + (i / 20) * 25);
+        ok(&mut a, "comment_add", json!({ "doc": v1, "page": 1, "type": "rectangle", "rect": [x, y, x + 10, y + 10] }));
+        ok(&mut a, "comment_add", json!({ "doc": v2, "page": 1, "type": "rectangle", "rect": [x, y, x + 10, y + 10] }));
+    }
+    ok(&mut a, "comment_add", json!({ "doc": v2, "page": 1, "type": "rectangle", "rect": [300, 100, 400, 160] }));
+    let start = std::time::Instant::now();
+    let r = ok(&mut a, "doc_compare", json!({ "doc": v2, "other": v1, "visual": true }));
+    assert!(start.elapsed().as_secs() < 30);
+    let regions = r["visual"].as_array().unwrap();
+    assert!(!regions.is_empty() && regions.iter().all(|v| v["cause"] == "annotation"), "{r}");
+}
+
+#[test]
 fn comparing_documents_through_tools() {
     let dir = workdir("compare");
     let mut a = auto(&dir);
