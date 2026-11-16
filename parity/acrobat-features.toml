@@ -9206,8 +9206,8 @@ milestone = "M12"
 status = "partial"
 commands = ["a11y.autotag_fields"]
 tools = ["accessibility_autotag_form_fields"]
-evidence = ["crates/a11y/src/tests.rs::autotag_form_fields_writes_widget_structure_and_parent_tree", "crates/automation/tests/it/automation.rs::autotag_form_fields_writes_reviewable_widget_tags"]
-notes = "For an untagged AcroForm, writes Form structure elements, OBJR references, widget StructParent keys and ParentTree entries. An existing tree is extended when its root points directly to a Document element and its ParentTree uses a direct Nums array; other layouts are refused before any edit. A widget listed on several pages is tagged once. Text, figures, links and other content remain untagged."
+evidence = ["crates/a11y/src/tests.rs::autotag_form_fields_writes_widget_structure_and_parent_tree", "crates/automation/tests/it/automation.rs::autotag_form_fields_writes_reviewable_widget_tags", "crates/a11y/src/autotag_fields.rs::extends_a_parent_tree_that_uses_kids_and_raises_the_limits", "crates/automation/tests/it/automation.rs::autotag_form_fields_extends_a_kids_parent_tree_and_refuses_a_cyclic_one"]
+notes = "For an untagged AcroForm, writes Form structure elements, OBJR references, widget StructParent keys and ParentTree entries. An existing tree is extended when its root points directly to a Document element and its ParentTree is a Nums array or a bounded Kids number tree (at most 10,000 nodes and 32 levels deep; new entries go in the rightmost leaf and /Limits are raised); refused before any edit: a cyclic, shared, too big or too deep tree, a node with both or neither of Nums and Kids, an empty Kids, an odd, non-integer or negative key, and missing or malformed /Limits on a node of the rightmost path below the root. A widget listed on several pages is tagged once. Text, figures, links and other content remain untagged."
 
 [[feature]]
 id = "a11y.reading-order-tool"

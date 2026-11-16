@@ -258,8 +258,8 @@ update the numbers.
 ### 11. Accessibility: only text-only automatic structure creation
 
 - **Missing:** apply auto-tag proposals to marked content and a valid parent tree, tag fields
-  into structure trees with unusual layouts (only a direct Document root with a direct
-  ParentTree Nums array is extended),
+  into structure trees with unusual layouts (only a direct Document root, whose ParentTree is a
+  Nums array or a bounded Kids number tree, is extended),
   visual Tags, Order and Content panels, Reading Order tool, table editor, the Make Accessible
   guided window (only the headless tool exists), Read Out Loud; full keyboard operation of PdfCraft itself and a screen-reader audit.
 - **Evidence:** all 32 checker rules, figure alt text, tag property and sibling order edits, and
