@@ -1,8 +1,8 @@
 //! Conservative tagging for AcroForm widgets.
 //!
 //! It creates `/Form` structure elements and `/OBJR` children so assistive technology can find
-//! widgets. An existing direct `/Document` root and direct `/ParentTree /Nums` are extended;
-//! unusual tree layouts are refused before any edit is made.
+//! widgets. An existing direct `/Document` root is extended, with a `/ParentTree` that is a `/Nums`
+//! array or a bounded `/Kids` number tree; unusual layouts are refused before any edit is made.
 
 use pdfcraft_cos::{Dict, Document, ObjRef, Object};
 
@@ -27,23 +27,122 @@ fn root_document_ref(doc: &Document, k: Option<&Object>) -> Result<ObjRef, Strin
     Err("the structure tree root K must be an indirect reference".into())
 }
 
-fn nums(doc: &Document, parent_tree: ObjRef) -> Result<Vec<Object>, String> {
-    let tree = doc.get(parent_tree);
-    let tree = tree.as_dict().ok_or("the structure parent tree is invalid")?;
-    tree.get(b"Nums")
-        .map(|value| doc.resolve(value))
-        .as_deref()
-        .and_then(Object::as_array)
-        .cloned()
-        .ok_or_else(|| "the structure parent tree must use a direct Nums array".to_string())
+/// Most nodes of a parent tree that are read, and how deep it may go. A hostile file can make a
+/// tree huge or cyclic; past these limits the file is refused before any edit is made.
+const MAX_TREE_NODES: usize = 10_000;
+const MAX_TREE_DEPTH: usize = 32;
+
+/// What a parent number tree holds and where new entries go.
+struct TreeScan {
+    /// The greatest key in the whole tree, or -1 when it has none.
+    greatest: i64,
+    /// The rightmost leaf, which holds the greatest keys and receives the new entries.
+    leaf: ObjRef,
+    /// The nodes from the root down to (not including) the leaf, whose `/Limits` follow it.
+    ancestors: Vec<ObjRef>,
+}
+
+/// A node is a leaf (`Nums`) or an inner node (`Kids`); never both and never neither.
+enum Node {
+    Leaf(Vec<Object>),
+    Inner(Vec<Object>),
+}
+
+fn classify(doc: &Document, dict: &Dict) -> Result<Node, String> {
+    let array = |key: &[u8]| dict.get(key).map(|value| doc.resolve(value)).as_deref().and_then(Object::as_array).cloned();
+    match (dict.contains(b"Nums"), dict.contains(b"Kids")) {
+        (true, true) => Err("a structure parent tree node has both Nums and Kids".into()),
+        (true, false) => array(b"Nums").map(Node::Leaf).ok_or_else(|| "the structure parent tree Nums is not an array".into()),
+        (false, true) => array(b"Kids").map(Node::Inner).ok_or_else(|| "the structure parent tree Kids is not an array".into()),
+        (false, false) => Err("the structure parent tree must have a Nums array or Kids".into()),
+    }
+}
+
+/// `/Limits` of a node below the root: exactly two integers, low not above high.
+fn limits(doc: &Document, dict: &Dict) -> Result<(i64, i64), String> {
+    let bad = || "a structure parent tree node below the root needs /Limits of two integers, low first".to_string();
+    let array = dict.get(b"Limits").map(|v| doc.resolve(v)).as_deref().and_then(Object::as_array).cloned().ok_or_else(bad)?;
+    let [low, high] = array.as_slice() else { return Err(bad()) };
+    match (doc.resolve(low).as_int(), doc.resolve(high).as_int()) {
+        (Some(low), Some(high)) if low <= high => Ok((low, high)),
+        _ => Err(bad()),
+    }
+}
+
+/// Read a parent tree (a `/Nums` leaf, or `/Kids` of nodes, ISO 32000-2 7.9.7) within bounds.
+fn scan_parent_tree(doc: &Document, root: ObjRef) -> Result<TreeScan, String> {
+    let mut greatest = -1_i64;
+    let mut seen = std::collections::HashSet::new();
+    let mut stack = vec![(root, 0_usize)];
+    while let Some((node, depth)) = stack.pop() {
+        if depth > MAX_TREE_DEPTH {
+            return Err("the structure parent tree is nested too deeply".into());
+        }
+        if !seen.insert(node) {
+            return Err("the structure parent tree shares a node or has a cycle".into());
+        }
+        let object = doc.get(node);
+        let dict = object.as_dict().ok_or("the structure parent tree is invalid")?;
+        match classify(doc, dict)? {
+            Node::Leaf(entries) => {
+                if entries.len() % 2 != 0 {
+                    return Err("the structure parent tree has an odd number of entries".into());
+                }
+                for pair in entries.as_chunks::<2>().0 {
+                    let Some(key) = doc.resolve(&pair[0]).as_int() else {
+                        return Err("the structure parent tree has a non-integer key".into());
+                    };
+                    if key < 0 {
+                        return Err("the structure parent tree has a negative key".into());
+                    }
+                    greatest = greatest.max(key);
+                }
+            }
+            Node::Inner(children) => {
+                for child in &children {
+                    let child = child.as_ref().ok_or("the structure parent tree has a direct child node")?;
+                    stack.push((child, depth.saturating_add(1)));
+                    if seen.len().saturating_add(stack.len()) > MAX_TREE_NODES {
+                        return Err("the structure parent tree has too many nodes".into());
+                    }
+                }
+            }
+        }
+    }
+    let mut ancestors = Vec::new();
+    let mut node = root;
+    for depth in 0..=MAX_TREE_DEPTH {
+        let object = doc.get(node);
+        let dict = object.as_dict().ok_or("the structure parent tree is invalid")?;
+        if depth > 0 {
+            limits(doc, dict)?;
+        }
+        match classify(doc, dict)? {
+            Node::Leaf(_) => return Ok(TreeScan { greatest, leaf: node, ancestors }),
+            Node::Inner(children) => {
+                let last = children.last().and_then(Object::as_ref).ok_or("the structure parent tree has an empty Kids array")?;
+                ancestors.push(node);
+                node = last;
+            }
+        }
+    }
+    Err("the structure parent tree is nested too deeply".into())
+}
+
+/// Raise the upper `/Limits` bound of a node below the root (already checked by the scan) to `top`.
+fn raise_limits(doc: &mut Document, node: ObjRef, top: i64) -> Result<(), String> {
+    let object = doc.get(node);
+    let dict = object.as_dict().ok_or("the structure parent tree is invalid")?;
+    let (low, high) = limits(doc, dict)?;
+    doc.update_dict(node, |d| d.set(b"Limits".to_vec(), Object::Array(vec![Object::Int(low), Object::Int(high.max(top))]))).map_err(|e| e.to_string())
 }
 
 /// Add `/Form` tags for every page widget that does not already have a structure parent.
 ///
 /// A new structure tree is written for an untagged form. A conventional existing tree is
 /// extended by adding the form tags to its direct `/Document` element and fresh entries to its
-/// direct `/ParentTree /Nums` array. Text, figures, links, and non-widget annotations remain
-/// outside this operation and need separate review.
+/// `/ParentTree` (a `/Nums` leaf, or the rightmost leaf of a `/Kids` tree, with `/Limits` raised). Text, figures, links, and non-widget
+/// annotations remain outside this operation and need separate review.
 pub fn tag_form_fields(doc: &mut Document) -> Result<usize, String> {
     let root = doc.root().ok_or("the PDF has no catalog")?;
     let catalog_object = doc.get(root);
@@ -83,6 +182,7 @@ pub fn tag_form_fields(doc: &mut Document) -> Result<usize, String> {
     }
     let count = i64::try_from(widgets.len()).map_err(|_| "too many form widgets")?;
 
+    let mut ancestors: Vec<ObjRef> = Vec::new();
     let (struct_root, document_ref, mut existing_kids, parent_tree, mut parent_nums, first_key, new_tree) = if let Some(existing_root) = existing_root
     {
         let struct_root = reference(Some(&existing_root), "structure tree root")?;
@@ -104,21 +204,15 @@ pub fn tag_form_fields(doc: &mut Document) -> Result<usize, String> {
                 _ => vec![k.clone()],
             },
         };
-        let parent_tree = reference(structure.get(b"ParentTree"), "structure parent tree")?;
-        let parent_nums = nums(doc, parent_tree)?;
-        if parent_nums.len() % 2 != 0 {
-            return Err("the structure parent tree has an odd number of entries".into());
-        }
-        let mut greatest = -1_i64;
-        for pair in parent_nums.as_chunks::<2>().0 {
-            let Some(key) = doc.resolve(&pair[0]).as_int() else {
-                return Err("the structure parent tree has a non-integer key".into());
-            };
-            if key < 0 {
-                return Err("the structure parent tree has a negative key".into());
-            }
-            greatest = greatest.max(key);
-        }
+        let parent_root = reference(structure.get(b"ParentTree"), "structure parent tree")?;
+        let scan = scan_parent_tree(doc, parent_root)?;
+        let leaf_object = doc.get(scan.leaf);
+        let Some(Node::Leaf(parent_nums)) = leaf_object.as_dict().and_then(|d| classify(doc, d).ok()) else {
+            return Err("the structure parent tree is invalid".into());
+        };
+        let parent_tree = scan.leaf;
+        ancestors = scan.ancestors;
+        let greatest = scan.greatest;
         let mut first_key = greatest.checked_add(1).ok_or("the structure parent tree has no available key")?;
         if let Some(next_obj) = structure.get(b"ParentTreeNextKey") {
             let resolved_next = doc.resolve(next_obj);
@@ -165,6 +259,11 @@ pub fn tag_form_fields(doc: &mut Document) -> Result<usize, String> {
     })
     .map_err(|e| e.to_string())?;
     doc.update_dict(parent_tree, |d| d.set(b"Nums".to_vec(), Object::Array(parent_nums))).map_err(|e| e.to_string())?;
+    // A leaf below the root and the nodes above it name their key range in /Limits.
+    let last_key = next_key.saturating_sub(1);
+    for node in ancestors.iter().skip(1).copied().chain(std::iter::once(parent_tree).filter(|_| !ancestors.is_empty())) {
+        raise_limits(doc, node, last_key)?;
+    }
     if new_tree {
         doc.update_dict(struct_root, |d| {
             d.set(b"K".to_vec(), Object::Ref(document_ref));
@@ -271,5 +370,113 @@ mod tests {
         // Widget got key 5 from /ParentTreeNextKey, and /ParentTreeNextKey advanced to 6.
         assert_eq!(doc.get(ObjRef::new(5, 0)).as_dict().unwrap().int(b"StructParent"), Some(5));
         assert_eq!(doc.get(ObjRef::new(6, 0)).as_dict().unwrap().int(b"ParentTreeNextKey"), Some(6));
+    }
+
+    fn kids_tree(parent_tree: &[&str]) -> Document {
+        let mut bodies: Vec<String> = vec![
+            "<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [4 0 R] >> /StructTreeRoot 5 0 R >>".into(),
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".into(),
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Annots [4 0 R] >>".into(),
+            "<< /Type /Annot /Subtype /Widget /FT /Tx /T (name) /Rect [20 60 120 80] >>".into(),
+            "<< /Type /StructTreeRoot /K 6 0 R /ParentTree 7 0 R >>".into(),
+            "<< /S /Document /P 5 0 R /K [] >>".into(),
+        ];
+        bodies.extend(parent_tree.iter().map(|b| (*b).to_owned()));
+        pdf(&bodies)
+    }
+
+    #[test]
+    fn extends_a_parent_tree_that_uses_kids_and_raises_the_limits() {
+        // Root 7 -> [8 (0..0), 9 -> [10 (1..3)]]; the greatest key is 3, so the widget gets 4.
+        let mut doc = kids_tree(&[
+            "<< /Kids [8 0 R 9 0 R] >>",
+            "<< /Limits [0 0] /Nums [0 []] >>",
+            "<< /Limits [1 3] /Kids [10 0 R] >>",
+            "<< /Limits [1 3] /Nums [1 [] 3 []] >>",
+        ]);
+        assert_eq!(tag_form_fields(&mut doc).unwrap(), 1);
+        assert_eq!(doc.get(ObjRef::new(4, 0)).as_dict().unwrap().int(b"StructParent"), Some(4));
+        assert_eq!(doc.get(ObjRef::new(5, 0)).as_dict().unwrap().int(b"ParentTreeNextKey"), Some(5));
+        let leaf = doc.get(ObjRef::new(10, 0));
+        let nums = leaf.as_dict().unwrap().get(b"Nums").unwrap().as_array().unwrap().clone();
+        assert_eq!(nums.len(), 6);
+        assert_eq!(nums[4].as_int(), Some(4));
+        for node in [9, 10] {
+            let limits = doc.get(ObjRef::new(node, 0)).as_dict().unwrap().get(b"Limits").unwrap().as_array().unwrap().clone();
+            assert_eq!((limits[0].as_int(), limits[1].as_int()), (Some(1), Some(4)), "node {node}");
+        }
+        // The other leaf is untouched.
+        let first = doc.get(ObjRef::new(8, 0));
+        assert_eq!(first.as_dict().unwrap().get(b"Nums").unwrap().as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn the_greatest_key_in_a_left_leaf_and_a_higher_next_key_decide_the_new_key() {
+        // The left leaf holds 0 and 9 (an unsorted tree is still read in full); the right leaf 1..3.
+        let tree = ["<< /Kids [8 0 R 9 0 R] >>", "<< /Limits [0 9] /Nums [0 [] 9 []] >>", "<< /Limits [1 3] /Nums [1 [] 3 []] >>"];
+        let mut doc = kids_tree(&tree);
+        assert_eq!(tag_form_fields(&mut doc).unwrap(), 1);
+        assert_eq!(doc.get(ObjRef::new(4, 0)).as_dict().unwrap().int(b"StructParent"), Some(10));
+        // A /ParentTreeNextKey above every key wins.
+        let mut doc = kids_tree(&tree);
+        doc.update_dict(ObjRef::new(5, 0), |d| d.set(b"ParentTreeNextKey".to_vec(), Object::Int(40))).unwrap();
+        assert_eq!(tag_form_fields(&mut doc).unwrap(), 1);
+        assert_eq!(doc.get(ObjRef::new(4, 0)).as_dict().unwrap().int(b"StructParent"), Some(40));
+        assert_eq!(doc.get(ObjRef::new(5, 0)).as_dict().unwrap().int(b"ParentTreeNextKey"), Some(41));
+        // The new entry points at a /Form, the root gains no /Limits and the other leaf is unchanged.
+        let leaf = doc.get(ObjRef::new(9, 0));
+        let nums = leaf.as_dict().unwrap().get(b"Nums").unwrap().as_array().unwrap().clone();
+        assert_eq!((nums[4].as_int(), nums.len()), (Some(40), 6));
+        let form = doc.get(nums[5].as_ref().unwrap());
+        assert_eq!(form.as_dict().unwrap().get(b"S").and_then(Object::as_name), Some(&b"Form"[..]));
+        assert!(!doc.get(ObjRef::new(7, 0)).as_dict().unwrap().contains(b"Limits"));
+        let left = doc.get(ObjRef::new(8, 0));
+        let limits = left.as_dict().unwrap().get(b"Limits").unwrap().as_array().unwrap().clone();
+        assert_eq!((limits[0].as_int(), limits[1].as_int()), (Some(0), Some(9)));
+    }
+
+    #[test]
+    fn a_cyclic_shared_or_malformed_parent_tree_is_refused_before_any_edit() {
+        let cases: [&[&str]; 11] = [
+            &["<< /Kids [8 0 R] >>", "<< /Kids [7 0 R] >>"],
+            &["<< /Kids [8 0 R 8 0 R] >>", "<< /Limits [0 0] /Nums [0 []] >>"],
+            &["<< /Kids [] >>"],
+            &["<< /Kids [<< /Nums [0 []] >>] >>"],
+            // Both Nums and Kids on one node.
+            &["<< /Nums [0 []] /Kids [8 0 R] >>", "<< /Limits [5 5] /Nums [5 []] >>"],
+            &["<< /Kids [8 0 R] >>", "<< /Limits [0 0] /Nums [0 []] /Kids [9 0 R] >>", "<< /Limits [7 7] /Nums [7 []] >>"],
+            // Limits on the rightmost path: missing, one value, not integers, reversed.
+            &["<< /Kids [8 0 R] >>", "<< /Nums [0 []] >>"],
+            &["<< /Kids [8 0 R] >>", "<< /Limits [0] /Nums [0 []] >>"],
+            &["<< /Kids [8 0 R] >>", "<< /Limits [(a) (b)] /Nums [0 []] >>"],
+            &["<< /Kids [8 0 R] >>", "<< /Limits [3 0] /Nums [0 []] >>"],
+            // A middle node without Limits.
+            &["<< /Kids [8 0 R] >>", "<< /Kids [9 0 R] >>", "<< /Limits [0 0] /Nums [0 []] >>"],
+        ];
+        for tree in cases {
+            let mut doc = kids_tree(tree);
+            let numbers = doc.object_numbers();
+            let before: Vec<_> = numbers.iter().map(|n| doc.get(ObjRef::new(*n, 0))).collect();
+            assert!(tag_form_fields(&mut doc).is_err(), "{tree:?}");
+            assert_eq!(doc.object_numbers(), numbers, "{tree:?}");
+            let after: Vec<_> = numbers.iter().map(|n| doc.get(ObjRef::new(*n, 0))).collect();
+            assert_eq!(after, before, "{tree:?}");
+        }
+    }
+
+    #[test]
+    fn a_parent_tree_with_more_pending_nodes_than_the_cap_is_refused() {
+        let kids: String = (0..=MAX_TREE_NODES).map(|_| "8 0 R ").collect();
+        let mut doc = kids_tree(&[&format!("<< /Kids [{kids}] >>"), "<< /Limits [0 0] /Nums [0 []] >>"]);
+        assert!(tag_form_fields(&mut doc).unwrap_err().contains("too many"));
+    }
+
+    #[test]
+    fn a_parent_tree_nested_past_the_depth_limit_is_refused() {
+        let mut nodes: Vec<String> = (0..40).map(|i| format!("<< /Kids [{} 0 R] >>", 8 + i)).collect();
+        nodes.push("<< /Nums [0 []] >>".into());
+        let refs: Vec<&str> = nodes.iter().map(String::as_str).collect();
+        let mut doc = kids_tree(&refs);
+        assert!(tag_form_fields(&mut doc).unwrap_err().contains("too deeply"));
     }
 }

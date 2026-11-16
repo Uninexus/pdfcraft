@@ -544,6 +544,78 @@ fn autotag_form_fields_writes_reviewable_widget_tags() {
     assert_eq!(result["status"], "passed");
 }
 
+/// A form whose existing structure tree keeps its parent tree as a `/Kids` number tree.
+fn form_with_kids_parent_tree(parent_tree: &[&str]) -> Vec<u8> {
+    let mut objs: Vec<String> = vec![
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [4 0 R] >> /MarkInfo << /Marked true >> /StructTreeRoot 5 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 300 400] >>".into(),
+        "<< /Type /Page /Parent 2 0 R /Annots [4 0 R] >>".into(),
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (name) /V (x) /Rect [60 60 200 80] /P 3 0 R >>".into(),
+        "<< /Type /StructTreeRoot /K 6 0 R /ParentTree 7 0 R >>".into(),
+        "<< /S /Document /P 5 0 R /K [] >>".into(),
+    ];
+    objs.extend(parent_tree.iter().map(|o| (*o).to_owned()));
+    let mut bytes = b"%PDF-1.7\n".to_vec();
+    let mut offsets = Vec::new();
+    for (i, o) in objs.iter().enumerate() {
+        offsets.push(bytes.len());
+        bytes.extend_from_slice(format!("{} 0 obj\n{o}\nendobj\n", i + 1).as_bytes());
+    }
+    let xref = bytes.len();
+    bytes.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1).as_bytes());
+    for o in offsets {
+        bytes.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+    }
+    bytes.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objs.len() + 1).as_bytes());
+    bytes
+}
+
+/// A structure tree whose parent tree is a `/Kids` number tree is extended; a cyclic one is
+/// refused with the document unchanged.
+#[test]
+fn autotag_form_fields_extends_a_kids_parent_tree_and_refuses_a_cyclic_one() {
+    let dir = workdir("autotag-form-fields-kids");
+    std::fs::write(dir.join("kids.pdf"), form_with_kids_parent_tree(&["<< /Kids [8 0 R] >>", "<< /Limits [0 0] /Nums [0 []] >>"])).unwrap();
+    std::fs::write(dir.join("cycle.pdf"), form_with_kids_parent_tree(&["<< /Kids [8 0 R] >>", "<< /Kids [7 0 R] >>"])).unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "kids.pdf" }))["doc"].as_u64().unwrap();
+    let tagged = ok(&mut a, "accessibility_autotag_form_fields", json!({ "doc": doc }));
+    assert_eq!(tagged["status"], "passed");
+    ok(&mut a, "doc_save", json!({ "doc": doc, "path": "kids-tagged.pdf" }));
+    let reopened = ok(&mut a, "doc_open", json!({ "path": "kids-tagged.pdf" }))["doc"].as_u64().unwrap();
+    let check = ok(&mut a, "accessibility_check", json!({ "doc": reopened, "rules": ["tagged-form-fields"] }));
+    let result = check["results"].as_array().unwrap().iter().find(|result| result["rule"] == "tagged-form-fields").unwrap();
+    assert_eq!(result["status"], "passed");
+
+    // Saving renumbers objects, so read the saved file by content.
+    use pdfcraft_cos::{ObjRef, Object};
+    let saved = pdfcraft_cos::Document::open(std::sync::Arc::new(std::fs::read(dir.join("kids-tagged.pdf")).unwrap())).unwrap();
+    let all: Vec<_> = saved.object_numbers().into_iter().map(|n| (n, saved.get(ObjRef::new(n, 0)))).collect();
+    let dict_of = |n: &(u32, std::sync::Arc<Object>)| n.1.as_dict().cloned();
+    let widget = all.iter().filter_map(dict_of).find(|d| d.get(b"Subtype").and_then(Object::as_name) == Some(&b"Widget"[..])).unwrap();
+    assert_eq!(widget.int(b"StructParent"), Some(1));
+    let root = all.iter().filter_map(dict_of).find(|d| d.get(b"Type").and_then(Object::as_name) == Some(&b"StructTreeRoot"[..])).unwrap();
+    assert_eq!(root.int(b"ParentTreeNextKey"), Some(2));
+    let leaf = all
+        .iter()
+        .filter_map(dict_of)
+        .find(|d| d.contains(b"Nums") && d.get(b"Limits").and_then(Object::as_array).is_some_and(|l| l.len() == 2 && l[1].as_int() == Some(1)))
+        .unwrap();
+    let nums = leaf.get(b"Nums").unwrap().as_array().unwrap().clone();
+    assert_eq!((nums.len(), nums[2].as_int()), (4, Some(1)));
+    let form = saved.get(nums[3].as_ref().unwrap());
+    assert_eq!(form.as_dict().unwrap().get(b"S").and_then(Object::as_name), Some(&b"Form"[..]));
+    let limits = leaf.get(b"Limits").unwrap().as_array().unwrap().clone();
+    assert_eq!(limits[0].as_int(), Some(0));
+
+    // A cyclic parent tree is refused and the open document is unchanged.
+    let cyclic = ok(&mut a, "doc_open", json!({ "path": "cycle.pdf" }))["doc"].as_u64().unwrap();
+    ok(&mut a, "doc_save", json!({ "doc": cyclic, "path": "cycle-before.pdf" }));
+    assert!(matches!(a.call("accessibility_autotag_form_fields", &json!({ "doc": cyclic })), Err(ToolError::Failed(_))));
+    ok(&mut a, "doc_save", json!({ "doc": cyclic, "path": "cycle-after.pdf" }));
+    assert_eq!(std::fs::read(dir.join("cycle-before.pdf")).unwrap(), std::fs::read(dir.join("cycle-after.pdf")).unwrap());
+}
+
 /// A two-page PDF with headings set apart only by their style: chapters in Helvetica-Bold 18,
 /// a section in Helvetica-Bold 14, text in Helvetica 11 (#1693).
 fn styled_headings_pdf() -> Vec<u8> {
