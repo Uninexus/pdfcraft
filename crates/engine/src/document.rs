@@ -14,6 +14,25 @@ use crate::{
 #[cfg(test)]
 use crate::{record_link_scan, record_marker_scan};
 
+/// What [`Document::make_accessible`] did and what it could not.
+#[derive(Clone, Debug)]
+pub struct MakeAccessible {
+    /// The single undoable edit, or `None` when no safe fix applies.
+    pub edit: Option<Edit>,
+    /// The rules the edit fixes (before it is applied: check again to confirm).
+    pub fixed: Vec<a11y::Rule>,
+    /// The document language fails and none was given, so it was left alone.
+    pub needs_language: bool,
+    /// The title fails and neither the file name nor the document gives one, so it was left alone.
+    pub needs_title: bool,
+    /// A language was given but the document already has a valid one, which was kept.
+    pub language_ignored: bool,
+    /// The document's Info /Title is not text and the fix replaces it.
+    pub replaced_non_text_title: bool,
+    /// The check this plan was made from.
+    pub report: a11y::Report,
+}
+
 pub struct Document {
     pub id: DocId,
     pub name: String,
@@ -491,6 +510,65 @@ impl Document {
             a11y::Rule::TabOrder => Ok(Edit::SetTabOrder { pages: (0..self.info.pages.len()).collect(), order: TabOrder::Structure }),
             other => Err(format!("\"{}\" has no automatic fix", other.name())),
         }
+    }
+
+    /// Accessibility ▸ Make Accessible: the one undoable edit that applies every safe automatic
+    /// fix whose rule currently fails (the document language when `language` is given, the title
+    /// with its title-bar display, and structure tab order), with what it did and what it left.
+    /// It never invents tags or claims compliance. Errors when the language is not a well formed
+    /// tag or the document does not allow changes.
+    pub fn make_accessible(&self, language: Option<&str>) -> Result<MakeAccessible, String> {
+        let language = language.map(str::trim).filter(|v| !v.is_empty());
+        if let Some(l) = language
+            && pdfcraft_export::language_tag(Some(l)).is_none()
+        {
+            return Err(format!("\"{l}\" is not a language tag; use one like en-US or fr-CA"));
+        }
+        if !self.allows_modification() {
+            return Err("this document's security does not allow changes".into());
+        }
+        let report = self.accessibility_check(&a11y::Options::default()).ok_or("the document can't be read for editing")?;
+        let failed = |rule: a11y::Rule| report.result(rule).is_some_and(|r| r.status == a11y::Status::Failed);
+        let mut view = self.initial_view();
+        let mut edits = Vec::new();
+        let mut fixed = Vec::new();
+        let (mut needs_language, mut needs_title, mut replaced_non_text_title) = (false, false, false);
+        if failed(a11y::Rule::PrimaryLanguage) {
+            match language {
+                Some(l) => {
+                    view.language = Some(l.to_owned());
+                    fixed.push(a11y::Rule::PrimaryLanguage);
+                }
+                None => needs_language = true,
+            }
+        }
+        let language_ignored = language.is_some() && !failed(a11y::Rule::PrimaryLanguage);
+        if failed(a11y::Rule::Title) {
+            let name = self.name.trim().trim_end_matches(".pdf").trim_end_matches(".PDF").trim();
+            let title = self
+                .info_value("Title")
+                .map(|t| t.trim().to_owned())
+                .filter(|t| !t.is_empty())
+                .or_else(|| Some(name.to_owned()).filter(|n| !n.is_empty()));
+            match title {
+                Some(title) => {
+                    replaced_non_text_title = self.has_info("Title") && self.info_value("Title").is_none();
+                    edits.push(Edit::SetInfo { key: "Title".into(), value: title });
+                    view.display_title = true;
+                    fixed.push(a11y::Rule::Title);
+                }
+                None => needs_title = true,
+            }
+        }
+        if !fixed.is_empty() {
+            edits.push(Edit::SetInitialView(Box::new(view)));
+        }
+        if failed(a11y::Rule::TabOrder) {
+            edits.push(Edit::SetTabOrder { pages: (0..self.info.pages.len()).collect(), order: TabOrder::Structure });
+            fixed.push(a11y::Rule::TabOrder);
+        }
+        let edit = (!edits.is_empty()).then(|| Edit::Batch { label: "Make accessible".into(), edits });
+        Ok(MakeAccessible { edit, fixed, needs_language, needs_title, language_ignored, replaced_non_text_title, report })
     }
 
     pub fn initial_view(&self) -> InitialView {

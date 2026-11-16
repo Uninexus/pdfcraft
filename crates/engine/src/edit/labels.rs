@@ -172,6 +172,7 @@ pub const EDIT_LABELS: &[&str] = &[
 /// already worded in the interface's language.
 pub const BATCH_LABELS: &[&str] = &[
     "Set document title",
+    "Make accessible",
     crate::session::INSERT_FROM_CLIPBOARD,
     "Mark differences",
     "Detect form fields",

@@ -163,7 +163,7 @@ use comments::comment_list;
 pub use comments::{SummarySort, comment_kind, comment_summary, comment_summary_pages, comment_type_name};
 #[cfg(test)]
 use document::page_runs;
-pub use document::{Document, EditNotice, TextNotice, display_bytes_for, render_password_for};
+pub use document::{Document, EditNotice, MakeAccessible, TextNotice, display_bytes_for, render_password_for};
 use document::{carry_verdict_marks, display_bytes, info_fields, recovered_render_password, same_pages, shown_under_redactions, undrawn_notices};
 pub use edit::{BATCH_LABELS, EDIT_LABELS, Edit};
 pub use error::{EditError, SourceProblem};
@@ -172,6 +172,7 @@ pub use history::Label;
 use layers::{apply_layer_state, print_layer_states, print_preview_layers, set_default_layer_state, use_layer_choices};
 pub use open::{OpenContext, PreparedDocument};
 pub use page_filter::{PageOrientation, PageParity, filter_pages};
+pub use pdfcraft_export::language_tag;
 pub use pictures::{MarkFile, image_dimensions};
 use pictures::{embed_image, fit_picture, mark_source, model_poster};
 use protection::unrestricted;

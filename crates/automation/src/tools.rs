@@ -1436,6 +1436,8 @@ pub fn tools() -> Vec<ToolDef> {
             )),
         t("accessibility_fix", "Fix an accessibility problem", "Apply the checker's automatic fix for a rule: primary-language (value: the language, e.g. en-US), title (value: the title; default the current title or file name; also shows it in the title bar) or tab-order (every page tabs in structure order). Returns the rule's new status. Undoable.")
             .with(schema(json!({ "doc": doc(), "rule": { "type": "string", "enum": ["primary-language", "title", "tab-order"] }, "value": { "type": "string" } }), &["doc", "rule"])),
+        t("accessibility_make_accessible", "Make accessible (safe fixes)", "Apply, as one undoable step, every safe automatic fix for a rule that currently fails: the document title (shown in the title bar), the document language when language is given (for example en-US) and structure tab order. Never writes tags, alternate text or tables and does not certify accessibility. Returns the rules fixed, the rules still failing, and rules left for manual review.")
+            .with(schema(json!({ "doc": doc(), "language": { "type": "string" } }), &["doc"])),
         t("accessibility_figures", "List figures", "The tagged figures (Figure elements, through the role map) in document order: figure number, page, alternate text and where the figure is drawn (top-left-origin points).")
             .ro()
             .cmd("a11y.alt_text")

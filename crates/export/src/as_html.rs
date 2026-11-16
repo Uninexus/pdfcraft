@@ -17,7 +17,7 @@ const LONGEST_TAG: usize = 255;
 /// hyphens, [`LONGEST_TAG`] characters at most. A singleton (one letter or digit) starts an
 /// extension, or with `x` private use, and needs a subtag after it. Anything else names no
 /// language.
-pub(crate) fn language_tag(lang: Option<&str>) -> Option<&str> {
+pub fn language_tag(lang: Option<&str>) -> Option<&str> {
     let tag = lang?.trim();
     let mut subtags = tag.split('-');
     let primary = subtags.next()?;
