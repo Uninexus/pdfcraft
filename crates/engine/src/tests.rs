@@ -15891,3 +15891,53 @@ fn make_accessible_plans_only_confirmed_safe_fixes() {
     let plan = s.get(id).unwrap().make_accessible(Some("en")).unwrap();
     assert!(plan.needs_title && !plan.fixed.contains(&a11y::Rule::Title));
 }
+
+#[test]
+fn guides_are_view_state_bounded_by_the_displayed_page() {
+    use crate::guides::{GuideAxis, MAX_GUIDES};
+    // Turned a quarter, the 200 x 300 page is displayed 300 wide and 200 tall.
+    let (mut s, id) = rotated_blank(90);
+    let (g, new) = s.add_guide(id, 0, GuideAxis::Vertical, 300.0).unwrap();
+    assert!(new && g.id == 1);
+    let (same, new) = s.add_guide(id, 0, GuideAxis::Vertical, 300.0).unwrap();
+    assert!(!new && same.id == g.id, "a guide already there is not doubled");
+    s.add_guide(id, 0, GuideAxis::Horizontal, 200.0).unwrap();
+    for (axis, at) in [(GuideAxis::Vertical, 300.5), (GuideAxis::Horizontal, 200.5), (GuideAxis::Vertical, -1.0), (GuideAxis::Vertical, f64::NAN)] {
+        assert!(s.add_guide(id, 0, axis, at).is_err(), "{axis:?} {at}");
+    }
+    assert!(s.add_guide(id, 1, GuideAxis::Vertical, 10.0).is_err(), "no second page");
+    assert_eq!(s.guides(id, None).unwrap().len(), 2);
+    let dirty_before = s.get(id).unwrap().dirty;
+    s.add_guide(id, 0, GuideAxis::Vertical, 10.0).unwrap();
+    assert_eq!(s.get(id).unwrap().dirty, dirty_before, "a guide is not an edit");
+    assert!(s.remove_guide(id, g.id).unwrap() && !s.remove_guide(id, g.id).unwrap());
+    assert_eq!(s.clear_guides(id, Some(5)).unwrap(), 0);
+    assert_eq!(s.clear_guides(id, None).unwrap(), 2);
+    for i in 0..MAX_GUIDES {
+        s.add_guide(id, 0, GuideAxis::Vertical, i as f64 / 2.0).unwrap();
+    }
+    assert!(s.add_guide(id, 0, GuideAxis::Vertical, 299.0).is_err(), "bounded");
+}
+
+#[test]
+fn guides_round_to_a_thousandth_and_survive_a_reload_with_their_ids() {
+    use crate::guides::GuideAxis;
+    let (mut s, id) = session_with(3);
+    let (a, _) = s.add_guide(id, 0, GuideAxis::Vertical, 72.5).unwrap();
+    let (again, new) = s.add_guide(id, 0, GuideAxis::Vertical, 72.5004).unwrap();
+    assert!(!new && again.id == a.id, "within a thousandth is the same guide");
+    let (zero, _) = s.add_guide(id, 0, GuideAxis::Horizontal, -0.0).unwrap();
+    assert!(zero.position.is_sign_positive(), "-0 is 0");
+    let (on_last, _) = s.add_guide(id, 2, GuideAxis::Vertical, 10.0).unwrap();
+    let bytes = s.get(id).unwrap().bytes.clone();
+    s.reload(id, bytes).unwrap();
+    let kept = s.guides(id, None).unwrap();
+    assert_eq!(kept.len(), 3, "{kept:?}");
+    let (next, _) = s.add_guide(id, 0, GuideAxis::Vertical, 5.0).unwrap();
+    assert!(next.id > on_last.id, "ids are not reused after a reload");
+    // The new file has one page: guides on pages it no longer has go, the rest stay.
+    let one = Arc::new(fixture(1));
+    s.reload(id, one).unwrap();
+    assert!(s.guides(id, None).unwrap().iter().all(|g| g.page == 0));
+    assert_eq!(s.guides(id, None).unwrap().len(), 3);
+}

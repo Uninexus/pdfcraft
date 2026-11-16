@@ -15,6 +15,7 @@ mod edit_all_javascripts;
 mod find_folder;
 mod find_text;
 mod form_bulk;
+mod guides;
 mod hostile_args;
 mod link_javascript;
 mod list_selection;

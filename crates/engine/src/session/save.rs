@@ -194,6 +194,7 @@ impl Session {
             return Err(OpenError::Invalid("a script is still running in this document; retry the reload once it finishes".into()));
         }
         let (name, path, generation) = (doc.name.clone(), doc.path.clone(), doc.generation);
+        let guides = doc.guides.clone();
         let password = doc.editor.as_ref().and_then(|e| e.keys.reopen.clone()).or_else(|| doc.password.clone());
         let new_id = self.open(name, path, bytes, password.as_deref())?;
         let at = self.docs.iter().position(|d| d.id == new_id).ok_or_else(|| OpenError::Invalid("the new version was not kept".into()))?;
@@ -212,6 +213,9 @@ impl Session {
         // one; there is nothing new to autosave.
         doc.generation = generation + 1;
         doc.snapshot_generation = doc.generation;
+        // Guides are the reader's view state too, and keep their ids; those on pages the new file
+        // no longer has are dropped.
+        doc.guides = guides.kept_within(doc.info.pages.len());
         // `open` pushed the new version last, so the old one is still at `old`.
         *self.docs.get_mut(old).ok_or_else(|| OpenError::Invalid("the document is not open".into()))? = doc;
         Ok(())

@@ -766,6 +766,9 @@ impl Automation {
             "content_copy" => self.content_copy(&a)?,
             "doc_print" => self.doc_print(&a)?,
             "doc_fix_hairlines" => self.fix_hairlines(&a)?,
+            "doc_guides" => self.doc_guides(&a)?,
+            "doc_guide_add" => self.doc_guide_add(&a)?,
+            "doc_guide_remove" => self.doc_guide_remove(&a)?,
             "doc_inks" => self.doc_inks(&a)?,
             "doc_ink_aliases" => self.doc_ink_aliases(&a)?,
             "attachment_add" => {

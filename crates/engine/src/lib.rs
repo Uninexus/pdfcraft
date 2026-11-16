@@ -35,6 +35,7 @@ mod fill_sign;
 pub mod find_replace;
 pub mod folder_search;
 pub mod form_entries;
+pub mod guides;
 mod history;
 pub mod js;
 mod layers;

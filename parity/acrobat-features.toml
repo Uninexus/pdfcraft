@@ -1643,11 +1643,11 @@ title = "Guides"
 area = "B"
 tier = "P2"
 milestone = "M12"
-status = "planned"
+status = "partial"
 commands = []
-tools = []
-evidence = []
-notes = ""
+tools = ["doc_guides", "doc_guide_add", "doc_guide_remove"]
+evidence = ["crates/engine/src/tests.rs::guides_are_view_state_bounded_by_the_displayed_page", "crates/automation/tests/it/guides.rs::guides_are_listed_added_and_removed_without_touching_the_file"]
+notes = "Headless first slice: ruler guides per page of an open document, with doc_guides, doc_guide_add and doc_guide_remove. A position is in points on the displayed page (after rotation), from the left edge for a vertical guide and from the top edge for a horizontal one; it must lie on the page, at most 200 per document, and a guide already there is returned instead of doubled. As in Acrobat they are view state: never saved into the PDF, never rendered or printed, not an undo step and they do not mark the document changed; they last while the document is open in the session and are kept by page number (they do not follow inserted, deleted or reordered pages). Missing: the app has no rulers to drag them from and draws no guides, snapping to them, locking, colour and the menu command, and they are not remembered between sessions"
 
 [[feature]]
 id = "view.line-weights"
