@@ -257,14 +257,17 @@ impl Automation {
             // Pages of the ranges are paired by position (old from + k with new from + k).
             let ranged = old_range.is_some() || new_range.is_some();
             self.session
-                .compare_visual_in(old, new, 72.0, old_range, new_range)
+                .compare_visual_regions_in(old, new, 72.0, old_range, new_range)
                 .map_err(failed)?
                 .iter()
-                .map(
-                    |(o, p, r)| {
-                        if ranged { json!({ "page": p + 1, "old_page": o + 1, "rect": r2(r) }) } else { json!({ "page": p + 1, "rect": r2(r) }) }
-                    },
-                )
+                .map(|v| {
+                    let (o, p, r, cause) = (v.old_page, v.page, r2(&v.rect), v.cause.label());
+                    if ranged {
+                        json!({ "page": p + 1, "old_page": o + 1, "rect": r, "cause": cause })
+                    } else {
+                        json!({ "page": p + 1, "rect": r, "cause": cause })
+                    }
+                })
                 .collect()
         } else {
             Vec::new()

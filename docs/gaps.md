@@ -1,5 +1,6 @@
 # Where PdfCraft falls short of Acrobat Pro
 
+> **Last reviewed:** 2026-11-16 | **Last updated:** 2026-11-16 | **Change:** minor (gap 21: `doc_compare` tells visual regions that overlap a comment annotation only one file has from other visual changes; estimates unchanged)
 > **Last reviewed:** 2026-11-16 | **Last updated:** 2026-11-16 | **Change:** minor (gap 17: redact_mark patterns sin and ca-postal-code, Canadian Social Insurance Numbers and postal codes; estimates unchanged)
 > **Last reviewed:** 2026-11-16 | **Last updated:** 2026-11-16 | **Change:** minor (gap 19: Preferences ▸ Forms gains a Required field border colour; estimates unchanged)
 > **Last reviewed:** 2026-11-16 | **Last updated:** 2026-11-16 | **Change:** minor (gap 13: listing signatures no longer reads every page when a document has no signature field, and measured that each save keeps one more copy of the file in undo history; estimates unchanged)
@@ -468,11 +469,18 @@ update the numbers.
   Show checkboxes (Replaced, Inserted, Deleted, Visual), which the list, the shading, Mark as
   comments and the report follow, and `kinds` on `doc_compare`, `doc_compare_report` and
   `doc_compare_mark` (bad values are refused, listing the allowed ones). A report of a filter says
-  what it hid and that the finer kinds are not told apart.
-- **Missing:** telling images, annotations, formatting and background/header-footer changes apart
-  (the comparison reads words and pixels, so all of them are Visual, which is shaded and counted
+  what it hid and that the finer kinds are not told apart. `doc_compare` with `visual` also tells
+  each visual region's cause: `annotation` when it overlaps (by `/Rect`) a comment (markup)
+  annotation that only one of the two files has on that page (added, removed, moved or edited),
+  otherwise `other`; form fields, links, popups and media are not looked at, and at most 2,000
+  comments per page are matched.
+- **Missing:** telling images, formatting and background/header-footer changes apart, and using
+  the annotation cause as a filter, in the dialog, the report or Mark as comments (the comparison
+  reads words and pixels, so all of them are Visual, which is shaded and counted
   but never listed or marked; the dialog and the report say so; Acrobat's defaults with
-  annotations, formatting and background off cannot be matched), scrolling the two halves by matching content rather than by
+  annotations, formatting and background off cannot be matched; an annotation present in both
+  files but drawn differently, or a change under an unchanged annotation's box, is not seen as an
+  annotation change; form-field and link changes are not told apart either), scrolling the two halves by matching content rather than by
   offset, scanned documents. A range is one contiguous run of pages per file (the dialog's old
   Pages field also took a list such as `1,3`).
 - **Estimate:** 8–16 h. **Doc:** [target-app-parity.md](target-app-parity.md).
@@ -512,6 +520,7 @@ update the numbers.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-16 | minor | Gap 21: `doc_compare` with `visual` gives each visual region a `cause`, `annotation` when it overlaps a comment (markup) annotation that only one of the two files has on that page and `other` otherwise; images, formatting and background changes are still not told apart, and the kinds filter, the dialog and the report do not use it yet (`misc.compare-filters` stays partial). Estimates unchanged. |
 | 2026-11-16 | minor | Gap 16: View ▸ Guides ▸ Show Guides draws a document's ruler guides over the pages (per tab, off by default, `ui.set guides`) and Clear Guides removes them; no rulers to drag from and no snapping yet (`view.guides` stays partial). Estimates unchanged. |
 | 2026-11-16 | minor | Gap 22: `af_list`, `af_add` and `af_remove` list and edit PDF 2.0 associated files (`/AF`) at document level (`core.pdf20-associated-files` is partial). Estimates unchanged. |
 | 2026-11-16 | minor | Gap 22: `doc_linearization` reports a file's linearization parameter dictionary and whether it still holds (read-only; `core.linearization` is partial). Estimates unchanged. |

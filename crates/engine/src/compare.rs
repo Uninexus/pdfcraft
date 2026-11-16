@@ -26,6 +26,38 @@ pub fn colour(kind: Kind) -> crate::Rgb {
     }
 }
 
+/// What a visual difference is, as far as the comparison can tell: a region that overlaps a
+/// comment (markup) annotation present in only one of the two files (added, removed, moved or edited), or any
+/// other change in how the page looks (images, formatting, background and header/footer changes
+/// are not told apart and stay `Other`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VisualCause {
+    Annotation,
+    Other,
+}
+
+impl VisualCause {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Annotation => "annotation",
+            Self::Other => "other",
+        }
+    }
+}
+
+/// One visual difference: pages 0-based and each document's own, the box in the newer file's
+/// user space, and what the region overlaps.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct VisualRegion {
+    pub old_page: usize,
+    pub page: usize,
+    pub rect: [f64; 4],
+    pub cause: VisualCause,
+}
+
+/// Most comment annotations of one page that Compare files matches between the two files.
+pub const MAX_COMPARED_ANNOTATIONS: usize = 2000;
+
 /// A 1-based, inclusive range of pages of one document for Compare files ("Pages N to M").
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PageRange {
@@ -283,6 +315,59 @@ impl Session {
             }
         }
         Ok(out)
+    }
+
+    /// [`Session::compare_visual_in`] telling which regions are comment annotation changes: a
+    /// region is [`VisualCause::Annotation`] when it overlaps (by `/Rect`, one point of slack) a
+    /// comment (markup) annotation of the old or the new page that the other page lacks, matched
+    /// on subtype, contents and rectangle rounded to a whole point. Only the annotations
+    /// `DocInfo::annotations` lists count (not form fields, links, popups or media), and at most
+    /// [`MAX_COMPARED_ANNOTATIONS`] per page are matched (the rest are ignored, so their
+    /// regions stay `Other`). Each page pair is matched once, in time linear in its annotations.
+    pub fn compare_visual_regions_in(
+        &self,
+        old: DocId,
+        new: DocId,
+        dpi: f32,
+        old_range: Option<PageRange>,
+        new_range: Option<PageRange>,
+    ) -> Result<Vec<VisualRegion>, EditError> {
+        let regions = self.compare_visual_in(old, new, dpi, old_range, new_range)?;
+        let a = self.get(old).ok_or(EditError::NoDocument)?;
+        let b = self.get(new).ok_or(EditError::NoDocument)?;
+        type Key<'a> = (&'a str, Option<&'a str>, [i64; 4]);
+        fn keyed(d: &crate::Document, page: usize) -> Vec<(Key<'_>, [f64; 4])> {
+            d.info
+                .annotations
+                .iter()
+                .filter(|x| x.page == page)
+                .take(MAX_COMPARED_ANNOTATIONS)
+                .map(|x| ((x.subtype.as_str(), x.contents.as_deref(), x.rect.map(|v| v.round() as i64)), x.rect.map(f64::from)))
+                .collect()
+        }
+        fn unmatched<'a>(mine: &[(Key<'a>, [f64; 4])], other: &[(Key<'a>, [f64; 4])]) -> Vec<[f64; 4]> {
+            let seen: std::collections::HashSet<&Key<'a>> = other.iter().map(|(k, _)| k).collect();
+            mine.iter().filter(|(k, _)| !seen.contains(k)).map(|(_, r)| *r).collect()
+        }
+        let mut changed: HashMap<(usize, usize), Vec<[f64; 4]>> = HashMap::new();
+        Ok(regions
+            .into_iter()
+            .map(|(old_page, page, rect)| {
+                let rects = changed.entry((old_page, page)).or_insert_with(|| {
+                    let (olds, news) = (keyed(a, old_page), keyed(b, page));
+                    let mut u = unmatched(&olds, &news);
+                    u.extend(unmatched(&news, &olds));
+                    u
+                });
+                let hit = rects.iter().any(|r| {
+                    r[0].min(r[2]) - 1.0 <= rect[2]
+                        && r[0].max(r[2]) + 1.0 >= rect[0]
+                        && r[1].min(r[3]) - 1.0 <= rect[3]
+                        && r[1].max(r[3]) + 1.0 >= rect[1]
+                });
+                VisualRegion { old_page, page, rect, cause: if hit { VisualCause::Annotation } else { VisualCause::Other } }
+            })
+            .collect())
     }
 
     /// The compare report as a new PDF (not opened).
