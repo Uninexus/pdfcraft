@@ -25,6 +25,7 @@ pub mod file_access;
 mod folder_find;
 mod forms;
 mod hairlines;
+mod ink_aliases;
 mod layers;
 mod links;
 #[cfg(feature = "mcp")]

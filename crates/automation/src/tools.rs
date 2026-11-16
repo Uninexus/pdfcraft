@@ -166,6 +166,23 @@ pub fn tools() -> Vec<ToolDef> {
                 }),
                 &["doc"],
             )),
+        t("doc_inks", "List spot inks", "Print production: the spot colorants (Separation and DeviceN colour spaces) the document uses, each with how many colour spaces name it, and aliasable false for a name that is not UTF-8 (shown as 0x and hex bytes), which no alias can name. Process colorants (Cyan, Magenta, Yellow, Black), All and None are not listed. Changes nothing.")
+            .ro()
+            .with(schema(json!({ "doc": doc() }), &["doc"])),
+        t("doc_ink_aliases", "Alias inks", "Print production, Ink Manager: rename spot colorants so that inks given one name print as one. Each { from, to } pair renames every Separation and DeviceN colorant named from to to, in page and form resources, images, patterns and shadings and the colour spaces kept as their own objects; a space keeps its own alternate space and tint transform, so the page looks the same on screen. A name is looked up once, so a to b with b to c does not become a to c. At most 64 pairs, names of 1 to 127 bytes. Process colorants, All and None are not inks: they are never renamed and cannot be the name an ink is given (None paints nothing, All paints on every plate). A DeviceN space is rewritten whole (names, colorants dictionary, mixing hints) and each colorant of it must stay distinct, so aliases that would merge two inks of one DeviceN space are refused with nothing written; merging inks that are in different spaces is fine. Spaces keep their own alternate and tint transform, so when two inks with different definitions get one name, different_alternates lists the name: the page looks the same on screen but PDF/X wants one definition per name. skipped_nested counts structures nested too deep to be read. Nothing to rename is not an error: renamed is 0 and no edit is made. Undoable.")
+            .with(schema(
+                json!({
+                    "doc": doc(),
+                    "aliases": {
+                        "type": "array", "minItems": 1, "maxItems": 64,
+                        "items": {
+                            "type": "object", "additionalProperties": false, "required": ["from", "to"],
+                            "properties": { "from": { "type": "string", "minLength": 1, "maxLength": 127 }, "to": { "type": "string", "minLength": 1, "maxLength": 127 } }
+                        }
+                    }
+                }),
+                &["doc", "aliases"],
+            )),
         t("attachment_add", "Attach a file", "Attach the file at path to the document (document level, the Attachments panel; not a paper-clip comment on a page). name defaults to the file's name; the attachment's key, unique in the document, is returned. Undoable.")
             .cmd("edit.attach")
             .with(schema(json!({"doc": doc(), "path": {"type": "string"}, "name": {"type": "string"}, "description": {"type": "string"}}), &["doc", "path"])),
