@@ -192,7 +192,8 @@ fn plan(doc: &Document, aliases: &InkAliases) -> Result<(Aliased, Vec<(ObjRef, O
     if aliases.aliases.is_empty() {
         return Ok((Aliased::default(), Vec::new()));
     }
-    let mut walk = Walk { doc, aliases, extras: BTreeMap::new(), spaces: 0, skipped: 0, sigs: BTreeMap::new(), renamed_to: BTreeSet::new() };
+    let mut walk =
+        Walk { doc, aliases, extras: BTreeMap::new(), spaces: 0, skipped: 0, recording: false, sigs: BTreeMap::new(), renamed_to: BTreeSet::new() };
     let nums = doc.object_numbers();
     // First every space is read, which fills in the objects its parts live in (a names array or
     // an attributes dictionary of its own), so that an object is rewritten once whatever order
@@ -202,12 +203,11 @@ fn plan(doc: &Document, aliases: &InkAliases) -> Result<(Aliased, Vec<(ObjRef, O
     }
     walk.spaces = 0;
     walk.skipped = 0;
-    walk.sigs.clear();
-    walk.renamed_to.clear();
+    walk.recording = true;
     let mut writes = Vec::new();
     for num in nums {
         let r = ObjRef::new(num, doc.generation(num));
-        let from_parts = walk.extras.get(&r).cloned();
+        let from_parts = walk.extras.get(&num).cloned();
         let object = doc.get(r);
         let base: &Object = from_parts.as_ref().unwrap_or(&object);
         let changed = walk.rename(base, 0).map_err(EditError::Invalid)?;
@@ -232,10 +232,13 @@ struct Walk<'a> {
     doc: &'a Document,
     aliases: &'a InkAliases,
     /// Objects that hold a part of a colour space (names, attributes, colorants, hints), as they
-    /// are to be written.
-    extras: BTreeMap<ObjRef, Object>,
+    /// are to be written, by object number (the generation a file records for it may disagree
+    /// with a reference to it).
+    extras: BTreeMap<u32, Object>,
     spaces: usize,
     skipped: usize,
+    /// Whether to note how each Separation is defined (the second pass only).
+    recording: bool,
     /// For each Separation colorant name after renaming, how its spaces are defined.
     sigs: BTreeMap<Vec<u8>, BTreeSet<String>>,
     /// Names some ink was given.
@@ -243,6 +246,17 @@ struct Walk<'a> {
 }
 
 type Res<T> = Result<T, String>;
+
+/// How a part of a Separation (its alternate space or tint transform) is defined, for telling
+/// two definitions apart: a reference stands for its object, a direct value for itself. Never the
+/// bytes of a stream.
+fn part_signature(part: Option<&Object>) -> String {
+    match part {
+        Some(Object::Ref(r)) => format!("{} {}", r.num, r.generation),
+        Some(other) => format!("{other:?}"),
+        None => String::new(),
+    }
+}
 
 impl Walk<'_> {
     /// `object` with the colorants of the spaces inside it renamed, or `None` when none is. Only
@@ -257,9 +271,6 @@ impl Walk<'_> {
         match object {
             Object::Array(items) => {
                 let space = self.rename_space(items)?;
-                if space.is_some() {
-                    self.spaces += 1;
-                }
                 // Spaces inside this array (an Indexed space's base, say).
                 let current: &[Object] = space.as_deref().unwrap_or(items);
                 let mut nested: Option<Vec<Object>> = None;
@@ -301,16 +312,16 @@ impl Walk<'_> {
                 let name = self.doc.resolve(name_object);
                 let Some(name) = name.as_name() else { return Ok(None) };
                 let to = self.aliases.lookup(name);
-                if is_spot(name) {
+                if self.recording && is_spot(name) {
                     let kept = to.unwrap_or(name).to_vec();
-                    let how = |i: usize| items.get(i).map(|o| format!("{:?}", self.doc.resolve(o))).unwrap_or_default();
-                    let sig = format!("{}|{}", how(2), how(3));
+                    let sig = format!("{}|{}", part_signature(items.get(2)), part_signature(items.get(3)));
                     self.sigs.entry(kept.clone()).or_default().insert(sig);
                     if to.is_some() {
                         self.renamed_to.insert(kept);
                     }
                 }
                 let Some(to) = to else { return Ok(None) };
+                self.spaces += 1;
                 let mut copy = items.to_vec();
                 if let Some(slot) = copy.get_mut(1) {
                     *slot = Object::Name(to.to_vec());
@@ -329,18 +340,23 @@ impl Walk<'_> {
         let mut new_names = Vec::with_capacity(list.len());
         let mut any = false;
         let mut seen: BTreeSet<Vec<u8>> = BTreeSet::new();
+        let mut given: BTreeSet<Vec<u8>> = BTreeSet::new();
         for entry in list {
             let resolved = self.doc.resolve(entry);
-            let kept = match resolved.as_name().and_then(|name| self.aliases.lookup(name)) {
+            let (kept, renamed) = match resolved.as_name().and_then(|name| self.aliases.lookup(name)) {
                 Some(to) => {
                     any = true;
-                    Object::Name(to.to_vec())
+                    given.insert(to.to_vec());
+                    (Object::Name(to.to_vec()), true)
                 }
-                None => entry.clone(),
+                None => (entry.clone(), false),
             };
+            // A repeat the file already had (a malformed space) is not ours to refuse: only one
+            // the aliases make.
             if let Some(name) = self.doc.resolve(&kept).as_name()
                 && name != b"None"
                 && !seen.insert(name.to_vec())
+                && (renamed || given.contains(name))
             {
                 return Err(format!(
                     "aliasing would give one DeviceN colour space the colorant {:?} twice; a DeviceN space names each colorant once, so those inks cannot be merged",
@@ -349,27 +365,35 @@ impl Walk<'_> {
             }
             new_names.push(kept);
         }
-        if !any {
-            return Ok(None);
-        }
         let mut copy = items.to_vec();
-        self.store(names_at, &mut copy, 1, Object::Array(new_names));
+        if any {
+            self.store(names_at, &mut copy, 1, Object::Array(new_names));
+        }
+        // The attributes name colorants too, and are kept in step even when the names do not
+        // have the ink (a colorants entry for an ink the space does not list).
+        let mut attributes_changed = false;
         if let Some(attributes) = items.get(4) {
             let (at, resolved) = target(self.doc, attributes);
             if let Object::Dict(dict) = &*resolved
                 && let Some(new) = self.rename_attributes(dict)?
             {
                 self.store(at, &mut copy, 4, Object::Dict(new));
+                attributes_changed = true;
             }
         }
-        Ok(Some(copy))
+        if !any && !attributes_changed {
+            return Ok(None);
+        }
+        self.spaces += 1;
+        // A space whose parts all live in objects of their own is itself unchanged.
+        Ok((copy != items).then_some(copy))
     }
 
     /// Puts `new` where a part lives: its own object, or slot `i` of the array being rewritten.
     fn store(&mut self, at: Option<ObjRef>, parent: &mut [Object], i: usize, new: Object) {
         match at {
             Some(r) => {
-                self.extras.insert(r, new);
+                self.extras.insert(r.num, new);
             }
             None => {
                 if let Some(slot) = parent.get_mut(i) {
@@ -382,7 +406,7 @@ impl Walk<'_> {
     fn store_in_dict(&mut self, at: Option<ObjRef>, parent: &mut Dict, key: &[u8], new: Object) {
         match at {
             Some(r) => {
-                self.extras.insert(r, new);
+                self.extras.insert(r.num, new);
             }
             None => parent.set(key.to_vec(), new),
         }
@@ -434,6 +458,14 @@ impl Walk<'_> {
                             })
                             .collect();
                         if renamed {
+                            let mut names = BTreeSet::new();
+                            for entry in &new {
+                                if let Some(name) = self.doc.resolve(entry).as_name()
+                                    && !names.insert(name.to_vec())
+                                {
+                                    return Err(format!("aliasing would name {:?} twice in a DeviceN printing order", String::from_utf8_lossy(name)));
+                                }
+                            }
                             self.store_in_dict(part_at, &mut new_hints, b"PrintingOrder", Object::Array(new));
                             hints_changed = true;
                         }
@@ -770,7 +802,7 @@ mod tests {
         doc.add(space(names));
         doc.add(space(names));
         let done = alias_inks(&mut doc, &aliases(&[("Gold", "Foil")])).unwrap();
-        assert_eq!((done.spaces, done.objects), (2, 3), "{done:?}");
+        assert_eq!((done.spaces, done.objects), (2, 1), "only the shared names array is written: {done:?}");
         assert_eq!(names_of(&doc.get(names)), vec![b"Foil".to_vec()]);
     }
 
@@ -803,6 +835,104 @@ mod tests {
         assert_eq!(inks, vec![Ink { name: "0x47e96c".to_owned(), spaces: 1, aliasable: false }]);
         // No alias a caller can write matches those bytes.
         assert_eq!(alias_inks(&mut doc, &aliases(&[("G\u{fffd}l", "Foil")])).unwrap(), Aliased::default());
+    }
+
+    /// A DeviceN that already repeats a colorant (malformed, but real) does not stop other
+    /// inks being aliased; only a repeat the aliases make is refused.
+    #[test]
+    fn a_repeat_the_file_already_had_does_not_block_aliasing() {
+        let mut doc = Document::new_empty();
+        let broken = doc.add(device_n(&["Spot1", "Spot1"], &[]));
+        let other = doc.add(sep("Gold"));
+        let done = alias_inks(&mut doc, &aliases(&[("Gold", "Foil")])).unwrap();
+        assert_eq!(done.spaces, 1, "{done:?}");
+        assert_eq!(name_at(&doc, other, 1), Some(b"Foil".to_vec()));
+        assert_eq!(names_of(&doc.get(broken).as_array().unwrap()[1]), vec![b"Spot1".to_vec(), b"Spot1".to_vec()]);
+        // A repeat beside an aliased ink in the same space stays as it was too.
+        let mut doc = Document::new_empty();
+        let space = doc.add(device_n(&["Spot1", "Spot1", "Gold"], &[]));
+        alias_inks(&mut doc, &aliases(&[("Gold", "Foil")])).unwrap();
+        assert_eq!(names_of(&doc.get(space).as_array().unwrap()[1]), vec![b"Spot1".to_vec(), b"Spot1".to_vec(), b"Foil".to_vec()]);
+    }
+
+    /// Objects with a generation other than 0 are rewritten like any other, and a reference whose
+    /// generation the file does not have for the object is dangling: not read, so not half done.
+    #[test]
+    fn objects_with_a_generation_are_rewritten_and_dangling_references_are_left_alone() {
+        let mut doc = Document::new_empty();
+        let names = ObjRef::new(40, 3);
+        doc.set(names, names_array(&["Gold"]));
+        let space = |reference: ObjRef| {
+            Object::Array(vec![Object::name("DeviceN"), Object::Ref(reference), Object::name("DeviceCMYK"), Object::Dict(Dict::new())])
+        };
+        doc.add(space(names));
+        let done = alias_inks(&mut doc, &aliases(&[("Gold", "Foil")])).unwrap();
+        assert_eq!((done.spaces, done.objects), (1, 1), "{done:?}");
+        assert_eq!(names_of(&doc.get(names)), vec![b"Foil".to_vec()]);
+        assert_eq!(doc.generation(40), 3, "the object keeps its generation");
+        let mut doc = Document::new_empty();
+        let names = doc.add(names_array(&["Gold"]));
+        let touched = snapshot(&doc);
+        doc.add(space(ObjRef::new(names.num, names.generation.wrapping_add(5))));
+        let before = snapshot(&doc);
+        assert_ne!(before, touched);
+        assert_eq!(alias_inks(&mut doc, &aliases(&[("Gold", "Foil")])).unwrap(), Aliased::default());
+        assert_eq!(snapshot(&doc), before);
+    }
+
+    /// An ink only the colorants dictionary has is renamed there, key and space together.
+    #[test]
+    fn a_colorants_entry_for_an_ink_the_names_lack_stays_consistent() {
+        let mut doc = Document::new_empty();
+        let space = doc.add(device_n(&["Gold"], &["Gold", "Gold2"]));
+        alias_inks(&mut doc, &aliases(&[("Gold2", "Silver")])).unwrap();
+        let object = doc.get(space);
+        let items = object.as_array().unwrap();
+        assert_eq!(names_of(&items[1]), vec![b"Gold".to_vec()]);
+        let colorants = items[4].as_dict().and_then(|d| d.get(b"Colorants")).and_then(Object::as_dict).unwrap();
+        assert_eq!(keys_of(colorants), vec![b"Gold".to_vec(), b"Silver".to_vec()]);
+        let silver = colorants.get(b"Silver").and_then(Object::as_array).unwrap();
+        assert_eq!(silver.get(1).and_then(Object::as_name), Some(&b"Silver"[..]));
+    }
+
+    /// A printing order that would name an ink twice is refused.
+    #[test]
+    fn a_printing_order_that_would_repeat_an_ink_is_refused() {
+        let mut doc = Document::new_empty();
+        let mut hints = Dict::new();
+        hints.set(b"PrintingOrder".to_vec(), names_array(&["Gold", "Foil"]));
+        let mut attrs = Dict::new();
+        attrs.set(b"MixingHints".to_vec(), Object::Dict(hints));
+        doc.add(Object::Array(vec![
+            Object::name("DeviceN"),
+            names_array(&["Gold"]),
+            Object::name("DeviceCMYK"),
+            Object::Dict(Dict::new()),
+            Object::Dict(attrs),
+        ]));
+        let touched = snapshot(&doc);
+        let Err(EditError::Invalid(why)) = alias_inks(&mut doc, &aliases(&[("Gold", "Foil")])) else { panic!("accepted") };
+        assert!(why.contains("printing order"), "{why}");
+        assert_eq!(snapshot(&doc), touched);
+    }
+
+    /// Tint transforms that are different objects are different definitions, however big their
+    /// streams are; the same object is one.
+    #[test]
+    fn definitions_are_told_apart_by_the_object_not_its_bytes() {
+        let mut doc = Document::new_empty();
+        let f1 = doc.add(Object::Stream(Stream::from_raw(Dict::new(), vec![1; 1000])));
+        let with =
+            |name: &str, f: ObjRef| Object::Array(vec![Object::name("Separation"), Object::name(name), Object::name("DeviceCMYK"), Object::Ref(f)]);
+        doc.add(with("Gold", f1));
+        doc.add(with("Gold2", f1));
+        assert!(alias_inks(&mut doc, &aliases(&[("Gold2", "Gold")])).unwrap().different_alternates.is_empty());
+        let mut doc = Document::new_empty();
+        let f1 = doc.add(Object::Stream(Stream::from_raw(Dict::new(), vec![1; 1000])));
+        let f2 = doc.add(Object::Stream(Stream::from_raw(Dict::new(), vec![2; 1000])));
+        doc.add(with("Gold", f1));
+        doc.add(with("Gold2", f2));
+        assert_eq!(alias_inks(&mut doc, &aliases(&[("Gold2", "Gold")])).unwrap().different_alternates, vec!["Gold".to_owned()]);
     }
 
     #[test]
