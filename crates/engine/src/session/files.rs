@@ -380,6 +380,12 @@ impl Session {
         Ok(pdfcraft_edit::list_inks(self.cos(id)?))
     }
 
+    /// Every page's boxes (media, crop, bleed, trim, art, in user space) with which of them the
+    /// file sets and the page's rotation. Nothing is changed.
+    pub fn page_box_report(&self, id: DocId) -> Result<Vec<pdfcraft_organize::PageBoxReport>, EditError> {
+        Ok(pdfcraft_organize::page_box_report(self.cos(id)?)?)
+    }
+
     /// What [`Edit::AliasInks`] would do (colour spaces renamed, objects rewritten, inks left with
     /// two definitions), without changing the document.
     pub fn preview_ink_aliases(&self, id: DocId, aliases: &pdfcraft_edit::InkAliases) -> Result<pdfcraft_edit::InksAliased, EditError> {
