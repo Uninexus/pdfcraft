@@ -74,7 +74,7 @@ mod page_streams;
 pub use convert_colours::{ColourTarget, ConvertColours, Converted as ColoursConverted, ImageRecolour, convert_colours};
 pub use hairlines::{Fixed as HairlinesFixed, Hairlines, fix_hairlines};
 pub mod ink_aliases;
-pub use ink_aliases::{Aliased as InksAliased, InkAliases, alias_inks, list_inks};
+pub use ink_aliases::{Aliased as InksAliased, Ink as SpotInk, InkAliases, alias_inks, list_inks, preview_aliases};
 pub mod added;
 pub use added::{
     Added, AddedImage, AddedText, Align, Content, Family, Ink, MarkerScan, add_content, delete_content, first_undrawable, isolate_content,

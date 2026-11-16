@@ -376,19 +376,14 @@ impl Session {
 
     /// The spot colorants the document's colour spaces name, with how many spaces name each
     /// (what Ink aliases would work on). Nothing is changed.
-    pub fn list_inks(&self, id: DocId) -> Vec<(String, usize)> {
-        let Some(doc) = self.get(id) else { return Vec::new() };
-        let Some(editor) = doc.editor.as_ref() else { return Vec::new() };
-        pdfcraft_edit::list_inks(&editor.cos)
+    pub fn list_inks(&self, id: DocId) -> Result<Vec<pdfcraft_edit::SpotInk>, EditError> {
+        Ok(pdfcraft_edit::list_inks(self.cos(id)?))
     }
 
-    /// How many colour spaces [`Edit::AliasInks`] would rename, and in how many objects, without
-    /// changing the document (the edit itself refuses when there is nothing to rename).
-    pub fn count_ink_aliases(&self, id: DocId, aliases: &pdfcraft_edit::InkAliases) -> pdfcraft_edit::InksAliased {
-        let Some(doc) = self.get(id) else { return Default::default() };
-        let Some(editor) = doc.editor.as_ref() else { return Default::default() };
-        let mut cos = editor.cos.clone();
-        pdfcraft_edit::alias_inks(&mut cos, aliases).unwrap_or_default()
+    /// What [`Edit::AliasInks`] would do (colour spaces renamed, objects rewritten, inks left with
+    /// two definitions), without changing the document.
+    pub fn preview_ink_aliases(&self, id: DocId, aliases: &pdfcraft_edit::InkAliases) -> Result<pdfcraft_edit::InksAliased, EditError> {
+        Ok(pdfcraft_edit::preview_aliases(self.cos(id)?, aliases)?)
     }
 
     /// XFDF with these comments (0-based page, position in the page's `/Annots`) and their

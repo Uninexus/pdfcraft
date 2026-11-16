@@ -8617,9 +8617,12 @@ evidence = [
     "crates/edit/src/ink_aliases.rs::every_space_naming_the_ink_is_renamed_and_nothing_else",
     "crates/edit/src/ink_aliases.rs::an_alias_nothing_uses_writes_nothing_and_aliases_are_not_chained",
     "crates/edit/src/ink_aliases.rs::bad_aliases_are_refused_before_anything_is_written",
+    "crates/edit/src/ink_aliases.rs::merging_two_inks_of_one_devicen_space_is_refused_and_writes_nothing",
+    "crates/edit/src/ink_aliases.rs::parts_stored_as_objects_of_their_own_are_rewritten_too",
+    "crates/edit/src/ink_aliases.rs::inks_that_end_up_with_different_alternates_are_reported",
     "crates/automation/tests/it/automation.rs::ink_aliases_through_tools",
 ]
-notes = "Headless first slice: doc_inks lists the spot colorants of the Separation and DeviceN colour spaces, and doc_ink_aliases renames them (from to) in every colour space of the document as one undoable edit; each space keeps its own alternate space and tint transform, so the page looks the same. Process colorants, All and None are never renamed. Missing: the Ink Manager window, converting a spot ink to process there (Convert colours does that for the whole document), and moving a DeviceN space's tint transform to the target ink."
+notes = "Headless first slice: doc_inks lists the spot colorants of the Separation and DeviceN colour spaces, and doc_ink_aliases renames them (from to) in every colour space of the document as one undoable edit; each space keeps its own alternate space and tint transform, so the page looks the same on screen; inks that end up with different definitions under one name are reported (PDF/X wants one per name). Aliases that would put one colorant twice in a DeviceN space are refused. Process colorants, All and None are never renamed. Missing: the Ink Manager window, converting a spot ink to process there (Convert colours does that for the whole document), and moving a DeviceN space's tint transform to the target ink."
 
 [[feature]]
 id = "print.printer-marks"

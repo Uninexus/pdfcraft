@@ -10630,13 +10630,15 @@ trailer << /Root 1 0 R >>
     let inks = ok(&mut a, "doc_inks", json!({ "doc": doc }));
     let names: Vec<_> = inks["inks"].as_array().unwrap().iter().map(|i| i["name"].as_str().unwrap().to_owned()).collect();
     assert_eq!(names, vec!["Gold Foil", "PANTONE 871 C"], "{inks}");
+    assert_eq!(inks["inks"][0]["aliasable"], true);
     assert!(pdfcraft_automation::tools().iter().any(|t| t.name == "doc_inks" && t.read_only));
 
     let before = a.call("page_render", &json!({ "doc": doc, "page": 1, "dpi": 72 })).unwrap();
     let aliased = ok(&mut a, "doc_ink_aliases", json!({ "doc": doc, "aliases": [{ "from": "Gold Foil", "to": "PANTONE 871 C" }] }));
     assert_eq!(aliased["renamed"], 1, "{aliased}");
     let inks = ok(&mut a, "doc_inks", json!({ "doc": doc }));
-    assert_eq!(inks["inks"], json!([{ "name": "PANTONE 871 C", "spaces": 2 }]), "{inks}");
+    assert_eq!(inks["inks"], json!([{ "name": "PANTONE 871 C", "spaces": 2, "aliasable": true }]), "{inks}");
+    assert_eq!(aliased["different_alternates"], json!([]), "{aliased}");
     let after = a.call("page_render", &json!({ "doc": doc, "page": 1, "dpi": 72 })).unwrap();
     assert_eq!(format!("{before:?}"), format!("{after:?}"), "the page looks the same");
 
@@ -10644,13 +10646,17 @@ trailer << /Root 1 0 R >>
     let none = ok(&mut a, "doc_ink_aliases", json!({ "doc": doc, "aliases": [{ "from": "Silver", "to": "Gold Foil" }] }));
     assert_eq!(none["renamed"], 0, "{none}");
     // Bad arguments are refused.
-    for bad in
-        [json!([]), json!([{ "from": "A" }]), json!([{ "from": "A", "to": "B" }, { "from": "A", "to": "C" }]), json!([{ "from": "", "to": "B" }])]
-    {
-        assert!(
-            matches!(err(&mut a, "doc_ink_aliases", json!({ "doc": doc, "aliases": bad })), ToolError::InvalidArgs(_) | ToolError::Failed(_)),
-            "{bad}"
-        );
+    for (bad, why) in [
+        (json!([]), "give at least one"),
+        (json!([{ "from": "A" }]), "needs a from and a to"),
+        (json!([{ "from": "A", "to": "B" }, { "from": "A", "to": "C" }]), "aliased twice"),
+        (json!([{ "from": "", "to": "B" }]), "1 to 127 bytes"),
+        (json!([{ "from": "PANTONE 871 C", "to": "None" }]), "not a name an ink can be given"),
+    ] {
+        match err(&mut a, "doc_ink_aliases", json!({ "doc": doc, "aliases": bad })) {
+            ToolError::InvalidArgs(m) => assert!(m.contains(why), "{bad}: {m}"),
+            other => panic!("{bad}: {other:?}"),
+        }
     }
     // One undo step puts the names back.
     ok(&mut a, "edit_undo", json!({ "doc": doc }));

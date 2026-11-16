@@ -11,13 +11,20 @@ impl Automation {
     /// how many colour spaces name it. Process colorants, All and None are not listed.
     pub(crate) fn doc_inks(&mut self, a: &Args) -> Result<Value> {
         let id = self.doc(a)?.id;
-        let inks: Vec<Value> = self.session.list_inks(id).into_iter().map(|(name, spaces)| json!({ "name": name, "spaces": spaces })).collect();
+        let inks: Vec<Value> = self
+            .session
+            .list_inks(id)
+            .map_err(ToolError::from)?
+            .into_iter()
+            .map(|i| json!({ "name": i.name, "spaces": i.spaces, "aliasable": i.aliasable }))
+            .collect();
         Ok(json!({ "inks": inks }))
     }
 
     /// `aliases`: `{ "from", "to" }` pairs. Each spot colorant named `from` is renamed `to` in
     /// every Separation and DeviceN colour space, as one undoable edit. A document that uses none
-    /// of the `from` inks is not an error: `renamed` is 0 and no edit is made.
+    /// of the `from` inks is not an error: `renamed` is 0 and no edit is made. Aliases that would
+    /// give one DeviceN space the same colorant twice are refused, with nothing written.
     pub(crate) fn doc_ink_aliases(&mut self, a: &Args) -> Result<Value> {
         let list = a
             .get("aliases")
@@ -36,11 +43,17 @@ impl Automation {
         }
         aliases.check().map_err(ToolError::InvalidArgs)?;
         let id = self.doc(a)?.id;
-        let found = self.session.count_ink_aliases(id, &aliases);
+        let found = self.session.preview_ink_aliases(id, &aliases).map_err(ToolError::from)?;
         if found.spaces == 0 {
-            return Ok(json!({ "renamed": 0, "objects": 0 }));
+            return Ok(json!({ "renamed": 0, "objects": 0, "skipped_nested": found.skipped_nested }));
         }
         let r = self.apply(a, Edit::AliasInks { aliases })?;
-        Ok(json!({ "renamed": found.spaces, "objects": found.objects, "undo": r["undo"] }))
+        Ok(json!({
+            "renamed": found.spaces,
+            "objects": found.objects,
+            "different_alternates": found.different_alternates,
+            "skipped_nested": found.skipped_nested,
+            "undo": r["undo"],
+        }))
     }
 }
