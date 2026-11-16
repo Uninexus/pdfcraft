@@ -5261,3 +5261,114 @@ fn catalog_af_for_test(doc: &Document) -> ((), Vec<Object>) {
     let c = af_catalog(doc);
     ((), doc.resolve(c.get(b"AF").unwrap()).as_array().cloned().unwrap())
 }
+
+/// Adds a `/DPart` node (not yet linked to its children) and returns its reference.
+fn add_part(doc: &mut Document, start_end: Option<(ObjRef, ObjRef)>) -> ObjRef {
+    let mut part = pdfcraft_cos::Dict::new();
+    part.set(b"Type".to_vec(), Object::name("DPart"));
+    if let Some((start, end)) = start_end {
+        part.set(b"Start".to_vec(), Object::Ref(start));
+        part.set(b"End".to_vec(), Object::Ref(end));
+    }
+    doc.add(Object::Dict(part))
+}
+
+fn set_children(doc: &mut Document, node: ObjRef, children: &[ObjRef]) {
+    let row = Object::Array(children.iter().map(|c| Object::Ref(*c)).collect());
+    doc.update_dict(node, |d| d.set(b"DParts".to_vec(), Object::Array(vec![row]))).unwrap();
+}
+
+fn set_document_part_root(doc: &mut Document, node: ObjRef) {
+    let mut root = pdfcraft_cos::Dict::new();
+    root.set(b"Type".to_vec(), Object::name("DPartRoot"));
+    root.set(b"DPartRootNode".to_vec(), Object::Ref(node));
+    root.set(b"RecordLevel".to_vec(), Object::Int(1));
+    let root = doc.add(Object::Dict(root));
+    doc.update_dict(doc.root().unwrap(), |c| c.set(b"DPartRoot".to_vec(), Object::Ref(root))).unwrap();
+}
+
+#[test]
+fn document_parts_are_listed_in_order_with_pages_and_metadata() {
+    let mut doc = open(fixture());
+    assert_eq!(list_document_parts(&doc), DocumentPartList::default(), "no /DPartRoot");
+    let pages = pages(&doc).unwrap();
+    let (p1, p2, p3) = (pages[0].obj, pages[1].obj, pages[2].obj);
+    let top = add_part(&mut doc, None);
+    let a = add_part(&mut doc, Some((p1, p1)));
+    let b = add_part(&mut doc, Some((p2, p3)));
+    let c = add_part(&mut doc, Some((p3, p3)));
+    // The root lists a and b; a lists c; b lists a again (listed twice) and the root (a cycle).
+    set_children(&mut doc, top, &[a, b]);
+    set_children(&mut doc, a, &[c]);
+    set_children(&mut doc, b, &[a, top]);
+    let mut dpm = pdfcraft_cos::Dict::new();
+    dpm.set(b"Kind".to_vec(), Object::String(pdfcraft_cos::PdfString::text("cover")));
+    dpm.set(b"Copies".to_vec(), Object::Int(3));
+    dpm.set(b"Nested".to_vec(), Object::Array(vec![]));
+    doc.update_dict(a, |d| d.set(b"DPM".to_vec(), Object::Dict(dpm))).unwrap();
+    set_document_part_root(&mut doc, top);
+
+    let list = list_document_parts(&doc);
+    assert!(list.has_root && !list.truncated);
+    assert_eq!(list.record_level, Some(1));
+    let rows: Vec<_> = list.parts.iter().map(|p| (p.object, p.parent, p.depth, p.start_page, p.end_page, p.children)).collect();
+    assert_eq!(
+        rows,
+        [
+            (top.num, None, 0, None, None, 2),
+            (a.num, Some(top.num), 1, Some(1), Some(1), 1),
+            (c.num, Some(a.num), 2, Some(3), Some(3), 0),
+            (b.num, Some(top.num), 1, Some(2), Some(3), 2),
+        ]
+    );
+    assert_eq!(list.skipped, 2, "a listed twice, the root reached again");
+    let kind = list.parts[1].metadata.iter().find(|(k, _)| k == "Kind").map(|(_, v)| v.as_str());
+    assert_eq!(kind, Some("cover"));
+    let nested = list.parts[1].metadata.iter().find(|(k, _)| k == "Nested").map(|(_, v)| v.as_str());
+    assert_eq!((nested, list.parts[1].metadata.len()), (Some("(array)"), 3));
+
+    // It reads back from a saved file too.
+    let saved = open(write_full(&doc, &SaveOptions::default()).unwrap());
+    assert_eq!(list_document_parts(&saved).parts.len(), 4);
+}
+
+#[test]
+fn document_part_listing_is_bounded_by_depth_and_node_count() {
+    // A chain deeper than the limit.
+    let mut doc = open(fixture());
+    let top = add_part(&mut doc, None);
+    let mut last = top;
+    for _ in 0..(MAX_DPART_DEPTH + 10) {
+        let next = add_part(&mut doc, None);
+        set_children(&mut doc, last, &[next]);
+        last = next;
+    }
+    set_document_part_root(&mut doc, top);
+    let list = list_document_parts(&doc);
+    assert!(list.truncated);
+    assert_eq!(list.parts.len(), MAX_DPART_DEPTH + 1);
+    assert_eq!(list.parts.last().map(|p| p.depth), Some(MAX_DPART_DEPTH));
+
+    // More siblings than the node limit.
+    let mut doc = open(fixture());
+    let top = add_part(&mut doc, None);
+    let kids: Vec<ObjRef> = (0..(MAX_DPART_NODES + 20)).map(|_| add_part(&mut doc, None)).collect();
+    set_children(&mut doc, top, &kids);
+    set_document_part_root(&mut doc, top);
+    let list = list_document_parts(&doc);
+    assert!(list.truncated);
+    assert_eq!(list.parts.len(), MAX_DPART_NODES);
+
+    // Hostile shapes: a root node that is not a dictionary, /DParts holding numbers.
+    let mut doc = open(fixture());
+    let number = doc.add(Object::Int(7));
+    set_document_part_root(&mut doc, number);
+    let list = list_document_parts(&doc);
+    assert!((list.has_root, list.parts.len(), list.skipped) == (true, 0, 1), "{list:?}");
+    let node = add_part(&mut doc, None);
+    doc.update_dict(node, |d| d.set(b"DParts".to_vec(), Object::Array(vec![Object::Int(1), Object::Array(vec![Object::Int(2), Object::Null])])))
+        .unwrap();
+    set_document_part_root(&mut doc, node);
+    let list = list_document_parts(&doc);
+    assert_eq!((list.parts.len(), list.skipped), (1, 2), "{list:?}");
+}

@@ -51,7 +51,7 @@ are borrowed; PDF 2.0 additions and most subset standards are missing. **150–2
 | §14.9 | Accessibility support: alt text, ActualText, language | full | alt text figure by figure, language, title | `a11y.alt-text-workflow` |
 | §14.10 | Web capture | yes | none | |
 | §14.11 | Prepress: page boxes, output intents, trapping, OPI | full | page boxes and crop; sRGB output intent | `print.*` production planned |
-| §14.12 | Document parts (DPart) | yes | none | `core.pdf20-dpart` planned |
+| §14.12 | Document parts (DPart) | yes | `dpart_list` (read-only listing) | `core.pdf20-dpart` partial |
 | §14.13 | Associated files (`/AF`) | yes | `af_list` (catalog and pages), `af_add` and `af_remove` (catalog only) | `core.pdf20-associated-files` partial |
 | — | Structural validation (Arlington PDF model) | yes (Preflight syntax checks) | none | `core.arlington-validation` planned |
 | — | Optional content (layers) | full | **own** toggle and default state, reset to the default state; set-OCG-state actions; no layer editing | `view.layers-panel`, `view.layers-reset` |

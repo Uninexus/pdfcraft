@@ -439,11 +439,11 @@ title = "PDF 2.0 document parts (DPart)"
 area = "A"
 tier = "P2"
 milestone = "M2"
-status = "planned"
+status = "partial"
 commands = []
-tools = []
-evidence = []
-notes = ""
+tools = ["dpart_list"]
+evidence = ["crates/organize/src/tests.rs::document_parts_are_listed_in_order_with_pages_and_metadata", "crates/organize/src/tests.rs::document_part_listing_is_bounded_by_depth_and_node_count", "crates/automation/tests/it/document_parts.rs::document_parts_are_listed_through_the_tool_and_survive_a_save"]
+notes = "Headless and read-only. dpart_list walks the tree under the catalog's /DPartRoot (node, parent, depth, /Start and /End as 1-based pages, child count, /DPM entries as short text) in document order; at most 5000 nodes and 64 levels, each node read once, only indirect references followed. It does not validate the tree against the specification. Not yet: creating, editing or removing document parts, keeping them in step with page edits beyond what is already preserved, /NodeNameList, any UI"
 
 [[feature]]
 id = "core.pdf20-namespaces"

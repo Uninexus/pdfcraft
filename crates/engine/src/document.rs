@@ -583,6 +583,11 @@ impl Document {
         self.editor.as_ref().map(|e| pdfcraft_organize::associated_files(&e.cos)).unwrap_or_default()
     }
 
+    /// The PDF 2.0 document part tree (`/DPartRoot`), read only.
+    pub fn document_parts(&self) -> pdfcraft_organize::DocumentPartList {
+        self.editor.as_ref().map(|e| pdfcraft_organize::list_document_parts(&e.cos)).unwrap_or_default()
+    }
+
     /// [`Self::associated_files`], with whether the list was cut at its bounds.
     pub fn associated_list(&self) -> pdfcraft_organize::AssociatedList {
         self.editor.as_ref().map(|e| pdfcraft_organize::list_associated_files(&e.cos)).unwrap_or_default()
