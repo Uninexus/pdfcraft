@@ -5372,3 +5372,97 @@ fn document_part_listing_is_bounded_by_depth_and_node_count() {
     let list = list_document_parts(&doc);
     assert_eq!((list.parts.len(), list.skipped), (1, 2), "{list:?}");
 }
+
+fn ns_dict(doc: &mut Document, ns: Option<&str>, roles: &[(&str, Object)]) -> ObjRef {
+    let mut d = pdfcraft_cos::Dict::new();
+    d.set(b"Type".to_vec(), Object::name("Namespace"));
+    if let Some(ns) = ns {
+        d.set(b"NS".to_vec(), Object::String(pdfcraft_cos::PdfString::text(ns)));
+    }
+    if !roles.is_empty() {
+        let mut map = pdfcraft_cos::Dict::new();
+        for (k, v) in roles {
+            map.set(k.as_bytes().to_vec(), v.clone());
+        }
+        d.set(b"RoleMapNS".to_vec(), Object::Dict(map));
+    }
+    doc.add(Object::Dict(d))
+}
+
+fn set_namespaces(doc: &mut Document, items: Vec<Object>) {
+    let mut root = pdfcraft_cos::Dict::new();
+    root.set(b"Type".to_vec(), Object::name("StructTreeRoot"));
+    root.set(b"Namespaces".to_vec(), Object::Array(items));
+    let root = doc.add(Object::Dict(root));
+    doc.update_dict(doc.root().unwrap(), |c| c.set(b"StructTreeRoot".to_vec(), Object::Ref(root))).unwrap();
+}
+
+#[test]
+fn structure_namespaces_are_listed_with_their_role_maps() {
+    let mut doc = open(fixture());
+    assert_eq!(list_structure_namespaces(&doc), NamespaceList::default(), "no /StructTreeRoot");
+    let pdf2 = ns_dict(&mut doc, Some("http://iso.org/pdf2/ssn"), &[]);
+    let custom = ns_dict(
+        &mut doc,
+        Some("urn:example:tags"),
+        &[("Note", Object::Array(vec![Object::name("P"), Object::Ref(pdf2)])), ("Plain", Object::name("Span")), ("Odd", Object::Int(3))],
+    );
+    let nameless = ns_dict(&mut doc, None, &[]);
+    // custom is listed twice, a number and a null are not namespaces.
+    set_namespaces(&mut doc, vec![Object::Ref(pdf2), Object::Ref(custom), Object::Ref(custom), Object::Int(4), Object::Ref(nameless), Object::Null]);
+
+    let list = list_structure_namespaces(&doc);
+    assert!(list.has_structure_tree && !list.truncated);
+    assert_eq!(list.skipped, 2, "{list:?}");
+    let rows: Vec<_> = list.namespaces.iter().map(|n| (n.object, n.ns.as_deref(), n.role_count)).collect();
+    assert_eq!(
+        rows,
+        [(Some(pdf2.num), Some("http://iso.org/pdf2/ssn"), 0), (Some(custom.num), Some("urn:example:tags"), 3), (Some(nameless.num), None, 0)]
+    );
+    let roles: Vec<_> =
+        list.namespaces[1].roles.iter().map(|r| (r.structure_type.as_str(), r.role.as_deref(), r.role_namespace.as_deref())).collect();
+    assert_eq!(roles, [("Note", Some("P"), Some("http://iso.org/pdf2/ssn")), ("Plain", Some("Span"), None), ("Odd", None, None)]);
+}
+
+#[test]
+fn structure_namespace_listing_is_bounded() {
+    let mut doc = open(fixture());
+    let many: Vec<Object> = (0..(MAX_NAMESPACES + 5)).map(|i| Object::Ref(ns_dict(&mut doc, Some(&format!("urn:n{i}")), &[]))).collect();
+    set_namespaces(&mut doc, many);
+    let list = list_structure_namespaces(&doc);
+    assert!(list.truncated);
+    assert_eq!(list.namespaces.len(), MAX_NAMESPACES);
+
+    let mut doc = open(fixture());
+    let roles: Vec<(String, Object)> = (0..(MAX_ROLE_ENTRIES + 10)).map(|i| (format!("T{i}"), Object::name("P"))).collect();
+    let roles: Vec<(&str, Object)> = roles.iter().map(|(k, v)| (k.as_str(), v.clone())).collect();
+    let big = ns_dict(&mut doc, Some(&"x".repeat(MAX_NS_CHARS + 50)), &roles);
+    set_namespaces(&mut doc, vec![Object::Ref(big)]);
+    let list = list_structure_namespaces(&doc);
+    let n = &list.namespaces[0];
+    assert_eq!(
+        (n.role_count, n.roles.len(), n.ns.as_ref().map(|s| s.chars().count())),
+        (MAX_ROLE_ENTRIES + 10, MAX_ROLE_ENTRIES, Some(MAX_NS_CHARS))
+    );
+
+    // /Namespaces that is not an array, and a /StructTreeRoot that is not a dictionary.
+    let mut doc = open(fixture());
+    let root = pdfcraft_cos::Dict::from_iter([(b"Namespaces".to_vec(), Object::Int(1))]);
+    let root = doc.add(Object::Dict(root));
+    doc.update_dict(doc.root().unwrap(), |c| c.set(b"StructTreeRoot".to_vec(), Object::Ref(root))).unwrap();
+    let list = list_structure_namespaces(&doc);
+    assert_eq!((list.has_structure_tree, list.namespaces.len()), (true, 0), "{list:?}");
+
+    // A /StructTreeRoot that is not a dictionary is no structure tree.
+    let mut doc = open(fixture());
+    let number = doc.add(Object::Int(7));
+    doc.update_dict(doc.root().unwrap(), |c| c.set(b"StructTreeRoot".to_vec(), Object::Ref(number))).unwrap();
+    assert_eq!(list_structure_namespaces(&doc), NamespaceList::default());
+
+    // Exactly the limit is not truncated.
+    let mut doc = open(fixture());
+    let exact: Vec<Object> = (0..MAX_NAMESPACES).map(|i| Object::Ref(ns_dict(&mut doc, Some(&format!("urn:n{i}")), &[]))).collect();
+    set_namespaces(&mut doc, exact);
+    let list = list_structure_namespaces(&doc);
+    assert_eq!((list.namespaces.len(), list.truncated), (MAX_NAMESPACES, false));
+}

@@ -791,6 +791,7 @@ impl Automation {
             }
             "af_list" => self.af_list(&a)?,
             "dpart_list" => self.dpart_list(&a)?,
+            "ns_list" => self.ns_list(&a)?,
             "af_add" => self.af_add(&a)?,
             "af_remove" => self.af_remove(&a)?,
             "attachment_delete" => {

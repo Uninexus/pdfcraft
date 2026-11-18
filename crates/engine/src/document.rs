@@ -588,6 +588,11 @@ impl Document {
         self.editor.as_ref().map(|e| pdfcraft_organize::list_document_parts(&e.cos)).unwrap_or_default()
     }
 
+    /// The PDF 2.0 structure namespaces (`/StructTreeRoot` `/Namespaces`), read only.
+    pub fn structure_namespaces(&self) -> pdfcraft_organize::NamespaceList {
+        self.editor.as_ref().map(|e| pdfcraft_organize::list_structure_namespaces(&e.cos)).unwrap_or_default()
+    }
+
     /// [`Self::associated_files`], with whether the list was cut at its bounds.
     pub fn associated_list(&self) -> pdfcraft_organize::AssociatedList {
         self.editor.as_ref().map(|e| pdfcraft_organize::list_associated_files(&e.cos)).unwrap_or_default()

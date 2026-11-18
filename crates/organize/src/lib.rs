@@ -21,6 +21,7 @@ mod dedupe;
 mod dparts;
 mod import;
 mod labels;
+mod namespaces;
 mod outline;
 mod outline_io;
 mod pdfx;
@@ -44,6 +45,7 @@ pub use import::{
     insert_file_pages, page_as_form, reachable, split, split_ranges,
 };
 pub use labels::{LabelRange, LabelStyle, PageLabels, number_pages, page_label_ranges, page_labels, set_page_label_ranges};
+pub use namespaces::{MAX_NAMESPACES, MAX_NS_CHARS, MAX_ROLE_ENTRIES, NamespaceList, NamespaceRole, StructureNamespace, list_structure_namespaces};
 pub use outline::{
     Bookmark, BookmarkPage, OutlineEntry, OutlineError, add_bookmark, add_bookmark_at, add_bookmark_tree, bookmark_page, bookmarks, delete_bookmark,
     move_bookmark, rename_bookmark, set_bookmark_color, set_bookmark_open, set_bookmark_page, set_bookmark_style, top_level_bookmarks,
