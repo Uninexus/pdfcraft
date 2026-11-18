@@ -1,5 +1,6 @@
 # Where PdfCraft falls short of Acrobat Pro
 
+> **Last reviewed:** 2026-11-18 | **Last updated:** 2026-11-18 | **Change:** minor (gap 22: `ns_list` lists the PDF 2.0 structure namespaces read-only; estimates unchanged)
 > **Last reviewed:** 2026-11-16 | **Last updated:** 2026-11-16 | **Change:** minor (gap 22: `dpart_list` lists the PDF 2.0 document part tree read-only; estimates unchanged)
 > **Last reviewed:** 2026-11-16 | **Last updated:** 2026-11-16 | **Change:** minor (gap 17: `redact_mark` can leave the first or last letters or digits of a pattern or regex match readable, headless; estimates unchanged)
 > **Last reviewed:** 2026-11-16 | **Last updated:** 2026-11-16 | **Change:** minor (gap 18: `print_readiness` takes an `ink_limit` for the total-ink finding, headless only; estimates unchanged)
@@ -507,6 +508,10 @@ update the numbers.
   `/DPartRoot` (node, parent, depth, `/Start` and `/End` as pages, child count, `/DPM` entries as short
   text; at most 5,000 nodes and 64 levels, each node read once). The tree is not validated, and
   creating or editing parts and any UI are not done.
+  `core.pdf20-namespaces` is partial: `ns_list` (read-only) lists the namespace dictionaries in the
+  structure tree root's `/Namespaces` (object, `/NS`, whether `/Schema` is present, `/RoleMapNS`
+  count and its first 64 entries; at most 1,000 namespaces; the same reference listed twice is listed once). Nothing is validated (unique `/NS`,
+  use by structure elements, role map consistency); adding or editing namespaces and any UI are not done.
 - **Estimate:** 20–35 h. **Doc:** [pdf-spec-parity.md](pdf-spec-parity.md).
 
 ### 23. Local AI provider
@@ -528,6 +533,7 @@ update the numbers.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-18 | minor | Gap 22: `ns_list` lists the PDF 2.0 structure namespaces (`/StructTreeRoot` `/Namespaces`, with `/RoleMapNS` entries) read-only (`core.pdf20-namespaces` is partial); no validation, writing or UI. Estimates unchanged. |
 | 2026-11-16 | minor | Gap 22: `dpart_list` lists the PDF 2.0 document part tree (`/DPartRoot`) read-only (`core.pdf20-dpart` is partial); no validation, writing or UI. Estimates unchanged. |
 | 2026-11-16 | minor | Gap 17: `redact_mark` with `pattern` or `regex` takes `keep_first` and `keep_last`, leaving that many letters or digits at the start or end of each match readable (headless; no UI control, not for find or words). Estimates unchanged. |
 | 2026-11-16 | minor | Gap 18: `print_readiness` takes an optional `ink_limit` (100 to 400 percent, default 300, other values refused) for the `ink-total` finding, and the finding names the limit used; no setting in the Print readiness dialog or Preferences, and still only painted vector CMYK colours (`print.total-area-coverage` stays partial). Estimates unchanged. |

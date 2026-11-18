@@ -451,11 +451,11 @@ title = "PDF 2.0 structure namespaces"
 area = "A"
 tier = "P1"
 milestone = "M12"
-status = "planned"
+status = "partial"
 commands = []
-tools = []
-evidence = []
-notes = ""
+tools = ["ns_list"]
+evidence = ["crates/organize/src/tests.rs::structure_namespaces_are_listed_with_their_role_maps", "crates/organize/src/tests.rs::structure_namespace_listing_is_bounded", "crates/automation/tests/it/structure_namespaces.rs::structure_namespaces_are_listed_through_the_tool_and_survive_a_save"]
+notes = "Headless and read-only. ns_list lists the namespace dictionaries in the /Namespaces array of the /StructTreeRoot (object, /NS as short text, whether /Schema is present, /RoleMapNS entry count and the first 64 entries: type, mapped role, and the /NS of the namespace of an [name namespace] pair); at most 1000 namespaces, the same reference listed twice is listed once, non-dictionary items counted as skipped. It does not validate: not that /NS values are unique, that a namespace is used by a structure element or that role maps agree. Not yet: adding, editing or removing namespaces, reading /NS on structure elements, role-mapping that follows namespaces, any UI"
 
 [[feature]]
 id = "core.arlington-validation"

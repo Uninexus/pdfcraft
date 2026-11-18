@@ -272,6 +272,34 @@ impl Automation {
         }))
     }
 
+    pub(crate) fn ns_list(&mut self, a: &Args) -> Result<Value> {
+        let doc = self.doc(a)?;
+        let list = doc.structure_namespaces();
+        let rows: Vec<Value> = list
+            .namespaces
+            .into_iter()
+            .map(|n| {
+                let roles: Vec<Value> =
+                    n.roles.into_iter().map(|r| json!({ "type": r.structure_type, "role": r.role, "role_namespace": r.role_namespace })).collect();
+                json!({
+                    "object": n.object,
+                    "ns": n.ns,
+                    "has_schema": n.has_schema,
+                    "role_count": n.role_count,
+                    "roles": roles,
+                })
+            })
+            .collect();
+        Ok(json!({
+            "has_structure_tree": list.has_structure_tree,
+            "namespaces": rows,
+            "count": rows.len(),
+            "skipped": list.skipped,
+            "truncated": list.truncated,
+            "unsaved_changes": doc.dirty,
+        }))
+    }
+
     pub(crate) fn af_add(&mut self, a: &Args) -> Result<Value> {
         let path = self.resolve(a.str("path")?, false)?;
         let relationship = a.str("relationship")?.to_string();
