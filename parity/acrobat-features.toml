@@ -9903,6 +9903,18 @@ evidence = ["crates/automation/tests/it/ai.rs::ask_sends_the_page_text_and_retur
 notes = "File > Ask AI Assistant… and ai_ask answer a question from the page text; the model is asked to cite pages like (p. 3), and those references in the answer are clickable and jump to the page (v0.21.6). Missing: conversation history."
 
 [[feature]]
+id = "misc.ai-redaction-suggest"
+title = "Suggest passages to redact with the AI provider"
+area = "N"
+tier = "P2"
+milestone = "M13"
+status = "partial"
+commands = []
+tools = ["ai_redaction_suggest"]
+evidence = ["crates/automation/tests/it/ai.rs::redaction_suggestions_keep_only_passages_that_are_in_the_text_and_mark_nothing", "crates/ai/src/tests.rs::passages_are_read_from_a_wrapped_reply_and_junk_is_dropped"]
+notes = "ai_redaction_suggest (headless only) sends the page text to the endpoint set up for the AI assistant and asks for personal or confidential passages as a JSON list. Only passages that occur in the text the model was given (cut to about 60,000 characters; `pages_sent` and `truncated` say what it saw; whitespace-normalised, case-sensitive, while `redact_mark` words match ignoring case) are returned, each with its pages and occurrence count; at most 200 are read, each at most 200 characters; the rest is counted in not_in_text. It marks and changes nothing: the person reviews the list and passes the accepted passages to redact_mark as words. A model can miss or over-flag, so it is a starting list, not a check. Tested only against a local stand-in server, not a real model. Missing: any UI, marking from the list in one step, passages split across lines, alternate-text suggestions."
+
+[[feature]]
 id = "misc.ai-conversational-edit"
 title = "Natural-language editing through registry commands"
 area = "N"

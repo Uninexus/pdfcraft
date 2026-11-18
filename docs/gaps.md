@@ -1,5 +1,6 @@
 # Where PdfCraft falls short of Acrobat Pro
 
+> **Last reviewed:** 2026-11-18 | **Last updated:** 2026-11-18 | **Change:** minor (gap 23: `ai_redaction_suggest` suggests passages to redact through the user's own AI endpoint, headless and suggest-only; estimates unchanged)
 > **Last reviewed:** 2026-11-18 | **Last updated:** 2026-11-18 | **Change:** minor (gap 22: `ns_list` lists the PDF 2.0 structure namespaces read-only; estimates unchanged)
 > **Last reviewed:** 2026-11-16 | **Last updated:** 2026-11-16 | **Change:** minor (gap 22: `dpart_list` lists the PDF 2.0 document part tree read-only; estimates unchanged)
 > **Last reviewed:** 2026-11-16 | **Last updated:** 2026-11-16 | **Change:** minor (gap 17: `redact_mark` can leave the first or last letters or digits of a pattern or regex match readable, headless; estimates unchanged)
@@ -516,8 +517,9 @@ update the numbers.
 
 ### 23. Local AI provider
 
-- **Missing:** the opt-in provider interface (local model or the user's own endpoint) and the
-  features on it: summarize, ask with page citations, alternate-text and redaction suggestions.
+- **Missing:** the opt-in provider interface (local model or the user's own endpoint) is in, with
+  summarize, ask with page citations and translate. Redaction suggestions are in headlessly only
+  (`ai_redaction_suggest`, suggest-only, no UI); alternate-text suggestions are missing.
   Acrobat's AI Assistant is a cloud service and out of scope.
 - **Estimate:** 20–40 h. **Doc:** [target-app-parity.md](target-app-parity.md).
 
@@ -533,6 +535,7 @@ update the numbers.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-18 | minor | Gap 23: `ai_redaction_suggest` asks the user's own AI endpoint for passages to redact and returns only those that occur in the page text, with pages and counts (`misc.ai-redaction-suggest` is partial); it marks nothing, has no UI and was tested only against a stand-in server. Estimates unchanged. |
 | 2026-11-18 | minor | Gap 22: `ns_list` lists the PDF 2.0 structure namespaces (`/StructTreeRoot` `/Namespaces`, with `/RoleMapNS` entries) read-only (`core.pdf20-namespaces` is partial); no validation, writing or UI. Estimates unchanged. |
 | 2026-11-16 | minor | Gap 22: `dpart_list` lists the PDF 2.0 document part tree (`/DPartRoot`) read-only (`core.pdf20-dpart` is partial); no validation, writing or UI. Estimates unchanged. |
 | 2026-11-16 | minor | Gap 17: `redact_mark` with `pattern` or `regex` takes `keep_first` and `keep_last`, leaving that many letters or digits at the start or end of each match readable (headless; no UI control, not for find or words). Estimates unchanged. |
