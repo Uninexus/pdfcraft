@@ -1,5 +1,6 @@
 # Where PdfCraft falls short of Acrobat Pro
 
+> **Last reviewed:** 2026-11-16 | **Last updated:** 2026-11-16 | **Change:** minor (gap 18: `print_readiness` takes an `ink_limit` for the total-ink finding, headless only; estimates unchanged)
 > **Last reviewed:** 2026-11-16 | **Last updated:** 2026-11-16 | **Change:** minor (gap 21: `doc_compare` tells visual regions that overlap a comment annotation only one file has from other visual changes; estimates unchanged)
 > **Last reviewed:** 2026-11-16 | **Last updated:** 2026-11-16 | **Change:** minor (gap 17: redact_mark patterns sin and ca-postal-code, Canadian Social Insurance Numbers and postal codes; estimates unchanged)
 > **Last reviewed:** 2026-11-16 | **Last updated:** 2026-11-16 | **Change:** minor (gap 19: Preferences ▸ Forms gains a Required field border colour; estimates unchanged)
@@ -428,7 +429,7 @@ update the numbers.
   print as image; PostScript output. Fix hairlines is in (Print production ▸ Fix hairlines…).
   Total area coverage and the overprint, rich-black text and spot-colour notes are in as a first slice
   (`print_readiness`, the ink findings): painted vector CMYK colours only, not those inside images,
-  shadings, patterns or annotation appearances, with no setting for the limit.
+  shadings, patterns or annotation appearances, with a settable limit only headlessly (`print_readiness` `ink_limit`, 100 to 400 percent, default 300), none in the app.
   Ink aliases are in as a headless slice (`doc_inks`, `doc_ink_aliases`: spot colorants listed and renamed
   so two inks print as one), with no Ink Manager window yet.
   Page boxes can be read back headlessly (`page_boxes`: all five boxes, which the file sets, the rotation and the
@@ -520,6 +521,7 @@ update the numbers.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-16 | minor | Gap 18: `print_readiness` takes an optional `ink_limit` (100 to 400 percent, default 300, other values refused) for the `ink-total` finding, and the finding names the limit used; no setting in the Print readiness dialog or Preferences, and still only painted vector CMYK colours (`print.total-area-coverage` stays partial). Estimates unchanged. |
 | 2026-11-16 | minor | Gap 21: `doc_compare` with `visual` gives each visual region a `cause`, `annotation` when it overlaps a comment (markup) annotation that only one of the two files has on that page and `other` otherwise; images, formatting and background changes are still not told apart, and the kinds filter, the dialog and the report do not use it yet (`misc.compare-filters` stays partial). Estimates unchanged. |
 | 2026-11-16 | minor | Gap 16: View ▸ Guides ▸ Show Guides draws a document's ruler guides over the pages (per tab, off by default, `ui.set guides`) and Clear Guides removes them; no rulers to drag from and no snapping yet (`view.guides` stays partial). Estimates unchanged. |
 | 2026-11-16 | minor | Gap 22: `af_list`, `af_add` and `af_remove` list and edit PDF 2.0 associated files (`/AF`) at document level (`core.pdf20-associated-files` is partial). Estimates unchanged. |

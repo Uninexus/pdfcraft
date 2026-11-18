@@ -11006,6 +11006,19 @@ trailer << /Root 1 0 R >>
     assert_eq!(find("ink-overprint")["page"].as_u64(), Some(1), "{r}");
     assert!(r["text"].as_str().unwrap().contains("ink inside images, shadings, patterns and annotation appearances"), "{r}");
     assert_eq!(ok(&mut a, "doc_info", json!({ "doc": doc })), before, "verification doesn't change the document");
+
+    // The limit is settable: 330% is fine at 340 and flagged against the stated 250 limit.
+    let ids = |r: &serde_json::Value| r["findings"].as_array().unwrap().iter().map(|f| f["id"].as_str().unwrap().to_owned()).collect::<Vec<_>>();
+    let loose = ok(&mut a, "print_readiness", json!({ "doc": doc, "ink_limit": 340 }));
+    assert!(!ids(&loose).contains(&"ink-total".to_owned()), "{loose}");
+    let tight = ok(&mut a, "print_readiness", json!({ "doc": doc, "ink_limit": 250 }));
+    let f = tight["findings"].as_array().unwrap().iter().find(|f| f["id"] == "ink-total").unwrap_or_else(|| panic!("{tight}"));
+    assert!(f["message"].as_str().unwrap().contains("more than 250% total ink"), "{tight}");
+    for bad in [json!(50), json!(401), json!("300")] {
+        let e = a.call("print_readiness", &json!({ "doc": doc, "ink_limit": bad })).expect_err("refused").to_string();
+        assert!(e.contains("100") && e.contains("400"), "{bad}: {e}");
+    }
+    assert_eq!(ok(&mut a, "doc_info", json!({ "doc": doc })), before);
 }
 
 /// Ink aliases through the tools: the spot inks are listed, two names become one, the page looks
