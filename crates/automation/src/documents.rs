@@ -241,6 +241,37 @@ impl Automation {
         Ok(json!({ "associated_files": rows, "count": rows.len(), "truncated": list.truncated, "unsaved_changes": doc.dirty }))
     }
 
+    pub(crate) fn dpart_list(&mut self, a: &Args) -> Result<Value> {
+        let doc = self.doc(a)?;
+        let list = doc.document_parts();
+        let rows: Vec<Value> = list
+            .parts
+            .into_iter()
+            .map(|p| {
+                let metadata: Vec<Value> = p.metadata.into_iter().map(|(key, value)| json!({ "key": key, "value": value })).collect();
+                json!({
+                    "object": p.object,
+                    "parent": p.parent,
+                    "depth": p.depth,
+                    "start_page": p.start_page,
+                    "end_page": p.end_page,
+                    "children": p.children,
+                    "metadata": metadata,
+                    "metadata_truncated": p.metadata_truncated,
+                })
+            })
+            .collect();
+        Ok(json!({
+            "has_root": list.has_root,
+            "record_level": list.record_level,
+            "parts": rows,
+            "count": rows.len(),
+            "skipped": list.skipped,
+            "truncated": list.truncated,
+            "unsaved_changes": doc.dirty,
+        }))
+    }
+
     pub(crate) fn af_add(&mut self, a: &Args) -> Result<Value> {
         let path = self.resolve(a.str("path")?, false)?;
         let relationship = a.str("relationship")?.to_string();

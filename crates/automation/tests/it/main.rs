@@ -12,6 +12,7 @@ mod batch_failures;
 mod batch_secrets;
 mod button_caption;
 mod document_actions;
+mod document_parts;
 mod edit_all_javascripts;
 mod find_folder;
 mod find_text;

@@ -1,5 +1,6 @@
 # Where PdfCraft falls short of Acrobat Pro
 
+> **Last reviewed:** 2026-11-16 | **Last updated:** 2026-11-16 | **Change:** minor (gap 22: `dpart_list` lists the PDF 2.0 document part tree read-only; estimates unchanged)
 > **Last reviewed:** 2026-11-16 | **Last updated:** 2026-11-16 | **Change:** minor (gap 17: `redact_mark` can leave the first or last letters or digits of a pattern or regex match readable, headless; estimates unchanged)
 > **Last reviewed:** 2026-11-16 | **Last updated:** 2026-11-16 | **Change:** minor (gap 18: `print_readiness` takes an `ink_limit` for the total-ink finding, headless only; estimates unchanged)
 > **Last reviewed:** 2026-11-16 | **Last updated:** 2026-11-16 | **Change:** minor (gap 21: `doc_compare` tells visual regions that overlap a comment annotation only one file has from other visual changes; estimates unchanged)
@@ -490,7 +491,7 @@ update the numbers.
 
 ### 22. PDF 2.0 extras, linearization, Arlington validation
 
-- **Missing:** UTF-8 text strings, associated files (`/AF`), document parts, structure namespaces;
+- **Missing:** UTF-8 text strings, associated files (`/AF`), document part editing, structure namespaces;
   linearized save (Fast Web View); deterministic save; structural validation against the Arlington
   model.
 - **Evidence:** `core.linearization` is partial: `doc_linearization` (read-only) reports a file's
@@ -502,6 +503,10 @@ update the numbers.
   Filespec with `/AFRelationship`, in the catalog `/AF` and the attachments; one undo step, refusing
   unknown relationships, EncryptedPayload, a non-array `/AF`, over 256 entries or 32 MiB; listing capped at 2,000 rows; the attachment of a removed file stays while another `/AF` lists it). Page,
   annotation and other-object writing, EncryptedPayload and any UI are not done.
+  `core.pdf20-dpart` is partial: `dpart_list` (read-only) lists the document part tree under
+  `/DPartRoot` (node, parent, depth, `/Start` and `/End` as pages, child count, `/DPM` entries as short
+  text; at most 5,000 nodes and 64 levels, each node read once). The tree is not validated, and
+  creating or editing parts and any UI are not done.
 - **Estimate:** 20–35 h. **Doc:** [pdf-spec-parity.md](pdf-spec-parity.md).
 
 ### 23. Local AI provider
@@ -523,6 +528,7 @@ update the numbers.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-16 | minor | Gap 22: `dpart_list` lists the PDF 2.0 document part tree (`/DPartRoot`) read-only (`core.pdf20-dpart` is partial); no validation, writing or UI. Estimates unchanged. |
 | 2026-11-16 | minor | Gap 17: `redact_mark` with `pattern` or `regex` takes `keep_first` and `keep_last`, leaving that many letters or digits at the start or end of each match readable (headless; no UI control, not for find or words). Estimates unchanged. |
 | 2026-11-16 | minor | Gap 18: `print_readiness` takes an optional `ink_limit` (100 to 400 percent, default 300, other values refused) for the `ink-total` finding, and the finding names the limit used; no setting in the Print readiness dialog or Preferences, and still only painted vector CMYK colours (`print.total-area-coverage` stays partial). Estimates unchanged. |
 | 2026-11-16 | minor | Gap 21: `doc_compare` with `visual` gives each visual region a `cause`, `annotation` when it overlaps a comment (markup) annotation that only one of the two files has on that page and `other` otherwise; images, formatting and background changes are still not told apart, and the kinds filter, the dialog and the report do not use it yet (`misc.compare-filters` stays partial). Estimates unchanged. |
