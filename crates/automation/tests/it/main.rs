@@ -30,6 +30,7 @@ mod page_actions;
 mod portfolio_info;
 mod preferences;
 mod redact_after_stray_q_form;
+mod redact_keep;
 mod redact_text_after_q;
 mod render_warnings;
 mod text_copy;

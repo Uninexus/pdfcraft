@@ -5871,11 +5871,11 @@ title = "Redact part of a match (e.g. all but the last four digits)"
 area = "G"
 tier = "P2"
 milestone = "M8"
-status = "planned"
+status = "partial"
 commands = []
-tools = []
-evidence = []
-notes = ""
+tools = ["redact_mark"]
+evidence = ["crates/automation/tests/it/redact_keep.rs::keep_last_and_keep_first_leave_the_ends_of_a_match_readable", "crates/automation/tests/it/redact_keep.rs::keep_arguments_are_checked"]
+notes = "redact_mark takes keep_first and keep_last (0 to 64) with pattern or regex: that many letters or digits at the start or end of each match stay readable and the box covers the rest (a separator that would begin or end the box is left out; a glyph holding several characters is kept only if all of it fits). A match with no more than that many is not marked and is counted as left_readable; the call fails if that leaves nothing to mark. Not yet: any UI control, find or words, a mask character or replacement text for the kept part, and a check against Acrobat's own behaviour (not observed)."
 
 [[feature]]
 id = "protect.redact-folder"

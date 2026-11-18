@@ -1,5 +1,6 @@
 # Where PdfCraft falls short of Acrobat Pro
 
+> **Last reviewed:** 2026-11-16 | **Last updated:** 2026-11-16 | **Change:** minor (gap 17: `redact_mark` can leave the first or last letters or digits of a pattern or regex match readable, headless; estimates unchanged)
 > **Last reviewed:** 2026-11-16 | **Last updated:** 2026-11-16 | **Change:** minor (gap 18: `print_readiness` takes an `ink_limit` for the total-ink finding, headless only; estimates unchanged)
 > **Last reviewed:** 2026-11-16 | **Last updated:** 2026-11-16 | **Change:** minor (gap 21: `doc_compare` tells visual regions that overlap a comment annotation only one file has from other visual changes; estimates unchanged)
 > **Last reviewed:** 2026-11-16 | **Last updated:** 2026-11-16 | **Change:** minor (gap 17: redact_mark patterns sin and ca-postal-code, Canadian Social Insurance Numbers and postal codes; estimates unchanged)
@@ -416,8 +417,9 @@ update the numbers.
 ### 17. Certificate security and other protect gaps
 
 - **Missing:** encrypting for certificate recipients (and opening such files), security policies,
-  attachment-only encryption, redaction pattern locales and partial-word redaction, folder
-  redaction, protected view, URL and attachment trust.
+  attachment-only encryption, redaction pattern locales, partial-word redaction in the app
+  (`redact_mark` has `keep_first` and `keep_last` headlessly), folder redaction, protected view,
+  URL and attachment trust.
 - **Estimate:** 15–30 h. **Doc:** [pdf-spec-parity.md](pdf-spec-parity.md).
 
 ### 18. Print production tools absent
@@ -521,6 +523,7 @@ update the numbers.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-16 | minor | Gap 17: `redact_mark` with `pattern` or `regex` takes `keep_first` and `keep_last`, leaving that many letters or digits at the start or end of each match readable (headless; no UI control, not for find or words). Estimates unchanged. |
 | 2026-11-16 | minor | Gap 18: `print_readiness` takes an optional `ink_limit` (100 to 400 percent, default 300, other values refused) for the `ink-total` finding, and the finding names the limit used; no setting in the Print readiness dialog or Preferences, and still only painted vector CMYK colours (`print.total-area-coverage` stays partial). Estimates unchanged. |
 | 2026-11-16 | minor | Gap 21: `doc_compare` with `visual` gives each visual region a `cause`, `annotation` when it overlaps a comment (markup) annotation that only one of the two files has on that page and `other` otherwise; images, formatting and background changes are still not told apart, and the kinds filter, the dialog and the report do not use it yet (`misc.compare-filters` stays partial). Estimates unchanged. |
 | 2026-11-16 | minor | Gap 16: View ▸ Guides ▸ Show Guides draws a document's ruler guides over the pages (per tab, off by default, `ui.set guides`) and Clear Guides removes them; no rulers to drag from and no snapping yet (`view.guides` stays partial). Estimates unchanged. |
