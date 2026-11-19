@@ -1,5 +1,6 @@
 # Where PdfCraft falls short of Acrobat Pro
 
+> **Last reviewed:** 2026-11-19 | **Last updated:** 2026-11-19 | **Change:** minor (gap 16: `doc_guide_snap` works out, headless, where a point lands when it snaps to a page's guides; the app does not snap yet; estimates unchanged)
 > **Last reviewed:** 2026-11-19 | **Last updated:** 2026-11-19 | **Change:** minor (gap 21: `doc_compare` takes `ignore_case`, headless text comparison that does not count case-only differences; estimates unchanged)
 > **Last reviewed:** 2026-11-19 | **Last updated:** 2026-11-19 | **Change:** minor (gap 22: `ns_list` reports `/NS` values that more than one structure namespace carries; estimates unchanged)
 > **Last reviewed:** 2026-11-18 | **Last updated:** 2026-11-18 | **Change:** minor (gap 23: `ai_redaction_suggest` suggests passages to redact through the user's own AI endpoint, headless and suggest-only; estimates unchanged)
@@ -413,7 +414,7 @@ update the numbers.
 
 - **Missing:** moving several selected objects across pages (same-page moves shipped, #844), single-key accelerators for the remaining tools (V, H, and the opt-in Z and G shipped),
   rulers and grids (ruler guides are in as a headless slice: `doc_guides`, `doc_guide_add`, `doc_guide_remove`, per page and
-  session-only, and View ▸ Guides ▸ Show Guides draws them over the pages and Clear Guides removes them; the app has no rulers to drag them from and snaps to none), loupe and dynamic zoom, multiple windows and spreadsheet split (split
+  session-only, `doc_guide_snap` works out headlessly where a point lands on the nearest guide within a tolerance, and View ▸ Guides ▸ Show Guides draws them over the pages and Clear Guides removes them; the app has no rulers to drag them from and does not snap to them), loupe and dynamic zoom, multiple windows and spreadsheet split (split
   view shipped), comment
   pop-ups that can be moved, connector lines, customisable quick tools; shortcut display and tool-mode bugs (#746, #721), macOS window controls
   (#789).
@@ -538,6 +539,7 @@ update the numbers.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-19 | minor | Gap 16: `doc_guide_snap` (read-only) gives where an `x` and/or `y` on a page lands on that page's nearest vertical and horizontal guide within `tolerance` points (default 4, 0 to 72, edge included; the lower position wins a tie; a page with no guides snaps to nothing). Headless arithmetic on the listed guides only: the app has no rulers and does not snap while dragging, and guides stay session-only view state. Estimates unchanged. |
 | 2026-11-19 | minor | Gap 21: `doc_compare` takes `ignore_case`: words that differ only in letter case are not text changes (headless; the visual regions still see the different pixels, and `doc_compare_report`, `doc_compare_mark` and the Compare dialog do not take it). Estimates unchanged. |
 | 2026-11-19 | minor | Gap 22: `ns_list` lists each `/NS` value that more than one structure namespace dictionary carries (`duplicate_ns`; text compared as listed, cut at 200 characters); other validation, editing and any UI are still not done. Estimates unchanged. |
 | 2026-11-18 | minor | Gap 23: `ai_redaction_suggest` asks the user's own AI endpoint for passages to redact and returns only those that occur in the page text, with pages and counts (`misc.ai-redaction-suggest` is partial); it marks nothing, has no UI and was tested only against a stand-in server. Estimates unchanged. |
