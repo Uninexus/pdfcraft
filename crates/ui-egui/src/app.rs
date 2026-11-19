@@ -263,6 +263,8 @@ impl PdfCraftApp {
             compare_old_pages: String::new(),
             compare_fields_for: None,
             compare_kinds: pdfcraft_engine::compare::ChangeKinds::all(),
+            compare_ignore_case: false,
+            compare_ignore_punctuation: false,
             compare: None,
             js_console: Default::default(),
             #[cfg(not(target_arch = "wasm32"))]

@@ -8206,6 +8206,35 @@ fn compare_kinds_filter_the_report_and_the_marks() {
     assert_eq!(s.mark_differences_in(old, new, None, None).unwrap(), 3);
 }
 
+/// Marks and the report of a comparison with ignored word differences leave those out, and the
+/// report says what was ignored; without options they are as before.
+#[test]
+fn compare_marks_and_report_follow_the_ignored_word_differences() {
+    let mut s = Session::new();
+    let open = |s: &mut Session, name: &str, text: &str| {
+        let b = s.create_from_text("t", text).unwrap();
+        s.open(name, None, b, None).unwrap()
+    };
+    let old = open(&mut s, "old.pdf", "Delivery within five days. Returns accepted");
+    let new = open(&mut s, "new.pdf", "delivery within three days. Returns, accepted");
+    let all = crate::compare::ChangeKinds::all();
+    let both = pdfcraft_compare::Options { ignore_case: true, ignore_punctuation: true };
+    let text_of = |s: &mut Session, bytes: Arc<Vec<u8>>| {
+        let id = s.open("report.pdf", None, bytes, None).unwrap();
+        page_texts(s, id).join(" ")
+    };
+    let r = s.compare_report_in_options(old, new, None, None, all, both).unwrap();
+    let t = text_of(&mut s, r);
+    assert!(t.contains("1 changes") && t.contains("Ignored in the text comparison: letter case, sentence punctuation"), "{t}");
+    let r = s.compare_report_in_kinds(old, new, None, None, all).unwrap();
+    let t = text_of(&mut s, r);
+    assert!(t.contains("3 changes") && !t.contains("Ignored in the text comparison"), "{t}");
+    assert_eq!(s.mark_differences_in_options(old, new, None, None, all, both).unwrap(), 1);
+    assert_eq!(s.get(new).unwrap().info.annotations.len(), 1);
+    let case_only = pdfcraft_compare::Options { ignore_case: true, ..Default::default() };
+    assert_eq!(s.mark_differences_in_options(old, new, None, None, all, case_only).unwrap(), 2);
+}
+
 /// The report and the marks follow the page ranges, and when the two ranges start at different
 /// pages every change still names each document's own page.
 #[test]

@@ -404,7 +404,7 @@ impl Session {
     /// [`Session::compare_report`] of the changes on `pages` ([`Session::compare_pages`]).
     pub fn compare_report_of(&self, old: DocId, new: DocId, pages: &[usize]) -> Result<Arc<Vec<u8>>, EditError> {
         let c = self.compare_pages(old, new, pages)?;
-        self.compare_report_for(&c, old, new, None, None, ChangeKinds::all())
+        self.compare_report_for(&c, old, new, (None, None), ChangeKinds::all(), WordOptions::default())
     }
 
     /// [`Session::compare_report`] of [`Session::compare_in`]: only the pages in each range. The
@@ -432,11 +432,25 @@ impl Session {
         new_range: Option<PageRange>,
         kinds: ChangeKinds,
     ) -> Result<Arc<Vec<u8>>, EditError> {
+        self.compare_report_in_options(old, new, old_range, new_range, kinds, WordOptions::default())
+    }
+
+    /// [`Session::compare_report_in_kinds`] of a comparison that leaves out the word differences
+    /// `options` names (case, sentence punctuation). The report says which were ignored.
+    pub fn compare_report_in_options(
+        &self,
+        old: DocId,
+        new: DocId,
+        old_range: Option<PageRange>,
+        new_range: Option<PageRange>,
+        kinds: ChangeKinds,
+        options: WordOptions,
+    ) -> Result<Arc<Vec<u8>>, EditError> {
         if kinds.is_empty() {
             return Err(ChangeKinds::empty_error());
         }
-        let c = self.compare_in(old, new, old_range, new_range)?;
-        self.compare_report_for(&c, old, new, old_range, new_range, kinds)
+        let c = self.compare_in_options(old, new, old_range, new_range, options)?;
+        self.compare_report_for(&c, old, new, (old_range, new_range), kinds, options)
     }
 
     fn compare_report_for(
@@ -444,9 +458,9 @@ impl Session {
         c: &Comparison,
         old: DocId,
         new: DocId,
-        old_range: Option<PageRange>,
-        new_range: Option<PageRange>,
+        (old_range, new_range): (Option<PageRange>, Option<PageRange>),
         kinds: ChangeKinds,
+        options: WordOptions,
     ) -> Result<Arc<Vec<u8>>, EditError> {
         let name = |id, range: Option<PageRange>| {
             let n = self.get(id).map(|d| d.name.clone()).unwrap_or_default();
@@ -457,6 +471,16 @@ impl Session {
             }
         };
         let mut notes = Vec::new();
+        if options != WordOptions::default() {
+            let mut ignored = Vec::new();
+            if options.ignore_case {
+                ignored.push("letter case");
+            }
+            if options.ignore_punctuation {
+                ignored.push("sentence punctuation");
+            }
+            notes.push(format!("Ignored in the text comparison: {}.", ignored.join(", ")));
+        }
         let shown = if kinds.is_all() { c.clone() } else { kinds.filter(c.clone()) };
         if !kinds.is_all() {
             notes.push(format!("Kinds of change shown: {}.", kinds.names().join(", ")));
@@ -518,10 +542,24 @@ impl Session {
         new_range: Option<PageRange>,
         kinds: ChangeKinds,
     ) -> Result<usize, EditError> {
+        self.mark_differences_in_options(old, new, old_range, new_range, kinds, WordOptions::default())
+    }
+
+    /// [`Session::mark_differences_in_kinds`] of a comparison that leaves out the word
+    /// differences `options` names (case, sentence punctuation).
+    pub fn mark_differences_in_options(
+        &mut self,
+        old: DocId,
+        new: DocId,
+        old_range: Option<PageRange>,
+        new_range: Option<PageRange>,
+        kinds: ChangeKinds,
+        options: WordOptions,
+    ) -> Result<usize, EditError> {
         if kinds.is_empty() {
             return Err(ChangeKinds::empty_error());
         }
-        let c = kinds.filter(self.compare_in(old, new, old_range, new_range)?);
+        let c = kinds.filter(self.compare_in_options(old, new, old_range, new_range, options)?);
         self.mark_comparison(new, &c)
     }
 

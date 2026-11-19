@@ -4,7 +4,7 @@
 
 use egui::{Align, Color32, Layout};
 use pdfcraft_engine::DocId;
-use pdfcraft_engine::compare::{ChangeKinds, Comparison, Kind, PageRange};
+use pdfcraft_engine::compare::{ChangeKinds, Comparison, Kind, PageRange, WordOptions};
 
 use crate::theme::{self, Tokens};
 use crate::{PdfCraftApp, RightPanel, widgets};
@@ -36,6 +36,9 @@ pub struct CompareState {
     /// background changes are not kinds of their own: the comparison reads words and pixels, so
     /// they are all visual.
     pub kinds: ChangeKinds,
+    /// The word differences the comparison left out (the dialog's Ignore checkboxes). Mark as
+    /// comments and the report run with the same ones, so they match the list.
+    pub options: WordOptions,
 }
 
 /// Visual differences are shaded orange.
@@ -114,6 +117,18 @@ pub(crate) fn body(ui: &mut egui::Ui, app: &mut PdfCraftApp, t: &Tokens) -> (boo
         ui.label(tl!("Kinds of change:"));
         kind_checkboxes(ui, &mut app.compare_kinds);
     });
+    ui.horizontal(|ui| {
+        ui.label(tl!("Ignore:"));
+        ui.add(widgets::checkbox(&mut app.compare_ignore_case, tl!("Letter case")));
+        ui.add(widgets::checkbox(&mut app.compare_ignore_punctuation, tl!("Punctuation")));
+    });
+    ui.label(
+        egui::RichText::new(tl!(
+            "Ignoring letter case or punctuation leaves out text changes that are only that; the words in the changes that remain keep their own text, and pixel differences are still found."
+        ))
+        .small()
+        .color(t.text_muted),
+    );
     ui.label(
         egui::RichText::new(tl!(
             "Images, annotations, formatting and background changes are not told apart: the comparison finds text changes and pixel differences, so they all count as visual."
@@ -374,7 +389,8 @@ impl PdfCraftApp {
             Ok(r) => r,
             Err(e) => return self.notify_error(e),
         };
-        match self.session.compare_in(old, new, old_range, new_range) {
+        let options = WordOptions { ignore_case: self.compare_ignore_case, ignore_punctuation: self.compare_ignore_punctuation };
+        match self.session.compare_in_options(old, new, old_range, new_range, options) {
             Ok(result) => {
                 // The pages of the two ranges are paired by position, as `doc_compare` does.
                 let visual = self.session.compare_visual_in(old, new, 72.0, old_range, new_range).unwrap_or_default();
@@ -393,6 +409,7 @@ impl PdfCraftApp {
                     leader: 1,
                     prev_scroll: [egui::Vec2::ZERO; 2],
                     kinds: self.compare_kinds,
+                    options,
                 });
                 self.shade_compare(i);
                 self.right = Some(RightPanel::Compare);
@@ -410,7 +427,7 @@ impl PdfCraftApp {
 
     pub(crate) fn compare_action(&mut self, index: usize, a: PanelAction) {
         let Some(s) = self.compare.as_mut() else { return };
-        let (old, new, old_range, new_range, kinds) = (s.old, s.new, s.old_range, s.new_range, s.kinds);
+        let (old, new, old_range, new_range, kinds, options) = (s.old, s.new, s.old_range, s.new_range, s.kinds, s.options);
         match a {
             PanelAction::Select(i) => {
                 s.selected = Some(i);
@@ -436,7 +453,7 @@ impl PdfCraftApp {
                 s.kinds = kinds;
                 self.shade_compare(index);
             }
-            PanelAction::Mark => match self.session.mark_differences_in_kinds(old, new, old_range, new_range, kinds) {
+            PanelAction::Mark => match self.session.mark_differences_in_options(old, new, old_range, new_range, kinds, options) {
                 Ok(n) => {
                     if let Some(info) = self.session.get(new).map(|d| d.info.clone()) {
                         self.views[index].document_changed(&info);
@@ -451,7 +468,7 @@ impl PdfCraftApp {
                 }
                 Err(e) => self.notify_error(e),
             },
-            PanelAction::Report => match self.session.compare_report_in_kinds(old, new, old_range, new_range, kinds) {
+            PanelAction::Report => match self.session.compare_report_in_options(old, new, old_range, new_range, kinds, options) {
                 Ok(bytes) => {
                     if let Err(e) = self.open_bytes("Compare Report.pdf", None, bytes.to_vec()) {
                         self.notify_error(e);
