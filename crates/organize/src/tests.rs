@@ -5427,6 +5427,45 @@ fn structure_namespaces_are_listed_with_their_role_maps() {
 }
 
 #[test]
+fn repeated_namespace_identifiers_are_reported() {
+    let mut doc = open(fixture());
+    let a = ns_dict(&mut doc, Some("urn:a"), &[]);
+    let b = ns_dict(&mut doc, Some("urn:b"), &[]);
+    let a2 = ns_dict(&mut doc, Some("urn:a"), &[]);
+    let a3 = ns_dict(&mut doc, Some("urn:a"), &[]);
+    let none1 = ns_dict(&mut doc, None, &[]);
+    let none2 = ns_dict(&mut doc, None, &[]);
+    // `a` listed twice by reference is one dictionary, not a repeat.
+    set_namespaces(
+        &mut doc,
+        vec![Object::Ref(a), Object::Ref(a), Object::Ref(b), Object::Ref(a2), Object::Ref(none1), Object::Ref(none2), Object::Ref(a3)],
+    );
+    let list = list_structure_namespaces(&doc);
+    assert_eq!(
+        list.duplicates,
+        [DuplicateNamespace { ns: "urn:a".into(), count: 3, objects: vec![Some(a.num), Some(a2.num), Some(a3.num)] }],
+        "{list:?}"
+    );
+
+    // Many repeats name a bounded number of objects but are all counted.
+    let mut doc = open(fixture());
+    let many: Vec<Object> = (0..(MAX_DUPLICATE_OBJECTS + 9)).map(|_| Object::Ref(ns_dict(&mut doc, Some("urn:same"), &[]))).collect();
+    set_namespaces(&mut doc, many);
+    let list = list_structure_namespaces(&doc);
+    assert_eq!(
+        (list.duplicates.len(), list.duplicates[0].count, list.duplicates[0].objects.len()),
+        (1, MAX_DUPLICATE_OBJECTS + 9, MAX_DUPLICATE_OBJECTS)
+    );
+
+    // Distinct identifiers report nothing.
+    let mut doc = open(fixture());
+    let x = ns_dict(&mut doc, Some("urn:x"), &[]);
+    let y = ns_dict(&mut doc, Some("urn:y"), &[]);
+    set_namespaces(&mut doc, vec![Object::Ref(x), Object::Ref(y)]);
+    assert!(list_structure_namespaces(&doc).duplicates.is_empty());
+}
+
+#[test]
 fn structure_namespace_listing_is_bounded() {
     let mut doc = open(fixture());
     let many: Vec<Object> = (0..(MAX_NAMESPACES + 5)).map(|i| Object::Ref(ns_dict(&mut doc, Some(&format!("urn:n{i}")), &[]))).collect();
