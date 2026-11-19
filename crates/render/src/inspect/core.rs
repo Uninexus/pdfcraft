@@ -2,8 +2,8 @@ use super::annotations::{FieldWalk, MAX_LINK_ATTACHMENT_TEXT_BYTES};
 use super::model::{Attachment, AttachmentSource, PageInfo, Portfolio, PortfolioView, Xfa};
 use super::navigation::{NameTreeSeen, text_string};
 use super::{
-    Arc, AssertUnwindSafe, DecryptionError, Dictionary, DocInfo, Document, HashMap, HashSet, LazyStructure, LoadOptions, LoadPdfError, Object,
-    ObjectId, OnceCell, OpenError, Pdf, Structure, catch_unwind,
+    Arc, AssertUnwindSafe, DecryptionError, Dictionary, DocInfo, Document, HashMap, LazyStructure, LoadOptions, LoadPdfError, Object, ObjectId,
+    OnceCell, OpenError, Pdf, Structure, catch_unwind,
 };
 
 /// lopdf decodes object and cross-reference streams while it loads, with no limit unless one is
@@ -188,7 +188,7 @@ impl<'a> Inspector<'a> {
             doc.catalog().ok().and_then(|c| c.get(b"Names").ok()).and_then(|o| me.dict(o)).and_then(|n| n.get(b"Dests").ok()).and_then(|o| me.dict(o))
         {
             let mut key_budget = MAX_LINK_ATTACHMENT_TEXT_BYTES;
-            me.name_tree_raw(tree, &mut HashSet::new(), 0, &mut named, &mut key_budget);
+            me.name_tree_raw(tree, &mut NameTreeSeen::default(), 0, &mut named, &mut key_budget);
         }
         me.named = named;
         me
