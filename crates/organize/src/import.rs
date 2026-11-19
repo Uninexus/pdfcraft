@@ -19,6 +19,7 @@
 //! - layers (optional content groups) used by the pages are registered in the destination's
 //!   `/OCProperties`, keeping their default on/off state.
 
+use std::cell::OnceCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
@@ -239,6 +240,7 @@ fn import_pages_mapped(
         let mut own = repeat.then(|| {
             let mut c = Copier::new(src, HashMap::new(), copier.pages.clone());
             c.kept = copier.kept.clone();
+            c.dests = copier.dests.clone();
             c
         });
         let src_dict = src.get(page).as_dict().cloned().unwrap_or_default();
@@ -404,45 +406,55 @@ fn resources_with_ancestors(src: &Document, page: &Dict) -> Option<Object> {
     merged.filter(|_| added).map(Object::Dict)
 }
 
-/// Look up a named destination in the source (`/Dests` dictionary or `/Names /Dests` tree).
-pub(crate) fn named_dest(src: &Document, name: &[u8]) -> Option<Object> {
-    let catalog = src.get(src.root()?).as_dict().cloned()?;
+/// Every named destination of the source (`/Dests` dictionary, then the `/Names /Dests` tree),
+/// each name once with the value a lookup would find first: the dictionary wins over the tree,
+/// and an earlier tree entry over a later one. Built once per import (see
+/// [`DestIndex`]): looking each link's name up in the tree on its own read the whole tree per
+/// link, so a file of N links to M names cost N x M. Values are kept as written and resolved
+/// when asked for.
+fn dest_entries(src: &Document) -> HashMap<Vec<u8>, Object> {
+    let mut index = HashMap::new();
+    let Some(catalog) = src.root().and_then(|r| src.get(r).as_dict().cloned()) else { return index };
     if let Some(dests) = catalog.get(b"Dests").map(|d| src.resolve(d))
-        && let Some(v) = dests.as_dict().and_then(|d| d.get(name))
+        && let Some(d) = dests.as_dict()
     {
-        return Some(src.resolve(v).as_ref().clone());
-    }
-    let names = src.resolve(catalog.get(b"Names")?);
-    let tree = names.as_dict()?.get(b"Dests")?.clone();
-    name_tree_lookup(src, &tree, name, 0, &mut NameTreeSeen::default())
-}
-
-/// Name trees are read once per node, and a `/Names` or `/Kids` array that is an indirect object
-/// once, by the first node to name it: a node listed twice (or a cycle) is skipped, and N nodes
-/// sharing one array of M pairs are not cloned and scanned N x M times.
-fn name_tree_lookup(src: &Document, node: &Object, key: &[u8], depth: u8, seen: &mut NameTreeSeen) -> Option<Object> {
-    if depth > 32 || node.as_ref().is_some_and(|r| !seen.nodes.insert(r)) {
-        return None;
-    }
-    #[cfg(test)]
-    crate::work(1);
-    let node = src.resolve(node);
-    let d = node.as_dict()?;
-    let names = first_read_array(src, d.get(b"Names"), &mut seen.names).unwrap_or_default();
-    #[cfg(test)]
-    crate::work(names.len());
-    for pair in names.chunks(2) {
-        if let [k, v] = pair
-            && src.resolve(k).as_string().is_some_and(|s| s.bytes == key)
-        {
-            return Some(src.resolve(v).as_ref().clone());
+        for (k, v) in d.iter() {
+            index.entry(k.clone()).or_insert_with(|| v.clone());
         }
     }
-    let kids = first_read_array(src, d.get(b"Kids"), &mut seen.kids).unwrap_or_default();
-    kids.iter().find_map(|k| name_tree_lookup(src, k, key, depth + 1, seen))
+    let tree = catalog.get(b"Names").map(|n| src.resolve(n)).and_then(|n| n.as_dict().and_then(|d| d.get(b"Dests").cloned()));
+    if let Some(tree) = tree {
+        // One walk, nothing copied until a name is new: a key or value is cloned only when it
+        // is inserted, and a key that is one indirect string shared by many pairs is looked at
+        // once (the first pair to use it wins, so later pairs with it add nothing). Collecting
+        // every pair first copied a shared megabyte key once per pair.
+        let mut key_refs: HashSet<ObjRef> = HashSet::new();
+        walk_name_tree(src, &tree, 0, &mut NameTreeSeen::default(), &mut |raw_key, key, value| {
+            if raw_key.as_ref().is_some_and(|r| !key_refs.insert(r)) || index.contains_key(key) {
+                return;
+            }
+            #[cfg(test)]
+            crate::work(key.len());
+            index.insert(key.to_vec(), value.clone());
+        });
+    }
+    index
 }
 
-/// What [`name_tree_entries`] and [`name_tree_lookup`] have visited: node objects, and the
+/// The named destinations of a source, read the first time one is asked for and shared by the
+/// copiers an import makes.
+#[derive(Clone, Default)]
+pub(crate) struct DestIndex(Rc<OnceCell<HashMap<Vec<u8>, Object>>>);
+
+impl DestIndex {
+    /// Look up a named destination in the source.
+    pub(crate) fn get(&self, src: &Document, name: &[u8]) -> Option<Object> {
+        let value = self.0.get_or_init(|| dest_entries(src)).get(name)?;
+        Some(src.resolve(value).as_ref().clone())
+    }
+}
+
+/// What [`name_tree_entries`] has visited: node objects, and the
 /// `/Names` arrays and the `/Kids` arrays that are indirect objects, in separate sets. An array
 /// is recorded only once it is known to be one, and as the one kind it was read as, so a `/Kids`
 /// entry naming an object that another node uses as its `/Names` array cannot hide that node's
@@ -457,8 +469,20 @@ pub(crate) struct NameTreeSeen {
 /// All (key, value) pairs of a name tree, in order, each node read once. A `/Names` or `/Kids`
 /// array that is an indirect object is read once too, by the first node to name it: a tree of N
 /// nodes sharing one array of M pairs would otherwise yield N x M entries from a file of N + M
-/// objects.
+/// objects. Each pair's key is copied, so a caller that needs only some pairs should use
+/// [`walk_name_tree`] (a key shared by reference is copied once per pair here).
 pub(crate) fn name_tree_entries(src: &Document, node: &Object, depth: u8, seen: &mut NameTreeSeen, out: &mut Vec<(Vec<u8>, Object)>) {
+    walk_name_tree(src, node, depth, seen, &mut |_, key, value| {
+        #[cfg(test)]
+        crate::work(key.len());
+        out.push((key.to_vec(), value.clone()));
+    });
+}
+
+/// [`name_tree_entries`] without the copying: `visit` gets each pair's key as written (an
+/// object, so a caller can tell a key shared by reference), the key's bytes and the value, and
+/// clones only what it keeps.
+fn walk_name_tree(src: &Document, node: &Object, depth: u8, seen: &mut NameTreeSeen, visit: &mut dyn FnMut(&Object, &[u8], &Object)) {
     if depth > 32 || node.as_ref().is_some_and(|r| !seen.nodes.insert(r)) {
         return;
     }
@@ -467,16 +491,18 @@ pub(crate) fn name_tree_entries(src: &Document, node: &Object, depth: u8, seen: 
     let node = src.resolve(node);
     let Some(d) = node.as_dict() else { return };
     if let Some(names) = first_read_array(src, d.get(b"Names"), &mut seen.names) {
+        #[cfg(test)]
+        crate::work(names.len());
         for pair in names.chunks(2) {
             if let [k, v] = pair
-                && let Some(k) = src.resolve(k).as_string()
+                && let Some(key) = src.resolve(k).as_string()
             {
-                out.push((k.bytes.clone(), v.clone()));
+                visit(k, &key.bytes, v);
             }
         }
     }
     for k in first_read_array(src, d.get(b"Kids"), &mut seen.kids).unwrap_or_default() {
-        name_tree_entries(src, &k, depth + 1, seen, out);
+        walk_name_tree(src, &k, depth + 1, seen, visit);
     }
 }
 
