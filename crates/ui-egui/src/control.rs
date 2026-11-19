@@ -55,6 +55,8 @@
 //!   page sizes and margins are shown in, and the paper Create ▸ Blank page uses); `ui.state.units`
 //!   and `ui.state.blank_paper` report them. `reset-comment-defaults=true` forgets every comment
 //!   tool's remembered colour, opacity, width and font size (Preferences ▸ Comment).
+//!   `compare-ignore-case=true|false` and `compare-ignore-punctuation=true|false` set the Compare
+//!   dialog's Ignore checkboxes, which persist; `ui.state.compare_ignore` reports `case` and `punctuation`.
 //!   `ai-base-url=<url>`, `ai-model=<name>` and `ai-api-key=<key>` set Preferences ▸ AI Assistant
 //!   (saved to `ai.json` in the settings folder); `ui.state.ai` reports `configured`, `base_url`,
 //!   `model` and `api_key_set`, never the key. `dialog=ask-ai` opens Ask AI Assistant.

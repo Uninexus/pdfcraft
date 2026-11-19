@@ -261,3 +261,43 @@ fn the_forms_page_turns_auto_complete_on_and_removes_remembered_entries() {
     h.run_steps(3);
     assert!(h.state().session.form_entries().is_empty());
 }
+
+#[test]
+fn the_compare_ignore_options_are_set_refused_and_remembered() {
+    let mut app = PdfCraftApp::new();
+    assert!(!app.compare_ignore_case && !app.compare_ignore_punctuation, "both start off");
+    app.set_option("compare-ignore-case", "true").unwrap();
+    let mut next = PdfCraftApp::new();
+    next.restore(&app.persist());
+    assert!(next.compare_ignore_case && !next.compare_ignore_punctuation, "only the one set is remembered");
+    app.set_option("compare-ignore-punctuation", "true").unwrap();
+    app.set_option("compare-ignore-case", "false").unwrap();
+    next.restore(&app.persist());
+    assert!(!next.compare_ignore_case && next.compare_ignore_punctuation, "and turning one off is remembered");
+    for (key, bad) in [("compare-ignore-case", "yes"), ("compare-ignore-case", ""), ("compare-ignore-punctuation", "1")] {
+        assert!(app.set_option(key, bad).is_err(), "{key}={bad}");
+    }
+    assert!(!app.compare_ignore_case && app.compare_ignore_punctuation, "a refused value changes nothing");
+}
+
+#[test]
+fn corrupt_saved_compare_ignore_options_keep_the_current_choice() {
+    let mut app = PdfCraftApp::new();
+    app.compare_ignore_case = true;
+    for json in [
+        "",
+        "not json",
+        "[]",
+        r#"{"compare_ignore": null}"#,
+        r#"{"compare_ignore": 7}"#,
+        r#"{"compare_ignore": "case"}"#,
+        r#"{"compare_ignore": [true, true]}"#,
+        r#"{"compare_ignore": {"case": "false", "punctuation": 1}}"#,
+        r#"{"compare_ignore": {"case": null}}"#,
+    ] {
+        app.restore(json);
+        assert!(app.compare_ignore_case && !app.compare_ignore_punctuation, "{json:?}");
+    }
+    app.restore(r#"{"compare_ignore": {"punctuation": true}}"#);
+    assert!(app.compare_ignore_case && app.compare_ignore_punctuation, "a missing key leaves the other alone");
+}
