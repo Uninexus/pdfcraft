@@ -213,6 +213,8 @@ impl PdfCraftApp {
         v["form_entries"] = serde_json::json!(self.session.form_entries().entries());
         v["organize_zoom"] = serde_json::json!(self.organize_zoom);
         v["blank_paper"] = serde_json::json!(self.blank_paper.token());
+        // The Compare dialog's Ignore checkboxes, so the next comparison starts as the last one did.
+        v["compare_ignore"] = serde_json::json!({ "case": self.compare_ignore_case, "punctuation": self.compare_ignore_punctuation });
         // Canonical names survive changes to the order of PAPERS and do not depend on UI language;
         // a custom paper is stored by the name it was given.
         let d = &self.print_draft;
@@ -453,6 +455,14 @@ impl PdfCraftApp {
         // An unknown or mistyped paper keeps the one the system's region gives.
         if let Some(paper) = v["blank_paper"].as_str().and_then(paper::Paper::from_token) {
             self.blank_paper = paper;
+        }
+        // The Compare dialog's Ignore checkboxes; each one is read alone, and anything that is
+        // not a boolean keeps the current choice.
+        if let Some(on) = v["compare_ignore"]["case"].as_bool() {
+            self.compare_ignore_case = on;
+        }
+        if let Some(on) = v["compare_ignore"]["punctuation"].as_bool() {
+            self.compare_ignore_punctuation = on;
         }
         if let Some(on) = v["always_default_view"].as_bool() {
             self.always_default_view = on;

@@ -432,6 +432,9 @@ impl PdfCraftApp {
             ("blank-paper", _) => {
                 self.blank_paper = paper::Paper::from_token(value).ok_or("blank-paper must be letter or a4")?;
             }
+            // The Compare dialog's Ignore checkboxes (saved with the other settings).
+            ("compare-ignore-case", _) => self.compare_ignore_case = parse_bool(value, "compare-ignore-case")?,
+            ("compare-ignore-punctuation", _) => self.compare_ignore_punctuation = parse_bool(value, "compare-ignore-punctuation")?,
             ("reset-comment-defaults", _) => {
                 if value != "true" {
                     return Err("reset-comment-defaults must be true".into());
@@ -562,5 +565,14 @@ impl PdfCraftApp {
             (other, _) => return Err(format!("unknown option {other}")),
         }
         Ok(())
+    }
+}
+
+/// `true` or `false` for an on/off option; anything else is refused and names the option.
+fn parse_bool(value: &str, key: &str) -> Result<bool, String> {
+    match value {
+        "true" => Ok(true),
+        "false" => Ok(false),
+        _ => Err(format!("{key} must be true or false")),
     }
 }
