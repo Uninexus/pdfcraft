@@ -5464,6 +5464,182 @@ fn document_part_listing_is_bounded_by_depth_and_node_count() {
     assert_eq!((list.parts.len(), list.skipped), (1, 2), "{list:?}");
 }
 
+/// A document part tree of `nodes` nodes under one root, every node's `/DPM` the one indirect
+/// dictionary `dpm`; the listing of each node's metadata.
+fn shared_dpm_listing(dpm: pdfcraft_cos::Dict, nodes: usize) -> DocumentPartList {
+    let mut doc = open(fixture());
+    let shared = doc.add(Object::Dict(dpm));
+    let top = add_part(&mut doc, None);
+    let kids: Vec<ObjRef> = (0..nodes).map(|_| add_part(&mut doc, None)).collect();
+    for kid in &kids {
+        doc.update_dict(*kid, |d| d.set(b"DPM".to_vec(), Object::Ref(shared))).unwrap();
+    }
+    set_children(&mut doc, top, &kids);
+    set_document_part_root(&mut doc, top);
+    list_document_parts(&doc)
+}
+
+/// How many nodes list their whole `/DPM` (`entries` entries, none flagged) and how many are cut.
+fn listed_and_cut(list: &DocumentPartList, entries: usize) -> (usize, usize) {
+    let listed = list.parts.iter().filter(|p| p.metadata.len() == entries && !p.metadata_truncated).count();
+    let cut = list.parts.iter().filter(|p| p.metadata_truncated).count();
+    (listed, cut)
+}
+
+#[test]
+fn document_part_metadata_is_read_within_one_allowance_whoever_shares_it() {
+    // The whole listing may read MAX_DPM_BYTES of /DPM keys and string and name values. Each of
+    // the three charges below has its own test: a dictionary one node lists is listed by every
+    // node that names it, so what it holds is paid again for each.
+    let per_node = |entries: usize, key: usize, value: usize| entries * (key + value + DPM_ENTRY_COST);
+
+    // Keys: 8 entries with 100 KB names, an integer value each.
+    let mut dpm = pdfcraft_cos::Dict::new();
+    for i in 0..8 {
+        dpm.set(format!("{i}{}", "k".repeat(100_000)).into_bytes(), Object::Int(i));
+    }
+    let cost = per_node(8, 100_001, 0);
+    let fit = MAX_DPM_BYTES / cost;
+    let list = shared_dpm_listing(dpm, fit + 3);
+    assert_eq!(list.parts.len(), fit + 4, "the root and every kid is a node");
+    assert_eq!(listed_and_cut(&list, 8), (fit, 3), "keys are charged");
+    // The listed key is cut to MAX_DPM_CHARS characters.
+    assert!(list.parts.iter().filter(|p| !p.metadata.is_empty()).all(|p| p.metadata.iter().all(|(k, _)| k.chars().count() == MAX_DPM_CHARS)));
+
+    // String values: one entry holding a 1 MiB string.
+    let mut dpm = pdfcraft_cos::Dict::new();
+    dpm.set(b"K".to_vec(), Object::String(pdfcraft_cos::PdfString::text(&"s".repeat(1 << 20))));
+    let fit = MAX_DPM_BYTES / per_node(1, 1, 1 << 20);
+    let list = shared_dpm_listing(dpm, fit + 3);
+    assert_eq!(listed_and_cut(&list, 1), (fit, 3), "string values are charged");
+    assert!(list.parts.iter().filter(|p| !p.metadata.is_empty()).all(|p| p.metadata[0].1.len() == MAX_DPM_CHARS));
+
+    // Name values: one entry whose value is a 1 MiB name.
+    let mut dpm = pdfcraft_cos::Dict::new();
+    dpm.set(b"K".to_vec(), Object::Name("n".repeat(1 << 20).into_bytes()));
+    let fit = MAX_DPM_BYTES / per_node(1, 1, 1 << 20);
+    let list = shared_dpm_listing(dpm, fit + 3);
+    assert_eq!(listed_and_cut(&list, 1), (fit, 3), "name values are charged");
+    assert!(list.parts.iter().filter(|p| !p.metadata.is_empty()).all(|p| p.metadata[0].1.len() == MAX_DPM_CHARS));
+
+    // Entries: 32 one-byte keys with integer values cost DPM_ENTRY_COST each, so a tree of the
+    // most nodes cannot list them all.
+    let mut dpm = pdfcraft_cos::Dict::new();
+    for i in 0..MAX_DPM_ENTRIES {
+        dpm.set(vec![b'a' + i as u8], Object::Int(1));
+    }
+    let fit = MAX_DPM_BYTES / per_node(MAX_DPM_ENTRIES, 1, 0);
+    assert!(fit + 1 < MAX_DPART_NODES, "the test needs more nodes than fit");
+    let list = shared_dpm_listing(dpm, MAX_DPART_NODES - 1);
+    assert_eq!(list.parts.len(), MAX_DPART_NODES);
+    assert_eq!(listed_and_cut(&list, MAX_DPM_ENTRIES), (fit, MAX_DPART_NODES - 1 - fit), "each entry has a cost");
+    // Once one does not fit, none after it is read: the first node cut lists whole entries only,
+    // and every later node lists none.
+    let first_cut = list.parts.iter().position(|p| p.metadata_truncated).unwrap();
+    assert!(list.parts[first_cut + 1..].iter().all(|p| p.metadata.is_empty() && p.metadata_truncated));
+}
+
+#[test]
+fn once_the_metadata_allowance_is_spent_later_dpms_are_flagged_and_not_read() {
+    let mut doc = open(fixture());
+    let top = add_part(&mut doc, None);
+    let text = |len: usize| Object::String(pdfcraft_cos::PdfString::text(&"t".repeat(len)));
+    let dict_of = |entries: Vec<(&str, Object)>| {
+        let mut dpm = pdfcraft_cos::Dict::new();
+        for (key, value) in entries {
+            dpm.set(key.as_bytes().to_vec(), value);
+        }
+        dpm
+    };
+    let part_with = |doc: &mut Document, dpm: Object| {
+        let part = add_part(doc, None);
+        doc.update_dict(part, |d| d.set(b"DPM".to_vec(), dpm)).unwrap();
+        part
+    };
+    let first = part_with(&mut doc, Object::Dict(dict_of(vec![("Big", text(MAX_DPM_BYTES - 1000))])));
+    // Cannot fit what is left; the small entry after it would.
+    let second = part_with(&mut doc, Object::Dict(dict_of(vec![("Big", text(5000)), ("Small", Object::Int(1))])));
+    // Later nodes whose whole /DPM would fit: direct, indirect (never read), and an empty one.
+    let third = part_with(&mut doc, Object::Dict(dict_of(vec![("Small", Object::Int(1))])));
+    let shared = doc.add(Object::Dict(dict_of(vec![("Small", Object::Int(1))])));
+    let fourth = part_with(&mut doc, Object::Ref(shared));
+    let fifth = part_with(&mut doc, Object::Dict(dict_of(vec![])));
+    set_children(&mut doc, top, &[first, second, third, fourth, fifth]);
+    set_document_part_root(&mut doc, top);
+    crate::dparts::PREPARES.with(|n| n.set(0));
+    let list = list_document_parts(&doc);
+    let rows: Vec<_> = list.parts.iter().map(|p| (p.metadata.len(), p.metadata_truncated)).collect();
+    assert_eq!(rows, [(0, false), (1, false), (0, true), (0, true), (0, true), (0, false)], "{list:?}");
+    // Only the first two were read: the allowance was spent by the second.
+    assert_eq!(crate::dparts::PREPARES.with(|n| n.get()), 2);
+}
+
+/// A PDF whose object 3 is one string of 33 MiB (more than the document keeps cached once read),
+/// and `nodes` document parts. In `shared_dictionary` every part's `/DPM` is object 3, a
+/// dictionary holding the string directly; otherwise object 3 is the string and every part's
+/// `/DPM` is a direct dictionary that names it.
+fn pdf_with_a_big_shared_metadata_value(nodes: usize, shared_dictionary: bool) -> Vec<u8> {
+    let big = "s".repeat(33 << 20);
+    let kids: String = (0..nodes).map(|i| format!("{} 0 R ", 7 + i)).collect();
+    let mut objs: Vec<Vec<u8>> = vec![
+        b"<< /Type /Catalog /Pages 2 0 R /DPartRoot 5 0 R >>".to_vec(),
+        b"<< /Type /Pages /Kids [4 0 R] /Count 1 /MediaBox [0 0 200 200] >>".to_vec(),
+        if shared_dictionary { format!("<< /K ({big}) >>").into_bytes() } else { format!("({big})").into_bytes() },
+        b"<< /Type /Page /Parent 2 0 R >>".to_vec(),
+        b"<< /Type /DPartRoot /DPartRootNode 6 0 R >>".to_vec(),
+        format!("<< /Type /DPart /DParts [[{kids}]] >>").into_bytes(),
+    ];
+    let dpm = if shared_dictionary { "3 0 R" } else { "<< /K 3 0 R >>" };
+    objs.extend((0..nodes).map(|_| format!("<< /Type /DPart /DPM {dpm} >>").into_bytes()));
+    let mut out = b"%PDF-2.0\n".to_vec();
+    let mut offsets = Vec::new();
+    for (i, o) in objs.iter().enumerate() {
+        offsets.push(out.len());
+        out.extend_from_slice(format!("{} 0 obj\n", i + 1).as_bytes());
+        out.extend_from_slice(o);
+        out.extend_from_slice(b"\nendobj\n");
+    }
+    let xref = out.len();
+    out.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1).as_bytes());
+    for o in offsets {
+        out.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+    }
+    out.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objs.len() + 1).as_bytes());
+    out
+}
+
+#[test]
+fn a_metadata_object_too_big_to_list_is_not_parsed_again_by_every_node_that_shares_it() {
+    // The document does not keep an object this large once read, so reading it again per node
+    // costs about 70 ms each: 300 nodes would take half a minute; it is read once, by the node that finds it does not fit, and the nodes after it read no /DPM.
+    for shared_dictionary in [true, false] {
+        let doc = open(pdf_with_a_big_shared_metadata_value(300, shared_dictionary));
+        let started = std::time::Instant::now();
+        let list = list_document_parts(&doc);
+        let took = started.elapsed();
+        assert_eq!(list.parts.len(), 301);
+        // Too big to list: every node is flagged, none lists it.
+        assert!(list.parts[1..].iter().all(|p| p.metadata.is_empty() && p.metadata_truncated));
+        assert!(took < std::time::Duration::from_secs(8), "shared dictionary {shared_dictionary}: {took:?}");
+    }
+}
+
+#[test]
+fn document_part_metadata_keys_and_values_are_cut_by_characters_not_bytes() {
+    // 300 four-byte characters: the cut is at 200 characters, not at a byte count.
+    let wide = "\u{1F600}".repeat(300);
+    let mut dpm = pdfcraft_cos::Dict::new();
+    dpm.set(wide.clone().into_bytes(), Object::Name(wide.clone().into_bytes()));
+    dpm.set(b"Text".to_vec(), Object::String(pdfcraft_cos::PdfString::text(&wide)));
+    let list = shared_dpm_listing(dpm, 1);
+    let part = &list.parts[1];
+    assert!(!part.metadata_truncated);
+    let entry = |key: &str| part.metadata.iter().find(|(k, _)| k == key).unwrap().1.clone();
+    assert_eq!(part.metadata.iter().find(|(k, _)| k.starts_with('\u{1F600}')).unwrap().0, "\u{1F600}".repeat(MAX_DPM_CHARS));
+    assert_eq!(part.metadata.iter().find(|(k, _)| k.starts_with('\u{1F600}')).unwrap().1, format!("/{}", "\u{1F600}".repeat(MAX_DPM_CHARS - 1)));
+    assert_eq!(entry("Text"), "\u{1F600}".repeat(MAX_DPM_CHARS));
+}
+
 fn ns_dict(doc: &mut Document, ns: Option<&str>, roles: &[(&str, Object)]) -> ObjRef {
     let mut d = pdfcraft_cos::Dict::new();
     d.set(b"Type".to_vec(), Object::name("Namespace"));

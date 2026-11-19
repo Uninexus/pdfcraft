@@ -8,6 +8,8 @@
 //! short text.
 
 use std::collections::{HashMap, HashSet};
+use std::ops::Deref;
+use std::sync::Arc;
 
 use pdfcraft_cos::{Document, ObjRef, Object};
 
@@ -23,6 +25,15 @@ pub const MAX_DPM_CHARS: usize = 200;
 const MAX_PAGES_READ: usize = 100_000;
 /// Most references read from the `/DParts` of one node.
 const MAX_CHILDREN: usize = 5000;
+/// What listing `/DPM` entries may read across the whole tree, in bytes: each entry costs its
+/// key's length, its value's raw length when that is a string or a name, and
+/// [`DPM_ENTRY_COST`]. An indirect value is resolved once to learn its length, so it is read
+/// before it is charged; the charge is made before it is listed, and again for each node that
+/// lists it, so a dictionary (or one long string) that many nodes share costs what it holds each
+/// time.
+pub const MAX_DPM_BYTES: usize = 4 << 20;
+/// What each listed `/DPM` entry costs besides its key and value.
+pub const DPM_ENTRY_COST: usize = 32;
 
 /// One node of the tree.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -41,7 +52,10 @@ pub struct DocumentPart {
     pub children: usize,
     /// `/DPM` entries as `(key, value as short text)`, at most [`MAX_DPM_ENTRIES`].
     pub metadata: Vec<(String, String)>,
-    /// `/DPM` has more entries than were listed.
+    /// `/DPM` has more entries than were listed: past [`MAX_DPM_ENTRIES`], or past what the tree
+    /// as a whole may list ([`MAX_DPM_BYTES`]; once one entry does not fit, no later one is listed or
+    /// read, and a node with a `/DPM` is flagged: one that is indirect and not read before without
+    /// being read, so even if it is empty).
     pub metadata_truncated: bool,
 }
 
@@ -83,6 +97,9 @@ pub fn list_document_parts(doc: &Document) -> DocumentPartList {
         }
     }
 
+    let mut text_left = MAX_DPM_BYTES;
+    // Set once an entry did not fit; from then on no /DPM is listed or read.
+    let mut spent = false;
     let mut seen: HashSet<ObjRef> = HashSet::new();
     // Preorder: a stack of (node, depth, parent), children pushed last-first.
     let mut stack = vec![(first, 0usize, None::<u32>)];
@@ -104,11 +121,12 @@ pub fn list_document_parts(doc: &Document) -> DocumentPartList {
 
         let mut children = Vec::new();
         let mut counted = 0usize;
-        if let Some(groups) = dict.get(b"DParts").map(|o| doc.resolve(o))
+        // Direct values are borrowed; only references are followed (a direct one would be cloned).
+        if let Some(groups) = dict.get(b"DParts").map(|o| follow(doc, o))
             && let Some(groups) = groups.as_array()
         {
             'groups: for group in groups {
-                let group = doc.resolve(group);
+                let group = follow(doc, group);
                 let Some(group) = group.as_array() else { continue };
                 for child in group {
                     if counted >= MAX_CHILDREN {
@@ -126,16 +144,31 @@ pub fn list_document_parts(doc: &Document) -> DocumentPartList {
 
         let mut metadata = Vec::new();
         let mut metadata_truncated = false;
-        if let Some(dpm) = dict.get(b"DPM").map(|o| doc.resolve(o))
-            && let Some(dpm) = dpm.as_dict()
-        {
-            for (key, value) in dpm.iter() {
-                if metadata.len() >= MAX_DPM_ENTRIES {
+        // Once an entry has not fitted, no /DPM is read at all: a node that has one is flagged, and
+        // an indirect one is flagged without being resolved (it may be empty).
+        let dpm = match dict.get(b"DPM") {
+            Some(Object::Ref(_)) if spent => {
+                metadata_truncated = true;
+                None
+            }
+            Some(direct) if spent => {
+                metadata_truncated = direct.as_dict().is_some_and(|d| !d.is_empty());
+                None
+            }
+            Some(o) => prepare_dpm(doc, &follow(doc, o)),
+            None => None,
+        };
+        if let Some(dpm) = dpm {
+            for entry in &dpm.entries {
+                if spent || entry.cost > text_left {
+                    spent = true;
                     metadata_truncated = true;
                     break;
                 }
-                metadata.push((short(&String::from_utf8_lossy(key)), value_text(doc, value)));
+                text_left -= entry.cost;
+                metadata.push((entry.key.clone(), entry.value.clone()));
             }
+            metadata_truncated |= dpm.more;
         }
 
         out.parts.push(DocumentPart {
@@ -161,18 +194,92 @@ pub fn list_document_parts(doc: &Document) -> DocumentPartList {
     out
 }
 
+/// What `o` points at: a reference is followed, and anything else is borrowed, not cloned.
+enum Followed<'a> {
+    Direct(&'a Object),
+    Held(Arc<Object>),
+}
+
+impl Deref for Followed<'_> {
+    type Target = Object;
+    fn deref(&self) -> &Object {
+        match self {
+            Self::Direct(o) => o,
+            Self::Held(o) => o,
+        }
+    }
+}
+
+fn follow<'a>(doc: &Document, o: &'a Object) -> Followed<'a> {
+    match o {
+        Object::Ref(_) => Followed::Held(doc.resolve(o)),
+        direct => Followed::Direct(direct),
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// `/DPM` dictionaries [`prepare_dpm`] read on this thread.
+    pub(crate) static PREPARES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// One `/DPM` entry as listed, and what listing it costs against [`MAX_DPM_BYTES`].
+struct Entry {
+    cost: usize,
+    key: String,
+    value: String,
+}
+
+/// The first [`MAX_DPM_ENTRIES`] entries of a `/DPM` dictionary, and whether it has more.
+struct Dpm {
+    entries: Vec<Entry>,
+    more: bool,
+}
+
+/// `dpm` as a listing, or `None` when it is not a dictionary. Direct values are borrowed; a
+/// reference is followed, which has to happen before the value's length is known and charged.
+fn prepare_dpm(doc: &Document, dpm: &Object) -> Option<Dpm> {
+    #[cfg(test)]
+    PREPARES.with(|n| n.set(n.get().saturating_add(1)));
+    let dpm = dpm.as_dict()?;
+    let entries = dpm
+        .iter()
+        .take(MAX_DPM_ENTRIES)
+        .map(|(key, value)| {
+            let value = follow(doc, value);
+            Entry { cost: key.len().saturating_add(raw_len(&value)).saturating_add(DPM_ENTRY_COST), key: short_bytes(key), value: value_text(&value) }
+        })
+        .collect();
+    Some(Dpm { entries, more: dpm.iter().nth(MAX_DPM_ENTRIES).is_some() })
+}
+
+/// The bytes reading `value` as text looks at.
+fn raw_len(value: &Object) -> usize {
+    match value {
+        Object::String(s) => s.bytes.len(),
+        Object::Name(n) => n.len(),
+        _ => 0,
+    }
+}
+
 fn short(text: &str) -> String {
     text.chars().take(MAX_DPM_CHARS).collect()
 }
 
-fn value_text(doc: &Document, value: &Object) -> String {
-    match &*doc.resolve(value) {
+/// The first [`MAX_DPM_CHARS`] characters of `bytes` read as UTF-8 with replacement characters,
+/// looking at no more bytes than that many characters can take (four each).
+fn short_bytes(bytes: &[u8]) -> String {
+    short(&String::from_utf8_lossy(bytes.get(..MAX_DPM_CHARS * 4).unwrap_or(bytes)))
+}
+
+fn value_text(value: &Object) -> String {
+    match value {
         Object::Null => "null".to_string(),
         Object::Bool(b) => b.to_string(),
         Object::Int(n) => n.to_string(),
         Object::Real(x) => x.to_string(),
-        Object::String(s) => short(&s.text_chars().take(MAX_DPM_CHARS).collect::<String>()),
-        Object::Name(n) => short(&format!("/{}", String::from_utf8_lossy(n))),
+        Object::String(s) => s.text_chars().take(MAX_DPM_CHARS).collect(),
+        Object::Name(n) => format!("/{}", short_bytes(n)).chars().take(MAX_DPM_CHARS).collect(),
         Object::Array(_) => "(array)".to_string(),
         Object::Dict(_) => "(dictionary)".to_string(),
         Object::Stream(_) => "(stream)".to_string(),
