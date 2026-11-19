@@ -377,6 +377,7 @@ impl Draft {
             "shown": self.shown(),
             "capped": self.capped(),
             "truncated": self.inventory.truncated,
+            "names_left_out": self.inventory.names_left_out,
             "filter": self.filter,
             "kind": self.kind.map(JavaScriptKind::id),
             "selected": selected,
@@ -394,6 +395,12 @@ impl Draft {
             })).collect::<Vec<_>>(),
         })
     }
+}
+
+/// The line shown when the listing left some names out.
+pub(crate) fn names_left_out_note() -> String {
+    tl!("Some scripts are listed without the field name, script name or title they belong to: the document's names are too long to read in full.")
+        .to_string()
 }
 
 /// Read the document's scripts again into the draft.
@@ -535,6 +542,10 @@ pub(crate) fn body(ui: &mut egui::Ui, app: &mut PdfCraftApp) -> bool {
                 .small()
                 .color(t.text_muted),
         );
+    }
+
+    if d.inventory.names_left_out > 0 {
+        ui.label(egui::RichText::new(names_left_out_note()).small().color(t.text_muted));
     }
 
     let mut pick = None;
@@ -757,6 +768,20 @@ mod tests {
         assert_eq!(d.shown(), 1);
         d.set_filter("zzz");
         assert_eq!(d.shown(), 0, "a filter set from outside takes effect at once");
+    }
+
+    #[test]
+    fn names_left_out_are_reported_in_the_state_and_the_note_names_all_three() {
+        let mut sess = pdfcraft_engine::Session::new();
+        let id = sess.open("one.pdf", None, std::sync::Arc::new(fixture()), None).unwrap();
+        let mut inventory = sess.get(id).unwrap().list_javascripts();
+        assert_eq!(Draft::default().state(true, false)["names_left_out"], 0);
+        inventory.names_left_out = 3;
+        let mut d = Draft::default();
+        d.relisted(id, 1, inventory, true, false);
+        assert_eq!(d.state(true, false)["names_left_out"], 3);
+        let note = names_left_out_note();
+        assert!(note.contains("field name") && note.contains("script name") && note.contains("title"), "{note}");
     }
 
     #[test]

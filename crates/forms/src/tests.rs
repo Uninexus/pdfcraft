@@ -8919,3 +8919,166 @@ fn a_twin_with_unread_options_is_refused_a_shared_value() {
     let err = set_value(&mut doc, "twin", &FieldValue::Choice(vec!["a".into()])).unwrap_err().to_string();
     assert!(err.contains("options were not read"), "{err}");
 }
+
+const MIB: usize = 1 << 20;
+
+#[test]
+fn the_label_allowance_is_sixteen_mebibytes() {
+    assert_eq!(MAX_TOTAL_LABELS, 16 * MIB);
+}
+
+fn js(i: usize) -> String {
+    format!("<< /S /JavaScript /JS (s{i}();) >>")
+}
+
+fn name_tree(body: String, extra: Vec<String>) -> Document {
+    let mut objs = vec![
+        "<< /Type /Catalog /Pages 2 0 R /Names << /JavaScript 3 0 R >> >>".to_string(),
+        "<< /Type /Pages /Kids [] /Count 0 >>".to_string(),
+        format!("<< /Names [{body}] >>"),
+    ];
+    objs.extend(extra);
+    document(&objs)
+}
+
+#[test]
+fn script_names_are_read_within_the_allowance_and_the_rest_are_counted() {
+    // 20 pairs whose keys are one indirect 1 MiB string: 16 MiB are read, four names are not.
+    let pairs: String = (0..20).map(|i| format!("4 0 R {} ", js(i))).collect();
+    let inv = javascripts(&name_tree(pairs, vec![format!("({})", "n".repeat(MIB))]));
+    assert_eq!(inv.entries.len(), 20);
+    assert_eq!(inv.entries.iter().filter(|e| e.name.is_some()).count(), 16);
+    assert_eq!(inv.names_left_out, 20 - 16);
+    // Every script keeps its code and its id.
+    assert!(inv.entries.iter().all(|e| e.code.is_some()));
+    assert!(!inv.capped);
+}
+
+#[test]
+fn a_name_copied_to_many_scripts_is_charged_for_each_copy() {
+    // One 1 MiB name, read once, heads a chain of 20 scripts: 16 copies fit.
+    let mut chain = js(20);
+    for i in (0..20).rev() {
+        chain = format!("<< /S /JavaScript /JS (s{i}();) /Next {chain} >>");
+    }
+    let big = name_tree(format!("4 0 R {chain}"), vec![format!("({})", "n".repeat(MIB))]);
+    let inv = javascripts(&big);
+    assert_eq!(inv.entries.len(), 21);
+    assert_eq!(inv.entries.iter().filter(|e| e.name.is_some()).count(), 16);
+    assert_eq!(inv.names_left_out, 21 - 16);
+}
+
+#[test]
+fn field_names_are_read_within_the_allowance_and_the_rest_are_counted() {
+    // 20 fields under one parent whose name is 1 MiB: each builds the parent's name again.
+    let mut objs = vec![
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm 3 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [] /Count 0 >>".to_string(),
+        "<< /Fields [4 0 R] >>".to_string(),
+        format!("<< /T ({}) /Kids [{}] >>", "p".repeat(MIB), (0..20).map(|i| format!("{} 0 R ", 5 + i)).collect::<String>()),
+    ];
+    objs.extend((0..20).map(|i| format!("<< /T (k{i}) /Parent 4 0 R /A {} >>", js(i))));
+    let inv = javascripts(&document(&objs));
+    assert_eq!(inv.entries.len(), 20);
+    // Each name is the parent's 1 MiB and a few bytes, so a little under 16 fit.
+    let named = inv.entries.iter().filter(|e| e.field.is_some()).count();
+    assert!((14..=15).contains(&named), "{named}");
+    assert_eq!(inv.names_left_out, 20 - named);
+    assert!(inv.entries.iter().all(|e| e.code.is_some()));
+}
+
+#[test]
+fn ordinary_names_are_listed_in_full_and_nothing_is_counted() {
+    let objs = vec![
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm 3 0 R /Outlines 5 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [] /Count 0 >>".to_string(),
+        "<< /Fields [4 0 R] >>".to_string(),
+        "<< /T (form) /Kids [6 0 R] >>".to_string(),
+        "<< /Type /Outlines /First 7 0 R /Last 7 0 R >>".to_string(),
+        format!("<< /T (child) /Parent 4 0 R /A {} >>", js(0)),
+        format!("<< /Title (Go) /Parent 5 0 R /A {} >>", js(1)),
+    ];
+    let inv = javascripts(&document(&objs));
+    let field = inv.entries.iter().find(|e| e.kind == ScriptKind::Field).and_then(|e| e.field.as_deref());
+    let title = inv.entries.iter().find(|e| e.kind == ScriptKind::Bookmark).and_then(|e| e.name.as_deref());
+    assert_eq!((field, title), (Some("form.child"), Some("Go")));
+    assert_eq!(inv.names_left_out, 0);
+}
+
+#[test]
+fn a_kids_array_shared_by_many_nodes_is_read_once() {
+    use crate::js_inventory::KIDS_READ;
+    let n = 300;
+    // Name tree: the root lists n nodes that all have the same /Kids array of n leaves.
+    let shared = 4 + n;
+    let mut objs = vec![
+        "<< /Type /Catalog /Pages 2 0 R /Names << /JavaScript 3 0 R >> >>".to_string(),
+        "<< /Type /Pages /Kids [] /Count 0 >>".to_string(),
+        format!("<< /Kids [{}] >>", (0..n).map(|i| format!("{} 0 R ", 4 + i)).collect::<String>()),
+    ];
+    objs.extend((0..n).map(|_| format!("<< /Kids {shared} 0 R >>")));
+    objs.push(format!("[{}]", (0..n).map(|i| format!("{} 0 R ", shared + 1 + i)).collect::<String>()));
+    objs.extend((0..n).map(|i| format!("<< /Names [(l{i}) {}] >>", js(i))));
+    let before = KIDS_READ.with(std::cell::Cell::get);
+    let inv = javascripts(&document(&objs));
+    let read = KIDS_READ.with(std::cell::Cell::get) - before;
+    assert_eq!(inv.entries.len(), n);
+    assert!(read <= 2 * n, "{read}");
+    // Field tree: the same shape.
+    let shared = 4 + n;
+    let mut objs = vec![
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm 3 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [] /Count 0 >>".to_string(),
+        format!("<< /Fields [{}] >>", (0..n).map(|i| format!("{} 0 R ", 4 + i)).collect::<String>()),
+    ];
+    objs.extend((0..n).map(|i| format!("<< /T (f{i}) /Kids {shared} 0 R >>")));
+    objs.push(format!("[{}]", (0..n).map(|i| format!("{} 0 R ", shared + 1 + i)).collect::<String>()));
+    objs.extend((0..n).map(|i| format!("<< /T (k{i}) /A {} >>", js(i))));
+    let before = KIDS_READ.with(std::cell::Cell::get);
+    let inv = javascripts(&document(&objs));
+    let read = KIDS_READ.with(std::cell::Cell::get) - before;
+    assert_eq!(inv.entries.len(), n);
+    assert!(read <= 2 * n, "{read}");
+}
+
+#[test]
+fn names_are_charged_when_read_even_if_no_script_copies_them() {
+    // 17 fields with a URI action each build their parent's 1 MiB name, which lists nothing and
+    // copies nothing; the reading allowance is gone when the one script field comes.
+    let mut objs = vec![
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm 3 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [] /Count 0 >>".to_string(),
+        "<< /Fields [4 0 R] >>".to_string(),
+        format!("<< /T ({}) /Kids [{}] >>", "p".repeat(MIB), (0..18).map(|i| format!("{} 0 R ", 5 + i)).collect::<String>()),
+    ];
+    objs.extend((0..17).map(|i| format!("<< /T (u{i}) /Parent 4 0 R /A << /S /URI /URI (http://x) >> >>")));
+    objs.push(format!("<< /T (last) /Parent 4 0 R /A {} >>", js(0)));
+    let inv = javascripts(&document(&objs));
+    assert_eq!(inv.entries.len(), 1);
+    assert_eq!(inv.entries[0].field, None);
+    assert_eq!(inv.names_left_out, 1);
+    assert!(inv.entries[0].code.is_some());
+}
+
+#[test]
+fn a_direct_name_is_looked_at_without_a_copy() {
+    use crate::js_inventory::BORROWED;
+    // 200 widgets under a parent whose /T is written in place: each name build borrows it.
+    let mut objs = vec![
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm 3 0 R /Names << /JavaScript 5 0 R >> /Outlines 6 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [] /Count 0 >>".to_string(),
+        "<< /Fields [4 0 R] >>".to_string(),
+        format!("<< /T ({}) /Kids [{}] >>", "p".repeat(1024), (0..200).map(|i| format!("{} 0 R ", 7 + i)).collect::<String>()),
+        format!("<< /Names [(key) {}] >>", js(900)),
+        "<< /Type /Outlines /First 207 0 R /Last 207 0 R >>".to_string(),
+    ];
+    objs.extend((0..200).map(|i| format!("<< /T (k{i}) /Parent 4 0 R /A {} >>", js(i))));
+    objs.push(format!("<< /Title (Go) /Parent 6 0 R /A {} >>", js(901)));
+    let before = BORROWED.with(std::cell::Cell::get);
+    let inv = javascripts(&document(&objs));
+    let borrowed = BORROWED.with(std::cell::Cell::get) - before;
+    assert_eq!(inv.entries.len(), 202);
+    assert_eq!(inv.names_left_out, 0);
+    // Each of 200 names looks at two direct parts, the document script key and the title.
+    assert!(borrowed >= 400 + 2, "{borrowed}");
+}

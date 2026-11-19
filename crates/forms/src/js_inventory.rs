@@ -9,10 +9,11 @@
 //! script is, and an id that no longer leads to a JavaScript action is refused.
 
 use std::collections::HashSet;
+use std::rc::Rc;
 
 use pdfcraft_cos::{Dict, Document, ObjRef, Object, PdfString};
 
-use crate::{FormError, page_refs, qualified_name, script, script_budget};
+use crate::{FormError, page_refs, script, script_budget};
 
 /// Most scripts listed; the rest are left out and [`ScriptInventory::capped`] says so.
 pub const MAX_SCRIPTS: usize = 5000;
@@ -24,6 +25,13 @@ const MAX_CHAIN: usize = 256;
 /// Most code bytes held by one listing in all; scripts past it are listed with empty code,
 /// marked truncated.
 pub const MAX_TOTAL_CODE: usize = 16 << 20;
+/// Most bytes of field names, document script names and bookmark titles one listing reads, and
+/// (a second allowance of the same size) most bytes of them it copies into entries. The first
+/// is spent by the stored length of each string read, before it is decoded (a field name by each
+/// of its parts, every time the name is built); the second by the decoded length of each name
+/// copied into an entry, before it is copied. A name that does not fit reads as absent and
+/// [`ScriptInventory::names_left_out`] counts the entry.
+pub const MAX_TOTAL_LABELS: usize = 16 << 20;
 /// Most annotations (and pages) visited in all while listing page actions.
 const MAX_VISITS: usize = 200_000;
 /// Most name tree nodes, outline items and fields visited.
@@ -95,11 +103,13 @@ pub struct ScriptEntry {
     pub kind: ScriptKind,
     /// When it runs: "Will Save", "Calculate", "Mouse Up", "Page Open", "Activate", ...
     pub trigger: String,
-    /// A field's full name.
+    /// A field's full name. `None` for a script that is not a field's, or when the name did not
+    /// fit in [`MAX_TOTAL_LABELS`] (see [`ScriptInventory::names_left_out`]).
     pub field: Option<String>,
     /// The 1-based page it is on or belongs to.
     pub page: Option<usize>,
-    /// A document script's name, or a bookmark's title.
+    /// A document script's name, or a bookmark's title. `None` when the name did not fit in
+    /// [`MAX_TOTAL_LABELS`] (see [`ScriptInventory::names_left_out`]).
     pub name: Option<String>,
     /// The source. `None` when the action has no readable text (no `/JS`, an undecodable
     /// stream, or the reading budget is spent).
@@ -121,6 +131,9 @@ pub struct ScriptInventory {
     pub capped: bool,
     /// How many listed scripts have `truncated` set.
     pub truncated: usize,
+    /// How many listed scripts lack the field name, script name or bookmark title they have,
+    /// because it was past the [`MAX_TOTAL_LABELS`] allowances. Their code and ids are listed.
+    pub names_left_out: usize,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -275,13 +288,18 @@ struct Collector<'a> {
     /// Annotations and pages visited, against [`MAX_VISITS`].
     visits: usize,
     seen_annots: HashSet<u32>,
+    /// Name bytes still to be read and still to be copied ([`MAX_TOTAL_LABELS`]).
+    read_left: usize,
+    copy_left: usize,
 }
 
 #[derive(Clone, Default)]
 struct Ctx {
-    field: Option<String>,
+    field: Option<Rc<str>>,
     page: Option<usize>,
-    name: Option<String>,
+    name: Option<Rc<str>>,
+    /// A name of this script was past the reading allowance, so it is absent.
+    left_out: bool,
 }
 
 impl Collector<'_> {
@@ -347,17 +365,77 @@ impl Collector<'_> {
             self.out.truncated += 1;
         }
         let fingerprint = read.as_ref().map_or_else(|| fingerprint(None), |r| r.fingerprint.to_string());
-        self.out.entries.push(ScriptEntry {
-            id,
-            kind,
-            trigger: trigger.to_string(),
-            field: ctx.field.clone(),
-            page: ctx.page,
-            name: ctx.name.clone(),
-            code,
-            truncated,
-            fingerprint,
-        });
+        let mut left_out = ctx.left_out;
+        let field = self.copied(ctx.field.as_deref(), &mut left_out);
+        let name = self.copied(ctx.name.as_deref(), &mut left_out);
+        if left_out {
+            self.out.names_left_out += 1;
+        }
+        self.out.entries.push(ScriptEntry { id, kind, trigger: trigger.to_string(), field, page: ctx.page, name, code, truncated, fingerprint });
+    }
+
+    /// `text` as an owned string when it fits in what is left to copy, charged before it is
+    /// copied; else `None`, and `left_out` is set.
+    fn copied(&mut self, text: Option<&str>, left_out: &mut bool) -> Option<String> {
+        let text = text?;
+        if text.len() > self.copy_left {
+            *left_out = true;
+            return None;
+        }
+        self.copy_left -= text.len();
+        Some(text.to_string())
+    }
+
+    /// A name decoded from `s`, when its stored length fits in what is left to read (charged
+    /// before it is decoded); else `None`, and `left_out` is set.
+    fn read_string(&mut self, s: &PdfString, left_out: &mut bool) -> Option<Rc<str>> {
+        if s.bytes.len() > self.read_left {
+            *left_out = true;
+            return None;
+        }
+        self.read_left -= s.bytes.len();
+        Some(Rc::from(s.to_text()))
+    }
+
+    /// The fully qualified name of the field `r`, as `qualified_name` builds it but with each
+    /// part charged by its stored length before it is decoded. `None` when it has no name or
+    /// reading it is not allowed; `left_out` is set in the second case.
+    fn field_name(&mut self, r: ObjRef, left_out: &mut bool) -> Option<Rc<str>> {
+        let doc = self.doc;
+        let mut parts: Vec<String> = Vec::new();
+        let mut seen = HashSet::new();
+        let mut cur = Some(r);
+        while let Some(c) = cur {
+            if seen.len() > 64 || !seen.insert(c) {
+                break;
+            }
+            let obj = doc.resolve(&Object::Ref(c));
+            let d = obj.as_dict()?;
+            if let Some(t) = d.get(b"T") {
+                match &*held(doc, t) {
+                    Object::String(s) => {
+                        if s.bytes.len() > self.read_left {
+                            *left_out = true;
+                            return None;
+                        }
+                        self.read_left -= s.bytes.len();
+                        parts.push(s.to_text());
+                    }
+                    Object::Name(n) => {
+                        if n.len() > self.read_left {
+                            *left_out = true;
+                            return None;
+                        }
+                        self.read_left -= n.len();
+                        parts.push(crate::name_text(n));
+                    }
+                    _ => {}
+                }
+            }
+            cur = d.reference(b"Parent").filter(|p| doc.get(*p).as_dict().is_some());
+        }
+        parts.reverse();
+        (!parts.is_empty()).then(|| Rc::from(parts.join(".")))
     }
 
     /// The text of the JavaScript action `action`, read once per script object.
@@ -408,6 +486,8 @@ impl Collector<'_> {
         let Some(tree) = follow(doc, &Object::Ref(root), &route.segs) else { return };
         let mut seen: HashSet<u32> = tree.as_ref().map(|r| r.num).into_iter().collect();
         let mut names_read: HashSet<u32> = HashSet::new();
+        // An indirect /Kids array shared by several nodes is read once.
+        let mut kids_read: HashSet<u32> = HashSet::new();
         let mut stack = vec![(route, tree)];
         let mut visited = 0usize;
         while let Some((route, raw)) = stack.pop() {
@@ -417,9 +497,13 @@ impl Collector<'_> {
             }
             let node = doc.resolve(&raw);
             let Some(d) = node.as_dict() else { continue };
-            if let Some(kids) = d.get(b"Kids") {
+            if let Some(kids) = d.get(b"Kids")
+                && kids.as_ref().is_none_or(|r| kids_read.insert(r.num))
+            {
                 let kids_route = route.key("Kids");
                 if let Some(list) = doc.resolve(kids).as_array().cloned() {
+                    #[cfg(test)]
+                    KIDS_READ.with(|n| n.set(n.get().saturating_add(list.len())));
                     let new: Vec<(Route, Object)> = list
                         .iter()
                         .enumerate()
@@ -437,8 +521,10 @@ impl Collector<'_> {
                 let names_route = route.key("Names");
                 for (i, pair) in list.chunks(2).enumerate() {
                     let [k, v] = pair else { continue };
-                    let Object::String(name) = &*doc.resolve(k) else { continue };
-                    let ctx = Ctx { name: Some(name.to_text()), ..Ctx::default() };
+                    let Object::String(name) = &*held(doc, k) else { continue };
+                    let mut left_out = false;
+                    let name = self.read_string(name, &mut left_out);
+                    let ctx = Ctx { name, left_out, ..Ctx::default() };
                     self.chain(names_route.idx(i * 2 + 1), v, ScriptKind::Document, "Document script", &ctx);
                     if self.full() {
                         return;
@@ -469,6 +555,8 @@ impl Collector<'_> {
         let Some(top) = form.as_dict().and_then(|f| f.get(b"Fields")).map(|f| doc.resolve(f)) else { return };
         let Some(top) = top.as_array() else { return };
         let mut seen: HashSet<u32> = HashSet::new();
+        // An indirect /Kids array shared by several fields is read once.
+        let mut kids_read: HashSet<u32> = HashSet::new();
         let mut stack: Vec<(ObjRef, usize)> = top.iter().filter_map(Object::as_ref).map(|r| (r, 0)).collect();
         stack.reverse();
         let mut visited = 0usize;
@@ -482,12 +570,20 @@ impl Collector<'_> {
             }
             let obj = doc.get(r);
             let Some(d) = obj.as_dict() else { continue };
-            let ctx = Ctx { field: qualified_name(doc, r), ..Ctx::default() };
-            self.actions_of(&Route::obj(r.num), d, ScriptKind::Field, &ctx, Some("Mouse Up"), FIELD_AA);
+            // The name matters only to a field that has actions.
+            if d.get(b"A").is_some() || d.get(b"AA").is_some() {
+                let mut left_out = false;
+                let field = self.field_name(r, &mut left_out);
+                let ctx = Ctx { field, left_out, ..Ctx::default() };
+                self.actions_of(&Route::obj(r.num), d, ScriptKind::Field, &ctx, Some("Mouse Up"), FIELD_AA);
+            }
             if depth < MAX_DEPTH
+                && d.get(b"Kids").is_none_or(|k| k.as_ref().is_none_or(|r| kids_read.insert(r.num)))
                 && let Some(kids) = d.get(b"Kids").map(|k| doc.resolve(k))
                 && let Some(kids) = kids.as_array()
             {
+                #[cfg(test)]
+                KIDS_READ.with(|n| n.set(n.get().saturating_add(kids.len())));
                 stack.extend(kids.iter().take(MAX_NODES).filter_map(Object::as_ref).map(|k| (k, depth + 1)).rev().collect::<Vec<_>>());
             }
         }
@@ -539,9 +635,12 @@ impl Collector<'_> {
                 let Some(ad) = annot.as_dict() else { continue };
                 match ad.name(b"Subtype") {
                     Some(b"Widget") => {
-                        let field = item.as_ref().and_then(|r| qualified_name(doc, r));
-                        let ctx = Ctx { field, page: Some(n + 1), name: None };
-                        self.actions_of(&route, ad, ScriptKind::Field, &ctx, Some("Mouse Up"), FIELD_AA);
+                        if ad.get(b"A").is_some() || ad.get(b"AA").is_some() {
+                            let mut left_out = false;
+                            let field = item.as_ref().and_then(|r| self.field_name(r, &mut left_out));
+                            let ctx = Ctx { field, page: Some(n + 1), name: None, left_out };
+                            self.actions_of(&route, ad, ScriptKind::Field, &ctx, Some("Mouse Up"), FIELD_AA);
+                        }
                     }
                     Some(b"Link") => self.actions_of(&route, ad, ScriptKind::Link, &ctx, Some("Activate"), FIELD_AA),
                     _ => self.actions_of(&route, ad, ScriptKind::Annotation, &ctx, Some("Activate"), FIELD_AA),
@@ -579,15 +678,53 @@ impl Collector<'_> {
                 stack.push((child, depth + 1));
             }
             if let Some(a) = d.get(b"A") {
-                let title = match d.get(b"Title").map(|t| doc.resolve(t)).as_deref() {
-                    Some(Object::String(s)) => Some(s.to_text()),
+                let mut left_out = false;
+                let title = match d.get(b"Title").map(|t| held(doc, t)).as_deref() {
+                    Some(Object::String(s)) => self.read_string(s, &mut left_out),
                     _ => None,
                 };
-                let ctx = Ctx { name: title, ..Ctx::default() };
+                let ctx = Ctx { name: title, left_out, ..Ctx::default() };
                 self.chain(Route::obj(r.num).key("A"), a, ScriptKind::Bookmark, "Activate", &ctx);
             }
         }
     }
+}
+
+/// An object as it is read: borrowed when it is direct, so a long string written in place is not
+/// copied by being looked at, and held through its reference when it is indirect.
+enum Held<'a> {
+    Direct(&'a Object),
+    Indirect(std::sync::Arc<Object>),
+}
+
+impl std::ops::Deref for Held<'_> {
+    type Target = Object;
+    fn deref(&self) -> &Object {
+        match self {
+            Held::Direct(o) => o,
+            Held::Indirect(o) => o,
+        }
+    }
+}
+
+/// `o` itself when it is direct, else what its reference leads to (`Document::resolve` copies a
+/// direct object, string bytes and all).
+fn held<'a>(doc: &Document, o: &'a Object) -> Held<'a> {
+    if matches!(o, Object::Ref(_)) {
+        Held::Indirect(doc.resolve(o))
+    } else {
+        #[cfg(test)]
+        BORROWED.with(|n| n.set(n.get().saturating_add(1)));
+        Held::Direct(o)
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Direct objects looked at without a copy by listings on this thread.
+    pub(crate) static BORROWED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// Entries of /Kids arrays read by listings on this thread, for tests of the sharing rule.
+    pub(crate) static KIDS_READ: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 /// Marks an /Annots array's object number in the seen set, apart from annotations'.
@@ -627,6 +764,8 @@ pub fn javascripts(doc: &Document) -> ScriptInventory {
         read_bytes: 0,
         visits: 0,
         seen_annots: HashSet::new(),
+        read_left: MAX_TOTAL_LABELS,
+        copy_left: MAX_TOTAL_LABELS,
     };
     c.catalog();
     // Pages first, so a widget's script carries its page; the field tree then adds the rest.

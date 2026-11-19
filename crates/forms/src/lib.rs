@@ -33,7 +33,8 @@ pub use author::{
 };
 pub use calc_order::{CalculatedField, CalculationIssue, CalculationOrder, calculation_order, set_calculation_order};
 pub use js_inventory::{
-    MAX_SCRIPT_LEN, MAX_SCRIPTS, MAX_TOTAL_CODE, ScriptEntry, ScriptInventory, ScriptKind, javascripts, remove_javascript, set_javascript,
+    MAX_SCRIPT_LEN, MAX_SCRIPTS, MAX_TOTAL_CODE, MAX_TOTAL_LABELS, ScriptEntry, ScriptInventory, ScriptKind, javascripts, remove_javascript,
+    set_javascript,
 };
 pub use scripting::{
     DocumentTrigger, FieldChange, FieldEvent, NoScripts, PageEvent, PageScript, ScriptResult, Scripts, apply_script_changes, document_action_scripts,
