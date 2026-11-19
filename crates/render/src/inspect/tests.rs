@@ -3158,3 +3158,152 @@ trailer << /Root 1 0 R >>
     let info = inspect(Arc::new(pdf.as_bytes().to_vec()), None).expect("opens");
     assert_eq!(info.outline.iter().map(|o| (o.title.as_str(), o.page)).collect::<Vec<_>>(), [("named", Some(1))]);
 }
+
+/// A document of `pages` pages under one `/Pages` node whose `/Resources` is object 5, each page
+/// carrying `page_extra`; `extra_objects` are objects 5 onward.
+fn font_pages(pages: usize, page_extra: &str, extra_objects: &str) -> Vec<u8> {
+    let kids: String = (0..pages).map(|i| format!("{} 0 R ", 100 + i)).collect();
+    let page_objects: String =
+        (0..pages).map(|i| format!("{} 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] {page_extra} >> endobj\n", 100 + i)).collect();
+    format!(
+        "%PDF-1.7\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n\
+         2 0 obj << /Type /Pages /Kids [{kids}] /Count {pages} /Resources 5 0 R >> endobj\n\
+         {page_objects}{extra_objects}trailer << /Root 1 0 R >>\n%%EOF"
+    )
+    .into_bytes()
+}
+
+fn inspect_fonts(pdf: &[u8], pages: usize) -> (DocInfo, usize) {
+    let doc = Document::load_mem(pdf).expect("loads");
+    let counting = CountingReads { doc: &doc, reads: std::cell::Cell::new(0) };
+    let page = PageInfo { width: 200.0, height: 200.0, crop: [0.0, 0.0, 200.0, 200.0], rotation: 0, label: String::new() };
+    let mut info = DocInfo { pages: vec![page; pages], ..Default::default() };
+    Inspector::new(&counting).fill(&mut info);
+    let reads = counting.reads.get();
+    (info, reads)
+}
+
+/// Pages that inherit one font dictionary of many entries from their `/Pages` node read it once,
+/// not once per page: the listing costs the entries and the pages, not their product.
+#[test]
+fn pages_sharing_a_font_dictionary_read_it_once() {
+    let entries: String = (0..300).map(|i| format!("/F{i} 7 0 R ")).collect();
+    let objects = format!(
+        "5 0 obj << /Font 6 0 R >> endobj\n6 0 obj << {entries} >> endobj\n\
+         7 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj\n"
+    );
+    let (info, reads) = inspect_fonts(&font_pages(300, "", &objects), 300);
+    assert_eq!(info.fonts.iter().map(|f| f.name.as_str()).collect::<Vec<_>>(), ["Helvetica"]);
+    assert!(info.warnings.iter().all(|w| !w.contains("fonts")), "{:?}", info.warnings);
+    // Before: every page collected all 300 entries (90,000 reads and more).
+    assert!(reads < 20_000, "{reads} reads");
+}
+
+/// Pages that each have a font of their own and also inherit a shared dictionary of long names
+/// pay for it every time: past the allowance the rest are not read, and doc_info says so instead
+/// of listing fewer fonts as if that were all of them.
+#[test]
+fn font_resources_past_the_allowance_are_flagged() {
+    let long = "n".repeat(1 << 20);
+    let entries: String = (0..8).map(|i| format!("/{long}{i} 7 0 R ")).collect();
+    let objects = format!(
+        "5 0 obj << /Font 6 0 R >> endobj\n6 0 obj << {entries} >> endobj\n\
+         7 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Shared >> endobj\n\
+         8 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Own >> endobj\n"
+    );
+    let (info, _) = inspect_fonts(&font_pages(160, "/Resources << /Font << /X 8 0 R >> >>", &objects), 160);
+    let warning = info.warnings.iter().find(|w| w.contains("font")).expect("flagged");
+    assert!(warning.contains("1024 MiB"), "{warning}");
+    let names: Vec<_> = info.fonts.iter().map(|f| f.name.as_str()).collect();
+    assert_eq!(names, ["Own", "Shared"], "what was read is still listed");
+}
+
+/// An ordinary document has no such warning, and a page's own font still hides an inherited one of
+/// the same resource name.
+#[test]
+fn own_fonts_still_shadow_inherited_ones_and_nothing_is_flagged() {
+    let objects = "5 0 obj << /Font << /X 7 0 R /Y 8 0 R >> >> endobj\n\
+         7 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Inherited >> endobj\n\
+         8 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Other >> endobj\n\
+         9 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Own >> endobj\n";
+    let (info, _) = inspect_fonts(&font_pages(2, "/Resources << /Font << /X 9 0 R >> >>", objects), 2);
+    let names: Vec<_> = info.fonts.iter().map(|f| f.name.as_str()).collect();
+    assert_eq!(names, ["Other", "Own"]);
+    assert!(info.warnings.is_empty(), "{:?}", info.warnings);
+}
+
+/// A `/Pages` node's direct `/Resources` is read by no reader of a page's fonts, so it must not
+/// make another page's own resources over the same font dictionary look already read: the first
+/// page has no fonts, the second has Helvetica, and both are listed as before.
+#[test]
+fn an_ancestors_direct_resources_do_not_hide_another_pages_fonts() {
+    let pdf = b"%PDF-1.7\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n\
+        2 0 obj << /Type /Pages /Kids [8 0 R 9 0 R] /Count 2 >> endobj\n\
+        8 0 obj << /Type /Pages /Parent 2 0 R /Kids [3 0 R] /Count 1 /Resources << /Font 6 0 R >> >> endobj\n\
+        9 0 obj << /Type /Pages /Parent 2 0 R /Kids [4 0 R] /Count 1 >> endobj\n\
+        3 0 obj << /Type /Page /Parent 8 0 R /MediaBox [0 0 200 200] >> endobj\n\
+        4 0 obj << /Type /Page /Parent 9 0 R /MediaBox [0 0 200 200] /Resources << /Font 6 0 R >> >> endobj\n\
+        6 0 obj << /F1 7 0 R >> endobj\n7 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj\n\
+        trailer << /Root 1 0 R >>\n%%EOF";
+    let (info, _) = inspect_fonts(pdf, 2);
+    assert_eq!(info.fonts.iter().map(|f| f.name.as_str()).collect::<Vec<_>>(), ["Helvetica"]);
+}
+
+/// Resources that are a stream are no resources to the readers either.
+#[test]
+fn stream_resources_do_not_hide_another_pages_fonts() {
+    let pdf = b"%PDF-1.7\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n\
+        2 0 obj << /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >> endobj\n\
+        3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Resources 5 0 R >> endobj\n\
+        4 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Resources << /Font 6 0 R >> >> endobj\n\
+        5 0 obj << /Font 6 0 R /Length 0 >> stream\n\nendstream endobj\n\
+        6 0 obj << /F1 7 0 R >> endobj\n7 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj\n\
+        trailer << /Root 1 0 R >>\n%%EOF";
+    let (info, _) = inspect_fonts(pdf, 2);
+    assert_eq!(info.fonts.iter().map(|f| f.name.as_str()).collect::<Vec<_>>(), ["Helvetica"]);
+}
+
+/// Many pages that each reach one font with a long `/BaseFont` through a different resource name
+/// build its listing entry once: the copies of its name are not charged, so they must not be made.
+#[test]
+fn a_font_reached_many_times_is_built_once() {
+    let long = "n".repeat(1 << 20);
+    let entries: String = (0..1000).map(|i| format!("/F{i} 7 0 R ")).collect();
+    let objects = format!(
+        "5 0 obj << /Font 6 0 R >> endobj\n6 0 obj << {entries} >> endobj\n\
+         7 0 obj << /Type /Font /Subtype /Type1 /BaseFont /{long} >> endobj\n\
+         8 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Own >> endobj\n"
+    );
+    let started = std::time::Instant::now();
+    let (info, _) = inspect_fonts(&font_pages(300, "/Resources << /Font << /X 8 0 R >> >>", &objects), 300);
+    assert_eq!(info.fonts.len(), 2, "{}", info.fonts.len());
+    assert!(started.elapsed().as_secs() < 20, "{:?}", started.elapsed());
+}
+
+/// A font's `/Subtype` can be an indirect name, so many fonts can name one huge object: a field
+/// over the cap is read as absent (not copied once per font) and the list says so.
+#[test]
+fn an_overlong_font_subtype_is_not_copied_per_font_and_is_flagged() {
+    let long = "n".repeat(1 << 20);
+    let fonts: String = (0..300).map(|i| format!("{} 0 obj << /Type /Font /Subtype 6 0 R /BaseFont /Font{i} >> endobj\n", 1000 + i)).collect();
+    let entries: String = (0..300).map(|i| format!("/F{i} {} 0 R ", 1000 + i)).collect();
+    let objects = format!("5 0 obj << /Font << {entries} >> >> endobj\n6 0 obj /{long} endobj\n{fonts}");
+    let started = std::time::Instant::now();
+    let (info, _) = inspect_fonts(&font_pages(1, "", &objects), 1);
+    assert_eq!(info.fonts.len(), 300);
+    assert!(info.fonts.iter().all(|f| f.kind.is_empty()), "read as absent");
+    assert!(info.warnings.iter().any(|w| w.contains("subtype") && crate::is_font_list_warning(w)), "{:?}", info.warnings);
+    assert!(started.elapsed().as_secs() < 20, "{:?}", started.elapsed());
+}
+
+/// Short names are read as before and are not flagged.
+#[test]
+fn ordinary_subtype_encoding_and_ordering_are_kept() {
+    let objects = "5 0 obj << /Font << /F1 7 0 R >> >> endobj\n\
+        7 0 obj << /Type /Font /Subtype /Type0 /BaseFont /KozMinPro-Regular /Encoding /UniJIS-UCS2-H /DescendantFonts [8 0 R] >> endobj\n\
+        8 0 obj << /Type /Font /Subtype /CIDFontType0 /BaseFont /KozMinPro-Regular /CIDSystemInfo << /Registry (Adobe) /Ordering (Japan1) /Supplement 4 >> >> endobj\n";
+    let (info, _) = inspect_fonts(&font_pages(1, "", objects), 1);
+    let f = info.fonts.iter().find(|f| f.name == "KozMinPro-Regular").expect("listed");
+    assert_eq!((f.kind.as_str(), f.encoding.as_deref()), ("Type0", Some("UniJIS-UCS2-H")));
+    assert!(info.warnings.is_empty(), "{:?}", info.warnings);
+}

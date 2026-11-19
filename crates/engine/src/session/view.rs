@@ -367,6 +367,7 @@ impl Session {
         let Some(doc) = self.docs.iter_mut().find(|d| d.id == id && d.fonts_stale) else { return };
         if let Ok(info) = pdfcraft_render::inspect(doc.bytes.clone(), doc.password.as_deref()) {
             doc.info.fonts = info.fonts;
+            replace_font_list_warnings(&mut doc.info.warnings, info.warnings);
         }
         doc.fonts_stale = false;
     }
@@ -374,6 +375,13 @@ impl Session {
     pub fn docs(&self) -> &[Document] {
         &self.docs
     }
+}
+
+/// The notes that the font list may be incomplete belong to the list: `warnings` loses its own and
+/// takes the ones in `reading` (a new reading of the fonts), leaving every other warning alone.
+pub(crate) fn replace_font_list_warnings(warnings: &mut Vec<String>, reading: Vec<String>) {
+    warnings.retain(|w| !pdfcraft_render::is_font_list_warning(w));
+    warnings.extend(reading.into_iter().filter(|w| pdfcraft_render::is_font_list_warning(w)));
 }
 
 /// Convert a view-space text line rectangle into a normalized, finite PDF user-space rectangle.
@@ -387,7 +395,7 @@ fn line_user_rect(page: &pdfcraft_render::PageInfo, v: [f32; 4]) -> Option<[f64;
 
 #[cfg(test)]
 mod tests {
-    use super::line_user_rect;
+    use super::{line_user_rect, replace_font_list_warnings};
     use crate::{Edit, Session};
     use pdfcraft_render::PageInfo;
     use std::sync::Arc;
@@ -396,6 +404,27 @@ mod tests {
     fn sample_page(rotation: u16) -> PageInfo {
         let (width, height) = if rotation % 180 == 90 { (300.0, 200.0) } else { (200.0, 300.0) };
         PageInfo { width, height, label: String::new(), crop: [10.0, 20.0, 210.0, 320.0], rotation }
+    }
+
+    const NOTE: &str = "Some fonts may be missing from the list: test";
+
+    /// A new reading's font-list note replaces the old one, whichever way it goes, and no other
+    /// warning is touched or moved.
+    #[test]
+    fn the_font_list_note_follows_the_latest_reading() {
+        let other = || vec!["Something else".to_string()];
+        // Kept (once) when the new reading is incomplete too.
+        let mut w = vec!["Other".to_string(), NOTE.to_string()];
+        replace_font_list_warnings(&mut w, vec![NOTE.to_string(), "Not about fonts".to_string()]);
+        assert_eq!(w, ["Other", NOTE]);
+        // Dropped when the list became complete.
+        let mut w = vec![NOTE.to_string(), "Other".to_string()];
+        replace_font_list_warnings(&mut w, other());
+        assert_eq!(w, ["Other"]);
+        // Added when it was not there and the list became incomplete.
+        let mut w = other();
+        replace_font_list_warnings(&mut w, vec![NOTE.to_string()]);
+        assert_eq!(w, ["Something else", NOTE]);
     }
 
     #[test]

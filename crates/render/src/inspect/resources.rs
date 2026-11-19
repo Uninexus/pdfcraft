@@ -19,6 +19,47 @@ const MAX_AUTO_STATE_APPLICATIONS: usize = 256;
 const MAX_AUTO_STATE_GROUPS: usize = 4096;
 const MAX_AUTO_STATE_CATEGORIES: usize = 16;
 
+/// What listing fonts may spend reading the pages' font resources together, in the bytes each
+/// font resource entry costs: its name's length plus [`FONT_ENTRY_COST`]. A page costs the entries
+/// of every font dictionary it reads (its own, and the ones its resources and its ancestors'
+/// name), each shared dictionary measured once; a page whose font dictionaries are exactly a
+/// page already read's costs nothing. Charged before the page's fonts are collected.
+pub(super) const MAX_FONT_WALK_BYTES: usize = 1 << 30;
+pub(super) const FONT_ENTRY_COST: usize = 64;
+/// Ancestors a page's resources are looked for in (the readers of a page's fonts stop at 100).
+const MAX_FONT_ANCESTORS: usize = 100;
+
+/// Whether `warning` is the one [`Inspector::fonts`] gives when the list may be incomplete.
+pub fn is_font_list_warning(warning: &str) -> bool {
+    warning.starts_with(FONT_LIST_WARNING)
+}
+
+/// What a font listing left out.
+#[derive(Default)]
+pub(super) struct FontListGaps {
+    /// Pages whose font resources did not fit [`MAX_FONT_WALK_BYTES`] were not read.
+    pub(super) pages_unread: bool,
+    /// A `/Subtype`, `/Encoding` or `/Ordering` longer than [`MAX_FONT_FIELD_BYTES`] was read as absent.
+    pub(super) fields_dropped: bool,
+}
+
+pub(super) const FONT_LIST_WARNING: &str = "Some fonts may be missing from the list";
+
+/// A font's `/Subtype`, an `/Encoding` name and a descendant's `/Ordering` are read only when at
+/// most this long (they are short names in every real file); a longer one is read as absent and
+/// the list is flagged. They can be indirect, so one object could otherwise be copied once for
+/// every font that names it.
+pub(super) const MAX_FONT_FIELD_BYTES: usize = 256;
+
+/// Where a page's font dictionary comes from, for telling two pages' apart without reading them:
+/// the indirect dictionary itself, or the direct one inside the indirect resources dictionary with
+/// this id.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+enum FontSource {
+    Dictionary(ObjectId),
+    Inside(ObjectId),
+}
+
 /// The Layers panel's rows from `/Order`: at most this many rows, nested at most this deep, and
 /// a label keeps at most this many characters.
 pub(super) const MAX_LAYER_ORDER_ROWS: usize = 4096;
@@ -290,20 +331,107 @@ impl<'a> Inspector<'a> {
         out
     }
 
-    pub(super) fn fonts(&self, out: &mut Vec<FontInfo>) {
+    /// The font dictionaries a page's fonts are read from, in the order they take precedence, and
+    /// what reading them costs ([`MAX_FONT_WALK_BYTES`]). `None` for the source list when the
+    /// page has a font dictionary of its own (so no other page has the same). Looks at the page and
+    /// its ancestors' `/Resources` and their `/Font`, which is every place the readers of a page's
+    /// fonts (`Structure::get_page_fonts`) take them from, and measures nothing it already has.
+    fn font_sources(&self, page: ObjectId, costs: &mut HashMap<FontSource, usize>) -> (Option<Vec<FontSource>>, usize) {
+        let entries = |d: &Dictionary| d.iter().fold(0usize, |t, (name, _)| t.saturating_add(name.len().saturating_add(FONT_ENTRY_COST)));
+        let mut sources = Vec::new();
+        let mut shared = true;
+        let mut total = 0usize;
         let mut seen = HashSet::new();
+        let mut node = Some(page);
+        while let Some(id) = node.filter(|_| seen.len() <= MAX_FONT_ANCESTORS) {
+            if !seen.insert(id) {
+                break;
+            }
+            let Ok(dict) = self.doc.get_dictionary(id) else { break };
+            let own = id == page;
+            // The resources as the readers of a page's fonts take them: the page's own, when
+            // written in it as a dictionary, and an indirect dictionary of the page or of an
+            // ancestor. A direct one in an ancestor, or a stream, is read by neither.
+            let resources = dict.get(b"Resources").ok().and_then(|r| match r {
+                Object::Reference(rid) => self.doc.get_dictionary(*rid).ok().map(|d| (d, *rid, false)),
+                Object::Dictionary(d) if own => Some((d, id, true)),
+                _ => None,
+            });
+            if let Some((resources, owner, direct)) = resources
+                && let Ok(font) = resources.get(b"Font")
+            {
+                let (source, dict) = match font {
+                    Object::Reference(fid) => (Some(FontSource::Dictionary(*fid)), self.doc.get_dictionary(*fid).ok()),
+                    Object::Dictionary(d) if direct => (None, Some(d)),
+                    Object::Dictionary(d) => (Some(FontSource::Inside(owner)), Some(d)),
+                    _ => (None, None),
+                };
+                if let Some(dict) = dict {
+                    match source {
+                        Some(source) => {
+                            total = total.saturating_add(*costs.entry(source).or_insert_with(|| entries(dict)));
+                            sources.push(source);
+                        }
+                        None => {
+                            shared = false;
+                            total = total.saturating_add(entries(dict));
+                        }
+                    }
+                }
+            }
+            node = dict.get(b"Parent").ok().and_then(|p| p.as_reference().ok());
+        }
+        (shared.then_some(sources), total)
+    }
+
+    /// Lists the fonts the pages use, and says what it left out: a page whose font resources
+    /// did not fit [`MAX_FONT_WALK_BYTES`] is skipped (its fonts are not listed unless another page
+    /// lists them), and a font field over [`MAX_FONT_FIELD_BYTES`] is read as absent.
+    pub(super) fn fonts(&self, out: &mut Vec<FontInfo>) -> FontListGaps {
+        let mut seen = HashSet::new();
+        let mut left = MAX_FONT_WALK_BYTES;
+        let mut costs = HashMap::new();
+        let mut read: HashSet<Vec<FontSource>> = HashSet::new();
+        let mut gaps = FontListGaps::default();
+        let mut done: HashSet<usize> = HashSet::new();
         for &pid in &self.page_ids {
+            let (sources, cost) = self.font_sources(pid, &mut costs);
+            if sources.as_ref().is_some_and(|s| read.contains(s)) {
+                continue;
+            }
+            if cost > left {
+                gaps.pages_unread = true;
+                continue;
+            }
+            left -= cost;
             let Ok(fonts) = self.doc.get_page_fonts(pid) else { continue };
+            if let Some(sources) = sources {
+                read.insert(sources);
+            }
             for (_, f) in fonts {
+                // A font dictionary is turned into a listing entry once, however many pages and
+                // resource names reach it: building one copies its names.
+                if !done.insert(std::ptr::from_ref(f) as usize) {
+                    continue;
+                }
                 let base = f
                     .get(b"BaseFont")
                     .ok()
                     .and_then(|o| o.as_name().ok())
                     .map(|n| String::from_utf8_lossy(n).into_owned())
                     .unwrap_or_else(|| "(unnamed)".into());
-                let kind = self.name(f, b"Subtype").unwrap_or_default();
+                let mut short = |bytes: &[u8]| {
+                    let fits = bytes.len() <= MAX_FONT_FIELD_BYTES;
+                    gaps.fields_dropped |= !fits;
+                    fits
+                };
+                let kind = match f.get(b"Subtype").map(|o| self.resolve(o)) {
+                    Ok(Object::Name(n)) if short(n) => String::from_utf8_lossy(n).into_owned(),
+                    _ => String::new(),
+                };
                 let encoding = match f.get(b"Encoding").map(|o| self.resolve(o)) {
-                    Ok(Object::Name(n)) => Some(String::from_utf8_lossy(n).into_owned()),
+                    Ok(Object::Name(n)) if short(n) => Some(String::from_utf8_lossy(n).into_owned()),
+                    Ok(Object::Name(_)) => None,
                     Ok(Object::Dictionary(_)) => Some("Custom".into()),
                     Ok(Object::Stream(_)) => Some("Embedded CMap".into()),
                     _ => None,
@@ -322,8 +450,14 @@ impl<'a> Inspector<'a> {
                     .and_then(|o| self.resolve(o).as_i64().ok())
                     .and_then(|n| u32::try_from(n).ok())
                     .unwrap_or(0);
-                let ordering =
-                    descendant.and_then(|d| d.get(b"CIDSystemInfo").ok()).and_then(|o| self.dict(o)).and_then(|c| self.text(c, b"Ordering"));
+                let ordering = descendant
+                    .and_then(|d| d.get(b"CIDSystemInfo").ok())
+                    .and_then(|o| self.dict(o))
+                    .filter(|c| match c.get(b"Ordering").map(|o| self.resolve(o)) {
+                        Ok(Object::String(b, _) | Object::Name(b)) => short(b),
+                        _ => true,
+                    })
+                    .and_then(|c| self.text(c, b"Ordering"));
                 let subset = base.len() > 7 && base.as_bytes()[6] == b'+' && base[..6].bytes().all(|b| b.is_ascii_uppercase());
                 let name = if subset { base[7..].to_string() } else { base };
                 let chosen = pdfcraft_fonts::fallback::substitute(&pdfcraft_fonts::fallback::Request {
@@ -347,6 +481,7 @@ impl<'a> Inspector<'a> {
             }
         }
         out.sort_by(|a, b| a.name.cmp(&b.name));
+        gaps
     }
 
     /// The attachment's name is the file specification's, else `fallback`'s, else a generic one.
