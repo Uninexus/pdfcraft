@@ -2306,6 +2306,7 @@ mod widget_budget_review_tests {
             tooltip: None,
             selected: vec![],
             single_value_is_array: false,
+            options_omitted: false,
             widgets: vec![widget; 140_000],
             actions: Default::default(),
             button: None,

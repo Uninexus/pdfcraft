@@ -70,6 +70,72 @@ fn button_action(doc: &Document, d: &Dict, widgets: &[ObjRef], scripts: &mut Dec
     })
 }
 
+/// The option text (export values and display texts, in bytes) all the fields of one form may
+/// hold when read: entries are cheap to repeat, and each can name one long string object.
+pub const MAX_OPTION_BYTES: usize = 16 << 20;
+
+/// A field's options (export value, display text) from its `/Opt` entries, spent from the form's
+/// allowances; `None`, spending nothing, when they do not fit what is left.
+/// A list refused after it was scanned: the byte allowance and the list's entries are spent, so a
+/// field sharing the list is refused at once instead of scanning it again (entries that are no
+/// text cost no bytes, and would otherwise be scanned in full every time).
+fn refused(seen: &mut Seen, entries: usize) -> Option<Vec<(String, String)>> {
+    seen.option_bytes_left = 0;
+    seen.option_entries_left = seen.option_entries_left.saturating_sub(entries);
+    None
+}
+
+fn read_options(doc: &Document, entries: &[Object], seen: &mut Seen) -> Option<Vec<(String, String)>> {
+    if entries.len() > seen.option_entries_left {
+        return None;
+    }
+    // The raw length of a text object, known before it is decoded.
+    let raw = |o: &Object| match o {
+        Object::String(s) => s.bytes.len(),
+        Object::Name(n) => n.len(),
+        _ => 0,
+    };
+    let left = seen.option_bytes_left;
+    let mut bytes = 0usize;
+    let mut out = Vec::with_capacity(entries.len().min(4096));
+    for o in entries {
+        let resolved = doc.resolve(o);
+        let halves = match &*resolved {
+            Object::Array(pair) if pair.len() >= 2 => Some((doc.resolve(&pair[0]), doc.resolve(&pair[1]))),
+            _ => None,
+        };
+        let (first, second): (&Object, Option<&Object>) = match &halves {
+            Some((a, b)) => (&**a, Some(&**b)),
+            None => (&*resolved, None),
+        };
+        // A text object longer than what is left is refused before it is decoded, and a refusal
+        // spends the rest of the allowance, so fields naming the same long list do not decode it
+        // again.
+        let raw_len = raw(first).saturating_add(second.map_or(0, raw));
+        if raw_len > left.saturating_sub(bytes) {
+            return refused(seen, entries.len());
+        }
+        let pair = match second {
+            Some(second) => text_of(first).zip(text_of(second)),
+            None => text_of(first).map(|t| (t.clone(), t)),
+        };
+        if let Some((export, shown)) = pair {
+            bytes = bytes.saturating_add(export.len()).saturating_add(shown.len());
+            if bytes > left {
+                return refused(seen, entries.len());
+            }
+            out.push((export, shown));
+        }
+    }
+    seen.option_entries_left -= entries.len();
+    seen.option_bytes_left -= bytes;
+    Some(out)
+}
+
+/// The `/Opt` entries all the fields of one form may hold when read. Fields can name one shared
+/// array, so what a form may spend is not bounded by its size.
+pub const MAX_OPTION_ENTRIES: usize = 1_000_000;
+
 /// Most entries of a `ResetForm` `/Fields` or `Hide` `/T` array that [`action_fields`] reads.
 const MAX_ACTION_FIELDS: usize = 65_536;
 /// Most bytes of field names [`action_fields`] builds in all, over every entry. A name is the
@@ -419,6 +485,11 @@ pub fn fields(doc: &Document) -> Vec<Field> {
     fields_with_adopted(doc).items
 }
 
+/// How many fields [`fields`] read with no options: see [`Fields::options_omitted`].
+pub fn options_omitted(doc: &Document) -> usize {
+    fields_with_adopted(doc).options_omitted
+}
+
 /// How many of [`fields`] were reachable only through the page annotations: the form's `/Fields`
 /// list names none or only some of them, so the leniency that adopts them is worth recording.
 pub fn adopted_page_fields(doc: &Document) -> usize {
@@ -432,6 +503,9 @@ pub struct Fields {
     pub items: Vec<Field>,
     /// How many fields were reachable only through page annotations.
     pub adopted_page_fields: usize,
+    /// How many combo and list boxes were read with no options because the form's `/Opt` arrays
+    /// together held more than [`MAX_OPTION_ENTRIES`] entries or [`MAX_OPTION_BYTES`] of text. Their `/Opt` is still in the file.
+    pub options_omitted: usize,
 }
 
 /// Read all terminal fields and the page-only adoption count in one enumeration.
@@ -453,8 +527,8 @@ pub fn fields_with_adopted(doc: &Document) -> Fields {
     if let Some(fields) = kept {
         return fields;
     }
-    let (items, adopted_page_fields) = enumerate(doc);
-    let fields = Fields { items, adopted_page_fields };
+    let (items, adopted_page_fields, options_omitted) = enumerate(doc);
+    let fields = Fields { items, adopted_page_fields, options_omitted };
     // Not kept (the thread is ending, or the slot is in use) costs only a later walk.
     let _ = LAST_READING.try_with(|last| {
         if let Ok(mut last) = last.try_borrow_mut() {
@@ -480,7 +554,7 @@ pub fn form_reads_on_this_thread() -> usize {
     FORM_READS.try_with(std::cell::Cell::get).unwrap_or(0)
 }
 
-pub(crate) fn enumerate(doc: &Document) -> (Vec<Field>, usize) {
+pub(crate) fn enumerate(doc: &Document) -> (Vec<Field>, usize, usize) {
     let _ = FORM_READS.try_with(|n| n.set(n.get().saturating_add(1)));
     let af = acroform(doc);
     let mut page_of = std::collections::HashMap::new();
@@ -526,6 +600,9 @@ pub(crate) fn enumerate(doc: &Document) -> (Vec<Field>, usize) {
         by_parent,
         scripts: script_budget(),
         values: DecodeBudget::new(MAX_VALUE_BYTES, 0),
+        option_entries_left: MAX_OPTION_ENTRIES,
+        option_bytes_left: MAX_OPTION_BYTES,
+        options_omitted: 0,
     };
     for r in listed_roots {
         // A `/Fields` entry that is a nameless kid of a field `/Fields` doesn't list is read
@@ -547,7 +624,7 @@ pub(crate) fn enumerate(doc: &Document) -> (Vec<Field>, usize) {
     adopt_page_fields(doc, &pages, &base, &page_of, &mut seen, &mut out);
     let adopted = out.len() - listed;
     rank_tabs(doc, &pages, &annot_index, &mut out);
-    (out, adopted)
+    (out, adopted, seen.options_omitted)
 }
 
 /// Widget annotations no `/Fields` entry reaches are adopted as fields, as Acrobat and the
@@ -620,6 +697,12 @@ struct Seen {
     by_parent: std::collections::HashMap<ObjRef, Vec<ObjRef>>,
     scripts: DecodeBudget,
     values: DecodeBudget,
+    /// Choice options the fields read so far may still take, from [`MAX_OPTION_ENTRIES`].
+    option_entries_left: usize,
+    /// Bytes of option text the fields read so far may still take, from [`MAX_OPTION_BYTES`].
+    option_bytes_left: usize,
+    /// Fields read with no options because their `/Opt` array did not fit what was left.
+    options_omitted: usize,
 }
 
 /// The field a page widget `r` names as its `/Parent`, when `r` is a widget and not a field of its
@@ -747,7 +830,7 @@ fn walk(
     let button = (inh.ft.as_deref() == Some(b"Btn") && inh.ff.unwrap_or(0) & flags::PUSH_BUTTON != 0)
         .then(|| button_action(doc, d, &widget_refs, &mut seen.scripts))
         .flatten();
-    let widgets = widget_refs
+    let widgets: Vec<Widget> = widget_refs
         .into_iter()
         .filter_map(|w| {
             let wo = doc.get(w);
@@ -794,17 +877,31 @@ fn walk(
             })
         })
         .collect();
-    let options = d
-        .get(b"Opt")
-        .map(|o| doc.resolve(o))
-        .and_then(|o| o.as_array().cloned())
-        .unwrap_or_default()
-        .iter()
-        .filter_map(|o| match &*doc.resolve(o) {
-            Object::Array(pair) if pair.len() >= 2 => Some((text_of(&doc.resolve(&pair[0]))?, text_of(&doc.resolve(&pair[1]))?)),
-            other => text_of(other).map(|t| (t.clone(), t)),
-        })
-        .collect::<Vec<(String, String)>>();
+    // `/Opt` entries and their text are spent from allowances for the whole form: fields can share
+    // one array, and each field's own copy of its strings made fields x options of them (entries
+    // can name one long string object too). A field whose list no longer fits reads with no
+    // options and says so ([`Field::options_omitted`]).
+    let opt = d.get(b"Opt").map(|o| doc.resolve(o));
+    let choice = matches!(kind, FieldKind::Combo | FieldKind::List);
+    // Only a choice field's list, and a check box's or radio group's list of one entry per widget
+    // (`Field::export_of`), is used; other `/Opt` entries are not read. A button group whose list
+    // is refused falls back to its on-state names, as with no `/Opt`; only a choice field is
+    // flagged, as its options are what it shows and matches values against.
+    let entries = opt.as_deref().and_then(Object::as_array).filter(|e| match kind {
+        FieldKind::Combo | FieldKind::List => true,
+        FieldKind::CheckBox | FieldKind::Radio => e.len() == widgets.len(),
+        _ => false,
+    });
+    let (options, options_omitted) = match entries {
+        None => (Vec::new(), false),
+        Some(entries) => match read_options(doc, entries, seen) {
+            Some(options) => (options, false),
+            None => {
+                seen.options_omitted += usize::from(choice);
+                (Vec::new(), choice)
+            }
+        },
+    };
     let mut value = values_of(doc, inh.v.as_ref(), &mut seen.values);
     // A list box without MultiSelect selects one option: "if clear, at most one item shall be
     // selected" (ISO 32000-2 Table 233). Given an array /V or /DV anyway, it holds the first
@@ -832,6 +929,7 @@ fn walk(
         flags: ff,
         max_len: inh.max_len,
         options,
+        options_omitted,
         selected,
         single_value_is_array,
         da: inh.da.clone().unwrap_or_else(|| "/Helv 0 Tf 0 g".into()),

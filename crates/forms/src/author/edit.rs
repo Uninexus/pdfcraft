@@ -66,7 +66,7 @@ fn write_sorted_opt(d: &mut Dict, items: &[(String, String)], old: &[usize]) -> 
 }
 
 /// Build /Opt before modifying the document, preserving appearance states and selection.
-fn button_export_options(f: &Field, index: usize, value: &str) -> Result<Vec<Object>, FormError> {
+fn button_export_options(f: &Field, raw_opt_len: usize, index: usize, value: &str) -> Result<Vec<Object>, FormError> {
     if !matches!(f.kind, FieldKind::CheckBox | FieldKind::Radio) {
         return invalid("only check boxes and radio buttons have an export value");
     }
@@ -75,7 +75,8 @@ fn button_export_options(f: &Field, index: usize, value: &str) -> Result<Vec<Obj
     }
     let widget = f.widgets.get(index).ok_or_else(|| FormError::Invalid("button widget index is out of range".into()))?;
     let state = widget.on_state.as_deref().ok_or_else(|| FormError::Invalid("button has no on appearance state".into()))?;
-    if !f.options.is_empty() && f.options.len() != f.widgets.len() {
+    // The `/Opt` as the file has it: the field reads no list that is not one entry per widget.
+    if raw_opt_len != 0 && raw_opt_len != f.widgets.len() {
         return invalid("button export options do not match its widgets");
     }
     let previous = f.export_of(index);
@@ -137,7 +138,9 @@ fn set_props_target(doc: &mut Document, name: &str, object: Option<ObjRef>, prop
     }
     let all = fields(doc);
     let f = all.iter().find(|f| f.name == name && object.is_none_or(|obj| f.obj == obj)).ok_or_else(|| FormError::NoSuchField(name.into()))?.clone();
-    let export_options = props.export_value.as_ref().map(|(index, value)| button_export_options(&f, *index, value)).transpose()?;
+    let raw_opt_len =
+        doc.get(f.obj).as_dict().and_then(|d| d.get(b"Opt").map(|o| doc.resolve(o))).and_then(|o| o.as_array().map(Vec::len)).unwrap_or(0);
+    let export_options = props.export_value.as_ref().map(|(index, value)| button_export_options(&f, raw_opt_len, *index, value)).transpose()?;
     if props.export_value.is_some() && props.options.is_some() {
         return invalid("give export_value or options, not both");
     }
@@ -166,6 +169,14 @@ fn set_props_target(doc: &mut Document, name: &str, object: Option<ObjRef>, prop
     // A locked field only takes unlocking (Acrobat greys its properties out).
     if f.locked() && props.locked != Some(false) && *props != (FieldProps { locked: props.locked, ..FieldProps::default() }) {
         return invalid(format!("{name} is locked: unlock it first"));
+    }
+    // A field whose options were not read would have its whole `/Opt` replaced by what is given.
+    if f.options_omitted && (props.options.is_some() || export_options.is_some()) {
+        return invalid(format!(
+            "{name} keeps its options: they were not read because the form's options (/Opt) went over the allowance of {} entries or {} bytes of text",
+            crate::MAX_OPTION_ENTRIES,
+            crate::MAX_OPTION_BYTES
+        ));
     }
     if let Some(options) = export_options.as_ref()
         && *props == (FieldProps { export_value: props.export_value.clone(), ..FieldProps::default() })
