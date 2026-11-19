@@ -1,5 +1,6 @@
 # Where PdfCraft falls short of Acrobat Pro
 
+> **Last reviewed:** 2026-11-19 | **Last updated:** 2026-11-19 | **Change:** minor (never crash, bookmarks: a listing spends titles from a 16 MiB allowance and copies only the first six items of a destination array, so bookmarks sharing one huge title or array cannot make a listing gigabytes long; estimates unchanged)
 > **Last reviewed:** 2026-11-19 | **Last updated:** 2026-11-19 | **Change:** minor (never crash, attachments: a `/Names` array of the attachment tree that several nodes share is read once, so a small file cannot list or rewrite hundreds of thousands of attachments; estimates unchanged)
 > **Last reviewed:** 2026-11-19 | **Last updated:** 2026-11-19 | **Change:** minor (gap 15: `form_merge_data` refuses a table of more than 2,000,000 cells and counts a comma-holding field name as one column; estimates unchanged)
 > **Last reviewed:** 2026-11-19 | **Last updated:** 2026-11-19 | **Change:** minor (gap 17: `redact_mark` pattern `nino` finds UK National Insurance numbers by format only, headless and in the UI pattern list; estimates unchanged)
@@ -543,6 +544,7 @@ update the numbers.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-19 | minor | Never crash: listing an editable document's bookmarks no longer copies a shared huge `/Title` or `/Dest` array into every bookmark. Titles are spent from a 16 MiB allowance per listing call (a title that does not fit what is left lists as empty; a copy or export then reports `truncated` and a Cut keeps its source) and a destination keeps six items. Estimates unchanged. |
 | 2026-11-19 | minor | Never crash: the attachment name tree is read with each shared `/Names` array once (`doc_info`, `attachment_*`, `af_*`, page templates, Combine), so a small file whose nodes all name one array no longer lists or rewrites nodes times entries attachments. Estimates unchanged. |
 | 2026-11-19 | minor | Gap 15: Merge data files into a spreadsheet (`form_merge_data`, Forms menu) refuses a table of more than 2,000,000 cells, which files that each bring their own field names reach quickly, and the tool's column count no longer splits a field name that holds commas. Estimates unchanged. |
 | 2026-11-19 | minor | Gap 17: `redact_mark` finds UK National Insurance numbers (`nino`), by format only (two letters, six digits, a final A to D; unallocated prefixes and unused letters excluded; no checksum, so a match is a candidate). Other countries' identifiers are still missing. Estimates unchanged. |

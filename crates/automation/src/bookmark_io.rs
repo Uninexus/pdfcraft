@@ -4,7 +4,7 @@
 //! (1-based, or `null` for one that goes nowhere), `view` (`{"type", "values"}`: a destination
 //! type and its values in PDF user space, as the file stores them), `color`, `bold`, `italic`,
 //! `open` and `children`. What export writes, import takes back unchanged. A file also carries
-//! `"truncated": true` when the export left out bookmarks nested past the listing limit.
+//! `"truncated": true` when the export left out bookmarks nested past the listing limit or a title that did not fit the listing's title allowance (that node has an empty title).
 use crate::{Args, Automation, Result, ToolError, failed};
 use pdfcraft_engine::{DocId, Edit, OutlineNode};
 use serde_json::{Value, json};

@@ -42,7 +42,9 @@ pub struct OutlineNode {
 #[derive(Clone, Debug, PartialEq)]
 pub struct OutlineTree {
     pub nodes: Vec<OutlineNode>,
-    /// Bookmarks nested deeper than the listing reaches (32 levels) were left out.
+    /// Something was left out: bookmarks nested deeper than the listing reaches (32 levels), or a
+    /// title that did not fit the listing's title allowance (that node's title is empty). A tree
+    /// with this set is not a faithful copy, so a cut must not delete its source.
     pub truncated: bool,
 }
 
@@ -56,7 +58,7 @@ pub fn outline_tree(doc: &Document, path: &[usize]) -> Result<OutlineTree, Outli
     let mut roots = Vec::new();
     for b in crate::bookmarks(doc).into_iter().filter(|b| b.path.starts_with(path) && !b.path.is_empty()) {
         let depth = b.path.len().saturating_sub(base);
-        if b.path.len() > LIST_DEPTH && has_children(doc, b.obj) {
+        if (b.path.len() > LIST_DEPTH && has_children(doc, b.obj)) || b.title_dropped {
             truncated = true;
         }
         while open.last().is_some_and(|(d, _)| *d >= depth) {
