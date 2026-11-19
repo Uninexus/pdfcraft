@@ -260,7 +260,7 @@ fn inspect_with(doc: &Document, limit_percent: f64, min_bleed_mm: Option<f64>, m
     let fail_ppi = FAIL_PPI.min(warn_ppi);
     let declared = pdfcraft_preflight::declared(doc);
     let pdfa_issues = pdfcraft_preflight::verify(doc, Level::A2b);
-    let fonts_not_embedded = pdfa_issues
+    let fonts_not_embedded: Vec<String> = pdfa_issues
         .iter()
         .filter(|issue| issue.pattern.contains("isn't embedded") || issue.pattern == "A font isn't embedded")
         .map(|issue| issue.value.clone().unwrap_or_else(|| "unnamed font".into()))
@@ -360,9 +360,47 @@ fn inspect_with(doc: &Document, limit_percent: f64, min_bleed_mm: Option<f64>, m
             page: None,
         });
     }
+    font_finding(&fonts_not_embedded, &mut findings);
     ink_findings(&ink::ink_pages(doc, &model_pages, limit_percent), limit_percent, &mut findings);
     findings.sort_by(|a, b| a.page.cmp(&b.page).then(a.id.cmp(b.id)).then(a.message.cmp(&b.message)));
     PrintReadiness { pages, images, output_intents: declared.output_intents, fonts_not_embedded, pdfa_issues, findings, resolution_unknown }
+}
+
+/// Font names the `font-not-embedded` finding lists before saying how many entries there are.
+const MAX_FONTS_LISTED: usize = 8;
+/// Characters of one font name the finding copies (a name is file text of any length).
+const MAX_FONT_NAME_CHARS: usize = 64;
+
+/// A press needs every font inside the file, so a font the file only names is a `warn`. One finding
+/// for the document, from what the PDF/A check reports for fonts a `/Resources` `/Font` dictionary names
+/// (content is not read for `Tf`): at most [`MAX_FONTS_LISTED`] names, each cut to
+/// [`MAX_FONT_NAME_CHARS`] characters before it is copied, and the number of font names reported.
+/// Only this message is bounded: `fonts_not_embedded` and the PDF/A issues keep full names. Nothing is embedded.
+fn font_finding(fonts_not_embedded: &[String], findings: &mut Vec<Finding>) {
+    if fonts_not_embedded.is_empty() {
+        return;
+    }
+    let shown: Vec<String> = fonts_not_embedded
+        .iter()
+        .take(MAX_FONTS_LISTED)
+        .map(|name| match name.char_indices().nth(MAX_FONT_NAME_CHARS) {
+            Some((end, _)) => format!("{}…", name.get(..end).unwrap_or_default()),
+            None => name.clone(),
+        })
+        .collect();
+    let count = fonts_not_embedded.len();
+    findings.push(Finding {
+        id: "font-not-embedded",
+        severity: "warn",
+        message: format!(
+            "{count} font name{} named in the file's resources but not embedded: {}{}. A press or another viewer may substitute {}. Nothing was embedded.",
+            if count == 1 { " is" } else { "s are" },
+            shown.join(", "),
+            if count > MAX_FONTS_LISTED { ", and more" } else { "" },
+            if count == 1 { "it" } else { "them" },
+        ),
+        page: None,
+    });
 }
 
 /// What the ink checks found, as findings. Colours in images and shadings are not measured.
@@ -750,6 +788,78 @@ mod tests {
         let report = inspect(&doc, TAC_LIMIT_PERCENT);
         assert!(report.images.iter().all(|image| image.ppi.is_finite()), "{:?}", report.images);
         assert!(!report.findings.iter().any(|f| f.id == "image-ppi"), "{:?}", report.findings);
+    }
+
+    /// A page whose resources name the given base fonts, each an indirect Type 1 font dictionary.
+    fn font_page(doc: &mut Document, base_fonts: &[String]) {
+        let pages = doc.root().and_then(|r| doc.get(r).as_dict().and_then(|d| d.reference(b"Pages"))).unwrap();
+        let mut fonts = Dict::new();
+        let mut content = String::from("BT ");
+        for (i, base) in base_fonts.iter().enumerate() {
+            let mut f = Dict::new();
+            f.set(b"Type".to_vec(), Object::name("Font"));
+            f.set(b"Subtype".to_vec(), Object::name("Type1"));
+            f.set(b"BaseFont".to_vec(), Object::name(base));
+            fonts.set(format!("F{i}").into_bytes(), Object::Ref(doc.add(Object::Dict(f))));
+            content.push_str(&format!("/F{i} 12 Tf (x) Tj "));
+        }
+        content.push_str("ET");
+        let mut res = Dict::new();
+        res.set(b"Font".to_vec(), Object::Dict(fonts));
+        let contents = doc.add(Object::Stream(Stream::from_raw(Dict::new(), content.into_bytes())));
+        let mut p = Dict::new();
+        p.set(b"Type".to_vec(), Object::name("Page"));
+        p.set(b"Parent".to_vec(), Object::Ref(pages));
+        p.set(b"MediaBox".to_vec(), Object::Array(vec![0.into(), 0.into(), 612.into(), 792.into()]));
+        p.set(b"Resources".to_vec(), Object::Dict(res));
+        p.set(b"Contents".to_vec(), Object::Ref(contents));
+        let r = doc.add(Object::Dict(p));
+        doc.update_dict(pages, |d| {
+            d.set(b"Count".to_vec(), Object::Int(1));
+            d.set(b"Kids".to_vec(), Object::Array(vec![Object::Ref(r)]));
+        })
+        .unwrap();
+    }
+
+    fn font_findings(report: &PrintReadiness) -> Vec<&Finding> {
+        report.findings.iter().filter(|f| f.id == "font-not-embedded").collect()
+    }
+
+    #[test]
+    fn a_font_the_file_only_names_is_one_document_warning_and_none_means_no_finding() {
+        let mut doc = Document::new_empty();
+        font_page(&mut doc, &["Helvetica".to_string()]);
+        let report = inspect(&doc, TAC_LIMIT_PERCENT);
+        let found = font_findings(&report);
+        assert_eq!(found.len(), 1, "{:?}", report.findings);
+        assert_eq!((found[0].severity, found[0].page), ("warn", None));
+        assert!(found[0].message.contains("1 font name is named in the file's resources but not embedded: Helvetica."), "{}", found[0].message);
+        assert!(report.text().contains("[warn] 1 font name is named in the file's resources but not embedded"));
+
+        let mut none = Document::new_empty();
+        let img = image(&mut none, 10, 10);
+        page(&mut none, "Im", img, "q 72 0 0 72 0 0 cm /Im Do Q");
+        assert!(font_findings(&inspect(&none, TAC_LIMIT_PERCENT)).is_empty());
+    }
+
+    #[test]
+    fn many_fonts_with_huge_names_give_a_bounded_finding() {
+        let mut doc = Document::new_empty();
+        // Half the names are three-byte characters, so a cut by bytes would split one or run long.
+        let names: Vec<String> = (0..200).map(|i| format!("{i:03}{}", if i % 2 == 0 { "N".repeat(100_000) } else { "€".repeat(50_000) })).collect();
+        font_page(&mut doc, &names);
+        let report = inspect(&doc, TAC_LIMIT_PERCENT);
+        let found = font_findings(&report);
+        assert_eq!(found.len(), 1);
+        let message = &found[0].message;
+        assert!(
+            message.starts_with("200 font names are named in the file's resources but not embedded: 000"),
+            "{}",
+            &message[..80.min(message.len())]
+        );
+        assert!(message.contains(", and more."), "more than eight fonts are said to be more");
+        assert!(message.chars().count() < 1000, "{} chars", message.chars().count());
+        assert_eq!(message.matches('…').count(), MAX_FONTS_LISTED);
     }
 
     /// A page with the given resources and content, for the ink checks.
