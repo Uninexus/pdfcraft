@@ -6441,6 +6441,37 @@ fn redacting_canadian_sin_and_postal_codes_through_tools() {
 }
 
 #[test]
+/// UK National Insurance numbers are removed from the saved content stream; an unallocated prefix
+/// and a number with a suffix past D stay.
+fn redacting_a_uk_national_insurance_number_through_tools() {
+    let table = tools();
+    let advertised: Vec<&str> = table.iter().find(|t| t.name == "redact_mark").unwrap().input_schema["properties"]["pattern"]["enum"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+    assert!(advertised.contains(&"nino"), "{advertised:?}");
+    let dir = workdir("redact-nino");
+    std::fs::write(dir.join("form.txt"), "NI number AB 12 34 56 C for Ada\nAlso jc654321b today\nBad ZZ 12 34 56 A and AB123456E").unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_create", json!({ "from": "text", "path": "form.txt" }))["doc"].as_u64().unwrap();
+    assert_eq!(ok(&mut a, "redact_mark", json!({ "doc": doc, "pattern": "nino" }))["marked"], 2);
+    assert!(page_text(&mut a, doc)[0].contains("AB 12 34 56 C"), "marks alone remove nothing");
+    assert_eq!(ok(&mut a, "redact_apply", json!({ "doc": doc }))["applied"], 2);
+    ok(&mut a, "doc_save", json!({ "doc": doc, "path": "redacted.pdf" }));
+    let reopened = ok(&mut a, "doc_open", json!({ "path": "redacted.pdf" }))["doc"].as_u64().unwrap();
+    let text = &page_text(&mut a, reopened)[0];
+    for gone in ["AB 12 34 56 C", "34 56 C", "56 C", "AB 12", "jc654321b", "jc6", "321b"] {
+        assert!(!text.contains(gone), "{gone} must be removed from the saved page: {text}");
+    }
+    for kept in ["NI number", "for Ada", "ZZ 12 34 56 A", "AB123456E"] {
+        assert!(text.contains(kept), "{kept} must remain: {text}");
+    }
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
 /// A client obeying the advertised schema can select iban, and the mark made through the tool
 /// covers the spaced number and nothing else.
 fn redacting_an_iban_through_tools() {
