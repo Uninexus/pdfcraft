@@ -10842,6 +10842,41 @@ fn adopting_page_only_fields_is_noted_as_a_repair() {
     assert_eq!(doc.repair_log(), vec!["the form's /Fields list omits 2 fields; they were read from the page annotations".to_string()]);
 }
 
+/// Choice fields whose options the form's allowance left unread are flagged on the field and
+/// recorded in the repair log, not left as fields that merely show no options.
+#[test]
+fn choice_fields_with_unread_options_are_noted_as_a_repair() {
+    let shared = "(o)".repeat(pdfcraft_forms::MAX_OPTION_ENTRIES / 2 + 1);
+    let objs: Vec<String> = vec![
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm 4 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 200 300] >>".into(),
+        "<< /Type /Page /Parent 2 0 R /Annots [6 0 R 7 0 R] >>".into(),
+        "<< /Fields [6 0 R 7 0 R] /DA (/Helv 0 Tf 0 g) >>".into(),
+        format!("[{shared}]"),
+        "<< /Type /Annot /Subtype /Widget /FT /Ch /T (a) /Ff 131072 /Opt 5 0 R /Rect [10 200 90 220] /P 3 0 R >>".into(),
+        "<< /Type /Annot /Subtype /Widget /FT /Ch /T (b) /Ff 131072 /Opt 5 0 R /Rect [10 150 90 170] /P 3 0 R >>".into(),
+    ];
+    let mut bytes = b"%PDF-1.7\n".to_vec();
+    let mut offsets = Vec::new();
+    for (i, o) in objs.iter().enumerate() {
+        offsets.push(bytes.len());
+        bytes.extend_from_slice(format!("{} 0 obj\n{o}\nendobj\n", i + 1).as_bytes());
+    }
+    let xref = bytes.len();
+    bytes.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1).as_bytes());
+    for o in offsets {
+        bytes.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+    }
+    bytes.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objs.len() + 1).as_bytes());
+    let mut s = Session::new().with_clock(|| 1_700_000_000);
+    let id = s.open("options.pdf", None, Arc::new(bytes), None).expect("opens");
+    let doc = s.get(id).unwrap();
+    let flags: Vec<bool> = doc.form.iter().map(|f| f.options_omitted).collect();
+    assert!(flags == [false, true], "per-field flags: {flags:?}");
+    let log = doc.repair_log();
+    assert!(log.len() == 1 && log[0].contains("1 choice field's options") && log[0].contains("left as it is"), "{log:?}");
+}
+
 /// A page too large for the renderer at the asked resolution exports at the most it allows (and
 /// says at what), as File ▸ Export does; a source that asks for strictness refuses it instead.
 #[test]

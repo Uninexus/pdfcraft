@@ -26,6 +26,11 @@ pub fn with_field_appearances_cached(doc: &Document, cache: &mut FieldAppearance
     let all = need_appearances(doc);
     let mut copy: Option<Document> = None;
     for f in fields(doc) {
+        // A choice field whose options were not read would be drawn with no rows: it keeps the
+        // appearance the file has.
+        if f.options_omitted && matches!(f.kind, FieldKind::Combo | FieldKind::List) {
+            continue;
+        }
         for w in &f.widgets {
             let widget = doc.get(w.obj);
             let normal = widget

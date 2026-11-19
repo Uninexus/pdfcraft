@@ -755,3 +755,38 @@ fn replace_all_reports_a_page_whose_text_cannot_be_read() {
     assert_eq!((r["replaced"].clone(), r["changed"].clone(), r["skipped_by"]["refused"].clone()), (json!(0), json!(false), json!(1)), "{r}");
     assert!(r["refusals"][0].as_str().unwrap().starts_with("page 2:"), "{r}");
 }
+
+/// A combo box whose options the form's allowance left unread says so in `form_fields`
+/// (`options_omitted: true`, with no options), and a field that was read does not.
+#[test]
+fn form_fields_flags_a_choice_field_whose_options_were_not_read() {
+    let shared = "(o)".repeat(1_000_000 / 2 + 1);
+    let objs: Vec<String> = vec![
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm 4 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 200 300] >>".into(),
+        "<< /Type /Page /Parent 2 0 R /Annots [6 0 R 7 0 R] >>".into(),
+        "<< /Fields [6 0 R 7 0 R] /DA (/Helv 0 Tf 0 g) >>".into(),
+        format!("[{shared}]"),
+        "<< /Type /Annot /Subtype /Widget /FT /Ch /T (a) /Ff 131072 /Opt 5 0 R /Rect [10 200 90 220] /P 3 0 R >>".into(),
+        "<< /Type /Annot /Subtype /Widget /FT /Ch /T (b) /Ff 131072 /Opt 5 0 R /Rect [10 150 90 170] /P 3 0 R >>".into(),
+    ];
+    let mut bytes = b"%PDF-1.7\n".to_vec();
+    let mut offsets = Vec::new();
+    for (i, o) in objs.iter().enumerate() {
+        offsets.push(bytes.len());
+        bytes.extend_from_slice(format!("{} 0 obj\n{o}\nendobj\n", i + 1).as_bytes());
+    }
+    let xref = bytes.len();
+    bytes.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1).as_bytes());
+    for o in offsets {
+        bytes.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+    }
+    bytes.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objs.len() + 1).as_bytes());
+    let mut a = Automation::new();
+    let doc = a.session.open("options.pdf", None, Arc::new(bytes), None).unwrap();
+    let fields = json(&mut a, "form_fields", json!({ "doc": doc.0 }));
+    let list = fields["fields"].as_array().unwrap();
+    let get = |name: &str| list.iter().find(|f| f["name"] == name).unwrap();
+    assert!(get("a").get("options_omitted").is_none(), "a field that was read carries no flag");
+    assert!(get("b")["options_omitted"] == true && get("b")["options"].as_array().is_some_and(Vec::is_empty), "{}", get("b"));
+}

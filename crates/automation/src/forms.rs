@@ -393,6 +393,9 @@ impl Automation {
                     }
                     FormFieldKind::Combo | FormFieldKind::List => {
                         o.insert("options".into(), f.options.iter().map(|(e, d)| json!({ "value": e, "label": d })).collect());
+                        if f.options_omitted {
+                            o.insert("options_omitted".into(), json!(true));
+                        }
                         // The selected options as 1-based positions in `options`: two options can share
                         // an export value, and `value` alone does not tell them apart.
                         o.insert("selected".into(), json!(f.selected.iter().map(|i| i.saturating_add(1)).collect::<Vec<_>>()));

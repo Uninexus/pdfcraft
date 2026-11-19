@@ -479,7 +479,7 @@ fn widgets_naming_a_field_that_does_not_list_them_join_it() {
         w(9, "E", 500),                                                                      // 13: not in 9's /Kids
     ];
     let doc = document(&objs);
-    let (all, adopted) = enumerate(&doc);
+    let (all, adopted, _) = enumerate(&doc);
     let listed: Vec<(&str, Vec<ObjRef>)> = all.iter().map(|f| (f.name.as_str(), f.widgets.iter().map(|w| w.obj).collect())).collect();
     let r = |num| ObjRef::new(num, 0);
     assert_eq!(listed, [("radio", vec![r(7), r(4)]), ("pair", vec![r(11), r(12)]), ("other", vec![r(13)])]);
@@ -7098,6 +7098,46 @@ fn invalid_button_export_edits_leave_document_unchanged() {
     }
 }
 
+/// A radio group whose `/Opt` has more entries than it has widgets is not one list of export
+/// values, and an export-value edit is refused rather than replacing the `/Opt` the field does not
+/// read (the field reads no options for such a list, so only the file's own length tells).
+#[test]
+fn a_button_export_edit_is_refused_when_opt_does_not_match_the_widgets() {
+    let mut doc = fixture();
+    let size = field(&fields(&doc), "size").obj;
+    let opt = Object::Array(["a", "b", "c"].iter().map(|t| Object::String(PdfString::text(t))).collect());
+    doc.update_dict(size, |d| d.set(b"Opt".to_vec(), opt.clone())).unwrap();
+    let before = write_incremental(&doc, &SaveOptions::default()).unwrap();
+    let err = set_props(&mut doc, "size", &FieldProps { export_value: Some((0, "new".into())), ..Default::default() }).unwrap_err().to_string();
+    assert!(err.contains("do not match its widgets"), "{err}");
+    assert!(write_incremental(&doc, &SaveOptions::default()).unwrap() == before, "the document is unchanged");
+}
+
+/// A list refused after it was scanned spends its entries too: entries that are no text cost no
+/// bytes, so a list of them followed by one string was scanned in full by every field sharing it.
+#[test]
+fn a_refused_option_list_spends_its_entries() {
+    let big = format!("[{}(x)]", "1 ".repeat(500_000));
+    let ints = format!("[{}]", "1 ".repeat(600_000));
+    let long = "x".repeat(1 << 20);
+    let objs: Vec<String> = vec![
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm 4 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 600 800] >>".into(),
+        "<< /Type /Page /Parent 2 0 R >>".into(),
+        "<< /Fields [8 0 R 9 0 R 10 0 R 11 0 R] >>".into(),
+        format!("({long})"),
+        big,
+        ints,
+        format!("<< /Type /Annot /Subtype /Widget /FT /Ch /T (a) /Ff 131072 /Opt [{}] /Rect [0 0 9 9] /P 3 0 R >>", "5 0 R ".repeat(40)),
+        "<< /Type /Annot /Subtype /Widget /FT /Ch /T (b) /Ff 131072 /Opt 6 0 R /Rect [0 0 9 9] /P 3 0 R >>".into(),
+        "<< /Type /Annot /Subtype /Widget /FT /Ch /T (c) /Ff 131072 /Opt 6 0 R /Rect [0 0 9 9] /P 3 0 R >>".into(),
+        "<< /Type /Annot /Subtype /Widget /FT /Ch /T (e) /Ff 131072 /Opt 7 0 R /Rect [0 0 9 9] /P 3 0 R >>".into(),
+    ];
+    let all = fields(&document(&objs));
+    assert!(["a", "b", "c"].iter().all(|n| field(&all, n).options_omitted), "the long and the shared lists are refused");
+    assert!(field(&all, "e").options_omitted, "entries the refused list spent are not there for another");
+}
+
 #[test]
 fn locked_button_export_edits_leave_the_document_unchanged() {
     for name in ["agree", "size"] {
@@ -8439,4 +8479,199 @@ fn action_field_lists_over_the_limits_are_not_read() {
     // Within the limits the list is read whole.
     set(&mut doc, "ResetForm", "Fields", Object::Array(vec![s("a"); 65_536]));
     assert!(matches!(field_actions(&doc, "go").unwrap().as_slice(), [(Trigger::MouseUp, FieldAction::Reset(f))] if f.len() == 65_536));
+}
+
+/// A form of six combo boxes naming one shared `/Opt` of `m` strings, each with a value, `/I` and
+/// a drawn appearance; the last is calculated from the text field `src` (value 5).
+fn shared_opt_form(m: usize, need_appearances: bool) -> Document {
+    let shared = "(o)".repeat(m);
+    let ids = |range: std::ops::Range<usize>| range.map(|i| format!("{} 0 R", 7 + i)).collect::<Vec<_>>().join(" ");
+    let mut objs: Vec<String> = vec![
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm 4 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 600 800] >>".into(),
+        "<< /Type /Page /Parent 2 0 R >>".into(),
+        format!("<< /Fields [{} 13 0 R] /NeedAppearances {need_appearances} /DA (/Helv 0 Tf 0 g) >>", ids(0..6)),
+        format!("[{shared}]"),
+        "<< /Length 0 >>\nstream\n\nendstream".into(),
+    ];
+    for i in 0..6 {
+        let calc = if i == 5 { r#" /AA << /C << /S /JavaScript /JS (AFSimple_Calculate\("SUM", new Array\("src"\)\);) >> >>"# } else { "" };
+        objs.push(format!(
+            "<< /Type /Annot /Subtype /Widget /FT /Ch /T (f{i}) /Ff 131072 /Opt 5 0 R /V (o) /I [1] /AP << /N 6 0 R >>{calc} /Rect [0 0 90 20] /P 3 0 R >>"
+        ));
+    }
+    objs.push("<< /Type /Annot /Subtype /Widget /FT /Tx /T (src) /V (5) /Rect [0 0 90 20] /P 3 0 R >>".into());
+    document(&objs)
+}
+
+/// Many choice fields naming one shared `/Opt` array each got their own copy of every option
+/// (fields x options strings; 3,000 x 3,000 took 4 s and gigabytes of memory in a debug build, and
+/// each cached copy of the field list copied them again). A form's fields now spend one allowance
+/// of `/Opt` entries; a field whose list no longer fits reads with no options and is counted.
+#[test]
+fn choice_fields_sharing_one_huge_opt_array_stop_at_the_form_allowance() {
+    let m = MAX_OPTION_ENTRIES / 5;
+    let doc = shared_opt_form(m, false);
+    let read = fields_with_adopted(&doc);
+    let with: usize = read.items.iter().filter(|f| f.options.len() == m && !f.options_omitted).count();
+    let total: usize = read.items.iter().map(|f| f.options.len()).sum();
+    assert!(total <= MAX_OPTION_ENTRIES, "options read in all: {total}");
+    assert!(with == 5, "fields that kept their options: {with}");
+    assert!(read.options_omitted == 1 && options_omitted(&doc) == 1, "omitted: {}", read.options_omitted);
+    let last = read.items.iter().find(|f| f.name == "f5").unwrap();
+    assert!(last.options.is_empty() && last.options_omitted, "the field past the allowance has none and says so");
+    // Within the allowance nothing is omitted.
+    assert!(options_omitted(&fixture()) == 0, "the fixture's small lists are read whole");
+    assert!(fields(&fixture()).iter().all(|f| !f.options_omitted), "no field of the fixture is marked");
+}
+
+/// Entries are cheap to repeat: `/Opt [7 0 R 7 0 R ...]` naming one long string made a copy of it
+/// per entry, and each of many fields naming such a list decoded up to the whole allowance before
+/// it was refused. The text of a form's options spends an allowance of bytes too, a text longer
+/// than what is left is refused before it is decoded, and a refusal spends what was left.
+#[test]
+fn options_naming_one_long_string_stop_at_the_byte_allowance() {
+    let long = "x".repeat(1 << 20);
+    let many = 100;
+    let mut objs: Vec<String> = vec![
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm 4 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 600 800] >>".into(),
+        "<< /Type /Page /Parent 2 0 R >>".into(),
+        format!("<< /Fields [{} {}] >>", (0..many).map(|i| format!("{} 0 R", 6 + i)).collect::<Vec<_>>().join(" "), format_args!("{} 0 R", 6 + many)),
+        format!("({long})"),
+    ];
+    // Each bare-string entry costs 2 MiB (an export value and a display text), so 8 fit in 16 MiB.
+    for i in 0..many {
+        objs.push(format!(
+            "<< /Type /Annot /Subtype /Widget /FT /Ch /T (big{i}) /Ff 131072 /Opt [{}] /Rect [0 0 90 20] /P 3 0 R >>",
+            "5 0 R ".repeat(40)
+        ));
+    }
+    objs.push("<< /Type /Annot /Subtype /Widget /FT /Ch /T (small) /Ff 131072 /Opt [(a) (b)] /Rect [0 0 90 20] /P 3 0 R >>".into());
+    let read = fields_with_adopted(&document(&objs));
+    let omitted = read.items.iter().filter(|f| f.options_omitted).count();
+    assert!(omitted == many + 1 && read.options_omitted == many + 1, "omitted fields: {omitted}");
+    assert!(read.items.iter().all(|f| f.options.is_empty()), "no options read");
+    // A refusal spent the allowance, so a later short list is refused too instead of redoing the work.
+    assert!(field(&read.items, "small").options_omitted, "later field after the refusal");
+    // 8 entries fit (16 MiB), 9 do not.
+    let list = |n: usize| objs.iter().map(|o| o.replace(&"5 0 R ".repeat(40), &"5 0 R ".repeat(n))).collect::<Vec<_>>();
+    let one_field = |n: usize| {
+        let mut o = list(n);
+        o.truncate(6);
+        o[3] = "<< /Fields [6 0 R] >>".into();
+        document(&o)
+    };
+    assert!(field(&fields(&one_field(8)), "big0").options.len() == 8, "a list within the allowance is read whole");
+    assert!(field(&fields(&one_field(9)), "big0").options_omitted, "a list over it is refused");
+}
+
+/// Only a combo or list box is flagged and counted: a text field's `/Opt` is not read, a check box
+/// or radio group reads a list of one entry per widget (its export values) and not another, and a
+/// refused button list is not a choice field's omission.
+#[test]
+fn only_choice_fields_are_flagged_for_unread_options() {
+    let objs: Vec<String> = vec![
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm 4 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 600 800] >>".into(),
+        "<< /Type /Page /Parent 2 0 R >>".into(),
+        "<< /Fields [5 0 R 6 0 R 7 0 R] >>".into(),
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (text) /Opt [(a) (b)] /Rect [0 0 9 9] /P 3 0 R >>".into(),
+        "<< /Type /Annot /Subtype /Widget /FT /Btn /T (box) /Opt [(yes)] /Rect [0 0 9 9] /P 3 0 R >>".into(),
+        "<< /Type /Annot /Subtype /Widget /FT /Btn /T (box2) /Opt [(a) (b) (c)] /Rect [0 0 9 9] /P 3 0 R >>".into(),
+    ];
+    let read = fields_with_adopted(&document(&objs));
+    assert!(read.items.iter().all(|f| !f.options_omitted) && read.options_omitted == 0);
+    assert!(field(&read.items, "text").options.is_empty(), "a text field's /Opt is not read");
+    assert!(field(&read.items, "box").options.len() == 1, "one entry for its one widget");
+    assert!(field(&read.items, "box2").options.is_empty(), "not one per widget: unused, not read");
+}
+
+/// Clear Form and a ResetForm action reset the fields that were read and leave a choice field
+/// whose options were not read as it is, instead of failing as a whole.
+#[test]
+fn a_reset_skips_a_choice_field_with_unread_options_and_resets_the_rest() {
+    let mut doc = shared_opt_form(MAX_OPTION_ENTRIES / 5, false);
+    let src = field(&fields(&doc), "src").obj;
+    doc.update_dict(src, |d| d.set(b"DV".to_vec(), PdfString::text("0"))).unwrap();
+    let kept = |doc: &Document| doc.get(field(&fields(doc), "f5").obj).as_dict().and_then(|d| d.get(b"V").cloned());
+    let before = kept(&doc);
+    let (changed, _) = reset_with_formatting(&mut doc, None, &mut NoScripts, false).expect("the reset goes through");
+    assert!(changed >= 1, "other fields were reset: {changed}");
+    assert!(field(&fields(&doc), "src").value == ["0"], "src is reset");
+    assert!(kept(&doc) == before, "the field with unread options is as it was");
+}
+
+/// A value change recalculates the calculated fields; one whose options were not read is left
+/// unchanged, and the change itself still goes through.
+#[test]
+fn a_value_change_still_works_with_a_calculated_choice_field_whose_options_were_not_read() {
+    let mut doc = shared_opt_form(MAX_OPTION_ENTRIES / 5, false);
+    let v = |doc: &Document, n: &str| doc.get(field(&fields(doc), n).obj).as_dict().and_then(|d| d.get(b"V").cloned());
+    let before = v(&doc, "f5");
+    set_value(&mut doc, "src", &FieldValue::Text("6".into())).expect("src changes");
+    assert!(field(&fields(&doc), "src").value == ["6"], "src has its new value");
+    assert!(v(&doc, "f5") == before, "f5 was left untouched");
+}
+
+/// A choice field whose options were not read keeps its value, `/I`, options and look: a value
+/// would be stored unchecked with `/I` dropped, a calculation and a redraw would do the same, and
+/// an edit of its options would replace the whole `/Opt` with what is given.
+#[test]
+fn a_choice_field_with_unread_options_is_not_written_or_redrawn() {
+    let mut doc = shared_opt_form(MAX_OPTION_ENTRIES / 5, true);
+    let before = |doc: &Document| {
+        let f = field(&fields(doc), "f5").clone();
+        let d = doc.get(f.obj).as_dict().cloned().unwrap();
+        (d.get(b"V").cloned(), d.get(b"I").cloned(), d.get(b"AP").cloned(), d.get(b"Opt").cloned())
+    };
+    let kept = before(&doc);
+    assert!(kept.1.is_some() && kept.3.is_some());
+    // set_value
+    let err = set_value(&mut doc, "f5", &FieldValue::Choice(vec!["anything".into()])).unwrap_err().to_string();
+    assert!(err.contains("options were not read") && err.contains("f5"), "{err}");
+    let err = set_value(&mut doc, "f5", &FieldValue::ChoiceIndices(vec![0])).unwrap_err().to_string();
+    assert!(err.contains("options were not read"), "{err}");
+    assert!(before(&doc) == kept, "set_value left the field as it was");
+    // recalculate: f5 is calculated from `src` (5), a value no option names; it is skipped
+    recalculate(&mut doc).expect("a calculation skips the field");
+    assert!(before(&doc) == kept, "recalculate left the field as it was");
+    // set_props
+    let props = FieldProps { options: Some(vec!["only".into()]), ..FieldProps::default() };
+    let err = set_props(&mut doc, "f5", &props).unwrap_err().to_string();
+    assert!(err.contains("keeps its options"), "{err}");
+    assert!(before(&doc) == kept, "set_props left the options as they were");
+    // The display copy (/NeedAppearances) redraws the fields that were read, not this one.
+    let shown = with_field_appearances(&doc).expect("the fields that were read are redrawn");
+    let f5 = field(&fields(&doc), "f5").clone();
+    let f0 = field(&fields(&doc), "f0").clone();
+    let ap_of = |d: &Document, f: &Field| d.get(f.widgets[0].obj).as_dict().and_then(|w| w.get(b"AP").cloned());
+    assert!(ap_of(&shown, &f5) == kept.2, "the unread field keeps the appearance the file has");
+    assert!(ap_of(&shown, &f0) != ap_of(&doc, &f0), "a field that was read is redrawn");
+}
+
+/// A field that shares a name with one whose options were not read takes the value through
+/// `share_value`, which refuses instead of dropping its `/I`.
+#[test]
+fn a_twin_with_unread_options_is_refused_a_shared_value() {
+    let m = MAX_OPTION_ENTRIES / 5;
+    let mut objs: Vec<String> = Vec::new();
+    let shared = "(o)".repeat(m);
+    objs.extend([
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm 4 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 600 800] >>".into(),
+        "<< /Type /Page /Parent 2 0 R >>".into(),
+        "<< /Fields [6 0 R 7 0 R 8 0 R 9 0 R 10 0 R 11 0 R] >>".into(),
+        format!("[{shared}]"),
+    ]);
+    // Four fields use 800,000 of the entries; the two that share the name `twin` follow.
+    for i in 6..10 {
+        objs.push(format!("<< /Type /Annot /Subtype /Widget /FT /Ch /T (f{i}) /Ff 131072 /Opt 5 0 R /Rect [0 0 9 9] /P 3 0 R >>"));
+    }
+    objs.push("<< /Type /Annot /Subtype /Widget /FT /Ch /T (twin) /Ff 131072 /Opt [(a) (b)] /I [1] /V (b) /Rect [0 0 9 9] /P 3 0 R >>".into());
+    objs.push("<< /Type /Annot /Subtype /Widget /FT /Ch /T (twin) /Ff 131072 /Opt 5 0 R /I [1] /V (o) /Rect [0 0 9 9] /P 3 0 R >>".into());
+    let mut doc = document(&objs);
+    assert!(fields(&doc).iter().filter(|f| f.name == "twin" && f.options_omitted).count() == 1);
+    let err = set_value(&mut doc, "twin", &FieldValue::Choice(vec!["a".into()])).unwrap_err().to_string();
+    assert!(err.contains("options were not read"), "{err}");
 }

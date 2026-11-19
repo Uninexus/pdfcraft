@@ -48,7 +48,10 @@ mod values;
 pub use appearances::{FieldAppearanceCache, declares_pdfa, need_appearances, undrawn_fields, with_field_appearances, with_field_appearances_cached};
 pub(crate) use read::page_refs;
 pub use read::selected_options;
-pub use read::{Fields, acroform, adopted_page_fields, fields, fields_with_adopted, form_reads_on_this_thread};
+pub use read::{
+    Fields, MAX_OPTION_BYTES, MAX_OPTION_ENTRIES, acroform, adopted_page_fields, fields, fields_with_adopted, form_reads_on_this_thread,
+    options_omitted,
+};
 #[cfg(test)]
 use read::{MAX_SCRIPT_BYTES, PageWalk, enumerate, form_reads_on_this_thread as form_reads};
 use read::{first_by_export, qualified_name, script, script_budget};
@@ -170,6 +173,10 @@ pub struct Field {
     pub max_len: Option<usize>,
     /// Choice options: (export value, display text).
     pub options: Vec<(String, String)>,
+    /// The field's `/Opt` was not read (the form's allowance of options was spent, see
+    /// [`MAX_OPTION_ENTRIES`] and [`MAX_OPTION_BYTES`]): `options` is empty though the file has
+    /// options. Values and options of such a choice field are neither written nor redrawn.
+    pub options_omitted: bool,
     /// Combo and list boxes: the selected options, as ascending positions in `options` (see
     /// [`selected_options`]). Two options can share an export value, so `value` alone can't say
     /// which of them is selected. Empty for other kinds.

@@ -133,6 +133,20 @@ fn fill(doc: &mut Document, all: &[Field], named: &[usize], name: &str, value: &
     Ok(())
 }
 
+/// The error for a choice field whose `/Opt` was not read ([`Field::options_omitted`]): with no
+/// options to match against, a value would be stored unchecked and `/I` dropped.
+pub(crate) fn refuse_unread_options(f: &Field) -> Result<(), FormError> {
+    if f.options_omitted && matches!(f.kind, FieldKind::Combo | FieldKind::List) {
+        return invalid(format!(
+            "{:?} was not changed: its options were not read because the form's options (/Opt) went over the allowance of {} entries or {} bytes of text",
+            f.name,
+            crate::MAX_OPTION_ENTRIES,
+            crate::MAX_OPTION_BYTES
+        ));
+    }
+    Ok(())
+}
+
 /// Give `twin` the value `source` (a field and its options) holds: its `/V`, and a choice's `/I`
 /// mapped to the twin's own options, drawn in the twin's own widgets.
 fn share_value(
@@ -142,6 +156,7 @@ fn share_value(
     value: &[String],
     scripts: &mut dyn Scripts,
 ) -> Result<(), FormError> {
+    refuse_unread_options(twin)?;
     match twin.kind {
         FieldKind::CheckBox => {
             let state = twin.widgets.iter().find_map(|w| w.on_state.clone()).unwrap_or_else(|| "Yes".into());
@@ -224,6 +239,11 @@ fn recalculate_values(
             break;
         }
         let Some(f) = all.iter().find(|f| f.obj == obj).cloned() else { continue };
+        // A calculated choice field whose options were not read keeps its value: a result could
+        // not be matched to an option, and storing it would drop `/I`.
+        if f.options_omitted {
+            continue;
+        }
         let lookup = |n: &str| -> Vec<String> {
             let prefix = format!("{n}.");
             all.iter().filter(|x| x.name == n || x.name.starts_with(&prefix)).flat_map(|x| x.value.first().cloned()).collect()
@@ -317,6 +337,7 @@ pub(crate) fn write_value(doc: &mut Document, f: &Field, value: &FieldValue, scr
 
 /// Persist a value according to the field kind. A reset bypasses custom input validation and defers text and choice appearances.
 fn write_value_impl(doc: &mut Document, f: &Field, value: &FieldValue, scripts: &mut dyn Scripts, resetting: bool) -> Result<(), FormError> {
+    refuse_unread_options(f)?;
     match (f.kind, value) {
         (FieldKind::Text, FieldValue::Text(t)) => {
             if let Some(max) = f.max_len
@@ -656,6 +677,10 @@ pub(crate) fn merged_appearance(doc: &Document, widget: ObjRef, fresh: &Dict) ->
 
 /// Regenerate the normal appearance of every widget of a text or choice field.
 fn redraw(doc: &mut Document, f: &Field, values: &[String], scripts: &mut dyn Scripts) -> Result<(), FormError> {
+    // Drawn with no options it would show no rows: the file's own look stays.
+    if f.options_omitted && matches!(f.kind, FieldKind::Combo | FieldKind::List) {
+        return Ok(());
+    }
     let shown = match values {
         [one] if matches!(f.kind, FieldKind::Text | FieldKind::Combo) => scripting::formatted(doc, f, one, scripts),
         _ => None,
@@ -991,6 +1016,11 @@ pub fn reset_with_formatting(
         // isn't known to be the default, so it is reset.
         let unread = |key: &[u8], read: &[String]| read.is_empty() && unread_stream(doc, f.obj, key);
         if !default_value_known(doc, f) || (f.value == f.default && !unread(b"V", &f.value)) {
+            continue;
+        }
+        // A choice field whose options were not read is left as it is, as a read-only one is, and
+        // the rest of the form is still reset.
+        if f.options_omitted {
             continue;
         }
         let v = match f.kind {
