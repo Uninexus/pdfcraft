@@ -16302,3 +16302,31 @@ fn guides_round_to_a_thousandth_and_survive_a_reload_with_their_ids() {
     assert!(s.guides(id, None).unwrap().iter().all(|g| g.page == 0));
     assert_eq!(s.guides(id, None).unwrap().len(), 3);
 }
+
+/// The note that the font list may be incomplete is kept when a content edit makes the list be
+/// read again (`refresh_fonts`, which `doc_info` and Properties call), and not repeated.
+#[test]
+fn the_font_list_warning_survives_refresh_fonts() {
+    let long = "n".repeat(1 << 20);
+    let entries: String = (0..8).map(|i| format!("/{long}{i} 7 0 R ")).collect();
+    let kids: String = (0..160).map(|i| format!("{} 0 R ", 100 + i)).collect();
+    let pages: String = (0..160)
+        .map(|i| format!("{} 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Resources << /Font << /X 8 0 R >> >> >> endobj\n", 100 + i))
+        .collect();
+    let pdf = format!(
+        "%PDF-1.7\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n\
+         2 0 obj << /Type /Pages /Kids [{kids}] /Count 160 /Resources 5 0 R >> endobj\n{pages}\
+         5 0 obj << /Font 6 0 R >> endobj\n6 0 obj << {entries} >> endobj\n\
+         7 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Shared >> endobj\n\
+         8 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Own >> endobj\n\
+         trailer << /Root 1 0 R >>\n%%EOF"
+    );
+    let mut session = Session::new().with_clock(|| 1_700_000_000);
+    let id = session.open("hostile.pdf", None, Arc::new(pdf.into_bytes()), None).expect("opens");
+    let flagged = |s: &Session| s.get(id).unwrap().info.warnings.iter().filter(|w| pdfcraft_render::is_font_list_warning(w)).count();
+    assert_eq!(flagged(&session), 1);
+    let text = AddedText { text: "serif".into(), rect: [20.0, 20.0, 200.0, 60.0], family: FontFamily::Times, ..Default::default() };
+    session.apply(id, Edit::AddText { page: 0, text }).unwrap();
+    session.refresh_fonts(id);
+    assert_eq!(flagged(&session), 1, "{:?}", session.get(id).unwrap().info.warnings);
+}

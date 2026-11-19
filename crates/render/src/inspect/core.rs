@@ -1,6 +1,7 @@
 use super::annotations::{FieldWalk, MAX_LINK_ATTACHMENT_TEXT_BYTES};
 use super::model::{Attachment, AttachmentSource, PageInfo, Portfolio, PortfolioView, Xfa};
 use super::navigation::{NameTreeSeen, text_string};
+use super::resources::{FONT_ENTRY_COST, FONT_LIST_WARNING, MAX_FONT_FIELD_BYTES, MAX_FONT_WALK_BYTES};
 use super::{
     Arc, AssertUnwindSafe, DecryptionError, Dictionary, DocInfo, Document, HashMap, LazyStructure, LoadOptions, LoadPdfError, Object, ObjectId,
     OnceCell, OpenError, Pdf, Structure, catch_unwind,
@@ -290,7 +291,19 @@ impl<'a> Inspector<'a> {
         self.layers(catalog, &mut info.layers);
         info.layer_groups = self.layer_groups(catalog);
         info.layer_order = self.layer_order(catalog, &info.layers);
-        self.fonts(&mut info.fonts);
+        let gaps = self.fonts(&mut info.fonts);
+        if gaps.pages_unread {
+            info.warnings.push(format!(
+                "{FONT_LIST_WARNING}: reading the pages' font resources costs more than {} MiB together (a font entry costs its name's length and {} bytes, a shared font dictionary once), so the pages that did not fit were not read.",
+                MAX_FONT_WALK_BYTES >> 20,
+                FONT_ENTRY_COST
+            ));
+        }
+        if gaps.fields_dropped {
+            info.warnings.push(format!(
+                "{FONT_LIST_WARNING}: a font's subtype, encoding name or character collection longer than {MAX_FONT_FIELD_BYTES} bytes was read as absent, so its type, encoding or substitute may be wrong."
+            ));
+        }
         if let Some(names) = catalog.get(b"Names").ok().and_then(|o| self.dict(o)) {
             if let Some(ef) = names.get(b"EmbeddedFiles").ok().and_then(|o| self.dict(o)) {
                 let mut seen = NameTreeSeen::default();

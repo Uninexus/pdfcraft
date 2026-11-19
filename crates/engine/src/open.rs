@@ -284,7 +284,11 @@ impl Session {
             cos => (bytes, info, cos),
         };
         // XFA notes survive the document being re-read after edits.
-        let xfa_warnings: Vec<String> = if info.xfa.is_some() { info.warnings.clone() } else { Vec::new() };
+        let xfa_warnings: Vec<String> = if info.xfa.is_some() {
+            info.warnings.iter().filter(|w| !pdfcraft_render::is_font_list_warning(w)).cloned().collect()
+        } else {
+            Vec::new()
+        };
         let mut document =
             Self::build_document(context, DocumentOpenData { name, path, bytes, info, structure: cos, render_password, password, xfa });
         // A script that ran away on open turns the form's scripts off for this document.
