@@ -2120,6 +2120,68 @@ fn hostile_outlines_end_their_runs_and_never_loop() {
     assert!(listed(&[]).is_empty());
 }
 
+/// `n` top-level bookmarks that all share one indirect `/Title` string of `title_len` bytes (object 5).
+fn shared_title_outline(n: usize, title_len: usize) -> Document {
+    let title = "x".repeat(title_len);
+    let mut items = vec![format!("({title})")];
+    for k in 0..n {
+        let prev = if k == 0 { String::new() } else { format!(" /Prev {} 0 R", 5 + k) };
+        let next = if k + 1 == n { String::new() } else { format!(" /Next {} 0 R", 7 + k) };
+        items.push(format!("<< /Title 5 0 R /Parent 3 0 R{prev}{next} /Dest [4 0 R /Fit] >>"));
+    }
+    let mut b: Vec<String> = vec![
+        "<< /Type /Catalog /Pages 2 0 R /Outlines 3 0 R >>".into(),
+        "<< /Type /Pages /Kids [4 0 R] /Count 1 /MediaBox [0 0 300 400] >>".into(),
+        format!("<< /Type /Outlines /First 6 0 R /Last {} 0 R /Count {n} >>", 5 + n),
+        "<< /Type /Page /Parent 2 0 R >>".into(),
+    ];
+    b.extend(items);
+    open(build(&b, "/Root 1 0 R"))
+}
+
+#[test]
+fn bookmarks_sharing_one_huge_title_are_listed_within_the_title_allowance() {
+    // 40 bookmarks share a 1 MiB title: copied into each, a listing would hold 40 MiB of text.
+    let d = shared_title_outline(40, 1 << 20);
+    let page = crate::bookmark_page(&d, 0, 40);
+    assert_eq!(page.bookmarks.len(), 40, "every bookmark is still listed");
+    let total: usize = page.bookmarks.iter().map(|b| b.title.len()).sum();
+    assert!(total <= 16 << 20, "titles listed {total} bytes");
+    assert_eq!(page.bookmarks.iter().filter(|b| !b.title.is_empty()).count(), 16);
+    assert!(page.bookmarks.iter().filter(|b| b.title.is_empty()).all(|b| b.title_dropped));
+    // Each call has its own allowance: a second page of 20 lists 16 titles again.
+    let second = crate::bookmark_page(&d, 20, 20);
+    assert_eq!(second.bookmarks.iter().filter(|b| !b.title.is_empty()).count(), 16);
+    // A title that fits is untouched.
+    let small = shared_title_outline(40, 100);
+    assert!(crate::bookmarks(&small).iter().all(|b| b.title.len() == 100 && !b.title_dropped));
+}
+
+#[test]
+fn a_long_destination_array_is_copied_only_as_far_as_it_is_read() {
+    // Object 5 is the array, which a bookmark (object 6) names as its /Dest.
+    let array = format!("[4 0 R /XYZ 1 2 3 {}]", "0 ".repeat(100_000));
+    let d = outline_with(&[&array, "<< /Title (A) /Parent 3 0 R /Dest 5 0 R >>"]);
+    let dest = crate::outline::resolve_dest(&d, &Object::Ref(pdfcraft_cos::ObjRef::new(5, 0))).unwrap();
+    assert!(dest.len() <= 6, "a destination array of 100,000 items was copied whole: {}", dest.len());
+    assert_eq!(dest.get(1), Some(&Object::name("XYZ")));
+}
+
+#[test]
+fn an_outline_with_a_title_past_the_allowance_is_exported_as_truncated() {
+    let d = shared_title_outline(40, 1 << 20);
+    let tree = crate::outline_tree(&d, &[]).unwrap();
+    assert!(tree.truncated, "empty titles must not pass as a faithful copy");
+    assert_eq!(tree.nodes.len(), 40);
+    assert_eq!(tree.nodes.iter().filter(|n| n.title.is_empty()).count(), 24);
+    // A subtree whose titles all fit is complete.
+    let tree = crate::outline_tree(&d, &[0]).unwrap();
+    assert!(!tree.truncated);
+    assert_eq!(tree.nodes.len(), 1);
+    let small = crate::outline_tree(&shared_title_outline(40, 100), &[]).unwrap();
+    assert!(!small.truncated);
+}
+
 #[test]
 fn bookmark_pages_list_every_bookmark_once() {
     let d = open(flat_outline(250));

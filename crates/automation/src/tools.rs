@@ -495,7 +495,7 @@ pub fn tools() -> Vec<ToolDef> {
         t(
             "bookmark_list",
             "List bookmarks",
-            "The bookmarks in outline order, one page at a time: each with its path (1-based, as the other bookmark tools take it), title, target page and open state, its colour ([r, g, b], 0-1) and bold or italic style when it has them, and its children on the same page. next is the offset of the following page, or null at the end. Bookmarks nested deeper than 33 levels are not listed.",
+            "The bookmarks in outline order, one page at a time: each with its path (1-based, as the other bookmark tools take it), title, target page and open state, its colour ([r, g, b], 0-1) and bold or italic style when it has them, and its children on the same page. next is the offset of the following page, or null at the end. Bookmarks nested deeper than 33 levels are not listed. Titles are read from a 16 MiB allowance per call: a title that does not fit what is left lists as empty (a later, shorter one may still list).",
         )
         .ro()
         .with(schema(
@@ -526,7 +526,7 @@ pub fn tools() -> Vec<ToolDef> {
         t(
             "bookmark_export",
             "Export bookmarks",
-            "The bookmark tree, or the subtree at path, as a list of nodes bookmark_import takes back unchanged. A node has title, page (1-based, null when it goes nowhere), open, and when set view ({type, values}: a destination type from ISO 32000-2 §12.3.2.2 Table 149 and its values in PDF user space, as the file stores them), color ([r, g, b], 0-1), bold, italic and children. truncated is true when bookmarks nested deeper than 33 levels were left out. With out, the tree is also written there as a JSON file {\"bookmarks\": [...]}, with \"truncated\": true when that is so; out is overwritten.",
+            "The bookmark tree, or the subtree at path, as a list of nodes bookmark_import takes back unchanged. A node has title, page (1-based, null when it goes nowhere), open, and when set view ({type, values}: a destination type from ISO 32000-2 §12.3.2.2 Table 149 and its values in PDF user space, as the file stores them), color ([r, g, b], 0-1), bold, italic and children. truncated is true when bookmarks nested deeper than 33 levels were left out, or a title did not fit the 16 MiB title allowance of the listing (its node then has an empty title). With out, the tree is also written there as a JSON file {\"bookmarks\": [...]}, with \"truncated\": true when that is so; out is overwritten.",
         )
         .destructive()
         .with(schema(

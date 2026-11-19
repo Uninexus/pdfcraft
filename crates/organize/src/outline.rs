@@ -27,6 +27,18 @@ const NAME_TREE_DEPTH: usize = 32;
 /// Deepest chain of indirect or named destinations followed for one bookmark.
 const DEST_DEPTH: u8 = 8;
 
+/// What one listing may spend on bookmark titles, in bytes: the larger of a title's raw and decoded
+/// lengths is charged for each. A `/Title` can be one indirect string that every bookmark shares, so
+/// without a limit the listing would copy it into each of them (a thousand bookmarks sharing a
+/// 5 MiB title would answer with 5 GiB). A title that does not fit what is left lists as empty (a
+/// later, shorter one may still list) and its bookmark says so in [`Bookmark::title_dropped`]. The
+/// inspector's outline makes the same choice.
+const LIST_TITLE_BYTES: usize = 16 << 20;
+
+/// How many items of an explicit destination array are kept: the page, the type and the four
+/// numbers of `/FitR` are all that is ever read, and the rest of a shared long array is not copied.
+const DEST_ITEMS: usize = 6;
+
 /// A bookmark in listing order, with where it sits and where it goes.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Bookmark {
@@ -34,6 +46,9 @@ pub struct Bookmark {
     /// Child indices from the top level (the paths the edit functions take).
     pub path: Vec<usize>,
     pub title: String,
+    /// The bookmark has a title that was left out because it did not fit the listing's title
+    /// allowance, so `title` is empty. A copy of this bookmark would lose its title.
+    pub title_dropped: bool,
     /// Shown expanded (a positive `/Count`) when it has children.
     pub open: bool,
     /// The 0-based page it goes to, when that page is in this document.
@@ -259,7 +274,7 @@ fn explicit_dest(doc: &Document, targets: &mut Targets, dest: &Object, depth: u8
     }
     let dest = doc.resolve(dest);
     match &*dest {
-        Object::Array(a) => Some(a.clone()),
+        Object::Array(a) => Some(a.iter().take(DEST_ITEMS).cloned().collect()),
         Object::Dict(d) => explicit_dest(doc, targets, d.get(b"D")?, depth + 1),
         Object::String(s) => {
             let inner = targets.named(doc, &s.bytes)?;
@@ -316,27 +331,46 @@ fn item_dest(doc: &Document, targets: &mut Targets, d: &Dict) -> Option<Vec<Obje
 }
 
 /// A bookmark's title as viewers show it: the decoded text, without NULs or surrounding space.
-fn title_of(doc: &Document, d: &Dict) -> String {
+/// Its size is spent from `budget` (see [`LIST_TITLE_BYTES`]). A title that does not fit is empty
+/// and the flag is `true`; a title that is missing or not text is empty and the flag is `false`.
+fn title_of(doc: &Document, d: &Dict, budget: &mut usize) -> (String, bool) {
     let title = d.get(b"Title").map(|t| doc.resolve(t));
-    let text = match title.as_deref() {
-        Some(Object::String(s)) => s.to_text(),
-        Some(Object::Name(n)) => String::from_utf8_lossy(n).into_owned(),
-        _ => return String::new(),
+    let (raw, text) = match title.as_deref() {
+        Some(Object::String(s)) => {
+            if s.bytes.len() > *budget {
+                return (String::new(), true);
+            }
+            (s.bytes.len(), s.to_text())
+        }
+        Some(Object::Name(n)) => {
+            if n.len() > *budget {
+                return (String::new(), true);
+            }
+            (n.len(), String::from_utf8_lossy(n).into_owned())
+        }
+        _ => return (String::new(), false),
     };
-    text.trim_matches('\0').trim().to_string()
+    // Decoding work follows the raw length, and the text kept follows the decoded length.
+    let cost = raw.max(text.len());
+    if cost > *budget {
+        *budget = budget.saturating_sub(raw);
+        return (String::new(), true);
+    }
+    *budget -= cost;
+    (text.trim_matches('\0').trim().to_string(), false)
 }
 
-fn describe(doc: &Document, targets: &mut Targets, obj: ObjRef, path: Vec<usize>) -> Bookmark {
+fn describe(doc: &Document, targets: &mut Targets, obj: ObjRef, path: Vec<usize>, title_budget: &mut usize) -> Bookmark {
     let item = doc.get(obj);
-    let (title, open, dest) = match item.as_dict() {
-        Some(d) => (title_of(doc, d), d.int(b"Count").is_some_and(|c| c > 0), item_dest(doc, targets, d)),
-        None => (String::new(), false, None),
+    let ((title, title_dropped), open, dest) = match item.as_dict() {
+        Some(d) => (title_of(doc, d, title_budget), d.int(b"Count").is_some_and(|c| c > 0), item_dest(doc, targets, d)),
+        None => ((String::new(), false), false, None),
     };
     let page = dest.as_deref().and_then(|d| page_of_explicit(targets, d));
     let view = dest.as_deref().filter(|_| page.is_some()).and_then(|d| view_of_explicit(doc, d));
     let color = item.as_dict().and_then(|d| d.get(b"C").map(|c| doc.resolve(c))).and_then(|c| title_color(doc, &c));
     let flags = item.as_dict().and_then(|d| d.get(b"F").and_then(|f| doc.resolve(f).as_int())).unwrap_or(0);
-    Bookmark { obj, path, title, open, page, view, color, italic: flags & 1 != 0, bold: flags & 2 != 0 }
+    Bookmark { obj, path, title, title_dropped, open, page, view, color, italic: flags & 1 != 0, bold: flags & 2 != 0 }
 }
 
 /// A bookmark title's `/C` as a colour: three numbers, each kept within 0–1 (ISO 32000-2
@@ -359,9 +393,10 @@ fn list(doc: &Document, max_depth: usize, offset: usize, limit: usize) -> Bookma
         }
     }
     let mut targets = Targets::new(doc);
+    let mut title_budget = LIST_TITLE_BYTES;
     while bookmarks.len() < limit {
         let Some(obj) = visit.step() else { break };
-        bookmarks.push(describe(doc, &mut targets, obj, visit.path()));
+        bookmarks.push(describe(doc, &mut targets, obj, visit.path(), &mut title_budget));
     }
     let next = if bookmarks.len() == limit && visit.step().is_some() { Some(offset.saturating_add(bookmarks.len())) } else { None };
     BookmarkPage { bookmarks, next }
