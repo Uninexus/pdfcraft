@@ -1,5 +1,6 @@
 # Where PdfCraft falls short of Acrobat Pro
 
+> **Last reviewed:** 2026-11-19 | **Last updated:** 2026-11-19 | **Change:** minor (gap 21: `doc_compare` takes `ignore_case`, headless text comparison that does not count case-only differences; estimates unchanged)
 > **Last reviewed:** 2026-11-19 | **Last updated:** 2026-11-19 | **Change:** minor (gap 22: `ns_list` reports `/NS` values that more than one structure namespace carries; estimates unchanged)
 > **Last reviewed:** 2026-11-18 | **Last updated:** 2026-11-18 | **Change:** minor (gap 23: `ai_redaction_suggest` suggests passages to redact through the user's own AI endpoint, headless and suggest-only; estimates unchanged)
 > **Last reviewed:** 2026-11-18 | **Last updated:** 2026-11-18 | **Change:** minor (gap 22: `ns_list` lists the PDF 2.0 structure namespaces read-only; estimates unchanged)
@@ -480,7 +481,8 @@ update the numbers.
   each visual region's cause: `annotation` when it overlaps (by `/Rect`) a comment (markup)
   annotation that only one of the two files has on that page (added, removed, moved or edited),
   otherwise `other`; form fields, links, popups and media are not looked at, and at most 2,000
-  comments per page are matched.
+  comments per page are matched. `doc_compare` takes `ignore_case` (words that differ only in
+  letter case are not text changes; text comparison only, headless only).
 - **Missing:** telling images, formatting and background/header-footer changes apart, and using
   the annotation cause as a filter, in the dialog, the report or Mark as comments (the comparison
   reads words and pixels, so all of them are Visual, which is shaded and counted
@@ -536,6 +538,7 @@ update the numbers.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-19 | minor | Gap 21: `doc_compare` takes `ignore_case`: words that differ only in letter case are not text changes (headless; the visual regions still see the different pixels, and `doc_compare_report`, `doc_compare_mark` and the Compare dialog do not take it). Estimates unchanged. |
 | 2026-11-19 | minor | Gap 22: `ns_list` lists each `/NS` value that more than one structure namespace dictionary carries (`duplicate_ns`; text compared as listed, cut at 200 characters); other validation, editing and any UI are still not done. Estimates unchanged. |
 | 2026-11-18 | minor | Gap 23: `ai_redaction_suggest` asks the user's own AI endpoint for passages to redact and returns only those that occur in the page text, with pages and counts (`misc.ai-redaction-suggest` is partial); it marks nothing, has no UI and was tested only against a stand-in server. Estimates unchanged. |
 | 2026-11-18 | minor | Gap 22: `ns_list` lists the PDF 2.0 structure namespaces (`/StructTreeRoot` `/Namespaces`, with `/RoleMapNS` entries) read-only (`core.pdf20-namespaces` is partial); no validation, writing or UI. Estimates unchanged. |

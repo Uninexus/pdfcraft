@@ -11,6 +11,7 @@ mod batch;
 mod batch_failures;
 mod batch_secrets;
 mod button_caption;
+mod compare_ignore_case;
 mod document_actions;
 mod document_parts;
 mod edit_all_javascripts;
