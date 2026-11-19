@@ -11143,6 +11143,56 @@ trailer << /Root 1 0 R >>
     assert_eq!(ok(&mut a, "doc_info", json!({ "doc": doc })), before);
 }
 
+/// A font the file's resources name but do not embed gives one bounded `font-not-embedded` warning;
+/// the document is unchanged and a file with no fonts gets none.
+#[test]
+fn print_readiness_warns_about_fonts_the_file_does_not_embed_through_tools() {
+    let dir = workdir("font-finding");
+    let pdf = |name: &str, font: &str| {
+        let content = "BT /F1 12 Tf 10 10 Td (x) Tj ET";
+        let body = format!(
+            "%PDF-1.7
+1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
+2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >> endobj
+4 0 obj << /Length {} >> stream
+{content}
+endstream endobj
+5 0 obj << /Type /Font /Subtype /Type1 /BaseFont /{font} >> endobj
+trailer << /Root 1 0 R >>
+%%EOF",
+            content.len()
+        );
+        std::fs::write(dir.join(name), body).unwrap();
+    };
+    pdf("one.pdf", "Helvetica");
+    // A name far longer than the finding copies.
+    pdf("long.pdf", &"L".repeat(5000));
+    std::fs::write(dir.join("none.pdf"), "%PDF-1.7\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] >> endobj\ntrailer << /Root 1 0 R >>\n%%EOF").unwrap();
+    let mut a = auto(&dir);
+    let found = |a: &mut Automation, path: &str| {
+        let doc = ok(a, "doc_open", json!({ "path": path }))["doc"].as_u64().unwrap();
+        let before = ok(a, "doc_info", json!({ "doc": doc }));
+        let report = ok(a, "print_readiness", json!({ "doc": doc }));
+        assert_eq!(ok(a, "doc_info", json!({ "doc": doc })), before, "verification only");
+        report["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|f| f["id"] == "font-not-embedded")
+            .map(|f| (f["severity"].as_str().unwrap().to_owned(), f["message"].as_str().unwrap().to_owned()))
+            .collect::<Vec<_>>()
+    };
+    let one = found(&mut a, "one.pdf");
+    assert_eq!(one.len(), 1, "{one:?}");
+    assert_eq!(one[0].0, "warn");
+    assert!(one[0].1.contains("1 font name is named in the file's resources but not embedded: Helvetica."), "{one:?}");
+    let long = found(&mut a, "long.pdf");
+    assert_eq!(long.len(), 1, "{long:?}");
+    assert!(long[0].1.chars().count() < 300 && long[0].1.contains('…'), "{}", long[0].1.len());
+    assert!(found(&mut a, "none.pdf").is_empty());
+}
+
 /// `min_ppi` through the tools: a 200 ppi image warns by default, is accepted at 150, is still a
 /// warning (not a fail) at 600, a 120 ppi image is a fail by default and accepted at 100, and bad
 /// values are refused without changing the document.

@@ -8569,6 +8569,22 @@ evidence = [
 notes = "First slice: print_readiness notes text shown in rich black (K 90% or more with other inks), pages that turn overprint on (a gs with OP or op true) and the spot colours selected (Separation, DeviceN). Spot colours are those selected with cs (process colorants, All and None are not spot colours; Indexed bases and patterns are not seen). Missing: a warning by text size, overprint effects and previews, rich black in fills and strokes, a UI panel (the report is text and findings only)."
 
 [[feature]]
+id = "print.font-embedding-warning"
+title = "Fonts not embedded warning"
+area = "L"
+tier = "P1"
+milestone = "M11"
+status = "partial"
+commands = ["prepress.readiness"]
+tools = ["print_readiness"]
+evidence = [
+    "crates/engine/src/printcheck.rs::a_font_the_file_only_names_is_one_document_warning_and_none_means_no_finding",
+    "crates/engine/src/printcheck.rs::many_fonts_with_huge_names_give_a_bounded_finding",
+    "crates/automation/tests/it/automation.rs::print_readiness_warns_about_fonts_the_file_does_not_embed_through_tools",
+]
+notes = "print_readiness gives one warn finding, font-not-embedded, when the PDF/A-2b structural check reports a font that a resource dictionary names but does not embed (no FontFile, FontFile2 or FontFile3). It names at most eight font names, each cut to 64 characters before it is copied, and says how many font names there are. Not covered: the check reads resource dictionaries, not content, so a font listed in a /Resources /Font dictionary but never selected with Tf is reported; it looks at every indirect object in the file, so a font only an unreachable object (an orphaned page or form left by an incremental update) names is reported too, and a page, form, appearance stream, pattern or Type 3 font resource counts alike; a font dictionary written inline inside /Font (not as an indirect object) is missed; fonts only in /AcroForm /DR are not looked at; the standard 14 fonts are reported like any other; a Type 3 font is never reported; a Type 0 font is judged by its first descendant's FontDescriptor. Only the finding's message is bounded: the fonts_not_embedded list and field, the Fonts not embedded measured line and the PDF/A issues keep full names. The count is of font names (names equal in their first 64 characters show the same). There is no setting to turn the finding off."
+
+[[feature]]
 id = "print.object-inspector"
 title = "Object inspector"
 area = "L"
