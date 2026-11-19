@@ -7,10 +7,13 @@ use pdfcraft_automation::{Automation, Content};
 use serde_json::{Value, json};
 
 fn pdf() -> Vec<u8> {
-    let c = "BT /F1 24 Tf 20 40 Td (Invoice total 42) Tj ET";
+    pdf_with("BT /F1 24 Tf 20 40 Td (Invoice total 42) Tj ET")
+}
+
+fn pdf_with(c: &str) -> Vec<u8> {
     let objs = [
         "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
-        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 300 100] >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 600 4000] >>".to_string(),
         "<< /Type /Page /Parent 2 0 R /Contents 4 0 R /Resources << /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> >> >> >>"
             .to_string(),
         format!("<< /Length {} >>\nstream\n{c}\nendstream", c.len()),
@@ -116,4 +119,64 @@ fn summarize_and_translate_send_their_instruction_with_the_page_text() {
     let e =
         a.call("ai_translate", &json!({ "doc": doc, "language": "  ", "base_url": "http://127.0.0.1:1/v1", "model": "m" })).unwrap_err().to_string();
     assert!(e.contains("language"), "{e}");
+}
+
+#[test]
+fn redaction_suggestions_keep_only_passages_that_are_in_the_text_and_mark_nothing() {
+    let dir = std::env::temp_dir().join(format!("pdfcraft-automation-ai-rs-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("a.pdf"), pdf()).unwrap();
+    let mut a = Automation::new().with_root(&dir).unwrap();
+    let doc = json_of(a.call("doc_open", &json!({ "path": "a.pdf" })).unwrap())["doc"].as_u64().unwrap();
+    let before = json_of(a.call("doc_info", &json!({ "doc": doc })).unwrap());
+
+    // The model names one passage the page holds, one it invented, one twice and a non-string.
+    let (url, req) = server(r#"{"choices":[{"message":{"content":"```json\n[\"Invoice total 42\", \"Nobody Here\", \"42\", \"42\", 7]\n```"}}]}"#);
+    let out = json_of(a.call("ai_redaction_suggest", &json!({ "doc": doc, "base_url": url, "model": "m" })).unwrap());
+    assert_eq!(
+        out["suggestions"],
+        json!([{ "text": "Invoice total 42", "pages": [1], "occurrences": 1 }, { "text": "42", "pages": [1], "occurrences": 1 }])
+    );
+    assert_eq!(out["not_in_text"], 1);
+    assert_eq!(out["pages_sent"], json!([1]));
+    let req = req.join().unwrap();
+    assert!(req.contains("redact") && req.contains("Invoice total 42"), "{req}");
+    assert_eq!(json_of(a.call("doc_info", &json!({ "doc": doc })).unwrap()), before, "suggesting changes nothing");
+
+    // A reply that is not a list is an error that says so, not an empty result.
+    let (url, req) = server(r#"{"choices":[{"message":{"content":"I cannot help with that."}}]}"#);
+    let e = a.call("ai_redaction_suggest", &json!({ "doc": doc, "base_url": url, "model": "m" })).unwrap_err().to_string();
+    assert!(e.contains("JSON list"), "{e}");
+    req.join().unwrap();
+
+    let e = a
+        .call("ai_redaction_suggest", &json!({ "doc": doc, "model": "m", "base_url": "http://127.0.0.1:1/v1", "pages": [9] }))
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("page 9 is out of range"), "{e}");
+}
+
+#[test]
+fn redaction_suggestions_only_count_text_the_model_was_given() {
+    // One page of about 70,000 characters: the limit is 60,000, so the last line is never sent.
+    let mut c = String::from("BT /F1 4 Tf 5 TL 5 3990 Td (Jane Doe) '\n");
+    for _ in 0..700 {
+        c.push_str(&format!("({}) '\n", "lorem ipsum ".repeat(8)));
+    }
+    c.push_str("(Late Person) ' ET");
+    let bytes = pdf_with(&c);
+    let dir = std::env::temp_dir().join(format!("pdfcraft-automation-ai-rt-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("big.pdf"), bytes).unwrap();
+    let mut a = Automation::new().with_root(&dir).unwrap();
+    let doc = json_of(a.call("doc_open", &json!({ "path": "big.pdf" })).unwrap())["doc"].as_u64().unwrap();
+
+    let (url, req) = server(r#"{"choices":[{"message":{"content":"[\"Jane Doe\", \"Late Person\"]"}}]}"#);
+    let out = json_of(a.call("ai_redaction_suggest", &json!({ "doc": doc, "base_url": url, "model": "m" })).unwrap());
+    let req = req.join().unwrap();
+    assert!(req.contains("Jane Doe") && !req.contains("Late Person"), "the last line must not be sent");
+    assert_eq!(out["truncated"], true);
+    assert_eq!(out["pages_sent"], json!([1]));
+    assert_eq!(out["suggestions"], json!([{ "text": "Jane Doe", "pages": [1], "occurrences": 1 }]));
+    assert_eq!(out["not_in_text"], 1, "a passage the model was not given is not a finding");
 }

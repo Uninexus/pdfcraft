@@ -407,10 +407,20 @@ const SYSTEM_PROMPT: &str = "You are the assistant inside a PDF editor. Answer t
 Cite page numbers like (p. 3) when you rely on a page. If the text does not contain the answer, say so instead of guessing. \
 The text may be incomplete: scanned pages without OCR have none.";
 
-/// Messages for a question about pages of a document: a system prompt, the text of each page
-/// (`(1-based page, text)`), cut to [`MAX_CONTEXT_CHARS`], and the question.
-pub fn document_messages(question: &str, pages: &[(usize, String)]) -> Vec<Message> {
-    let mut context = String::new();
+/// The document text that goes into a question: what fits in [`MAX_CONTEXT_CHARS`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DocumentContext {
+    /// The `(1-based page, text)` pairs that are in the question, the last one possibly cut short.
+    /// A page that did not fit at all is not here.
+    pub included: Vec<(usize, String)>,
+    /// Whether some text was left out to fit the limit.
+    pub cut: bool,
+}
+
+/// Picks the text of `pages` (`(1-based page, text)`) that fits in [`MAX_CONTEXT_CHARS`], cutting on
+/// a character boundary.
+pub fn document_context(pages: &[(usize, String)]) -> DocumentContext {
+    let mut included = Vec::new();
     let mut used = 0usize;
     let mut cut = false;
     for (page, text) in pages {
@@ -426,14 +436,25 @@ pub fn document_messages(question: &str, pages: &[(usize, String)]) -> Vec<Messa
             cut = true;
         }
         used += head.chars().count() + body.chars().count() + 1;
-        context.push_str(&head);
-        context.push_str(&body);
-        context.push('\n');
+        included.push((*page, body));
         if cut {
             break;
         }
     }
-    if cut {
+    DocumentContext { included, cut }
+}
+
+/// Messages for a question about pages of a document: a system prompt, the text of each page
+/// (`(1-based page, text)`), cut to [`MAX_CONTEXT_CHARS`], and the question.
+pub fn document_messages(question: &str, pages: &[(usize, String)]) -> Vec<Message> {
+    let ctx = document_context(pages);
+    let mut context = String::new();
+    for (page, body) in &ctx.included {
+        context.push_str(&format!("--- Page {page} ---\n"));
+        context.push_str(body);
+        context.push('\n');
+    }
+    if ctx.cut {
         context.push_str("[The document text was cut here to fit the size limit.]\n");
     }
     if context.trim().is_empty() {
@@ -457,6 +478,54 @@ pub fn translate_question(language: &str) -> Option<String> {
         "Translate the document text into {language}. Keep the order, headings, lists and numbers as they are, mark each page with its \
 heading like \"--- Page 3 ---\", and do not add comments of your own."
     ))
+}
+
+/// The instruction behind redaction suggestions: a JSON list of verbatim passages and nothing else.
+pub const REDACTION_QUESTION: &str = "List the passages of this document that a person would want to redact before sharing it: names of \
+people, postal addresses, email addresses, phone numbers, identity, account, card and tax numbers, dates of birth and similar personal or \
+confidential details. Copy each passage exactly as it appears in the text, as short as it can be while staying complete. Reply with only a \
+JSON array of strings, for example [\"Jane Doe\", \"+1 555 0100\"], and no other text. Reply [] when there is none.";
+
+/// The most characters one suggested passage may have.
+pub const MAX_PASSAGE_CHARS: usize = 200;
+/// The most passages read from one reply; the rest are ignored.
+pub const MAX_PASSAGES: usize = 200;
+
+/// Reads a model's reply to [`REDACTION_QUESTION`]: the first JSON array in it that parses and holds a string, else the first that parses (models
+/// often wrap it in a code fence or a sentence, and may put brackets of their own after it). Runs of
+/// whitespace in an entry, newlines and tabs included, become one space; entries that are not
+/// strings, are empty after that, are longer than [`MAX_PASSAGE_CHARS`] or still hold a control
+/// character are dropped, repeats are kept once, and at most [`MAX_PASSAGES`] come back. `None`
+/// when the reply holds no array.
+pub fn parse_passages(reply: &str) -> Option<Vec<String>> {
+    // Every array that parses, in order; the first one that holds a string is the list (a reply like
+    // "as in [1]: [\"Jane\"]" has an earlier array that is not), else the first array, which may be [].
+    let mut arrays = reply.match_indices('[').filter_map(|(i, _)| {
+        let rest = reply.get(i..)?;
+        match serde_json::Deserializer::from_str(rest).into_iter::<serde_json::Value>().next()? {
+            Ok(serde_json::Value::Array(items)) => Some(items),
+            _ => None,
+        }
+    });
+    let first = arrays.next()?;
+    let items = if first.iter().any(serde_json::Value::is_string) {
+        first
+    } else {
+        arrays.find(|a| a.iter().any(serde_json::Value::is_string)).unwrap_or(first)
+    };
+    let mut out: Vec<String> = Vec::new();
+    for item in &items {
+        let Some(raw) = item.as_str() else { continue };
+        let text = raw.split_whitespace().collect::<Vec<_>>().join(" ");
+        if text.is_empty() || text.chars().count() > MAX_PASSAGE_CHARS || text.chars().any(char::is_control) || out.contains(&text) {
+            continue;
+        }
+        out.push(text);
+        if out.len() >= MAX_PASSAGES {
+            break;
+        }
+    }
+    Some(out)
 }
 
 #[cfg(test)]

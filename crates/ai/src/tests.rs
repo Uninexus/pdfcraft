@@ -231,3 +231,36 @@ mod page_references {
         assert_eq!(segs.iter().filter(|s| matches!(s, Segment::Page(_))).count(), 5);
     }
 }
+
+#[test]
+fn passages_are_read_from_a_wrapped_reply_and_junk_is_dropped() {
+    let reply = "Sure:\n```json\n[\"Jane Doe\", 7, \"  \", \"Jane Doe\", \"a\\u0007b\", null, \"+1 555 0100\"]\n```";
+    assert_eq!(parse_passages(reply), Some(vec!["Jane Doe".to_owned(), "+1 555 0100".to_owned()]));
+    assert_eq!(parse_passages("[]"), Some(vec![]));
+    assert_eq!(parse_passages("nothing to redact"), None);
+    assert_eq!(parse_passages("] [ not json ["), None);
+    let long = format!("[\"{}\"]", "x".repeat(MAX_PASSAGE_CHARS + 1));
+    assert_eq!(parse_passages(&long), Some(vec![]));
+    let many = format!("[{}]", (0..MAX_PASSAGES + 50).map(|i| format!("\"w{i}\"")).collect::<Vec<_>>().join(","));
+    assert_eq!(parse_passages(&many).map(|v| v.len()), Some(MAX_PASSAGES));
+}
+
+#[test]
+fn passages_ignore_brackets_around_the_list_and_fold_newlines_and_tabs() {
+    assert_eq!(parse_passages("[\"Jane\"] see [p. 2]"), Some(vec!["Jane".to_owned()]));
+    assert_eq!(parse_passages("As in [1]: [\"Jane\"]"), Some(vec!["Jane".to_owned()]));
+    assert_eq!(
+        parse_passages("[\"12 Elm\\nStreet\", \"Jane\\tDoe\", \"12 Elm Street\"]"),
+        Some(vec!["12 Elm Street".to_owned(), "Jane Doe".to_owned()])
+    );
+}
+
+#[test]
+fn document_context_reports_what_was_really_included() {
+    let ctx = document_context(&[(1, "short".into()), (2, "é".repeat(MAX_CONTEXT_CHARS + 10)), (3, "never seen".into())]);
+    assert!(ctx.cut);
+    assert_eq!(ctx.included.iter().map(|(p, _)| *p).collect::<Vec<_>>(), vec![1, 2]);
+    assert!(ctx.included[1].1.chars().count() < MAX_CONTEXT_CHARS);
+    let fits = document_context(&[(1, "a".into()), (2, "b".into())]);
+    assert!(!fits.cut && fits.included.len() == 2);
+}
