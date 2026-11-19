@@ -34,9 +34,15 @@ pub enum ImageEdit {
 /// Forms ▸ Merge data files into spreadsheet: the field values of each file (FDF, XFDF or a
 /// filled-in PDF form), as CSV with one row per file.
 pub fn merge_data_files(files: &[(String, Vec<u8>)]) -> Result<String, String> {
+    merge_data_files_counted(files).map(|(csv, _)| csv)
+}
+
+/// [`merge_data_files`] with the number of columns the CSV has. Refuses a table of more than
+/// `pdfcraft_xfdf::MAX_MERGE_CELLS` cells.
+pub fn merge_data_files_counted(files: &[(String, Vec<u8>)]) -> Result<(String, usize), String> {
     let rows =
         files.iter().map(|(name, bytes)| pdfcraft_xfdf::data_values(bytes).map_err(|e| format!("{name}: {e}"))).collect::<Result<Vec<_>, _>>()?;
-    Ok(pdfcraft_xfdf::merge_csv(&rows))
+    pdfcraft_xfdf::merge_csv_limited(&rows)
 }
 
 /// One file produced by a split: (1-based first page, last page, PDF bytes).

@@ -6,7 +6,9 @@
 //!   style and dashes, rotation, justification, fringe, line leaders) and a stamp's appearance;
 //!   field values, nested by name.
 //! - **FDF** (ISO 32000-2 §12.7.8): fields and comments in PDF syntax, with their appearances.
-//! - Form data as **XML**, **CSV** and **tab-delimited text** (Acrobat's Export data formats).
+//! - Form data as **XML**, **CSV** and **tab-delimited text** (Acrobat's Export data formats), and
+//!   Merge Data Files into a spreadsheet (`merge_csv`; `merge_csv_limited` caps the table at
+//!   `MAX_MERGE_CELLS` cells).
 //!
 //! Import merges: a comment whose name (`/NM`) already exists on its page replaces it; field
 //! values go through the form's own checks (formats, validation) and recalculate.
@@ -196,6 +198,33 @@ pub fn data_values(bytes: &[u8]) -> Result<Vec<(String, Vec<String>)>, DataError
 /// that starts with `=`, `+`, `-` or `@` (after any leading whitespace) as a formula. Such a cell
 /// is written with a leading `'`, which keeps it text; a plain number such as `-12.5` is not.
 pub fn merge_csv(files: &[Vec<(String, Vec<String>)>]) -> String {
+    merge_csv_table(&merge_columns(files), files)
+}
+
+/// The most cells (columns times rows, empty ones included) Merge Data Files writes. Every file
+/// adds a row and every name no earlier file had adds a column, so files that each bring their
+/// own names make a table that grows with the square of their number; the cap stops that from
+/// filling memory and the disk (a million cells is a few megabytes of commas).
+pub const MAX_MERGE_CELLS: usize = 2_000_000;
+
+/// [`merge_csv`] for files that may be hostile: the CSV and its column count (a header cell can
+/// hold commas or line breaks, so the count is not found by splitting the header), or an error
+/// when the table would hold more than [`MAX_MERGE_CELLS`] cells.
+pub fn merge_csv_limited(files: &[Vec<(String, Vec<String>)>]) -> Result<(String, usize), String> {
+    let columns = merge_columns(files);
+    let cells = columns.len().saturating_mul(files.len());
+    if cells > MAX_MERGE_CELLS {
+        return Err(format!(
+            "the files would make a table of {} columns and {} rows; at most {MAX_MERGE_CELLS} cells are written, so merge fewer files or files that share their field names",
+            columns.len(),
+            files.len()
+        ));
+    }
+    Ok((merge_csv_table(&columns, files), columns.len()))
+}
+
+/// The distinct field names of `files`, in the order they first appear.
+fn merge_columns(files: &[Vec<(String, Vec<String>)>]) -> Vec<&str> {
     let mut columns: Vec<&str> = Vec::new();
     let mut known: HashSet<&str> = HashSet::new();
     for f in files {
@@ -205,6 +234,10 @@ pub fn merge_csv(files: &[Vec<(String, Vec<String>)>]) -> String {
             }
         }
     }
+    columns
+}
+
+fn merge_csv_table(columns: &[&str], files: &[Vec<(String, Vec<String>)>]) -> String {
     let literal = |s: &str| if runs_as_formula(s) { format!("'{s}") } else { s.to_string() };
     let q = |s: &str| {
         let s = literal(s);

@@ -10345,6 +10345,32 @@ fn merging_form_data_into_a_spreadsheet() {
     assert_eq!(std::fs::read_to_string(dir.join("report.csv")).unwrap(), "City\nParis\nOslo\nOslo\n");
 }
 
+/// The columns the tool reports count a header cell once even when it holds a comma or a line
+/// break, and a table past the cell cap is refused without writing the file.
+#[test]
+fn merging_form_data_counts_columns_and_refuses_a_huge_table() {
+    let dir = workdir("merge-data-cap");
+    let mut a = auto(&dir);
+    let xfdf = |name: &str| {
+        format!(
+            "<?xml version=\"1.0\"?><xfdf xmlns=\"http://ns.adobe.com/xfdf/\"><fields><field name=\"{name}\"><value>v</value></field></fields></xfdf>"
+        )
+    };
+    std::fs::write(dir.join("comma.xfdf"), xfdf("a,b")).unwrap();
+    let r = ok(&mut a, "form_merge_data", json!({ "paths": ["comma.xfdf"], "path": "one.csv" }));
+    assert_eq!((r["rows"].as_u64(), r["columns"].as_u64()), (Some(1), Some(1)), "{r}");
+    let side = 1415;
+    let mut paths = Vec::new();
+    for i in 0..side {
+        let name = format!("f{i}.xfdf");
+        std::fs::write(dir.join(&name), xfdf(&format!("n{i}"))).unwrap();
+        paths.push(name);
+    }
+    let err = a.call("form_merge_data", &json!({ "paths": paths, "path": "big.csv" })).unwrap_err().to_string();
+    assert!(err.contains("at most 2000000 cells"), "{err}");
+    assert!(!dir.join("big.csv").exists());
+}
+
 #[test]
 fn field_actions_through_tools() {
     let dir = workdir("field-actions");
