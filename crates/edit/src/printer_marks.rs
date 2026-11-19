@@ -329,7 +329,9 @@ fn pdfcraft_organize_boxes(doc: &Document, page: usize) -> Result<[[f64; 4]; 5],
     let p = page_list(doc).get(page).cloned().ok_or_else(|| EditError::Invalid(format!("page {} does not exist", page + 1)))?;
     let rect = |k: &[u8]| -> Option<[f64; 4]> {
         let a = p.dict.get(k).map(|o| doc.resolve(o))?;
-        let v: Vec<f64> = a.as_array()?.iter().filter_map(|x| doc.resolve(x).as_f64()).collect();
+        // The first four entries, all numbers, as the viewer reads a rectangle; the rest of a long
+        // array is not read.
+        let v: Vec<f64> = a.as_array()?.iter().take(4).map(|x| doc.resolve(x).as_f64()).collect::<Option<_>>()?;
         (v.len() == 4 && v.iter().all(|x| x.is_finite())).then(|| [v[0].min(v[2]), v[1].min(v[3]), v[0].max(v[2]), v[1].max(v[3])])
     };
     let media = rect(b"MediaBox").unwrap_or([0.0, 0.0, 612.0, 792.0]);

@@ -53,11 +53,14 @@ pub enum BoxSpec {
     Margins([f64; 4]),
 }
 
-/// Parses a 4-number PDF rectangle `[x0, y0, x1, y1]` into `[xmin, ymin, xmax, ymax]` when it has
-/// finite coordinates and positive width and height.
+/// Parses a PDF rectangle `[x0, y0, x1, y1]` into `[xmin, ymin, xmax, ymax]` as the viewer reads
+/// one: the first four entries, each resolved, must all be numbers, and entries after the fourth
+/// are not read. They must also be finite and give a positive width and height. Guard: one array,
+/// direct or indirect, can be the box of every page, so reading it whole would cost its length
+/// once per page and box (a 1,000,000-entry array shared by 100,000 pages).
 fn rect_of(o: Option<&Object>, doc: &Document) -> Option<[f64; 4]> {
     let o = doc.resolve(o?);
-    let v: Vec<f64> = o.as_array()?.iter().filter_map(|x| doc.resolve(x).as_f64()).collect();
+    let v: Vec<f64> = o.as_array()?.iter().take(4).map(|x| doc.resolve(x).as_f64()).collect::<Option<_>>()?;
     if v.len() != 4 || !v.iter().all(|x| x.is_finite()) {
         return None;
     }
@@ -103,9 +106,9 @@ pub struct PageBoxReport {
     /// Whether each of `boxes` comes from a valid entry (the media and crop boxes may be
     /// inherited from a `/Pages` node), not defaulted from its parent box.
     pub explicit: [bool; 5],
-    /// Whether the key is present but its value was rejected (not four numbers, no positive
-    /// width and height, or, for the other boxes, no overlap with the media box), so the box
-    /// defaulted instead.
+    /// Whether the key is present but its value was rejected (its first four entries are
+    /// not all numbers, or give no positive width and height, or, for the other boxes, no overlap
+    /// with the media box), so the box defaulted instead.
     pub ignored: [bool; 5],
     /// The page's rotation in degrees, as [`page_rotation`] gives it.
     pub rotate: i64,

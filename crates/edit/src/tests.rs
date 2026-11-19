@@ -10068,6 +10068,26 @@ fn paragraph_breaks_get_their_own_spacing() {
     assert!(b.len() >= 2 && (gap_after_first(&b) - 12.0).abs() < 0.5, "{b:?}");
 }
 
+/// The printer marks read a page box as the viewer does: its first four entries, so a trim box
+/// written with a long array (the same array can serve every page) is the trim box, not missing.
+#[test]
+fn printer_marks_read_a_long_box_array_from_its_first_four_entries() {
+    use crate::printer_marks::PrinterMarks;
+    let reals = |v: &[f64]| Object::Array(v.iter().map(|v| Object::Real(*v)).collect());
+    let mut doc = fixture();
+    let page = page_list(&doc)[0].clone();
+    let mut trim = vec![36.0, 36.0, 576.0, 756.0];
+    trim.extend(std::iter::repeat_n(7.0, 100_000));
+    doc.update_dict(page.obj, |d| {
+        d.set(b"MediaBox".to_vec(), reals(&[0.0, 0.0, 612.0, 792.0]));
+        d.set(b"TrimBox".to_vec(), reals(&trim));
+        d.set(b"BleedBox".to_vec(), reals(&[27.0, 27.0, 585.0, 765.0]));
+    })
+    .unwrap();
+    let widened = add_printer_marks(&mut doc, &[0], &PrinterMarks::default(), false).unwrap();
+    assert!(widened.is_empty(), "the trim box is read from its first four entries, so the marks fit: {widened:?}");
+}
+
 /// Printer marks: drawn outside the trim box as a removable page mark; the page
 /// is widened to make room when asked and the trim box stays; running again replaces them.
 #[test]
