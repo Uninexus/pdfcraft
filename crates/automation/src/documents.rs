@@ -204,14 +204,14 @@ impl Automation {
         let doc = self.doc(a)?;
         let ends = doc.revision_ends();
         let sigs = doc.signatures.clone();
+        let signed_by = signers_by_revision(&ends, sigs.iter().enumerate().filter(|(_, s)| s.signed).map(|(i, s)| (i, s.signed_len)));
         let list: Vec<Value> = ends
             .iter()
+            .zip(&signed_by)
             .enumerate()
-            .map(|(i, end)| {
+            .map(|(i, (end, signers))| {
                 let start = if i == 0 { 0 } else { ends[i - 1] };
-                // A signature signs the revision its byte range ends in.
-                let signed: Vec<&str> =
-                    sigs.iter().filter(|s| s.signed && s.signed_len > start && s.signed_len <= *end).map(|s| s.field.as_str()).collect();
+                let signed: Vec<&str> = signers.iter().filter_map(|&k| sigs.get(k)).map(|s| s.field.as_str()).collect();
                 json!({ "revision": i + 1, "end": end, "bytes": end - start, "signed_by": signed })
             })
             .collect();
@@ -969,5 +969,55 @@ impl Automation {
         let mut out = self.apply(a, Edit::Protect(p))?;
         out["security"] = security(self.doc(a)?);
         Ok(out)
+    }
+}
+
+/// For each revision (`ends`, strictly increasing: `bytes[..end]` is that revision), the indexes
+/// of the signatures that sign exactly it, in the order given. `signed` is each signed
+/// signature's index and the length of the revision its byte range ends in; a signature signs the
+/// revision `(start, end]` holds. One binary search per signature, so the work is
+/// `signatures * log(revisions)` where a scan of every signature for every revision cost
+/// `revisions * signatures` (a file's revisions and its signature fields are both file-controlled:
+/// 100,000 revisions and 20,000 signature fields were 2 billion comparisons). A length past the
+/// last revision, or 0, signs none. Each signature lands in at most one revision, so the names
+/// listed are at most the names the document already holds.
+fn signers_by_revision(ends: &[usize], signed: impl Iterator<Item = (usize, usize)>) -> Vec<Vec<usize>> {
+    let mut out: Vec<Vec<usize>> = vec![Vec::new(); ends.len()];
+    for (index, len) in signed {
+        if len == 0 {
+            continue;
+        }
+        let revision = ends.partition_point(|&end| end < len);
+        if let Some(slot) = out.get_mut(revision) {
+            slot.push(index);
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod revision_signer_tests {
+    use super::signers_by_revision;
+
+    #[test]
+    fn a_signature_belongs_to_the_revision_its_length_falls_in() {
+        let ends = [100, 250, 400];
+        let signed = [(0, 100), (1, 101), (2, 250), (3, 400), (4, 401), (5, 0), (6, 1), (7, 100)];
+        let got = signers_by_revision(&ends, signed.into_iter());
+        assert_eq!(got, vec![vec![0, 6, 7], vec![1, 2], vec![3]]);
+        assert!(signers_by_revision(&[], signed.into_iter()).is_empty());
+    }
+
+    #[test]
+    fn many_revisions_and_signatures_are_matched_in_near_linear_time() {
+        // 200,000 revisions and 200,000 signatures: matching every signature against every
+        // revision would be 40 billion comparisons.
+        let n = 200_000usize;
+        let ends: Vec<usize> = (1..=n).map(|i| i * 10).collect();
+        let started = std::time::Instant::now();
+        let got = signers_by_revision(&ends, (0..n).map(|i| (i, (i + 1) * 10 - (i % 10))));
+        assert!(started.elapsed() < std::time::Duration::from_secs(5), "took {:?}", started.elapsed());
+        assert_eq!(got.len(), n);
+        assert!(got.iter().enumerate().all(|(r, v)| v == &[r]));
     }
 }
