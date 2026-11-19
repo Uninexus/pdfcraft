@@ -203,7 +203,7 @@ fn entries(doc: &Document, key: &[u8]) -> Vec<(Vec<u8>, Object)> {
 fn all_entries(doc: &Document, key: &[u8]) -> Vec<(Vec<u8>, Object)> {
     let Some(tree) = names(doc).and_then(|n| n.get(key).cloned()) else { return Vec::new() };
     let mut out = Vec::new();
-    crate::import::name_tree_entries(doc, &tree, 0, &mut HashSet::new(), &mut out);
+    crate::import::name_tree_entries(doc, &tree, 0, &mut Default::default(), &mut out);
     out
 }
 

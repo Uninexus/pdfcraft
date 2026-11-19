@@ -125,18 +125,15 @@ impl<'a> Inspector<'a> {
 
     /// The entries of an embedded-files name tree. Each string key is spent from `text_budget`
     /// (see [`MAX_LINK_ATTACHMENT_TEXT_BYTES`]), and an entry whose key does not fit is left out.
-    pub(super) fn name_tree(
-        &self,
-        node: &'a Dictionary,
-        seen: &mut HashSet<*const Dictionary>,
-        depth: u32,
-        text_budget: &mut usize,
-    ) -> Vec<(String, &'a Object)> {
+    pub(super) fn name_tree(&self, node: &'a Dictionary, seen: &mut NameTreeSeen, depth: u32, text_budget: &mut usize) -> Vec<(String, &'a Object)> {
         let mut out = Vec::new();
-        if depth > 32 || !seen.insert(node as *const _) {
+        if depth > 32 || !seen.nodes.insert(node as *const _) {
             return out;
         }
-        if let Ok(Object::Array(pairs)) = node.get(b"Names").map(|o| self.resolve(o)) {
+        // A `/Names` array that is an indirect object is listed once, by the first node to name
+        // it: N nodes sharing one array of M pairs would otherwise list N x M entries.
+        let names = node.get(b"Names").ok().filter(|n| self.resolved_id(n).is_none_or(|id| seen.objects.insert(id)));
+        if let Some(Object::Array(pairs)) = names.map(|o| self.resolve(o)) {
             for pair in pairs.chunks(2) {
                 if let [k, v] = pair {
                     let key = match self.resolve(k) {
@@ -419,8 +416,9 @@ pub(super) fn text_string(bytes: &[u8]) -> String {
     pdfcraft_cos::PdfString::literal(bytes).to_text()
 }
 
-/// What [`Inspector::name_tree_find`] has visited: node dictionaries, and the key and `/Names`
-/// array objects it reached by reference.
+/// What [`Inspector::name_tree`] and [`Inspector::name_tree_find`] have visited: node
+/// dictionaries, and the `/Names` array objects (and, for the find, key objects) they reached by
+/// reference.
 #[derive(Default)]
 pub(super) struct NameTreeSeen {
     nodes: HashSet<*const Dictionary>,

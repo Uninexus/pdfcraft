@@ -1,6 +1,6 @@
 use super::annotations::{FieldWalk, MAX_LINK_ATTACHMENT_TEXT_BYTES};
 use super::model::{Attachment, AttachmentSource, PageInfo, Portfolio, PortfolioView, Xfa};
-use super::navigation::text_string;
+use super::navigation::{NameTreeSeen, text_string};
 use super::{
     Arc, AssertUnwindSafe, DecryptionError, Dictionary, DocInfo, Document, HashMap, HashSet, LazyStructure, LoadOptions, LoadPdfError, Object,
     ObjectId, OnceCell, OpenError, Pdf, Structure, catch_unwind,
@@ -293,7 +293,7 @@ impl<'a> Inspector<'a> {
         self.fonts(&mut info.fonts);
         if let Some(names) = catalog.get(b"Names").ok().and_then(|o| self.dict(o)) {
             if let Some(ef) = names.get(b"EmbeddedFiles").ok().and_then(|o| self.dict(o)) {
-                let mut seen = HashSet::new();
+                let mut seen = NameTreeSeen::default();
                 for (name, spec) in self.name_tree(ef, &mut seen, 0, &mut text_budget) {
                     // The key is kept a second time when it is also the name.
                     let fallback = |budget: &mut usize| spend(name.as_bytes(), budget, |_| name.clone());

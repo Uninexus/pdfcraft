@@ -5507,3 +5507,57 @@ fn structure_namespace_listing_is_bounded() {
     let list = list_structure_namespaces(&doc);
     assert_eq!((list.namespaces.len(), list.truncated), (MAX_NAMESPACES, false));
 }
+
+/// A name tree whose `kids` nodes all name one `/Names` array of `pairs` entries: the file holds
+/// `kids + pairs` objects, and a reader that copies the array for every node lists `kids x pairs`.
+fn doc_with_shared_names_array(kids: usize, pairs: usize) -> Document {
+    // Objects: 1 catalog, 2 pages, 3 page, 4 root node, 5 the shared array, 6.. the kid nodes.
+    let entries: String = (0..pairs).map(|i| format!("(f{i:05}.txt) << /Type /Filespec /F (f{i:05}.txt) >> ")).collect();
+    let refs: String = (0..kids).map(|i| format!("{} 0 R ", i + 6)).collect();
+    let mut b: Vec<String> = vec![
+        "<< /Type /Catalog /Pages 2 0 R /Names << /EmbeddedFiles 4 0 R >> >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 300 400] >>".into(),
+        "<< /Type /Page /Parent 2 0 R >>".into(),
+        format!("<< /Kids [{refs}] >>"),
+        format!("[{entries}]"),
+    ];
+    b.extend((0..kids).map(|_| "<< /Names 5 0 R >>".to_string()));
+    open(build(&b, "/Root 1 0 R"))
+}
+
+#[test]
+fn a_names_array_shared_by_many_nodes_is_listed_once() {
+    let (kids, pairs) = (300, 300);
+    let doc = doc_with_shared_names_array(kids, pairs);
+    let keys = attachment_keys(&doc);
+    assert_eq!(keys.len(), pairs, "each attachment is listed once, not once per node that names the array");
+    assert_eq!((keys.first().map(String::as_str), keys.last().map(String::as_str)), (Some("f00000.txt"), Some("f00299.txt")));
+}
+
+/// Objects: 1 catalog, 2 pages, 3 page, 4 root node, 5 an array of two entries, 6 a node dictionary
+/// as given by `node6`. `root_kids` is the root's `/Kids`, `root_names` its `/Names`.
+fn doc_with_name_tree(root_names: &str, root_kids: &str, node6: &str) -> Document {
+    let b: Vec<String> = vec![
+        "<< /Type /Catalog /Pages 2 0 R /Names << /EmbeddedFiles 4 0 R >> >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 300 400] >>".into(),
+        "<< /Type /Page /Parent 2 0 R >>".into(),
+        format!("<< /Names {root_names} /Kids {root_kids} >>"),
+        "[(a.txt) << /Type /Filespec /F (a.txt) >> (b.txt) << /Type /Filespec /F (b.txt) >>]".into(),
+        node6.into(),
+    ];
+    open(build(&b, "/Root 1 0 R"))
+}
+
+#[test]
+fn a_kids_entry_naming_the_names_array_does_not_hide_its_entries() {
+    // /Kids lists object 5, the /Names array itself, then node 6, which names that array.
+    let doc = doc_with_name_tree("[]", "[5 0 R 6 0 R]", "<< /Names 5 0 R >>");
+    assert_eq!(attachment_keys(&doc), ["a.txt", "b.txt"]);
+}
+
+#[test]
+fn a_kids_entry_naming_a_node_dictionary_does_not_hide_its_entries() {
+    // /Names names node 6, a dictionary, where an array belongs; node 6 is still read as a kid.
+    let doc = doc_with_name_tree("6 0 R", "[6 0 R]", "<< /Names [(c.txt) << /Type /Filespec /F (c.txt) >>] >>");
+    assert_eq!(attachment_keys(&doc), ["c.txt"]);
+}

@@ -3466,8 +3466,8 @@ milestone = "M12"
 status = "shipped"
 commands = ["edit.attach"]
 tools = ["attachment_add"]
-evidence = ["crates/organize/src/tests.rs::attachments_are_added_listed_and_deleted", "crates/organize/src/tests.rs::attachments_added_in_the_app_survive_combine_and_more_can_be_attached", "crates/automation/tests/it/automation.rs::attaching_and_deleting_files_through_the_tools"]
-notes = "Edit ▸ Attach a file… (also the Attach a file… button in the Attachments panel and the Edit a PDF list): the file goes into /Names /EmbeddedFiles as a Filespec with a Flate-compressed EmbeddedFile stream (/Size, /ModDate, /Subtype from the extension); a name already taken gets \" (2)\"…; the panel opens on it. Undoable. Acrobat's Comment ▸ Attach File (a paper-clip comment on the page) is comment.attach-file-comment."
+evidence = ["crates/organize/src/tests.rs::attachments_are_added_listed_and_deleted", "crates/organize/src/tests.rs::attachments_added_in_the_app_survive_combine_and_more_can_be_attached", "crates/automation/tests/it/automation.rs::attaching_and_deleting_files_through_the_tools", "crates/automation/tests/it/shared_name_arrays.rs::attachment_add_keeps_each_entry_of_a_shared_names_array_once", "crates/organize/src/tests.rs::a_names_array_shared_by_many_nodes_is_listed_once", "crates/organize/src/tests.rs::a_kids_entry_naming_the_names_array_does_not_hide_its_entries", "crates/organize/src/tests.rs::a_kids_entry_naming_a_node_dictionary_does_not_hide_its_entries"]
+notes = "Edit ▸ Attach a file… (also the Attach a file… button in the Attachments panel and the Edit a PDF list): the file goes into /Names /EmbeddedFiles as a Filespec with a Flate-compressed EmbeddedFile stream (/Size, /ModDate, /Subtype from the extension); a name already taken gets \" (2)\"…; the panel opens on it. Undoable. A /Names array that several name-tree nodes share is read once (the listing and the rewrite no longer multiply its entries by the number of nodes). Acrobat's Comment ▸ Attach File (a paper-clip comment on the page) is comment.attach-file-comment."
 
 [[feature]]
 id = "organize.attachments-delete"
