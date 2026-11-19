@@ -11117,6 +11117,76 @@ trailer << /Root 1 0 R >>
     assert_eq!(ok(&mut a, "doc_info", json!({ "doc": doc })), before);
 }
 
+/// `min_ppi` through the tools: a 200 ppi image warns by default, is accepted at 150, is still a
+/// warning (not a fail) at 600, a 120 ppi image is a fail by default and accepted at 100, and bad
+/// values are refused without changing the document.
+#[test]
+fn print_readiness_min_ppi_through_tools() {
+    let dir = workdir("min-ppi");
+    let pdf = |name: &str, drawn_pt: &str| {
+        let content = format!("q {drawn_pt} 0 0 {drawn_pt} 10 10 cm /Im Do Q");
+        let body = format!(
+            "%PDF-1.7
+1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
+2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Resources << /XObject << /Im 5 0 R >> >> /Contents 4 0 R >> endobj
+4 0 obj << /Length {} >> stream
+{content}
+endstream endobj
+5 0 obj << /Type /XObject /Subtype /Image /Width 2 /Height 2 /BitsPerComponent 8 /ColorSpace /DeviceGray /Length 4 >> stream
+AAAA
+endstream endobj
+trailer << /Root 1 0 R >>
+%%EOF",
+            content.len()
+        );
+        std::fs::write(dir.join(name), body).unwrap();
+    };
+    // 2 px over 0.72 pt is 200 ppi; over 1.2 pt it is 120 ppi.
+    pdf("p200.pdf", "0.72");
+    pdf("p120.pdf", "1.2");
+    let mut a = auto(&dir);
+    let d200 = ok(&mut a, "doc_open", json!({ "path": "p200.pdf" }))["doc"].as_u64().unwrap();
+    let d120 = ok(&mut a, "doc_open", json!({ "path": "p120.pdf" }))["doc"].as_u64().unwrap();
+    let before = ok(&mut a, "doc_info", json!({ "doc": d200 }));
+    let ppi = |r: &serde_json::Value| {
+        r["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|f| f["id"] == "image-ppi")
+            .map(|f| (f["severity"].as_str().unwrap().to_owned(), f["message"].as_str().unwrap().to_owned()))
+            .collect::<Vec<_>>()
+    };
+    let run = |a: &mut Automation, doc: u64, extra: serde_json::Value| {
+        let mut args = json!({ "doc": doc });
+        if !extra.is_null() {
+            args["min_ppi"] = extra;
+        }
+        ok(a, "print_readiness", args)
+    };
+    let default = ppi(&run(&mut a, d200, json!(null)));
+    assert!(default.len() == 1 && default[0].0 == "warn" && default[0].1.contains("below 300"), "{default:?}");
+    assert!(ppi(&run(&mut a, d200, json!(150))).is_empty());
+    let strict = ppi(&run(&mut a, d200, json!(600)));
+    assert!(strict.len() == 1 && strict[0].0 == "warn" && strict[0].1.contains("below 600"), "{strict:?}");
+    assert_eq!(ppi(&run(&mut a, d120, json!(null)))[0].0, "fail");
+    assert!(ppi(&run(&mut a, d120, json!(100))).is_empty());
+    // null is not given, and the ends of the range are accepted through the tool.
+    assert_eq!(ppi(&run(&mut a, d200, json!(null))), default);
+    for edge in [36, 1200] {
+        let r = ppi(&run(&mut a, d200, json!(edge)));
+        assert!(r.len() <= 1, "{edge}: {r:?}");
+    }
+    let asked = ppi(&run(&mut a, d200, json!(600)));
+    assert!(asked[0].1.contains("600 ppi was asked for") && !asked[0].1.contains("close-up"), "{asked:?}");
+    for bad in [json!(35), json!(1201), json!("300"), json!(0)] {
+        let e = a.call("print_readiness", &json!({ "doc": d200, "min_ppi": bad })).expect_err("refused").to_string();
+        assert!(e.contains("min_ppi") && e.contains("1200"), "{bad}: {e}");
+    }
+    assert_eq!(ok(&mut a, "doc_info", json!({ "doc": d200 })), before);
+}
+
 /// Ink aliases through the tools: the spot inks are listed, two names become one, the page looks
 /// the same (each space keeps its alternate space and tint transform), and one undo restores them.
 #[test]
