@@ -5528,6 +5528,61 @@ fn repeated_namespace_identifiers_are_reported() {
 }
 
 #[test]
+fn role_pairs_say_whether_their_namespace_is_listed() {
+    let mut doc = open(fixture());
+    let listed = ns_dict(&mut doc, Some("urn:listed"), &[]);
+    let stray = ns_dict(&mut doc, Some("urn:stray"), &[]);
+    let number = doc.add(Object::Int(7));
+    let mut direct = pdfcraft_cos::Dict::new();
+    direct.set(b"NS".to_vec(), Object::String(pdfcraft_cos::PdfString::text("urn:direct")));
+    let owner = ns_dict(
+        &mut doc,
+        Some("urn:owner"),
+        &[
+            ("A", Object::Array(vec![Object::name("P"), Object::Ref(listed)])),
+            ("B", Object::Array(vec![Object::name("P"), Object::Ref(stray)])),
+            ("C", Object::Array(vec![Object::name("P"), Object::Dict(direct)])),
+            ("D", Object::Array(vec![Object::name("P"), Object::Int(3)])),
+            ("E", Object::name("Span")),
+            ("F", Object::Array(vec![Object::name("P")])),
+            ("G", Object::Array(vec![Object::name("P"), Object::Ref(number)])),
+        ],
+    );
+    set_namespaces(&mut doc, vec![Object::Ref(listed), Object::Ref(owner)]);
+    let list = list_structure_namespaces(&doc);
+    let flags: Vec<_> = list.namespaces[1].roles.iter().map(|r| (r.structure_type.as_str(), r.role_namespace_listed)).collect();
+    assert_eq!(flags, [("A", Some(true)), ("B", Some(false)), ("C", Some(false)), ("D", None), ("E", None), ("F", None), ("G", None)], "{list:?}");
+    assert_eq!(list.namespaces[1].roles[6].role_namespace_object, Some(number.num));
+    assert_eq!(list.namespaces[1].roles[1].role_namespace_object, Some(stray.num));
+    assert_eq!(list.unlisted_role_namespaces, 2, "{list:?}");
+
+    // An entry with the wrong generation resolves to nothing, so it lists nothing: a role pointing
+    // at the object by its real reference is not listed.
+    let mut doc = open(fixture());
+    let target = ns_dict(&mut doc, Some("urn:target"), &[]);
+    let owner = ns_dict(&mut doc, Some("urn:owner"), &[("A", Object::Array(vec![Object::name("P"), Object::Ref(target)]))]);
+    set_namespaces(&mut doc, vec![Object::Ref(owner), Object::Ref(ObjRef::new(target.num, 3))]);
+    let list = list_structure_namespaces(&doc);
+    assert_eq!(
+        (list.namespaces.len(), list.namespaces[0].roles[0].role_namespace_listed, list.unlisted_role_namespaces),
+        (1, Some(false), 1),
+        "{list:?}"
+    );
+
+    // Past the limit, a target that was not read may be further on: unknown, not unlisted.
+    let mut doc = open(fixture());
+    let late = ns_dict(&mut doc, Some("urn:late"), &[]);
+    let owner = ns_dict(&mut doc, Some("urn:owner"), &[("A", Object::Array(vec![Object::name("P"), Object::Ref(late)]))]);
+    let mut items = vec![Object::Ref(owner)];
+    items.extend((0..MAX_NAMESPACES).map(|i| Object::Ref(ns_dict(&mut doc, Some(&format!("urn:n{i}")), &[]))));
+    items.push(Object::Ref(late));
+    set_namespaces(&mut doc, items);
+    let list = list_structure_namespaces(&doc);
+    assert!(list.truncated);
+    assert_eq!((list.namespaces[0].roles[0].role_namespace_listed, list.unlisted_role_namespaces), (None, 0), "{list:?}");
+}
+
+#[test]
 fn structure_namespace_listing_is_bounded() {
     let mut doc = open(fixture());
     let many: Vec<Object> = (0..(MAX_NAMESPACES + 5)).map(|i| Object::Ref(ns_dict(&mut doc, Some(&format!("urn:n{i}")), &[]))).collect();

@@ -61,12 +61,13 @@ fn structure_namespaces_are_listed_through_the_tool_and_survive_a_save() {
     assert_eq!(
         rows[1]["roles"],
         json!([
-            { "type": "Note", "role": "P", "role_namespace": "http://iso.org/pdf2/ssn" },
-            { "type": "Plain", "role": "Span", "role_namespace": null }
+            { "type": "Note", "role": "P", "role_namespace": "http://iso.org/pdf2/ssn", "role_namespace_object": 5, "role_namespace_listed": true },
+            { "type": "Plain", "role": "Span", "role_namespace": null, "role_namespace_object": null, "role_namespace_listed": null }
         ])
     );
 
     assert_eq!(listed["duplicate_ns"], json!([]), "{listed}");
+    assert_eq!(listed["unlisted_role_namespaces"], 0, "{listed}");
 
     // Reading is not an edit; the namespaces are still there after another edit and a save.
     assert_eq!(listed["unsaved_changes"], false);
@@ -74,9 +75,25 @@ fn structure_namespaces_are_listed_through_the_tool_and_survive_a_save() {
     call(&mut a, "doc_save", json!({ "doc": doc, "path": "out.pdf" }));
     let reopened = call(&mut a, "doc_open", json!({ "path": "out.pdf" }))["doc"].as_u64().unwrap();
     let again = call(&mut a, "ns_list", json!({ "doc": reopened }));
-    let shape =
-        |v: &Value| -> Vec<Value> { v["namespaces"].as_array().unwrap().iter().map(|n| json!([n["ns"], n["has_schema"], n["roles"]])).collect() };
+    // Object numbers can change on a save, so the role's target is compared by its text and flag.
+    let shape = |v: &Value| -> Vec<Value> {
+        v["namespaces"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|n| {
+                let roles: Vec<Value> = n["roles"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|r| json!([r["type"], r["role"], r["role_namespace"], r["role_namespace_listed"]]))
+                    .collect();
+                json!([n["ns"], n["has_schema"], roles])
+            })
+            .collect()
+    };
     assert_eq!(shape(&again), shape(&listed), "{again}");
+    assert_eq!(again["namespaces"][1]["roles"][0]["role_namespace_object"], again["namespaces"][0]["object"], "{again}");
 
     // A document without a structure tree has no namespaces.
     let blank = call(&mut a, "doc_create", json!({ "from": "blank" }));
@@ -97,4 +114,26 @@ fn repeated_namespace_identifiers_are_reported_through_the_tool() {
     let listed = call(&mut a, "ns_list", json!({ "doc": doc }));
     assert_eq!(listed["count"], 2, "{listed}");
     assert_eq!(listed["duplicate_ns"], json!([{ "ns": "http://iso.org/pdf2/ssn", "count": 2, "objects": [5, 6] }]), "{listed}");
+}
+
+#[test]
+fn role_pairs_naming_an_unlisted_namespace_are_reported_through_the_tool() {
+    let dir = tempfile::tempdir().unwrap();
+    let bytes = String::from_utf8(pdf_with_namespaces()).unwrap();
+    // The structure tree root lists only the second namespace, whose role map points at the first.
+    let bytes = bytes.replace("/Namespaces [5 0 R 6 0 R]", "/Namespaces [6 0 R]      ");
+    std::fs::write(dir.path().join("unlisted.pdf"), bytes).unwrap();
+    let mut a = Automation::new().with_root(dir.path()).unwrap();
+    let doc = call(&mut a, "doc_open", json!({ "path": "unlisted.pdf" }))["doc"].as_u64().unwrap();
+    let listed = call(&mut a, "ns_list", json!({ "doc": doc }));
+    assert_eq!(listed["count"], 1, "{listed}");
+    assert_eq!(listed["unlisted_role_namespaces"], 1, "{listed}");
+    let note = &listed["namespaces"][0]["roles"][0];
+    assert_eq!(
+        (note["type"].as_str(), note["role_namespace_object"].as_u64(), note["role_namespace_listed"].as_bool()),
+        (Some("Note"), Some(5), Some(false)),
+        "{listed}"
+    );
+    assert_eq!(note["role_namespace"], "http://iso.org/pdf2/ssn", "{listed}");
+    assert_eq!(listed["unsaved_changes"], false);
 }

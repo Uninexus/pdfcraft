@@ -280,7 +280,7 @@ impl Automation {
             .into_iter()
             .map(|n| {
                 let roles: Vec<Value> =
-                    n.roles.into_iter().map(|r| json!({ "type": r.structure_type, "role": r.role, "role_namespace": r.role_namespace })).collect();
+                    n.roles.into_iter().map(|r| json!({ "type": r.structure_type, "role": r.role, "role_namespace": r.role_namespace, "role_namespace_object": r.role_namespace_object, "role_namespace_listed": r.role_namespace_listed })).collect();
                 json!({
                     "object": n.object,
                     "ns": n.ns,
@@ -295,6 +295,7 @@ impl Automation {
             "has_structure_tree": list.has_structure_tree,
             "namespaces": rows,
             "duplicate_ns": duplicates,
+            "unlisted_role_namespaces": list.unlisted_role_namespaces,
             "count": rows.len(),
             "skipped": list.skipped,
             "truncated": list.truncated,

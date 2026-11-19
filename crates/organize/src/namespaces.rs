@@ -4,9 +4,10 @@
 //! structure types the namespace defines to a role in the same or another namespace.
 //!
 //! Reading only: [`list_structure_namespaces`] changes nothing and does not check that the
-//! namespaces are used or that the role maps are consistent. It reports `/NS` values that more
+//! namespaces are used or that the role maps are consistent in other ways. It reports `/NS` values that more
 //! than one listed dictionary carries (a namespace is identified by its `/NS`, so two dictionaries with the same `/NS` describe one namespace twice (ISO 32000-2 14.7.4)),
-//! compared as the listed text (cut at [`MAX_NS_CHARS`]).
+//! compared as the listed text (cut at [`MAX_NS_CHARS`]). It also says, for each `[name namespace]`
+//! role pair, whether the namespace dictionary it points at is one `/Namespaces` lists.
 
 use std::collections::{HashMap, HashSet};
 
@@ -28,6 +29,13 @@ pub struct NamespaceRole {
     pub role: Option<String>,
     /// The `/NS` of the namespace a pair points at, when it is a namespace dictionary with one.
     pub role_namespace: Option<String>,
+    /// The object number of the dictionary a pair points at, when it points at one by reference.
+    pub role_namespace_object: Option<u32>,
+    /// For a pair whose second item is a dictionary: whether that dictionary is one the structure
+    /// tree root's `/Namespaces` lists (`Some(false)` for an unlisted or direct one). `None` for a
+    /// bare name or a pair without a dictionary, and when the list was cut at [`MAX_NAMESPACES`] and
+    /// the target is not among the ones read, because it may be further on.
+    pub role_namespace_listed: Option<bool>,
 }
 
 /// One namespace dictionary.
@@ -71,6 +79,9 @@ pub struct NamespaceList {
     pub truncated: bool,
     /// `/NS` values carried by more than one of the namespaces read, in order of first appearance.
     pub duplicates: Vec<DuplicateNamespace>,
+    /// Listed roles (at most [`MAX_ROLE_ENTRIES`] per namespace) whose pair names a namespace
+    /// dictionary that `/Namespaces` does not list (`role_namespace_listed == Some(false)`).
+    pub unlisted_role_namespaces: usize,
 }
 
 fn short(text: &str) -> String {
@@ -119,19 +130,28 @@ pub fn list_structure_namespaces(doc: &Document) -> NamespaceList {
         {
             role_count = map.len();
             for (key, value) in map.iter().take(MAX_ROLE_ENTRIES) {
-                let (role, role_namespace) = match &*doc.resolve(value) {
-                    Object::Name(n) => (Some(short(&String::from_utf8_lossy(n))), None),
+                let (role, role_namespace, role_namespace_object, has_target) = match &*doc.resolve(value) {
+                    Object::Name(n) => (Some(short(&String::from_utf8_lossy(n))), None, None, false),
                     Object::Array(pair) => {
                         let role = pair.first().map(|o| doc.resolve(o)).and_then(|o| match &*o {
                             Object::Name(n) => Some(short(&String::from_utf8_lossy(n))),
                             _ => None,
                         });
-                        let target = pair.get(1).map(|o| doc.resolve(o)).and_then(|o| o.as_dict().and_then(|d| ns_text(doc, d)));
-                        (role, target)
+                        let item = pair.get(1);
+                        let target_dict = item.map(|o| doc.resolve(o)).and_then(|o| o.as_dict().map(|d| ns_text(doc, d)));
+                        let object = item.and_then(|o| o.as_ref()).map(|r| r.num);
+                        (role, target_dict.clone().flatten(), object, target_dict.is_some())
                     }
-                    _ => (None, None),
+                    _ => (None, None, None, false),
                 };
-                roles.push(NamespaceRole { structure_type: short(&String::from_utf8_lossy(key)), role, role_namespace });
+                roles.push(NamespaceRole {
+                    structure_type: short(&String::from_utf8_lossy(key)),
+                    role,
+                    role_namespace,
+                    role_namespace_object,
+                    // Settled below, once every namespace is read.
+                    role_namespace_listed: has_target.then_some(false),
+                });
             }
         }
         out.namespaces.push(StructureNamespace {
@@ -143,6 +163,20 @@ pub fn list_structure_namespaces(doc: &Document) -> NamespaceList {
         });
     }
     out.duplicates = duplicate_namespaces(&out.namespaces);
+    let listed: HashSet<u32> = out.namespaces.iter().filter_map(|n| n.object).collect();
+    let truncated = out.truncated;
+    for role in out.namespaces.iter_mut().flat_map(|n| n.roles.iter_mut()) {
+        let Some(flag) = role.role_namespace_listed.as_mut() else { continue };
+        let found = role.role_namespace_object.is_some_and(|n| listed.contains(&n));
+        if found {
+            *flag = true;
+        } else if truncated && role.role_namespace_object.is_some() {
+            // It may be among the namespaces left out.
+            role.role_namespace_listed = None;
+        } else {
+            out.unlisted_role_namespaces = out.unlisted_role_namespaces.saturating_add(1);
+        }
+    }
     out
 }
 
