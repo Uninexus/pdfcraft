@@ -464,19 +464,52 @@ pub(crate) struct NameTreeSeen {
     nodes: HashSet<ObjRef>,
     names: HashSet<ObjRef>,
     kids: HashSet<ObjRef>,
+    /// Key bytes [`name_tree_entries`] has copied so far, against [`MAX_NAME_TREE_KEY_BYTES`].
+    key_bytes: usize,
 }
+
+/// The most key text [`name_tree_entries`] copies from one tree. A key that is one indirect
+/// string shared by every pair costs the file its size once but a copy per pair here (2,000
+/// pairs on a 1 MiB key: 12 MiB of file, 2 GiB of entries, and as much again when a caller
+/// writes the tree back). Real keys are file names, so this is far above any real tree.
+pub(crate) const MAX_NAME_TREE_KEY_BYTES: usize = 32 * 1024 * 1024;
 
 /// All (key, value) pairs of a name tree, in order, each node read once. A `/Names` or `/Kids`
 /// array that is an indirect object is read once too, by the first node to name it: a tree of N
 /// nodes sharing one array of M pairs would otherwise yield N x M entries from a file of N + M
-/// objects. Each pair's key is copied, so a caller that needs only some pairs should use
-/// [`walk_name_tree`] (a key shared by reference is copied once per pair here).
-pub(crate) fn name_tree_entries(src: &Document, node: &Object, depth: u8, seen: &mut NameTreeSeen, out: &mut Vec<(Vec<u8>, Object)>) {
+/// objects. Each pair's key is copied, and every copy is charged to an allowance of
+/// [`MAX_NAME_TREE_KEY_BYTES`]: a pair that would pass it, and every pair after it, is left out
+/// of `out` and the call returns an error. A caller that rewrites the tree must propagate it
+/// (writing back the partial list would drop the left-out entries); one that only lists may
+/// keep what was read. A caller that needs only some pairs should use [`walk_name_tree`].
+pub(crate) fn name_tree_entries(
+    src: &Document,
+    node: &Object,
+    depth: u8,
+    seen: &mut NameTreeSeen,
+    out: &mut Vec<(Vec<u8>, Object)>,
+) -> Result<(), OrganizeError> {
+    let mut over = false;
+    // The seen-set carries the running total, so it is shared with `walk_name_tree` by hand.
+    let mut used = seen.key_bytes;
     walk_name_tree(src, node, depth, seen, &mut |_, key, value| {
+        if over || key.len() > MAX_NAME_TREE_KEY_BYTES.saturating_sub(used) {
+            over = true;
+            return;
+        }
+        used = used.saturating_add(key.len());
         #[cfg(test)]
         crate::work(key.len());
         out.push((key.to_vec(), value.clone()));
     });
+    seen.key_bytes = used;
+    if over {
+        return Err(OrganizeError::Invalid(format!(
+            "a name tree's keys total more than {} MiB (a key shared by many pairs counts once per pair)",
+            MAX_NAME_TREE_KEY_BYTES / (1024 * 1024)
+        )));
+    }
+    Ok(())
 }
 
 /// [`name_tree_entries`] without the copying: `visit` gets each pair's key as written (an

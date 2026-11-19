@@ -11,7 +11,8 @@ use crate::import::{name_tree_entries, set_attachments, set_attachments_exact};
 
 /// The keys of the document-level attachments, in name-tree order.
 pub fn attachment_keys(doc: &Document) -> Vec<String> {
-    entries(doc).into_iter().map(|(k, _)| PdfString::literal(k).to_text()).collect()
+    // A listing: a tree past the key allowance shows what was read (changing it refuses).
+    entries(doc).0.into_iter().map(|(k, _)| PdfString::literal(k).to_text()).collect()
 }
 
 /// Attach `bytes` to the document under `name` (a file name; any folder part is dropped). The
@@ -42,7 +43,7 @@ pub(crate) fn add_attachment_spec(
     if name.is_empty() {
         return Err(OrganizeError::Invalid("the attachment needs a file name".into()));
     }
-    let mut all = entries(doc);
+    let mut all = entries_to_rewrite(doc)?;
     let taken: Vec<String> = all.iter().map(|(k, _)| PdfString::literal(k.clone()).to_text()).collect();
     let mut key = name.clone();
     let mut n = 2;
@@ -85,7 +86,7 @@ pub(crate) fn add_attachment_spec(
 /// Remove the document-level attachment whose name-tree key is `key`. The embedded stream is
 /// left for the writer's garbage collection, as with every other removal.
 pub fn delete_attachment(doc: &mut Document, key: &str) -> Result<(), OrganizeError> {
-    let mut all = entries(doc);
+    let mut all = entries_to_rewrite(doc)?;
     let before = all.len();
     all.retain(|(k, _)| PdfString::literal(k.clone()).to_text() != key);
     if all.len() == before {
@@ -97,7 +98,7 @@ pub fn delete_attachment(doc: &mut Document, key: &str) -> Result<(), OrganizeEr
 /// Remove the document-level attachment entries whose value is the file specification `spec`
 /// itself, whatever their keys read as. Returns whether any was removed.
 pub(crate) fn delete_attachment_by_ref(doc: &mut Document, spec: ObjRef) -> Result<bool, OrganizeError> {
-    let mut all = entries(doc);
+    let mut all = entries_to_rewrite(doc)?;
     let before = all.len();
     all.retain(|(_, v)| *v != Object::Ref(spec));
     if all.len() == before {
@@ -114,7 +115,7 @@ pub(crate) fn delete_attachment_by_ref(doc: &mut Document, spec: ObjRef) -> Resu
 /// Set or clear the description of a document-level attachment without replacing its file
 /// specification or embedded stream.
 pub fn set_attachment_description(doc: &mut Document, key: &str, description: Option<&str>) -> Result<(), OrganizeError> {
-    let mut all = entries(doc);
+    let mut all = entries_to_rewrite(doc)?;
     let Some((_, value)) = all.iter_mut().find(|(name, _)| PdfString::literal(name.clone()).to_text() == key) else {
         return Err(OrganizeError::Invalid(format!("there is no attachment named {key}")));
     };
@@ -143,18 +144,32 @@ pub fn set_attachment_description(doc: &mut Document, key: &str, description: Op
 }
 
 /// The `/EmbeddedFiles` entries (key, file specification), in tree order.
-pub(crate) fn entries(doc: &Document) -> Vec<(Vec<u8>, Object)> {
+/// A tree past the key allowance (see `name_tree_entries`) gives what was read and `false`.
+pub(crate) fn entries(doc: &Document) -> (Vec<(Vec<u8>, Object)>, bool) {
     let Some(tree) = doc
         .root()
         .and_then(|r| doc.get(r).as_dict().cloned())
         .and_then(|c| c.get(b"Names").map(|n| doc.resolve(n)))
         .and_then(|n| n.as_dict().and_then(|d| d.get(b"EmbeddedFiles").cloned()))
     else {
-        return Vec::new();
+        return (Vec::new(), true);
     };
     let mut out = Vec::new();
-    name_tree_entries(doc, &tree, 0, &mut Default::default(), &mut out);
-    out
+    let complete = name_tree_entries(doc, &tree, 0, &mut Default::default(), &mut out).is_ok();
+    (out, complete)
+}
+
+/// Every entry, for a change that writes the tree back flat: an error, with the document
+/// untouched, when the tree is past the key allowance, since writing back what was read would
+/// silently delete the rest.
+pub(crate) fn entries_to_rewrite(doc: &Document) -> Result<Vec<(Vec<u8>, Object)>, OrganizeError> {
+    match entries(doc) {
+        (all, true) => Ok(all),
+        _ => Err(OrganizeError::Invalid(format!(
+            "the attachments (EmbeddedFiles) name tree's keys total more than {} MiB (a key shared by many pairs counts once per pair), so the attachments are not edited; nothing was changed",
+            crate::import::MAX_NAME_TREE_KEY_BYTES / (1024 * 1024)
+        ))),
+    }
 }
 
 /// Drop `/EmbeddedFiles` from the catalog's `/Names` (and `/Names` itself when nothing is left).

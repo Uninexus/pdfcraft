@@ -204,7 +204,7 @@ impl Combiner {
         // Attachments belong to the whole file: they come along with all of its pages, not with a
         // selection of them.
         if pages.iter().collect::<HashSet<_>>().len() == n {
-            collect_attachments(&mut self.out, src, &mut self.attachments)?;
+            collect_attachments(&mut self.out, src, title, &mut self.attachments)?;
         }
         let declared = crate::pdfx::PrintStandard::of(src);
         match self.standard.as_ref().map(|first| first.declared.same_as(&declared)) {
@@ -302,7 +302,7 @@ pub fn combine_grouped_with(runs: &[Run<'_>], conflicts: FieldConflicts) -> Resu
         }
         // Attachments come along with all of a file's pages, not with a selection of them.
         if file.pages.iter().collect::<HashSet<_>>().len() == crate::page_count(file.src)? {
-            collect_attachments(&mut out, file.src, &mut attachments)?;
+            collect_attachments(&mut out, file.src, &file.title, &mut attachments)?;
         }
         let declared = crate::pdfx::PrintStandard::of(file.src);
         match &standard {

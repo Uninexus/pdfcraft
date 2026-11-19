@@ -241,6 +241,11 @@ pub fn remove_associated_file(doc: &mut Document, index: usize, keep_attachment:
     }
     let shared = associated_file_is_shared(doc, index)?;
     let removed = list.remove(index - 1);
+    if matches!(removed, Object::Ref(_)) && !keep_attachment && !shared {
+        // The attachment is deleted below; find out now whether its tree can be rewritten, so a
+        // refusal leaves /AF as it was.
+        crate::attachments::entries_to_rewrite(doc)?;
+    }
     write_catalog_af(doc, root, list)?;
     match removed {
         Object::Ref(spec) if !keep_attachment && !shared => delete_attachment_by_ref(doc, spec),

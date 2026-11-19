@@ -252,7 +252,7 @@ fn showing_and_hiding_keep_every_name_of_a_long_tree() {
     bodies.extend(form_bodies().iter().skip(1).map(|b| b.to_string()));
     bodies.push(pages_tree);
     let mut doc = build(&bodies.iter().map(String::as_str).collect::<Vec<_>>());
-    let count = |doc: &Document, tree: &[u8]| all_entries(doc, tree).len();
+    let count = |doc: &Document, tree: &[u8]| all_entries(doc, tree).unwrap().len();
     assert_eq!(count(&doc, b"Pages"), MAX_NAMES + 10);
     set_template_hidden(&mut doc, "More", false).unwrap();
     assert_eq!((count(&doc, b"Pages"), count(&doc, b"Templates")), (MAX_NAMES + 11, 0));
