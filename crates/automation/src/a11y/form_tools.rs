@@ -208,8 +208,8 @@ impl Automation {
             })
             .collect();
         Ok(
-            json!({ "count": scripts.len(), "scripts": scripts, "capped": inv.capped, "truncated_count": inv.truncated, "max_scripts": pdfcraft_engine::MAX_JAVASCRIPTS,
-            "max_script_bytes": pdfcraft_engine::MAX_JAVASCRIPT_LEN, "max_total_code_bytes": pdfcraft_engine::MAX_JAVASCRIPT_TOTAL }),
+            json!({ "count": scripts.len(), "scripts": scripts, "capped": inv.capped, "truncated_count": inv.truncated, "names_left_out": inv.names_left_out, "max_scripts": pdfcraft_engine::MAX_JAVASCRIPTS,
+            "max_script_bytes": pdfcraft_engine::MAX_JAVASCRIPT_LEN, "max_total_code_bytes": pdfcraft_engine::MAX_JAVASCRIPT_TOTAL, "max_label_bytes": pdfcraft_engine::MAX_JAVASCRIPT_LABELS }),
         )
     }
 

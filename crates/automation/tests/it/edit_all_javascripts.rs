@@ -218,3 +218,27 @@ fn the_list_is_capped() {
     let r = tool(&mut a, "doc_javascripts", json!({ "doc": doc }));
     assert_eq!((r["count"].clone(), r["capped"].clone()), (json!(5000), json!(true)));
 }
+
+#[test]
+fn names_past_the_reading_allowance_are_left_out_and_counted() {
+    // 20 name-tree keys that are one indirect 1 MiB string: 16 MiB of names are read.
+    let pairs: String = (0..20).map(|i| format!("4 0 R << /S /JavaScript /JS (s{i}\\(\\);) >> ")).collect();
+    let (mut a, doc) = open(
+        "labels",
+        pdf_of(&[
+            "<< /Type /Catalog /Pages 2 0 R /Names << /JavaScript 3 0 R >> >>".into(),
+            "<< /Type /Pages /Kids [5 0 R] /Count 1 >>".into(),
+            format!("<< /Names [{pairs}] >>"),
+            format!("({})", "n".repeat(1 << 20)),
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] >>".into(),
+        ]),
+    );
+    let r = tool(&mut a, "doc_javascripts", json!({ "doc": doc }));
+    let list = r["scripts"].as_array().unwrap();
+    assert_eq!((r["count"].clone(), r["names_left_out"].clone(), r["max_label_bytes"].clone()), (json!(20), json!(4), json!(16 << 20)));
+    assert_eq!(list.iter().filter(|s| s["name"].is_null()).count(), 4);
+    assert!(list.iter().all(|s| s["code"].is_string()));
+    // An ordinary document reports none.
+    let (mut a, doc) = open("ordinary", form());
+    assert_eq!(tool(&mut a, "doc_javascripts", json!({ "doc": doc }))["names_left_out"], 0);
+}
