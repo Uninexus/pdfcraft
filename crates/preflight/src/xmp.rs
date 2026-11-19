@@ -77,10 +77,17 @@ pub(crate) fn parse(xmp: &str) -> Option<craft_xml::El> {
     if !xml_limits_ok(xmp) {
         return None;
     }
-    let options = craft_xml::Options { doctype: craft_xml::Doctype::Reject, ..craft_xml::Options::default() }
-        .strict()
-        .with_limits(craft_xml::Limits { max_depth: 1024, max_nodes: 100_000, max_attrs_total: 100_000, ..craft_xml::Limits::DEFAULT });
-    options.parse(xmp.as_bytes()).ok()
+    options().parse(xmp.as_bytes()).ok()
+}
+
+/// The XML reader settings every XMP read uses: strict, no DOCTYPE, bounded depth and size.
+fn options() -> craft_xml::Options<'static> {
+    craft_xml::Options { doctype: craft_xml::Doctype::Reject, ..craft_xml::Options::default() }.strict().with_limits(craft_xml::Limits {
+        max_depth: 1024,
+        max_nodes: 100_000,
+        max_attrs_total: 100_000,
+        ..craft_xml::Limits::DEFAULT
+    })
 }
 
 /// [`identifier`] through an XML parser; `Err` when the packet can't be parsed within the limits.
@@ -254,46 +261,190 @@ fn written_name(element: &str) -> Option<&str> {
 /// without one, one that is not well-formed or within the parser's limits, and one that already
 /// says `iso`, give `None`.
 pub fn with_modify_date(xmp: &str, iso: &str) -> Option<String> {
-    let doc = parse(xmp)?;
+    // A byte order mark is not part of the XML text: read without it and give it back.
+    let (bom, xmp) = match xmp.strip_prefix('\u{feff}') {
+        Some(rest) => ("\u{feff}", rest),
+        None => ("", xmp),
+    };
+    // Well-formed and within the parser's limits, or no edit at all; the event pass below then
+    // only needs to find byte ranges.
+    parse(xmp)?;
+    let mut events = options().events(xmp.as_bytes());
     // (byte range replaced, its replacement)
     let mut edits: Vec<(std::ops::Range<usize>, String)> = Vec::new();
-    for node in doc.descendants().filter(roxmltree::Node::is_element) {
-        if node.has_tag_name((XMP_NS, "ModifyDate")) {
-            let name = written_name(xmp.get(node.range())?)?;
-            // Keep the start tag's own attributes (such as namespace declarations) and write the value fresh.
-            let whole = xmp.get(node.range())?;
-            let start_end = whole.find('>')? + 1;
-            let start = whole.get(..start_end)?;
-            let open = start.strip_suffix("/>").map_or_else(|| start.to_owned(), |t| format!("{t}>"));
-            edits.push((node.range(), format!("{open}{iso}</{name}>")));
-        }
-        for at in node.attributes().filter(|a| a.namespace() == Some(XMP_NS) && a.name() == "ModifyDate") {
-            edits.push((at.range_value(), iso.to_owned()));
+    // Namespace bindings in scope; each open element remembers how many it added and where it began.
+    let mut scope: Vec<(String, String)> = vec![("xml".into(), "http://www.w3.org/XML/1998/namespace".into())];
+    struct Open {
+        added: usize,
+        start: std::ops::Range<usize>,
+        modify: bool,
+        /// Value ranges of ModifyDate attributes of a ModifyDate element, rewritten with its start tag.
+        own_attrs: Vec<std::ops::Range<usize>>,
+        description: Option<Option<String>>,
+    }
+    let mut open: Vec<Open> = Vec::new();
+    // The first rdf:Description: its whole range and the prefix bound to the XMP namespace there.
+    let mut first_description: Option<(std::ops::Range<usize>, Option<String>)> = None;
+    let mut seen_description = false;
+    let namespace_of =
+        |scope: &[(String, String)], prefix: &str| scope.iter().rfind(|(p, _)| p == prefix).map(|(_, u)| u.clone()).filter(|u| !u.is_empty());
+    while let Some(event) = events.next().ok()? {
+        match event {
+            craft_xml::Event::Start { name, attrs } => {
+                let span = events.span();
+                let before = scope.len();
+                for (k, v) in &attrs {
+                    if k == "xmlns" {
+                        scope.push((String::new(), v.clone()));
+                    } else if let Some(p) = k.strip_prefix("xmlns:") {
+                        scope.push((p.to_owned(), v.clone()));
+                    }
+                }
+                let (prefix, local) = name.split_once(':').unwrap_or(("", name.as_str()));
+                let ns = namespace_of(&scope, prefix);
+                // A prefix nothing declares: the packet is not namespace-well-formed, leave it alone.
+                if !prefix.is_empty() && prefix != "xml" && ns.is_none() {
+                    return None;
+                }
+                let tag = xmp.get(span.clone())?;
+                // What is inside a ModifyDate element is replaced with it; nothing there is edited on its own.
+                let inside_modify = open.iter().any(|o| o.modify);
+                let modify = !inside_modify && local == "ModifyDate" && ns.as_deref() == Some(XMP_NS);
+                let mut own_attrs = Vec::new();
+                // Attributes in the XMP namespace named ModifyDate: replace the value in place.
+                for (aname, value_range) in tag_attributes(tag) {
+                    let Some((ap, alocal)) = aname.split_once(':') else { continue };
+                    if ap == "xmlns" || ap == "xml" {
+                        continue;
+                    }
+                    let ans = namespace_of(&scope, ap);
+                    ans.as_ref()?;
+                    if alocal == "ModifyDate" && ans.as_deref() == Some(XMP_NS) && !inside_modify {
+                        let range = span.start + value_range.start..span.start + value_range.end;
+                        if modify {
+                            own_attrs.push(range);
+                        } else {
+                            edits.push((range, iso.to_owned()));
+                        }
+                    }
+                }
+                let description = if !inside_modify && local == "Description" && ns.as_deref() == Some(RDF_NS) && !seen_description {
+                    seen_description = true;
+                    Some(namespace_prefix(&scope, XMP_NS))
+                } else {
+                    None
+                };
+                // An empty element's end event follows at once with the same span.
+                open.push(Open { added: scope.len() - before, start: span, modify, own_attrs, description });
+            }
+            craft_xml::Event::End { .. } => {
+                let end = events.span();
+                let Some(el) = open.pop() else { continue };
+                let whole = el.start.start..end.end;
+                if el.modify {
+                    let text = xmp.get(whole.clone())?;
+                    let name = written_name(text)?;
+                    // Keep the start tag's own attributes (such as namespace declarations) and write the value fresh.
+                    let mut start = xmp.get(el.start.clone())?.to_owned();
+                    let mut own = el.own_attrs.clone();
+                    own.sort_by_key(|r| std::cmp::Reverse(r.start));
+                    for r in own {
+                        let rel = r.start.checked_sub(el.start.start)?..r.end.checked_sub(el.start.start)?;
+                        start.get(rel.clone())?;
+                        start.replace_range(rel, iso);
+                    }
+                    let open_tag = start.strip_suffix("/>").map_or_else(|| start.clone(), |t| format!("{t}>"));
+                    edits.push((whole.clone(), format!("{open_tag}{iso}</{name}>")));
+                }
+                if let Some(prefix) = el.description {
+                    first_description = Some((whole, prefix));
+                }
+                let keep = scope.len().saturating_sub(el.added);
+                scope.truncate(keep);
+            }
+            _ => {}
         }
     }
     if edits.is_empty() {
         identifier(xmp, PDFA_ID, "part")?;
-        let desc = doc.descendants().find(|n| n.has_tag_name((RDF_NS, "Description")))?;
-        let whole = xmp.get(desc.range())?;
+        let (range, prefix) = first_description?;
+        let whole = xmp.get(range.clone())?;
         let written = written_name(whole)?;
         // A prefix already bound to the XMP namespace here; otherwise the element declares its own.
-        let child = match desc.lookup_prefix(XMP_NS) {
+        let child = match prefix {
             Some(p) => format!("<{p}:ModifyDate>{iso}</{p}:ModifyDate>"),
             None => format!("<xmp:ModifyDate xmlns:xmp=\"{XMP_NS}\">{iso}</xmp:ModifyDate>"),
         };
         if let Some(head) = whole.strip_suffix("/>") {
-            edits.push((desc.range(), format!("{head}>\n   {child}\n  </{written}>")));
+            edits.push((range, format!("{head}>\n   {child}\n  </{written}>")));
         } else {
-            let close = desc.range().end.checked_sub(whole.len() - whole.rfind("</")?)?;
+            let close = range.end.checked_sub(whole.len() - whole.rfind("</")?)?;
             edits.push((close..close, format!("   {child}\n  ")));
         }
     }
     edits.sort_by_key(|(r, _)| std::cmp::Reverse(r.start));
+    // Applied last-start-first: each range must lie before the one applied before it, and on characters.
     let mut out = xmp.to_owned();
+    let mut limit = out.len();
     for (range, with) in edits {
-        out.replace_range(range, &with);
+        if range.end > limit || !out.is_char_boundary(range.start) || !out.is_char_boundary(range.end) || range.start > range.end {
+            return None;
+        }
+        out.replace_range(range.clone(), &with);
+        limit = range.start;
     }
-    (out != xmp).then_some(out)
+    (out != xmp).then(|| format!("{bom}{out}"))
+}
+
+/// The prefix bound to `uri` in `scope` (innermost wins), if it is a non-empty one.
+fn namespace_prefix(scope: &[(String, String)], uri: &str) -> Option<String> {
+    let (p, u) = scope.iter().rfind(|(_, u)| u == uri)?;
+    // A later binding of the same prefix to another URI hides this one.
+    let current = scope.iter().rfind(|(q, _)| q == p)?;
+    (current.1 == *u && !p.is_empty()).then(|| p.clone())
+}
+
+/// The attributes of a start tag as written: each name with the byte range of its value (inside
+/// the quotes) in `tag`. Stops at the first thing that is not an attribute.
+fn tag_attributes(tag: &str) -> Vec<(&str, std::ops::Range<usize>)> {
+    let bytes = tag.as_bytes();
+    let mut out = Vec::new();
+    let mut i = 1;
+    let skip_ws = |mut i: usize| {
+        while bytes.get(i).is_some_and(u8::is_ascii_whitespace) {
+            i += 1;
+        }
+        i
+    };
+    // The element name.
+    while bytes.get(i).is_some_and(|b| !b.is_ascii_whitespace() && *b != b'>' && *b != b'/') {
+        i += 1;
+    }
+    loop {
+        i = skip_ws(i);
+        let name_start = i;
+        while bytes.get(i).is_some_and(|b| !b.is_ascii_whitespace() && !matches!(*b, b'=' | b'>' | b'/')) {
+            i += 1;
+        }
+        if i == name_start {
+            break;
+        }
+        let name_end = i;
+        i = skip_ws(i);
+        if bytes.get(i) != Some(&b'=') {
+            break;
+        }
+        i = skip_ws(i + 1);
+        let Some(&quote) = bytes.get(i).filter(|q| matches!(**q, b'"' | b'\'')) else { break };
+        let value_start = i + 1;
+        let Some(len) = bytes.get(value_start..).and_then(|rest| rest.iter().position(|b| *b == quote)) else { break };
+        let value_end = value_start + len;
+        if let Some(name) = tag.get(name_start..name_end) {
+            out.push((name, value_start..value_end));
+        }
+        i = value_end + 1;
+    }
+    out
 }
 
 fn info(doc: &Document, key: &str) -> Option<String> {
@@ -371,12 +522,21 @@ mod tests {
     }
 
     fn modified(xmp: &str) -> Vec<String> {
-        let d = parse(xmp).expect("well-formed");
-        let mut found: Vec<String> =
-            d.descendants().filter(|n| n.has_tag_name((XMP_NS, "ModifyDate"))).map(|n| n.text().unwrap_or("").to_owned()).collect();
-        for n in d.descendants() {
-            found.extend(n.attributes().filter(|a| a.namespace() == Some(XMP_NS) && a.name() == "ModifyDate").map(|a| a.value().to_owned()));
+        fn walk(el: &craft_xml::El, parent: &NsScope<'_>, found: &mut Vec<String>) {
+            let scope = parent.child(el);
+            if scope.is(el, XMP_NS, "ModifyDate") {
+                found.push(el.text().into_owned());
+            }
+            if let Some(v) = scope.attr(el, XMP_NS, "ModifyDate") {
+                found.push(v.to_owned());
+            }
+            for child in el.elements() {
+                walk(child, &scope, found);
+            }
         }
+        let d = parse(xmp).expect("well-formed");
+        let mut found = Vec::new();
+        walk(&d, &NsScope::root(), &mut found);
         found
     }
 
@@ -396,6 +556,85 @@ mod tests {
         }
         let current = doc(&format!("<rdf:Description xmlns:xmp=\"{XMP_NS}\"><xmp:ModifyDate>{ISO}</xmp:ModifyDate></rdf:Description>"));
         assert_eq!(with_modify_date(&current, ISO), None, "already current");
+    }
+
+    /// A packet with `body` as the one description, its namespaces declared on the root.
+    fn desc(body: &str) -> String {
+        doc(&format!("<rdf:Description xmlns:xmp=\"{XMP_NS}\">{body}</rdf:Description>"))
+    }
+
+    #[test]
+    fn overlapping_modify_date_forms_do_not_panic() {
+        // An element that also carries the attribute, nested elements, and an attribute inside an
+        // element each used to give overlapping edits, applied out of range.
+        let long = "2020-01-01T00:00:00Z and a longer value than the date";
+        for body in [
+            format!("<xmp:ModifyDate xmp:ModifyDate=\"{long}\"/>"),
+            format!("<xmp:ModifyDate xmp:ModifyDate=\"{long}\">{long}</xmp:ModifyDate>"),
+            format!("<xmp:ModifyDate><xmp:ModifyDate>{long}</xmp:ModifyDate></xmp:ModifyDate>"),
+            format!("<xmp:ModifyDate><x xmp:ModifyDate=\"{long}\"/>text</xmp:ModifyDate>"),
+        ] {
+            let packet = desc(&body);
+            let out = with_modify_date(&packet, ISO).unwrap_or_else(|| panic!("changed: {body}"));
+            assert!(out.contains(ISO), "{out}");
+            assert!(!out.contains(long), "{out}");
+            assert!(parse(&out).is_some(), "still well-formed: {out}");
+        }
+        // The bare form from the review: a long attribute on a self-closed element.
+        let packet = format!("<xmp:ModifyDate xmlns:xmp=\"{XMP_NS}\" xmp:ModifyDate=\"{}\"/>", "x".repeat(40));
+        let out = with_modify_date(&packet, ISO).expect("changed");
+        assert!(parse(&out).is_some() && !out.contains("xxxx"), "{out}");
+    }
+
+    #[test]
+    fn start_tag_values_with_markup_characters_are_kept() {
+        for tricky in ["a>b", "a=b", "it's", "say \"hi\" >"] {
+            let quote = if tricky.contains('"') { '\'' } else { '"' };
+            let body = format!("<xmp:ModifyDate note={quote}{tricky}{quote}>2020</xmp:ModifyDate>");
+            let out = with_modify_date(&desc(&body), ISO).expect("changed");
+            assert!(out.contains(&format!("note={quote}{tricky}{quote}>{ISO}</xmp:ModifyDate>")), "{out}");
+            // The same text in the attribute being replaced and in a neighbour.
+            let body = format!("<xmp:ModifyDate note={quote}{tricky}{quote}/>");
+            let out = with_modify_date(&desc(&body), ISO).expect("changed");
+            assert!(out.contains(&format!("note={quote}{tricky}{quote}>{ISO}</xmp:ModifyDate>")), "{out}");
+            let body = format!("<rdf:Description xmp:ModifyDate=\"2020\" note={quote}{tricky}{quote}/>");
+            let out = with_modify_date(&desc(&body), ISO).expect("changed");
+            assert_eq!(modified(&out), [ISO], "{out}");
+            assert!(out.contains(&format!("note={quote}{tricky}{quote}")), "{out}");
+        }
+    }
+
+    #[test]
+    fn default_namespace_and_rebound_prefixes_are_read_by_namespace() {
+        let packet = format!("{HEAD}<rdf:Description><ModifyDate xmlns=\"{XMP_NS}\">2020</ModifyDate></rdf:Description>{TAIL}");
+        let out = with_modify_date(&packet, ISO).expect("changed");
+        assert!(out.contains(&format!("<ModifyDate xmlns=\"{XMP_NS}\">{ISO}</ModifyDate>")), "{out}");
+        // A child that rebinds the prefix to another namespace: its ModifyDate is not the XMP one.
+        let body = "<xmp:ModifyDate>2020</xmp:ModifyDate><x xmlns:xmp=\"urn:other\"><xmp:ModifyDate>keep</xmp:ModifyDate></x>";
+        let out = with_modify_date(&desc(body), ISO).expect("changed");
+        assert!(out.contains("<xmp:ModifyDate>keep</xmp:ModifyDate>"), "{out}");
+        assert_eq!(modified(&out), [ISO], "{out}");
+    }
+
+    #[test]
+    fn multibyte_cdata_and_entity_content_is_replaced_cleanly() {
+        for inner in ["2020-01-01", "\u{65e5}\u{672c}\u{8a9e} \u{1f600}", "<![CDATA[a > b]]>", "&amp;&#x41;&lt;"] {
+            let body = format!("\u{3042}\u{3044}<!-- \u{1f600} --><xmp:ModifyDate note=\"\u{3046}\">{inner}</xmp:ModifyDate>\u{3048}");
+            let out = with_modify_date(&desc(&body), ISO).expect("changed");
+            assert_eq!(modified(&out), [ISO], "{out}");
+            assert!(out.contains("\u{3042}\u{3044}<!--") && out.contains("\u{3048}</rdf:Description>"), "{out}");
+        }
+        let body = "<xmp:ModifyDate>\u{1f600}</xmp:ModifyDate>";
+        let out = with_modify_date(&format!("\u{feff}{}", desc(body)), ISO).expect("bom packet");
+        assert!(out.starts_with('\u{feff}') && modified(out.trim_start_matches('\u{feff}')) == [ISO], "{out}");
+    }
+
+    #[test]
+    fn an_undeclared_prefix_is_left_untouched() {
+        let packet = doc("<rdf:Description><ns:ModifyDate>2020</ns:ModifyDate></rdf:Description>");
+        assert_eq!(with_modify_date(&packet, ISO), None);
+        let packet = doc(&format!("<rdf:Description xmlns:xmp=\"{XMP_NS}\" nope:ModifyDate=\"1\" xmp:ModifyDate=\"2\"/>"));
+        assert_eq!(with_modify_date(&packet, ISO), None);
     }
 
     #[test]

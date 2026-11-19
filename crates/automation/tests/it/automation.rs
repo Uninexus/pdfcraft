@@ -1361,14 +1361,7 @@ fn combine_takes_images_and_text_files() {
 #[test]
 fn inserting_pictures_makes_one_undoable_step_and_refuses_other_files() {
     let dir = workdir("insert-pictures");
-    let rgb = |width: u32| {
-        let mut png = Vec::new();
-        let mut encoder = png::Encoder::new(&mut png, width, 2);
-        encoder.set_color(png::ColorType::Rgb);
-        encoder.set_depth(png::BitDepth::Eight);
-        encoder.write_header().unwrap().write_image_data(&vec![90; width as usize * 6]).unwrap();
-        png
-    };
+    let rgb = |width: u32| encode_png(width, 2, craft_image_codecs::ChannelLayout::Rgb, vec![90; width as usize * 6]);
     std::fs::write(dir.join("one.png"), rgb(4)).unwrap();
     std::fs::write(dir.join("two.png"), rgb(6)).unwrap();
     std::fs::write(dir.join("broken.png"), b"\x89PNG\r\n\x1a\nbroken").unwrap();

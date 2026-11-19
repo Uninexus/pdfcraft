@@ -507,12 +507,17 @@ pub(crate) fn body(ui: &mut egui::Ui, app: &mut PdfCraftApp) -> bool {
         )
         .labelled_by(label.id);
         let shown = d.kind.map_or_else(|| tl!("All kinds").to_string(), kind_label);
-        craft_ui::ComboBox::from_id_salt("javascripts-kind").selected_text(shown).show_ui(ui, |ui| {
-            ui.selectable_value(&mut d.kind, None, tl!("All kinds"));
-            for k in JavaScriptKind::ALL {
-                ui.selectable_value(&mut d.kind, Some(k), kind_label(k));
-            }
-        });
+        let kind_label_text = ui.label(tl!("Kind:"));
+        craft_ui::ComboBox::from_id_salt("javascripts-kind")
+            .selected_text(shown)
+            .show_ui(ui, |ui| {
+                ui.selectable_value(&mut d.kind, None, tl!("All kinds"));
+                for k in JavaScriptKind::ALL {
+                    ui.selectable_value(&mut d.kind, Some(k), kind_label(k));
+                }
+            })
+            .response
+            .labelled_by(kind_label_text.id);
     });
     d.refresh_visible();
     let summary = if d.shown() == d.total() {

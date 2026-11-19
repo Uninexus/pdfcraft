@@ -561,7 +561,7 @@ mod tests {
             d.set(b"TrimBox".to_vec(), Object::Array(vec![1.into(), 1.into(), 611.into(), 791.into()]));
         })
         .unwrap();
-        let page = &inspect(&doc).pages[0];
+        let page = &inspect(&doc, TAC_LIMIT_PERCENT).pages[0];
         // 612 x 792 user units of 2 points each.
         assert!((page.media_mm[0] - 612.0 * 2.0 * 25.4 / 72.0).abs() < 1e-9, "{:?}", page.media_mm);
         assert!((page.bleed_margin_mm[0] - 2.0 * 25.4 / 72.0).abs() < 1e-9, "{:?}", page.bleed_margin_mm);
