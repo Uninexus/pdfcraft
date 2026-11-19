@@ -2866,6 +2866,33 @@ fn page_box_report_covers_inheritance_reversed_corners_bad_entries_and_rotation(
 }
 
 #[test]
+fn a_box_is_its_first_four_entries_all_numbers_as_the_viewer_reads_it() {
+    // A hostile file shares one huge array between every page's boxes. The viewer reads the first
+    // four entries and stops; a non-number among them, or fewer than four entries, is no box.
+    let long = format!("[0 0 300 400 {}]", "7 ".repeat(100_000));
+    let d = open(build(
+        &[
+            "<< /Type /Catalog /Pages 2 0 R >>".into(),
+            "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 /MediaBox 5 0 R >>".into(),
+            // A fifth number is not read; a non-number first; a non-number third.
+            "<< /Type /Page /Parent 2 0 R /CropBox [10 20 290 380 1] /TrimBox [(a) 0 30 40] /BleedBox [0 0 /X 300 400] >>".into(),
+            // Fewer than four entries; a number after a non-number past position four.
+            "<< /Type /Page /Parent 2 0 R /ArtBox [1 2 3] /TrimBox [0 0 30 40 (a)] >>".into(),
+            long,
+        ],
+        "/Root 1 0 R",
+    ));
+    let r = page_box_report(&d).unwrap();
+    assert_eq!(r[0].boxes[0], [0.0, 0.0, 300.0, 400.0], "the shared media box is its first four numbers");
+    assert_eq!(r[0].explicit, [true, true, false, false, false]);
+    assert_eq!(r[0].boxes[1], [10.0, 20.0, 290.0, 380.0], "a fifth number is not read");
+    assert_eq!(r[0].ignored, [false, false, true, true, false], "a non-number among the first four is no box");
+    assert_eq!((r[1].explicit[4], r[1].ignored[4]), (false, true), "fewer than four entries is no box");
+    assert_eq!((r[1].explicit[3], r[1].ignored[3]), (true, false), "entries after the fourth are irrelevant");
+    assert_eq!(page_boxes(&d).unwrap()[0][3], [10.0, 20.0, 290.0, 380.0], "an ignored trim box defaults to the crop box");
+}
+
+#[test]
 fn page_boxes_remove_uninherited_crop_clip_disjoint_boxes_and_reject_overflow() {
     let mut doc = open(fixture());
     set_page_box(&mut doc, &[0], PageBox::Crop, BoxSpec::Margins([10.0, 20.0, 30.0, 40.0])).unwrap();

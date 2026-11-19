@@ -741,6 +741,14 @@ fn implementation_limits_are_reported() {
     assert_eq!(limits(&doc("", "", "[0 0 2 200]", "")), ["Page 1 has a boundary smaller than 3 or larger than 14400 units"]);
     assert_eq!(limits(&doc("", "", ok, "/CropBox [0 0 14401 200]")), ["Page 1 has a boundary smaller than 3 or larger than 14400 units"]);
     assert!(limits(&doc("", "", "[0 0 2 2]", "/MediaBox [0 0 3 14400]")).is_empty(), "the page's own box overrides its parent's");
+    // A box is its first four entries, as the viewer reads it: a longer array is judged by them,
+    // and one with a non-number among them is no box.
+    let flagged = ["Page 1 has a boundary smaller than 3 or larger than 14400 units"];
+    assert_eq!(limits(&doc("", "", "[0 0 1 1 5]", "")), flagged, "a fifth entry used to hide a box that is too small");
+    let long = format!("[0 0 20000 200 {}]", "7 ".repeat(100_000));
+    assert_eq!(limits(&doc("", "", &long, "")), flagged, "a long array is judged by its first four entries");
+    assert!(limits(&doc("", "", "[0 0 200 200 99999]", "")).is_empty(), "later entries are not read");
+    assert!(limits(&doc("", "", "[(a) 0 1 1]", "")).is_empty() && limits(&doc("", "", "[0 0 /X 1 1]", "")).is_empty());
 }
 
 /// 6.1.13 also reads the trailer, a page's `/Contents` streams joined (operands may end one

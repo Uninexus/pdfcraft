@@ -165,11 +165,17 @@ fn contents(doc: &Document, page: &Dict) -> Vec<ObjRef> {
 }
 
 /// Whether one of a page's boundaries (with the media and crop boxes it inherits) is narrower or
-/// lower than 3 units, or wider or higher than 14400.
+/// lower than 3 units, or wider or higher than 14400. A box is read as the viewer reads
+/// one: its first four entries, which must all be numbers; later entries are not read, so one
+/// array shared by many pages costs a constant per page.
 pub(crate) fn page_box_out_of_range(doc: &Document, page: &Dict) -> bool {
     BOXES.iter().filter_map(|k| page.get(k)).any(|b| {
         let b = doc.resolve(b);
-        let v: Vec<f64> = b.as_array().map(|a| a.iter().filter_map(|x| doc.resolve(x).as_f64()).collect()).unwrap_or_default();
+        let v: Vec<f64> = b
+            .as_array()
+            .map(|a| a.iter().take(4).map(|x| doc.resolve(x).as_f64()).collect::<Option<Vec<f64>>>())
+            .unwrap_or_default()
+            .unwrap_or_default();
         let [x0, y0, x1, y1] = v.as_slice() else { return false };
         let (w, h) = ((x1 - x0).abs(), (y1 - y0).abs());
         // A size past `f64` (corners near ±1e308) is as much too large as any other.
