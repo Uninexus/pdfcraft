@@ -567,7 +567,8 @@ fn xfdf_fields(doc: &Document, out: &mut String) {
     }
     let mut root = Node::default();
     for f in pdfcraft_forms::fields(doc) {
-        if matches!(f.kind, FieldKind::PushButton | FieldKind::Signature) {
+        // A field whose value was not read is left out rather than written as empty or Off.
+        if matches!(f.kind, FieldKind::PushButton | FieldKind::Signature) || f.value_omitted {
             continue;
         }
         let mut node = &mut root;

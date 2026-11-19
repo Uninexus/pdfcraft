@@ -342,6 +342,9 @@ impl Automation {
                 if !f.actions.unsupported.is_empty() {
                     o.insert("unsupported_scripts".into(), json!(f.actions.unsupported));
                 }
+                if f.value_omitted {
+                    o.insert("value_omitted".into(), json!(true));
+                }
                 if matches!(f.kind, FormFieldKind::CheckBox | FormFieldKind::Radio) {
                     o.insert("export_values".into(), json!((0..f.widgets.len()).map(|i| f.export_of(i)).collect::<Vec<_>>()));
                 }
@@ -936,7 +939,15 @@ impl Automation {
         }
         let bytes = self.session.export_data(id, format, comments, fields).map_err(failed)?;
         crate::write_atomic(&path, &bytes)?;
-        Ok(json!({ "path": path.to_string_lossy(), "bytes": bytes.len() }))
+        // Fields whose value was not read are left out of form data, not written empty. An XFA
+        // export (.xml or .xdp of an XFA form) writes the datasets, which hold their own values.
+        let xfa = self.session.get(id).is_some_and(|d| d.info.xfa.is_some());
+        let left_out = if fields && !(xfa && matches!(format, pdfcraft_engine::DataFormat::Xml | pdfcraft_engine::DataFormat::Xdp)) {
+            self.session.export_data_left_out(id)
+        } else {
+            Vec::new()
+        };
+        Ok(json!({ "path": path.to_string_lossy(), "bytes": bytes.len(), "left_out": left_out }))
     }
 
     pub(crate) fn doc_import_data(&mut self, a: &Args) -> Result<Value> {

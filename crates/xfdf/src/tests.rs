@@ -2805,3 +2805,49 @@ fn shared_xfdf_fields_match_retained_reader() -> Result<(), Box<dyn std::error::
     );
     Ok(())
 }
+
+/// A push button `a` and a text field `b` sharing one array of two million strings as `/V` (only
+/// the first fits the form's allowance of value text, and a button is not exported), and `ok` with
+/// a value of its own.
+fn unread_value_form() -> Document {
+    let entries = "(a)".repeat(2_000_000);
+    let objs: Vec<String> = vec![
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm 4 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 200 300] >>".into(),
+        "<< /Type /Page /Parent 2 0 R /Annots [6 0 R 7 0 R 8 0 R] >>".into(),
+        "<< /Fields [6 0 R 7 0 R 8 0 R] /DA (/Helv 0 Tf 0 g) >>".into(),
+        format!("[{entries}]"),
+        "<< /Type /Annot /Subtype /Widget /FT /Btn /Ff 65536 /T (a) /V 5 0 R /Rect [10 200 90 220] /P 3 0 R >>".into(),
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (b) /V 5 0 R /Rect [10 150 90 170] /P 3 0 R >>".into(),
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (ok) /V (x) /Rect [10 100 90 120] /P 3 0 R >>".into(),
+    ];
+    let mut bytes = b"%PDF-1.7\n".to_vec();
+    let mut offsets = Vec::new();
+    for (i, o) in objs.iter().enumerate() {
+        offsets.push(bytes.len());
+        bytes.extend_from_slice(format!("{} 0 obj\n{o}\nendobj\n", i + 1).as_bytes());
+    }
+    let xref = bytes.len();
+    bytes.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1).as_bytes());
+    for o in offsets {
+        bytes.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+    }
+    bytes.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objs.len() + 1).as_bytes());
+    Document::open(Arc::new(bytes)).expect("opens")
+}
+
+/// A field whose value was not read is not written as empty: the text, XML, XFDF and FDF exports
+/// all leave it out, and `fields_left_out` names it.
+#[test]
+fn exports_do_not_write_a_value_that_was_not_read_as_empty() {
+    let doc = unread_value_form();
+    let xml = export_data(&doc, Format::Xml);
+    assert!(xml.contains("<ok>x</ok>") && !xml.contains("<b>"), "{}", &xml[..xml.len().min(300)]);
+    let xfdf = export_xfdf(&doc, false, true, "f.pdf");
+    assert!(xfdf.contains("name=\"ok\"") && !xfdf.contains("name=\"b\""), "xfdf names b");
+    let fdf = export_fdf(&doc, false, true, "f.pdf").expect("an FDF export leaves the field out");
+    let text = String::from_utf8_lossy(&fdf);
+    assert!(text.contains("/T (ok)") && !text.contains("/T (b)"), "fdf names b");
+    assert!(fields_left_out(&doc) == ["b"], "left out: {:?}", fields_left_out(&doc));
+    assert!(fields_left_out(&Document::new_empty()).is_empty(), "nothing is left out of a form that was read");
+}

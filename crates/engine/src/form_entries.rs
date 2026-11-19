@@ -145,6 +145,7 @@ mod tests {
             selected: Vec::new(),
             single_value_is_array: false,
             options_omitted: false,
+            value_omitted: false,
             da: String::new(),
             quadding: 0,
             tooltip: None,

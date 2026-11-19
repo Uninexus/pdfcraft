@@ -340,12 +340,12 @@ impl Session {
         config.print_layers = print_preview_layers(editor.as_ref().map(|e| &e.cos), &info.layers);
         let display = display_bytes(editor.as_mut(), &bytes, &mut signatures, &context.captions);
         let renderer = RenderPool::new(display.clone(), render_threads(), display_config(&config));
-        let (form, adopted, omitted) = editor
+        let (form, adopted, omitted, values_omitted) = editor
             .as_ref()
             .map(|e| {
                 let mut fields = pdfcraft_forms::fields_with_adopted(&e.cos);
                 xfa::mark_script_buttons(&e.cos, &mut fields.items);
-                (fields.items, fields.adopted_page_fields, fields.options_omitted)
+                (fields.items, fields.adopted_page_fields, fields.options_omitted, fields.value_omitted)
             })
             .unwrap_or_default();
         // Fields the file lists only as page widgets are adopted leniently; the file says so.
@@ -369,6 +369,19 @@ impl Session {
             } else {
                 format!(
                     "{omitted} choice fields' options (/Opt) were not read because the form's options went over the allowance; the fields are left as they are"
+                )
+            };
+            e.cos.note_repair(line);
+        }
+        // Fields whose /V or /DV text went over the form's allowance read with no value.
+        if values_omitted > 0
+            && let Some(e) = &mut editor
+        {
+            let line = if values_omitted == 1 {
+                "1 field's value (/V or /DV) was not read because the form's values went over the allowance; the field is left as it is".to_string()
+            } else {
+                format!(
+                    "{values_omitted} fields' values (/V or /DV) were not read because the form's values went over the allowance; the fields are left as they are"
                 )
             };
             e.cos.note_repair(line);

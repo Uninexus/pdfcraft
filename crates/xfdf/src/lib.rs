@@ -101,11 +101,24 @@ pub struct Report {
     pub skipped: Vec<String>,
 }
 
+/// The names of the fields that [`export_data`], [`export_xfdf`] and [`export_fdf`] leave out of
+/// form data because their value was not read (`Field::value_omitted`: the form's values went over
+/// the allowance), instead of writing them as empty or Off. Push buttons and signatures are not
+/// form data and are never listed.
+pub fn fields_left_out(doc: &Document) -> Vec<String> {
+    pdfcraft_forms::fields(doc)
+        .into_iter()
+        .filter(|f| f.value_omitted && !matches!(f.kind, FieldKind::PushButton | FieldKind::Signature))
+        .map(|f| f.name)
+        .collect()
+}
+
 /// Form data as XML, CSV or tab-delimited text (Acrobat's Export data formats).
 pub fn export_data(doc: &Document, format: Format) -> String {
     let fields: Vec<(String, String)> = pdfcraft_forms::fields(doc)
         .into_iter()
-        .filter(|f| !matches!(f.kind, FieldKind::PushButton | FieldKind::Signature))
+        // A field whose value was not read is left out rather than written as empty or Off.
+        .filter(|f| !matches!(f.kind, FieldKind::PushButton | FieldKind::Signature) && !f.value_omitted)
         .map(|f| {
             let v = match f.kind {
                 FieldKind::CheckBox | FieldKind::Radio if f.value.is_empty() => "Off".to_string(),
@@ -174,7 +187,7 @@ pub fn data_values(bytes: &[u8]) -> Result<Vec<(String, Vec<String>)>, DataError
         let doc = Document::open(std::sync::Arc::new(bytes.to_vec())).map_err(|e| DataError::Malformed(e.to_string()))?;
         return Ok(pdfcraft_forms::fields(&doc)
             .into_iter()
-            .filter(|f| !matches!(f.kind, FieldKind::PushButton | FieldKind::Signature))
+            .filter(|f| !matches!(f.kind, FieldKind::PushButton | FieldKind::Signature) && !f.value_omitted)
             .map(|f| {
                 let v = if matches!(f.kind, FieldKind::CheckBox | FieldKind::Radio) && f.value.is_empty() {
                     vec!["Off".to_string()]

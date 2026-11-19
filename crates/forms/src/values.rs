@@ -136,6 +136,15 @@ fn fill(doc: &mut Document, all: &[Field], named: &[usize], name: &str, value: &
 /// The error for a choice field whose `/Opt` was not read ([`Field::options_omitted`]): with no
 /// options to match against, a value would be stored unchecked and `/I` dropped.
 pub(crate) fn refuse_unread_options(f: &Field) -> Result<(), FormError> {
+    // A value or default that was not read is the file's only copy of it: writing the field would
+    // replace what could not be shown, and a copy of the empty value would erase it from a twin.
+    if f.value_omitted {
+        return invalid(format!(
+            "{:?} was not changed: its value (/V or /DV) was not read because the form's values went over the allowance of {} bytes of text",
+            f.name,
+            crate::MAX_VALUE_BYTES
+        ));
+    }
     if f.options_omitted && matches!(f.kind, FieldKind::Combo | FieldKind::List) {
         return invalid(format!(
             "{:?} was not changed: its options were not read because the form's options (/Opt) went over the allowance of {} entries or {} bytes of text",
@@ -241,12 +250,19 @@ fn recalculate_values(
         let Some(f) = all.iter().find(|f| f.obj == obj).cloned() else { continue };
         // A calculated choice field whose options were not read keeps its value: a result could
         // not be matched to an option, and storing it would drop `/I`.
-        if f.options_omitted {
+        // A field whose value was not read is not given a result either.
+        if f.options_omitted || f.value_omitted {
             continue;
         }
+        // Whether a field this calculation read has a value that was not read: its total would
+        // be worked out from nothing, so the field keeps the one it has. (A JavaScript
+        // calculation reads those fields as empty text: a known limit.)
+        let read_unread = std::cell::Cell::new(false);
         let lookup = |n: &str| -> Vec<String> {
             let prefix = format!("{n}.");
-            all.iter().filter(|x| x.name == n || x.name.starts_with(&prefix)).flat_map(|x| x.value.first().cloned()).collect()
+            let named = || all.iter().filter(|x| x.name == n || x.name.starts_with(&prefix));
+            read_unread.set(read_unread.get() || named().any(|x| x.value_omitted));
+            named().flat_map(|x| x.value.first().cloned()).collect()
         };
         let current = f.value.first().cloned().unwrap_or_default();
         let v = if let Some(js) = &f.actions.scripts.calculate {
@@ -274,6 +290,9 @@ fn recalculate_values(
             }
         } else {
             let Some(v) = af::calculate(&f.actions.calculate, &lookup) else { continue };
+            if read_unread.get() {
+                continue;
+            }
             v
         };
         // A combo box result naming an option, by export value or display text, is stored as that
@@ -677,8 +696,9 @@ pub(crate) fn merged_appearance(doc: &Document, widget: ObjRef, fresh: &Dict) ->
 
 /// Regenerate the normal appearance of every widget of a text or choice field.
 fn redraw(doc: &mut Document, f: &Field, values: &[String], scripts: &mut dyn Scripts) -> Result<(), FormError> {
-    // Drawn with no options it would show no rows: the file's own look stays.
-    if f.options_omitted && matches!(f.kind, FieldKind::Combo | FieldKind::List) {
+    // Drawn with no options it would show no rows, and with no value it would show none: the
+    // file's own look stays.
+    if f.value_omitted || (f.options_omitted && matches!(f.kind, FieldKind::Combo | FieldKind::List)) {
         return Ok(());
     }
     let shown = match values {
@@ -968,10 +988,11 @@ fn unread_stream(doc: &Document, field: ObjRef, key: &[u8]) -> bool {
 }
 
 /// Whether this snapshot contains a known default, including a genuinely absent /DV.
-/// An unread nonempty default stream is unknown, not an instruction to clear the field.
+/// An unread nonempty default stream, or a field with a `/V` or `/DV` text that was not read
+/// ([`Field::value_omitted`]), is unknown, not an instruction to clear the field.
 /// Reuse this policy when exposing reset defaults to other execution layers.
 pub fn default_value_known(doc: &Document, field: &Field) -> bool {
-    !field.default.is_empty() || !unread_stream(doc, field.obj, b"DV")
+    !field.value_omitted && (!field.default.is_empty() || !unread_stream(doc, field.obj, b"DV"))
 }
 
 /// Acrobat's Clear form: every field (or the named ones) back to its default value.
@@ -1020,7 +1041,8 @@ pub fn reset_with_formatting(
         }
         // A choice field whose options were not read is left as it is, as a read-only one is, and
         // the rest of the form is still reset.
-        if f.options_omitted {
+        // (`write_value_impl` refuses such a field, which would abort the whole reset.)
+        if f.options_omitted || f.value_omitted {
             continue;
         }
         let v = match f.kind {

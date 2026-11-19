@@ -790,3 +790,74 @@ fn form_fields_flags_a_choice_field_whose_options_were_not_read() {
     assert!(get("a").get("options_omitted").is_none(), "a field that was read carries no flag");
     assert!(get("b")["options_omitted"] == true && get("b")["options"].as_array().is_some_and(Vec::is_empty), "{}", get("b"));
 }
+
+/// `form_fields` says a field's value was not read, and gives it no value.
+#[test]
+fn form_fields_flags_a_field_whose_value_was_not_read() {
+    let entries = "(a)".repeat(2_000_000);
+    let objs: Vec<String> = vec![
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm 4 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 200 300] >>".into(),
+        "<< /Type /Page /Parent 2 0 R /Annots [6 0 R 7 0 R] >>".into(),
+        "<< /Fields [6 0 R 7 0 R] /DA (/Helv 0 Tf 0 g) >>".into(),
+        format!("[{entries}]"),
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (a) /V 5 0 R /Rect [10 200 90 220] /P 3 0 R >>".into(),
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (b) /V 5 0 R /Rect [10 150 90 170] /P 3 0 R >>".into(),
+    ];
+    let mut bytes = b"%PDF-1.7\n".to_vec();
+    let mut offsets = Vec::new();
+    for (i, o) in objs.iter().enumerate() {
+        offsets.push(bytes.len());
+        bytes.extend_from_slice(format!("{} 0 obj\n{o}\nendobj\n", i + 1).as_bytes());
+    }
+    let xref = bytes.len();
+    bytes.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1).as_bytes());
+    for o in offsets {
+        bytes.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+    }
+    bytes.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objs.len() + 1).as_bytes());
+    let mut a = Automation::new();
+    let doc = a.session.open("values.pdf", None, Arc::new(bytes), None).unwrap();
+    let fields = json(&mut a, "form_fields", json!({ "doc": doc.0 }));
+    let list = fields["fields"].as_array().unwrap();
+    let get = |name: &str| list.iter().find(|f| f["name"] == name).unwrap();
+    assert!(get("a").get("value_omitted").is_none(), "a field that was read carries no flag");
+    assert!(get("b")["value_omitted"] == true && get("b")["value"].as_array().is_none_or(Vec::is_empty), "{}", get("b"));
+}
+
+/// `doc_export_data` names the fields it left out of form data because their value was not read.
+#[test]
+fn doc_export_data_reports_the_fields_it_left_out() {
+    let entries = "(a)".repeat(2_000_000);
+    let objs: Vec<String> = vec![
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm 4 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 200 300] >>".into(),
+        "<< /Type /Page /Parent 2 0 R /Annots [6 0 R 7 0 R] >>".into(),
+        "<< /Fields [6 0 R 7 0 R] /DA (/Helv 0 Tf 0 g) >>".into(),
+        format!("[{entries}]"),
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (a) /V 5 0 R /Rect [10 200 90 220] /P 3 0 R >>".into(),
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (b) /V 5 0 R /Rect [10 150 90 170] /P 3 0 R >>".into(),
+    ];
+    let mut bytes = b"%PDF-1.7\n".to_vec();
+    let mut offsets = Vec::new();
+    for (i, o) in objs.iter().enumerate() {
+        offsets.push(bytes.len());
+        bytes.extend_from_slice(format!("{} 0 obj\n{o}\nendobj\n", i + 1).as_bytes());
+    }
+    let xref = bytes.len();
+    bytes.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1).as_bytes());
+    for o in offsets {
+        bytes.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+    }
+    bytes.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objs.len() + 1).as_bytes());
+    let mut a = Automation::new();
+    let doc = a.session.open("values.pdf", None, Arc::new(bytes), None).unwrap();
+    let dir = std::env::temp_dir().join(format!("pdfcraft-left-out-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("data.xml");
+    let out = json(&mut a, "doc_export_data", json!({ "doc": doc.0, "path": path.to_string_lossy(), "what": "fields" }));
+    let xml = std::fs::read_to_string(&path).unwrap();
+    std::fs::remove_dir_all(&dir).ok();
+    assert!(out["left_out"] == json!(["b"]), "{out}");
+    assert!(xml.contains("<a>") && !xml.contains("<b>"), "the export holds a and not b");
+}

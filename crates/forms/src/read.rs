@@ -324,17 +324,105 @@ fn actions_of(doc: &Document, d: &Dict, widgets: &[ObjRef], scripts: &mut Decode
 
 /// Text streams of field values (`/V`, `/DV`) one reading of the form may decode in all, however
 /// many fields name the same stream.
-pub(crate) const MAX_VALUE_BYTES: usize = 64 << 20;
+pub const MAX_VALUE_BYTES: usize = 64 << 20;
 
-/// A field's value or default value (`/V`, `/DV`). A text stream is decoded against `budget`, and
-/// reads as no value once it is spent, as one that won't decode does.
-fn values_of(doc: &Document, o: Option<&Object>, budget: &mut DecodeBudget) -> Vec<String> {
-    let Some(o) = o else { return Vec::new() };
-    match &*doc.resolve(o) {
-        Object::Array(a) => a.iter().filter_map(|x| text_of(&doc.resolve(x))).collect(),
-        Object::Stream(s) => budget.decode(s).ok().map(|b| PdfString::literal(b).to_text()).into_iter().collect(),
-        other => text_of(other).filter(|s| s != "Off" && !s.is_empty()).into_iter().collect(),
+/// What one string in a value costs besides its decoded bytes (a `String` header), and what an
+/// entry of an array that is not text costs, so an array of millions of numbers is not walked in
+/// full by every field that names it.
+const VALUE_ENTRY_COST: usize = 24;
+
+/// What reading the form's `/V` and `/DV` text (strings, names, and arrays of them) may still
+/// spend, over all its fields. Fields can share one array (named by reference, or inherited from a
+/// parent), and each field's own copy of it made fields x entries strings.
+pub(crate) struct ValueText {
+    left: usize,
+    /// Objects whose value was refused: fields naming one again skip it without reading it, and
+    /// the allowance is left for other values.
+    refused: std::collections::HashSet<ObjRef>,
+}
+
+impl ValueText {
+    #[cfg(test)]
+    pub(crate) fn left(&self) -> usize {
+        self.left
     }
+
+    pub(crate) fn new(allowance: usize) -> Self {
+        Self { left: allowance, refused: Default::default() }
+    }
+
+    /// The text of one string or name: its decoded bytes and [`VALUE_ENTRY_COST`] are spent, or
+    /// `None` when they do not fit. `None` spends nothing.
+    fn take(&mut self, o: &Object, spent: &mut usize) -> Option<Option<String>> {
+        let raw = match o {
+            Object::String(s) => s.bytes.len(),
+            Object::Name(n) => n.len(),
+            _ => return Some(None),
+        };
+        // The raw length is known before the text is decoded. A text decodes to fewer bytes than
+        // that only from UTF-16BE (about half), so refusing on it is conservative there and exact
+        // otherwise; the decoded length is what is spent below.
+        let after = spent.saturating_add(VALUE_ENTRY_COST);
+        if raw > self.left.saturating_sub(after) {
+            return None;
+        }
+        let t = text_of(o)?;
+        *spent = after.saturating_add(t.len());
+        (*spent <= self.left).then_some(Some(t))
+    }
+}
+
+/// A field's value or default value (`/V`, `/DV`), or `None` when it is text this reading of the
+/// form has no allowance left for ([`ValueText`]; the field is then flagged
+/// [`Field::value_omitted`]). A text stream is decoded against `budget`, and reads as no value
+/// once that is spent, as one that won't decode does. The cost of text is its decoded length, so
+/// a value can be up to about three times as long in the file as what it costs; an array is
+/// refused before it is walked when its entries alone, at [`VALUE_ENTRY_COST`] each, are more than
+/// is left. A refused object named by reference is remembered; one that is not (a direct or
+/// inherited value) spends what was read of it before it did not fit.
+pub(crate) fn values_of(doc: &Document, o: Option<&Object>, budget: &mut DecodeBudget, text: &mut ValueText) -> Option<Vec<String>> {
+    let Some(o) = o else { return Some(Vec::new()) };
+    let owner = o.as_ref();
+    if owner.is_some_and(|r| text.refused.contains(&r)) {
+        return None;
+    }
+    let mut spent = 0usize;
+    let out = match &*doc.resolve(o) {
+        Object::Array(a) => {
+            if a.len().saturating_mul(VALUE_ENTRY_COST) > text.left {
+                None
+            } else {
+                let mut out = Vec::with_capacity(a.len().min(4096));
+                let mut fits = true;
+                for x in a {
+                    match text.take(&doc.resolve(x), &mut spent) {
+                        Some(Some(t)) => out.push(t),
+                        // not text: it still costs an entry
+                        Some(None) => spent = spent.saturating_add(VALUE_ENTRY_COST),
+                        None => {
+                            fits = false;
+                            break;
+                        }
+                    }
+                    if spent > text.left {
+                        fits = false;
+                        break;
+                    }
+                }
+                fits.then_some(out)
+            }
+        }
+        Object::Stream(s) => return Some(budget.decode(s).ok().map(|b| PdfString::literal(b).to_text()).into_iter().collect()),
+        other => text.take(other, &mut spent).map(|t| t.filter(|s| s != "Off" && !s.is_empty()).into_iter().collect()),
+    };
+    match (&out, owner) {
+        (Some(_), _) => text.left -= spent.min(text.left),
+        (None, Some(r)) => {
+            text.refused.insert(r);
+        }
+        (None, None) => text.left -= spent.min(text.left),
+    }
+    out
 }
 
 /// A choice field's `/I` (ISO 32000-2 Table 234) as option positions, when it is usable: an array
@@ -490,6 +578,11 @@ pub fn options_omitted(doc: &Document) -> usize {
     fields_with_adopted(doc).options_omitted
 }
 
+/// How many fields [`fields`] read with no value: see [`Fields::value_omitted`].
+pub fn value_omitted(doc: &Document) -> usize {
+    fields_with_adopted(doc).value_omitted
+}
+
 /// How many of [`fields`] were reachable only through the page annotations: the form's `/Fields`
 /// list names none or only some of them, so the leniency that adopts them is worth recording.
 pub fn adopted_page_fields(doc: &Document) -> usize {
@@ -506,6 +599,9 @@ pub struct Fields {
     /// How many combo and list boxes were read with no options because the form's `/Opt` arrays
     /// together held more than [`MAX_OPTION_ENTRIES`] entries or [`MAX_OPTION_BYTES`] of text. Their `/Opt` is still in the file.
     pub options_omitted: usize,
+    /// How many fields were read with no value because their `/V` or `/DV` text did not fit what
+    /// the form's values may take in all ([`MAX_VALUE_BYTES`]): see [`Field::value_omitted`].
+    pub value_omitted: usize,
 }
 
 /// Read all terminal fields and the page-only adoption count in one enumeration.
@@ -528,7 +624,8 @@ pub fn fields_with_adopted(doc: &Document) -> Fields {
         return fields;
     }
     let (items, adopted_page_fields, options_omitted) = enumerate(doc);
-    let fields = Fields { items, adopted_page_fields, options_omitted };
+    let value_omitted = items.iter().filter(|f| f.value_omitted).count();
+    let fields = Fields { items, adopted_page_fields, options_omitted, value_omitted };
     // Not kept (the thread is ending, or the slot is in use) costs only a later walk.
     let _ = LAST_READING.try_with(|last| {
         if let Ok(mut last) = last.try_borrow_mut() {
@@ -600,6 +697,7 @@ pub(crate) fn enumerate(doc: &Document) -> (Vec<Field>, usize, usize) {
         by_parent,
         scripts: script_budget(),
         values: DecodeBudget::new(MAX_VALUE_BYTES, 0),
+        text: ValueText::new(MAX_VALUE_BYTES),
         option_entries_left: MAX_OPTION_ENTRIES,
         option_bytes_left: MAX_OPTION_BYTES,
         options_omitted: 0,
@@ -697,6 +795,8 @@ struct Seen {
     by_parent: std::collections::HashMap<ObjRef, Vec<ObjRef>>,
     scripts: DecodeBudget,
     values: DecodeBudget,
+    /// What the string and array values of the fields read so far may still take, from [`MAX_VALUE_BYTES`].
+    text: ValueText,
     /// Choice options the fields read so far may still take, from [`MAX_OPTION_ENTRIES`].
     option_entries_left: usize,
     /// Bytes of option text the fields read so far may still take, from [`MAX_OPTION_BYTES`].
@@ -902,11 +1002,13 @@ fn walk(
             }
         },
     };
-    let mut value = values_of(doc, inh.v.as_ref(), &mut seen.values);
+    let value = values_of(doc, inh.v.as_ref(), &mut seen.values, &mut seen.text);
     // A list box without MultiSelect selects one option: "if clear, at most one item shall be
     // selected" (ISO 32000-2 Table 233). Given an array /V or /DV anyway, it holds the first
     // value only, and shows and resets to it; the file keeps its entries until the field is filled.
-    let mut default = values_of(doc, inh.dv.as_ref(), &mut seen.values);
+    let default = values_of(doc, inh.dv.as_ref(), &mut seen.values, &mut seen.text);
+    let value_omitted = value.is_none() || default.is_none();
+    let (mut value, mut default) = (value.unwrap_or_default(), default.unwrap_or_default());
     let single = kind == FieldKind::List && ff & flags::MULTI_SELECT == 0;
     let single_value_is_array = single && inh.v.as_ref().is_some_and(|v| doc.resolve(v).as_array().is_some());
     if single {
@@ -930,6 +1032,7 @@ fn walk(
         max_len: inh.max_len,
         options,
         options_omitted,
+        value_omitted,
         selected,
         single_value_is_array,
         da: inh.da.clone().unwrap_or_else(|| "/Helv 0 Tf 0 g".into()),

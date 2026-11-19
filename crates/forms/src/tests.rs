@@ -4920,6 +4920,203 @@ fn repeated_value_streams_share_one_decode_budget() {
     assert_eq!(all[0].value, ["x".repeat(1 << 20)], "the first field still reads its value");
 }
 
+/// A form of text fields named `a`, `b`, `c` that share one array of two million strings as their
+/// `/V` (50 MB of the 64 MiB the form's values may take, so only the first fits), `c` with a `/DV`,
+/// then `ok`, whose own value is small. `NeedAppearances` is set and every widget has an
+/// appearance, so a redraw shows.
+fn shared_value_array_form() -> Document {
+    let entries = "(a)".repeat(2_000_000);
+    let widget = |name: &str, extra: &str, y: u32| {
+        format!("<< /Type /Annot /Subtype /Widget /FT /Tx /T ({name}) {extra} /Rect [10 {y} 90 {}] /P 3 0 R /AP << /N 10 0 R >> >>", y + 20)
+    };
+    let objs: Vec<String> = vec![
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm 4 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 200 300] >>".into(),
+        "<< /Type /Page /Parent 2 0 R /Annots [6 0 R 7 0 R 8 0 R 9 0 R] >>".into(),
+        "<< /Fields [6 0 R 7 0 R 8 0 R 9 0 R] /DA (/Helv 0 Tf 0 g) /NeedAppearances true >>".into(),
+        format!("[{entries}]"),
+        widget("a", "/V 5 0 R", 10),
+        widget("b", "/V 5 0 R", 40),
+        widget("c", "/V 5 0 R /DV (d)", 70),
+        widget("ok", "/V (x) /DV (y)", 100),
+        "<< /Type /XObject /Subtype /Form /BBox [0 0 80 20] /Length 0 >>\nstream\n\nendstream".into(),
+    ];
+    document(&objs)
+}
+
+/// Fields can share one array as their value (by reference, or by inheriting it), and each field's
+/// own copy of it made fields x entries strings. A form's values spend one allowance of text; a
+/// field whose value does not fit reads with none and is flagged, a value that fits is read as it
+/// was, and what comes after the refusal is still read.
+#[test]
+fn repeated_value_arrays_share_one_text_allowance() {
+    let doc = shared_value_array_form();
+    let read = fields_with_adopted(&doc);
+    let get = |n: &str| field(&read.items, n);
+    let held: usize = read.items.iter().map(|f| f.value.len()).sum();
+    assert!(held <= crate::MAX_VALUE_BYTES / 24, "{held} value strings held");
+    assert!(get("a").value.len() == 2_000_000 && !get("a").value_omitted, "the first field reads its value");
+    assert!(get("b").value_omitted && get("b").value.is_empty(), "the second does not fit");
+    assert!(get("c").value_omitted && get("c").default.len() == 1, "the third does not fit, and its default is still read");
+    assert!(get("ok").value == ["x"] && get("ok").default == ["y"] && !get("ok").value_omitted, "a field after the refusals is read");
+    assert!(read.value_omitted == 2 && value_omitted(&doc) == 2, "omitted: {}", read.value_omitted);
+}
+
+/// Where the allowance ends: a text that fits exactly is read, one byte more is not, for a string
+/// or a name alone and in an array, and an entry that is not text still costs one. Nothing is
+/// spent by a refusal of an object named by reference, which is remembered instead.
+#[test]
+fn value_text_allowance_boundaries() {
+    use crate::read::{ValueText, values_of};
+    let doc = Document::new_empty();
+    let mut budget = pdfcraft_cos::DecodeBudget::new(1 << 20, 0);
+    let mut read = |o: Object, allowance: usize| values_of(&doc, Some(&o), &mut budget, &mut ValueText::new(allowance));
+    let s = |t: &str| Object::String(PdfString::literal(t.as_bytes().to_vec()));
+    // a string costs 24 and its decoded bytes
+    assert!(read(s("abc"), 27) == Some(vec!["abc".into()]), "exact fit, string");
+    assert!(read(s("abc"), 26).is_none(), "one over, string");
+    assert!(read(Object::Name(b"abc".to_vec()), 27).is_some(), "exact fit, name");
+    assert!(read(Object::Name(b"abc".to_vec()), 26).is_none(), "one over, name");
+    let two = || Object::Array(vec![s("ab"), s("c")]);
+    assert!(read(two(), 51).is_some(), "exact fit, array");
+    assert!(read(two(), 50).is_none(), "one over, array");
+    let numbers = || Object::Array(vec![Object::Int(1), Object::Null, Object::Int(3)]);
+    assert!(read(numbers(), 72).is_some_and(|v| v.is_empty()), "exact fit, entries that are not text");
+    assert!(read(numbers(), 71).is_none(), "one over, entries that are not text");
+    // a scalar that is not text is free
+    assert!(read(Object::Int(7), 0).is_some(), "a number costs nothing alone");
+}
+
+/// Entries that are not text cost too: fields sharing an array of three million numbers refuse it
+/// without walking it, where each walk made fields x entries steps.
+#[test]
+fn a_shared_array_of_numbers_is_refused_without_a_walk() {
+    let n = 40;
+    let fields_list: String = (0..n).map(|i| format!("{} 0 R ", i + 6)).collect();
+    let mut objs: Vec<String> = vec![
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm 4 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 200 300] >>".into(),
+        "<< /Type /Page /Parent 2 0 R >>".into(),
+        format!("<< /Fields [{fields_list}] >>"),
+        format!("[{}]", "7 ".repeat(3_000_000)),
+    ];
+    objs.extend((0..n).map(|i| format!("<< /FT /Tx /T (f{i}) /V 5 0 R >>")));
+    let doc = document(&objs);
+    let start = std::time::Instant::now();
+    let read = fields_with_adopted(&doc);
+    let took = start.elapsed();
+    assert!(read.items.len() == n && read.value_omitted == n, "omitted: {}", read.value_omitted);
+    assert!(took < std::time::Duration::from_secs(2), "reading took {took:?}");
+}
+
+/// A field whose value was not read is the file's only copy of that value: nothing writes,
+/// resets, redraws or exports it, and its default is not known.
+#[test]
+fn a_field_whose_value_was_not_read_is_left_alone() {
+    let mut doc = shared_value_array_form();
+    let all = fields(&doc);
+    let c = field(&all, "c").clone();
+    let dict_of = |doc: &Document, f: &Field| doc.get(f.obj).as_dict().cloned().unwrap();
+    let kept = dict_of(&doc, &c);
+    assert!(!default_value_known(&doc, &c), "the default of such a field is not known");
+    assert!(default_value_known(&doc, field(&all, "ok")), "that of another is");
+    // set_value
+    let err = set_value(&mut doc, "c", &FieldValue::Text("new".into())).unwrap_err().to_string();
+    assert!(err.contains("value (/V or /DV) was not read") && err.contains("\"c\""), "{err}");
+    assert!(dict_of(&doc, &c) == kept, "set_value left the field as it was");
+    // reset: the rest of the form is reset, this field keeps its value and appearance
+    let (changed, _) = reset_with_formatting(&mut doc, None, &mut NoScripts, false).expect("the reset goes through");
+    assert!(changed >= 1, "other fields were reset: {changed}");
+    assert!(field(&fields(&doc), "ok").value == ["y"], "ok goes back to its default");
+    let b = field(&fields(&doc), "b").clone();
+    assert!(dict_of(&doc, &c) == kept && matches!(dict_of(&doc, &b).get(b"V"), Some(Object::Ref(_))), "reset kept the unread values");
+    // the display copy redraws what was read and leaves the rest
+    let shown = with_field_appearances(&doc).expect("the fields that were read are redrawn");
+    let ap_of = |d: &Document, f: &Field| d.get(f.obj).as_dict().and_then(|w| w.get(b"AP").cloned());
+    assert!(ap_of(&shown, &c) == kept.get(b"AP").cloned(), "the unread field keeps the appearance the file has");
+    assert!(ap_of(&shown, field(&fields(&doc), "ok")) != ap_of(&doc, field(&fields(&doc), "ok")), "a field that was read is redrawn");
+}
+
+/// A field whose value was not read is not redrawn empty by an edit of its own properties, and a
+/// calculation that reads it keeps its total instead of working it out from nothing.
+#[test]
+fn a_property_edit_and_a_calculation_leave_an_unread_value_alone() {
+    let mut doc = shared_value_array_form();
+    let c = field(&fields(&doc), "c").clone();
+    assert!(c.value_omitted);
+    let ap = |doc: &Document| doc.get(c.obj).as_dict().and_then(|d| d.get(b"AP").cloned());
+    let before = ap(&doc);
+    set_props(&mut doc, "c", &FieldProps { tooltip: Some("a tip".into()), required: Some(true), ..FieldProps::default() })
+        .expect("the edit goes through");
+    assert!(ap(&doc) == before, "the appearance of a field whose value was not read is as the file has it");
+    assert!(field(&fields(&doc), "c").value_omitted, "still flagged");
+    // `total` sums `b` (unread) and `ok`; `control` sums `ok` alone and is worked out as usual.
+    let sum = |names: &str| format!("/AA << /C << /S /JavaScript /JS (AFSimple_Calculate\\(\"SUM\", new Array \\({names}\\)\\);) >> >>");
+    let widget = |name: &str, extra: &str, y: u32| {
+        format!("<< /Type /Annot /Subtype /Widget /FT /Tx /T ({name}) {extra} /Rect [10 {y} 90 {}] /P 3 0 R >>", y + 20)
+    };
+    let entries = "(a)".repeat(2_000_000);
+    let objs: Vec<String> = vec![
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm 4 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 200 300] >>".into(),
+        "<< /Type /Page /Parent 2 0 R >>".into(),
+        "<< /Fields [6 0 R 7 0 R 8 0 R 9 0 R 10 0 R] /DA (/Helv 0 Tf 0 g) >>".into(),
+        format!("[{entries}]"),
+        widget("a", "/V 5 0 R", 10),
+        widget("b", "/V 5 0 R", 40),
+        widget("ok", "/V (4)", 70),
+        widget("total", &format!("/V (7) {}", sum("\"b\", \"ok\"")), 100),
+        widget("control", &format!("/V (0) {}", sum("\"ok\"")), 130),
+    ];
+    let mut doc = document(&objs);
+    assert!(field(&fields(&doc), "b").value_omitted);
+    recalculate(&mut doc).expect("recalculates");
+    let all = fields(&doc);
+    assert!(field(&all, "total").value == ["7"], "a total that reads an unread value is left as it was: {:?}", field(&all, "total").value);
+    assert!(field(&all, "control").value == ["4"], "another calculation is worked out: {:?}", field(&all, "control").value);
+}
+
+/// A `/V` inherited from a parent is read once per kid, and is refused for each when it does not
+/// fit: three kids of a parent holding an array of three million numbers are all flagged.
+#[test]
+fn a_value_inherited_from_a_parent_that_does_not_fit_flags_every_kid() {
+    let objs: Vec<String> = vec![
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm 4 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 200 300] >>".into(),
+        "<< /Type /Page /Parent 2 0 R >>".into(),
+        "<< /Fields [5 0 R] >>".into(),
+        format!("<< /FT /Tx /T (p) /V [{}] /Kids [6 0 R 7 0 R 8 0 R] >>", "7 ".repeat(3_000_000)),
+        "<< /Parent 5 0 R /T (k1) >>".into(),
+        "<< /Parent 5 0 R /T (k2) >>".into(),
+        "<< /Parent 5 0 R /T (k3) /V (own) >>".into(),
+    ];
+    let all = fields(&document(&objs));
+    let flags: Vec<bool> = ["p.k1", "p.k2", "p.k3"].iter().map(|n| field(&all, n).value_omitted).collect();
+    assert!(flags == [true, true, false], "flags: {flags:?}");
+    assert!(field(&all, "p.k3").value == ["own"], "a kid with a value of its own reads it");
+}
+
+/// A refusal of a direct or inherited array spends what was read of it, so the same walk is not
+/// paid again by every field; one named by reference spends nothing and is remembered.
+#[test]
+fn a_refused_array_spends_what_was_read_unless_it_is_remembered_by_reference() {
+    use crate::read::{ValueText, values_of};
+    let mut doc = Document::new_empty();
+    let mut budget = pdfcraft_cos::DecodeBudget::new(1 << 20, 0);
+    let s = |t: &str| Object::String(PdfString::literal(t.as_bytes().to_vec()));
+    // three strings of 6 bytes cost 30 each: 24 x 3 = 72 passes the length check, 90 does not fit 80
+    let three = Object::Array(vec![s("aaaaaa"), s("aaaaaa"), s("aaaaaa")]);
+    let mut text = ValueText::new(80);
+    assert!(values_of(&doc, Some(&three), &mut budget, &mut text).is_none(), "does not fit");
+    assert!(text.left() == 20, "the two strings read were spent: {} left", text.left());
+    let r = doc.add(three.clone());
+    let mut text = ValueText::new(80);
+    assert!(values_of(&doc, Some(&Object::Ref(r)), &mut budget, &mut text).is_none(), "does not fit");
+    assert!(text.left() == 80, "a refusal by reference spends nothing: {} left", text.left());
+    assert!(values_of(&doc, Some(&Object::Ref(r)), &mut budget, &mut text).is_none(), "refused again at once");
+    assert!(values_of(&doc, Some(&s("ab")), &mut budget, &mut text) == Some(vec!["ab".into()]), "a later small value still reads");
+}
+
 /// Clear form leaves a field as it is when its default is a stream the value budget didn't reach:
 /// 70 fields typed in, whose default is one 1 MiB text stream, keep a value, the first ones
 /// their default and the rest what was typed, none of them emptied.
