@@ -7555,6 +7555,32 @@ fn the_calculation_order_is_read_fixed_and_set() {
     assert_eq!((value(&mut a, "total"), value(&mut a, "tax")), (json!("0"), json!("0")), "undone with the values it recalculated");
 }
 
+/// `form_calculation_order` flags `/CO` entries it does not list: one long field name written in
+/// many entries is listed within 16 MiB of text, and `extra_omitted` counts the rest.
+#[test]
+fn form_calculation_order_counts_the_extra_entries_it_does_not_list() {
+    let name = "n".repeat(1 << 20);
+    let co = "6 0 R ".repeat(20);
+    let objs = [
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm 4 0 R >>".to_owned(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 600 800] >>".to_owned(),
+        "<< /Type /Page /Parent 2 0 R /Annots [5 0 R 6 0 R] >>".to_owned(),
+        format!("<< /Fields [5 0 R 6 0 R] /DA (/Helv 0 Tf 0 g) /CO [5 0 R {co}] >>"),
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (c) /Rect [50 700 250 720] /P 3 0 R /AA << /C << /S /JavaScript /JS (AFSimple_Calculate\\(\"SUM\", \"a\"\\);) >> >> >>".to_owned(),
+        format!("<< /Type /Annot /Subtype /Widget /FT /Tx /T ({name}) /Rect [50 660 250 680] /P 3 0 R >>"),
+    ];
+    let dir = workdir("co-extra");
+    std::fs::write(dir.join("form.pdf"), pdf_of(&objs.iter().map(String::as_str).collect::<Vec<_>>())).unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "form.pdf" }))["doc"].as_u64().unwrap();
+    let r = ok(&mut a, "form_calculation_order", json!({ "doc": doc }));
+    assert_eq!(r["extra"].as_array().map(Vec::len), Some(15), "listed within 16 MiB of text");
+    assert_eq!(r["extra_omitted"], 5, "the rest are counted, not listed");
+    assert_eq!(r["fixable"], true);
+    let r = ok(&mut a, "form_calculation_order", json!({ "doc": doc, "fix": true }));
+    assert_eq!((r["extra"].clone(), r["extra_omitted"].clone(), r["fixable"].clone()), (json!([]), json!(0), json!(false)), "fix removes them all");
+}
+
 /// A malformed form with two calculated fields named `dup`, one summing `src`, the other `x`.
 fn two_calculations_with_one_name() -> Vec<u8> {
     let widget = |name: &str, y: u32, reads: &str| {

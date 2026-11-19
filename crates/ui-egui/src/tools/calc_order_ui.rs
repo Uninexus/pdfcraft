@@ -533,10 +533,10 @@ fn cards(ui: &mut egui::Ui, t: &Tokens, pal: &Palette, order: &CalculationOrder,
                 );
                 card_text(ui, &crate::i18n::fmt(&template, &[("fields", &names(&unlisted))]), text);
             }
-            if !order.extra.is_empty() {
+            if !order.extra.is_empty() || order.extra_omitted > 0 {
                 let note = crate::i18n::trn(
                     lang,
-                    order.extra.len() as u64,
+                    (order.extra.len() as u64).saturating_add(order.extra_omitted as u64),
                     "The calculation order has {n} entry that calculates nothing. Fix order removes it.",
                     "The calculation order has {n} entries that calculate nothing. Fix order removes them.",
                 );
@@ -642,7 +642,7 @@ pub(crate) fn panel(app: &mut PdfCraftApp, ui: &mut egui::Ui, t: &Tokens) {
     let Some(view) = app.views.get_mut(index) else { return };
     let listed = view.calc_order.listed(doc);
     let order = &listed.order;
-    if order.fields.is_empty() && order.extra.is_empty() {
+    if order.fields.is_empty() && order.extra.is_empty() && order.extra_omitted == 0 {
         ui.label(
             egui::RichText::new(tl!(
                 "No field in this form calculates its value yet. Give a field a calculation on the Calculate tab of its properties, and it shows here."
