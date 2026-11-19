@@ -2508,3 +2508,29 @@ fn compare_ignore_options_are_set_and_reported_through_the_control_channel() {
     }
     assert_eq!(ok(&mut h, &c, "ui.state", json!({}))["compare_ignore"], json!({"case": false, "punctuation": true}));
 }
+
+#[test]
+fn print_readiness_thresholds_are_set_and_reported_through_the_control_channel() {
+    let (mut h, c) = harness();
+    let state = |h: &mut _| ok(h, &c, "ui.state", json!({}))["print_readiness"].clone();
+    assert_eq!(state(&mut h), json!({"ink_limit": null, "min_bleed_mm": null, "min_ppi": null}));
+    ok(&mut h, &c, "ui.set", json!({"key":"readiness-ink-limit","value":250}));
+    ok(&mut h, &c, "ui.set", json!({"key":"readiness-min-ppi","value":"150"}));
+    ok(&mut h, &c, "ui.set", json!({"key":"readiness-min-bleed-mm","value":3.5}));
+    assert_eq!(state(&mut h), json!({"ink_limit": 250.0, "min_bleed_mm": 3.5, "min_ppi": 150.0}));
+    for (key, invalid) in [
+        ("readiness-ink-limit", json!(401)),
+        ("readiness-ink-limit", json!(null)),
+        ("readiness-min-bleed-mm", json!(-1)),
+        ("readiness-min-bleed-mm", json!(true)),
+        ("readiness-min-ppi", json!(35)),
+        ("readiness-min-ppi", json!("NaN")),
+        ("readiness-min-ppi", json!("")),
+        ("readiness-min-ppi", json!([])),
+    ] {
+        assert!(call(&mut h, &c, "ui.set", json!({"key":key,"value":invalid})).is_err(), "{key}={invalid}");
+    }
+    assert_eq!(state(&mut h), json!({"ink_limit": 250.0, "min_bleed_mm": 3.5, "min_ppi": 150.0}));
+    ok(&mut h, &c, "ui.set", json!({"key":"readiness-ink-limit","value":"default"}));
+    assert_eq!(state(&mut h)["ink_limit"], json!(null));
+}

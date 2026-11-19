@@ -46,6 +46,7 @@ mod chrome;
 mod image_engine;
 pub use combine_grid::ThumbState as CombineThumb;
 pub use combine_ui::{Columns as CombineColumns, CombineView, Lock as CombineLock, SortKey};
+pub use readiness_ui::{ReadinessEdit, ReadinessField, ReadinessOptions};
 mod commands;
 pub mod control;
 mod menus;
@@ -880,6 +881,11 @@ pub struct PdfCraftApp {
     pub hairlines_draft: hairlines_ui::HairlinesDraft,
     /// The report Print production ▸ Print readiness shows.
     pub readiness_report: Option<pdfcraft_engine::printcheck::PrintReadiness>,
+    /// The thresholds the report is measured against (`print_readiness`'s `ink_limit`,
+    /// `min_bleed_mm` and `min_ppi`); `None` is the default. Remembered in the settings.
+    pub readiness_options: readiness_ui::ReadinessOptions,
+    /// What the dialog's three fields hold as typed.
+    pub readiness_edit: readiness_ui::ReadinessEdit,
     /// Protect Using Password dialog state.
     pub protect_draft: protect::ProtectDraft,
     /// New bookmarks from text styles dialog state (#1693).

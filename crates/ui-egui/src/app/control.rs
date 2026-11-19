@@ -435,6 +435,13 @@ impl PdfCraftApp {
             // The Compare dialog's Ignore checkboxes (saved with the other settings).
             ("compare-ignore-case", _) => self.compare_ignore_case = parse_bool(value, "compare-ignore-case")?,
             ("compare-ignore-punctuation", _) => self.compare_ignore_punctuation = parse_bool(value, "compare-ignore-punctuation")?,
+            // The Print readiness dialog's thresholds: a number in the engine's range, or `default`.
+            (key, _) if readiness_field(key).is_some() => {
+                let field = readiness_field(key).ok_or("unknown option")?;
+                // Text only: an empty value or anything but a number in the range or `default` is refused.
+                let n = if value.trim().is_empty() { return Err(field.key_error()) } else { field.parse(value).map_err(|_| field.key_error())? };
+                self.set_readiness_option(field, n)?;
+            }
             ("reset-comment-defaults", _) => {
                 if value != "true" {
                     return Err("reset-comment-defaults must be true".into());
@@ -575,4 +582,9 @@ fn parse_bool(value: &str, key: &str) -> Result<bool, String> {
         "false" => Ok(false),
         _ => Err(format!("{key} must be true or false")),
     }
+}
+
+/// The Print readiness threshold a `ui.set` key names.
+fn readiness_field(key: &str) -> Option<crate::readiness_ui::ReadinessField> {
+    crate::readiness_ui::ReadinessField::ALL.into_iter().find(|f| f.key() == key)
 }

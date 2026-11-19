@@ -18,12 +18,12 @@ mod ink;
 /// Below this, ordinary sheet printing cannot hold the picture. Large-format work sometimes can.
 const FAIL_PPI: f64 = 150.0;
 /// Ordinary close-up print. Between this and [`FAIL_PPI`] the picture is usable but soft.
-const WARN_PPI: f64 = 300.0;
+pub const WARN_PPI: f64 = 300.0;
 /// Less than this past the trim, on the tightest side, is not a normal 3 mm bleed.
-const MIN_BLEED_MM: f64 = 2.0;
+pub const MIN_BLEED_MM: f64 = 2.0;
 /// Total ink (C + M + Y + K, in percent) above which a painted CMYK colour is reported. Press
 /// conditions run from about 240% (uncoated) to 340% (coated); 300% is the usual SWOP limit.
-const TAC_LIMIT_PERCENT: f64 = 300.0;
+pub const TAC_LIMIT_PERCENT: f64 = 300.0;
 /// The limit a caller may set is a percentage of total ink. Below 100 every coloured object is
 /// flagged and above 400 (four full inks) nothing can be, so those are mistakes, not settings.
 pub const TAC_LIMIT_RANGE: std::ops::RangeInclusive<f64> = 100.0..=400.0;
