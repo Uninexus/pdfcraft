@@ -20,7 +20,7 @@ fn button_action(doc: &Document, d: &Dict, widgets: &[ObjRef], scripts: &mut Dec
     let s = |k: &[u8]| a.get(k).and_then(|v| text_of(&doc.resolve(v)));
     Some(match a.name(b"S")? {
         b"ResetForm" => {
-            let fields = a.get(b"Fields").map(|f| action_fields(doc, f)).unwrap_or_default();
+            let fields = a.get(b"Fields").map(|f| action_fields(doc, f)).unwrap_or_else(|| Some(Vec::new()))?;
             let exclude = a.get(b"Flags").and_then(|f| doc.resolve(f).as_int()).unwrap_or(0) & 1 != 0;
             af::ButtonAction::Reset { fields, exclude }
         }
@@ -38,7 +38,7 @@ fn button_action(doc: &Document, d: &Dict, widgets: &[ObjRef], scripts: &mut Dec
             af::ButtonAction::GoTo(page_refs(doc).iter().position(|p| *p == target)?)
         }
         b"Hide" => {
-            let fields = a.get(b"T").map(|t| action_fields(doc, t)).unwrap_or_default();
+            let fields = a.get(b"T").map(|t| action_fields(doc, t)).unwrap_or_else(|| Some(Vec::new()))?;
             let hide = !a.get(b"H").is_some_and(|h| matches!(&*doc.resolve(h), Object::Bool(false)));
             af::ButtonAction::ShowHide { fields, hide }
         }
@@ -70,17 +70,45 @@ fn button_action(doc: &Document, d: &Dict, widgets: &[ObjRef], scripts: &mut Dec
     })
 }
 
+/// Most entries of a `ResetForm` `/Fields` or `Hide` `/T` array that [`action_fields`] reads.
+const MAX_ACTION_FIELDS: usize = 65_536;
+/// Most bytes of field names [`action_fields`] builds in all, over every entry. A name is the
+/// partial names of up to 64 ancestors joined, and entries can share those ancestors, so the names
+/// can be far larger than the array that lists them: each of a few thousand entries naming a
+/// widget under the same chain of long partial names would otherwise build its own copy.
+const MAX_ACTION_FIELD_BYTES: usize = 4 << 20;
+
 /// The field names targeted by a `ResetForm` (`/Fields`) or `Hide` (`/T`) action entry: a field
-/// name string, an indirect field or widget dictionary reference, or an array of them.
-pub(crate) fn action_fields(doc: &Document, o: &Object) -> Vec<String> {
+/// name string, an indirect field or widget dictionary reference, or an array of them. `None`
+/// when the array has more than [`MAX_ACTION_FIELDS`] entries or the names total more than
+/// [`MAX_ACTION_FIELD_BYTES`]: a shortened list would reset or hide the wrong fields (a reset
+/// that excludes the listed ones would reset more), so the action is not read at all.
+pub(crate) fn action_fields(doc: &Document, o: &Object) -> Option<Vec<String>> {
     let target = |item: &Object| match item {
         Object::Ref(r) => qualified_name(doc, *r).or_else(|| text_of(&doc.resolve(item))),
         other => text_of(other),
     };
+    let mut bytes = 0usize;
+    let mut out = Vec::new();
+    let mut take = |name: Option<String>| -> Option<()> {
+        if let Some(name) = name {
+            bytes = bytes.checked_add(name.len()).filter(|b| *b <= MAX_ACTION_FIELD_BYTES)?;
+            out.push(name);
+        }
+        Some(())
+    };
     match &*doc.resolve(o) {
-        Object::Array(items) => items.iter().filter_map(target).collect(),
-        _ => target(o).into_iter().collect(),
+        Object::Array(items) => {
+            if items.len() > MAX_ACTION_FIELDS {
+                return None;
+            }
+            for item in items {
+                take(target(item))?;
+            }
+        }
+        _ => take(target(o))?,
     }
+    Some(out)
 }
 
 /// The fully qualified name of the field that `r` (a field or one of its widgets) belongs to,

@@ -8393,3 +8393,50 @@ fn copies_are_made_in_one_call_and_a_bad_one_changes_nothing() {
     let names: Vec<_> = fields(&reopen(&doc)).into_iter().map(|f| f.name).collect();
     assert!(names.contains(&"B".to_owned()), "{names:?}");
 }
+
+/// A /Hide or /ResetForm array whose entries share a deep chain of long partial names built one
+/// copy of that chain per entry, and an array past the entry limit was read whole. Such an action
+/// is now not read (a shortened list would hide or reset the wrong fields).
+#[test]
+fn action_field_lists_over_the_limits_are_not_read() {
+    let mut doc = fixture();
+    let go = field(&fields(&doc), "go").obj;
+    let s = |t: &str| Object::String(PdfString::text(t));
+    // 64 ancestors, each with a 100 KB partial name: one qualified name is about 6.4 MB.
+    let long = "n".repeat(100_000);
+    let mut parent = None;
+    for _ in 0..64 {
+        let node = doc.add(Object::Dict(Dict::new()));
+        doc.update_dict(node, |d| {
+            d.set(b"T".to_vec(), s(&long));
+            if let Some(p) = parent {
+                d.set(b"Parent".to_vec(), Object::Ref(p));
+            }
+        })
+        .unwrap();
+        parent = Some(node);
+    }
+    let leaf = doc.add(Object::Dict(Dict::new()));
+    doc.update_dict(leaf, |d| {
+        d.set(b"T".to_vec(), s("leaf"));
+        d.set(b"Parent".to_vec(), Object::Ref(parent.unwrap()));
+    })
+    .unwrap();
+    let set = |doc: &mut Document, kind: &str, key: &str, list: Object| {
+        let mut a = Dict::new();
+        a.set(b"S".to_vec(), Object::name(kind));
+        a.set(key.as_bytes().to_vec(), list);
+        doc.update_dict(go, |d| d.set(b"A".to_vec(), Object::Dict(a))).unwrap();
+    };
+    set(&mut doc, "Hide", "T", Object::Array(vec![Object::Ref(leaf); 3]));
+    assert!(field(&fields(&doc), "go").button.is_none(), "names over the byte allowance");
+    assert!(matches!(field_actions(&doc, "go").unwrap().as_slice(), [(Trigger::MouseUp, FieldAction::Other(_))]));
+    set(&mut doc, "ResetForm", "Fields", Object::Array(vec![Object::Ref(leaf)]));
+    assert!(matches!(field_actions(&doc, "go").unwrap().as_slice(), [(Trigger::MouseUp, FieldAction::Other(_))]));
+    // Too many entries, though each name is short.
+    set(&mut doc, "ResetForm", "Fields", Object::Array(vec![s("a"); 65_537]));
+    assert!(matches!(field_actions(&doc, "go").unwrap().as_slice(), [(Trigger::MouseUp, FieldAction::Other(_))]));
+    // Within the limits the list is read whole.
+    set(&mut doc, "ResetForm", "Fields", Object::Array(vec![s("a"); 65_536]));
+    assert!(matches!(field_actions(&doc, "go").unwrap().as_slice(), [(Trigger::MouseUp, FieldAction::Reset(f))] if f.len() == 65_536));
+}
