@@ -382,8 +382,8 @@ milestone = "M1"
 status = "shipped"
 commands = ["file.properties"]
 tools = ["doc_revisions"]
-evidence = ["craft-pdf::cos/document/tests.rs::revision_ends_split_incremental_updates", "crates/automation/tests/it/automation.rs::digital_ids_signing_and_validation_through_tools"]
-notes = "revision ends from the xref chain (linearized first-page sections fold into their revision); listed in Document Properties ▸ Advanced and by doc_revisions with the signatures covering each"
+evidence = ["craft-pdf::cos/document/tests.rs::revision_ends_split_incremental_updates", "crates/automation/tests/it/automation.rs::digital_ids_signing_and_validation_through_tools", "crates/automation/src/documents.rs::many_revisions_and_signatures_are_matched_in_near_linear_time", "crates/automation/src/documents.rs::a_signature_belongs_to_the_revision_its_length_falls_in"]
+notes = "revision ends from the xref chain (linearized first-page sections fold into their revision); listed in Document Properties ▸ Advanced and by doc_revisions with the signatures covering each (matched by binary search over the revision ends)"
 
 [[feature]]
 id = "core.view-revision"
