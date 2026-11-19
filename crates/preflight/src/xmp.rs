@@ -1,6 +1,8 @@
 //! XMP metadata for PDF/A: the identification schema and the document information, kept
 //! consistent (ISO 19005-2 §6.6).
 
+use std::sync::Arc;
+
 use pdfcraft_cos::Document;
 
 /// The largest XMP packet read; a larger one is treated as missing.
@@ -33,23 +35,52 @@ pub(crate) fn identifier(xmp: &str, namespace: &str, local: &str) -> Option<Stri
 }
 
 /// Namespace scope tracking for `craft_xml::El` trees.
+///
+/// A scope is a chain of the declarations that elements add, shared by every scope below it. An
+/// element that declares nothing shares its parent's chain, so holding one scope per child of a
+/// wide element costs a pointer each, not a copy of every declaration above it.
 #[derive(Clone)]
-pub(crate) struct NsScope<'a>(Vec<(&'a str, &'a str)>);
+pub(crate) struct NsScope<'a>(Arc<ScopeNode<'a>>);
+
+// The chain is as long as the parser's depth cap of 1024 allows, so dropping it cannot overflow the stack.
+struct ScopeNode<'a> {
+    decls: Vec<(&'a str, &'a str)>,
+    parent: Option<Arc<ScopeNode<'a>>>,
+}
 
 impl<'a> NsScope<'a> {
     pub(crate) fn root() -> Self {
-        Self(vec![("xml", "http://www.w3.org/XML/1998/namespace")])
+        Self(Arc::new(ScopeNode { decls: vec![("xml", "http://www.w3.org/XML/1998/namespace")], parent: None }))
     }
 
     pub(crate) fn child(&self, el: &'a craft_xml::El) -> Self {
-        let mut next = self.0.clone();
-        next.extend(el.ns_decls());
-        Self(next)
+        let decls: Vec<(&'a str, &'a str)> = el.ns_decls().collect();
+        if decls.is_empty() {
+            return self.clone();
+        }
+        Self(Arc::new(ScopeNode { decls, parent: Some(Arc::clone(&self.0)) }))
+    }
+
+    /// Whether both scopes are the same chain, so no declaration was copied between them.
+    #[cfg(test)]
+    pub(crate) fn shares_with(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+
+    /// The URI the innermost declaration of `prefix` binds, empty when it undeclares it.
+    fn lookup(&self, prefix: &str) -> Option<&'a str> {
+        let mut node = Some(&self.0);
+        while let Some(n) = node {
+            if let Some((_, uri)) = n.decls.iter().rfind(|(p, _)| *p == prefix) {
+                return Some(uri);
+            }
+            node = n.parent.as_ref();
+        }
+        None
     }
 
     pub(crate) fn el_ns(&self, el: &craft_xml::El) -> Option<&'a str> {
-        let prefix = el.prefix();
-        self.0.iter().rfind(|(p, _)| *p == prefix).map(|(_, u)| *u).filter(|u| !u.is_empty())
+        self.lookup(el.prefix()).filter(|u| !u.is_empty())
     }
 
     pub(crate) fn attr_ns(&self, attr_name: &str) -> Option<&'a str> {
@@ -57,7 +88,7 @@ impl<'a> NsScope<'a> {
         if prefix == "xmlns" {
             return None;
         }
-        self.0.iter().rfind(|(p, _)| *p == prefix).map(|(_, u)| *u).filter(|u| !u.is_empty())
+        self.lookup(prefix).filter(|u| !u.is_empty())
     }
 
     pub(crate) fn attr(&self, el: &'a craft_xml::El, ns: &str, local: &str) -> Option<&'a str> {
