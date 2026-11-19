@@ -246,7 +246,7 @@ impl Automation {
         let (old, new) = self.compare_ids(a)?;
         let (old_range, new_range) = (self.compare_range(a, "other", old)?, self.compare_range(a, "doc", new)?);
         let kinds = Self::compare_kinds(a)?;
-        let full = self.session.compare_in(old, new, old_range, new_range).map_err(failed)?;
+        let full = self.session.compare_in_with(old, new, old_range, new_range, a.opt_bool("ignore_case")?.unwrap_or(false)).map_err(failed)?;
         let hidden = |k: Kind| if kinds.wants(k) { 0 } else { full.count(k) };
         let hidden_counts = json!({ "replaced": hidden(Kind::Replaced), "inserted": hidden(Kind::Inserted), "deleted": hidden(Kind::Deleted) });
         let identical = full.identical();

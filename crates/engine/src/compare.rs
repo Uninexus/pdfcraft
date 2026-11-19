@@ -223,6 +223,19 @@ impl Session {
     /// are the documents' own (page 7 is page 7, not renumbered from the range), and the word
     /// counts are of the compared pages. An invalid range is an error ([`PageRange::resolve`]).
     pub fn compare_in(&self, old: DocId, new: DocId, old_range: Option<PageRange>, new_range: Option<PageRange>) -> Result<Comparison, EditError> {
+        self.compare_in_with(old, new, old_range, new_range, false)
+    }
+
+    /// [`Session::compare_in`]; with `ignore_case`, words that differ only in letter case are not
+    /// changes (the words in the changes keep their own text). The visual comparison is unaffected.
+    pub fn compare_in_with(
+        &self,
+        old: DocId,
+        new: DocId,
+        old_range: Option<PageRange>,
+        new_range: Option<PageRange>,
+        ignore_case: bool,
+    ) -> Result<Comparison, EditError> {
         let a = self.get(old).ok_or(EditError::NoDocument)?;
         let b = self.get(new).ok_or(EditError::NoDocument)?;
         let old_pages = old_range.map(|r| r.resolve(a.info.pages.len())).transpose()?;
@@ -236,7 +249,7 @@ impl Session {
             words
         };
         let (old_words, new_words) = (within(a.words(), old_pages.clone()), within(b.words(), new_pages.clone()));
-        let mut c = pdfcraft_compare::compare(&old_words, &new_words);
+        let mut c = pdfcraft_compare::compare_with(&old_words, &new_words, ignore_case);
         // A range without words has no neighbour to place a change by: put it on the range's
         // first page rather than page 1.
         for (words, pages, side) in [(&old_words, &old_pages, 0), (&new_words, &new_pages, 1)] {

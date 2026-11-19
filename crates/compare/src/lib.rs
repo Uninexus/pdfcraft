@@ -255,8 +255,15 @@ fn side(words: &[&Word], neighbour: Option<&Word>) -> Side {
 
 /// Compare two documents' words.
 pub fn compare(old: &[Word], new: &[Word]) -> Comparison {
-    let a: Vec<u64> = old.iter().map(|w| hash(&w.text)).collect();
-    let b: Vec<u64> = new.iter().map(|w| hash(&w.text)).collect();
+    compare_with(old, new, false)
+}
+
+/// [`compare`]; with `ignore_case` two words that differ only in letter case (Unicode lowercase
+/// mapping) count as the same word. The words in the result keep their own text.
+pub fn compare_with(old: &[Word], new: &[Word], ignore_case: bool) -> Comparison {
+    let key = |w: &Word| if ignore_case { hash(&w.text.to_lowercase()) } else { hash(&w.text) };
+    let a: Vec<u64> = old.iter().map(key).collect();
+    let b: Vec<u64> = new.iter().map(key).collect();
     let mut ops = Vec::with_capacity(a.len().max(b.len()));
     diff(&a, &b, &mut ops, 0);
 
@@ -349,6 +356,20 @@ mod tests {
     fn identical_text_has_no_changes() {
         let c = compare(&words("the same words here", 0), &words("the same words here", 0));
         assert!(c.identical());
+    }
+
+    #[test]
+    fn ignoring_case_treats_words_that_differ_only_in_case_as_equal() {
+        let (old, new) = (words("Invoice TOTAL due Ärger", 0), words("invoice total DUE ärger now", 0));
+        let c = compare(&old, &new);
+        assert_eq!((c.changes.len(), c.changes[0].kind), (1, Kind::Replaced));
+        let c = compare_with(&old, &new, true);
+        let got: Vec<(Kind, &str)> = c.changes.iter().map(|x| (x.kind, x.new.text.as_str())).collect();
+        assert_eq!(got, [(Kind::Inserted, "now")]);
+        assert!(compare_with(&old, &old, true).identical());
+        // A real word change is still a change, and the result keeps each side's own text.
+        let c = compare_with(&words("Alpha Beta", 0), &words("alpha GAMMA", 0), true);
+        assert_eq!((c.changes.len(), c.changes[0].old.text.as_str(), c.changes[0].new.text.as_str()), (1, "Beta", "GAMMA"));
     }
 
     #[test]
