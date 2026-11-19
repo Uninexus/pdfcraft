@@ -103,16 +103,19 @@ fn read(doc: &Document, o: &Object, pages: &[pdfcraft_cos::ObjRef], scripts: &mu
     Some(match d.name(b"S")? {
         b"JavaScript" => FieldAction::JavaScript(crate::script(doc, o, scripts).unwrap_or_default()),
         b"URI" => FieldAction::Uri(d.get(b"URI").and_then(|u| doc.resolve(u).as_string().map(|s| s.to_text())).unwrap_or_default()),
-        b"ResetForm" => FieldAction::Reset(d.get(b"Fields").map(|f| crate::read::action_fields(doc, f)).unwrap_or_default()),
+        b"ResetForm" => match d.get(b"Fields").map_or_else(|| Some(Vec::new()), |f| crate::read::action_fields(doc, f)) {
+            Some(fields) => FieldAction::Reset(fields),
+            None => FieldAction::Other("ResetForm (too many field names to list)".into()),
+        },
         b"Named" => FieldAction::Named(d.name(b"N").map(|n| String::from_utf8_lossy(n).into_owned()).unwrap_or_default()),
         b"GoTo" => {
             let dest = d.get(b"D").map(|x| doc.resolve(x))?;
             let target = dest.as_array()?.first()?.as_ref()?;
             FieldAction::GoTo(pages.iter().position(|p| *p == target)?)
         }
-        b"Hide" => FieldAction::ShowHide {
-            fields: d.get(b"T").map(|t| crate::read::action_fields(doc, t)).unwrap_or_default(),
-            hide: !d.get(b"H").is_some_and(|h| matches!(&*doc.resolve(h), Object::Bool(false))),
+        b"Hide" => match d.get(b"T").map_or_else(|| Some(Vec::new()), |t| crate::read::action_fields(doc, t)) {
+            Some(fields) => FieldAction::ShowHide { fields, hide: !d.get(b"H").is_some_and(|h| matches!(&*doc.resolve(h), Object::Bool(false))) },
+            None => FieldAction::Other("Hide (too many field names to list)".into()),
         },
         b"SubmitForm" => FieldAction::Submit(
             d.get(b"F")
