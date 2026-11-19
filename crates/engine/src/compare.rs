@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use pdfcraft_cos::ObjRef;
 
-pub use pdfcraft_compare::{Change, Comparison, Kind, Side};
+pub use pdfcraft_compare::{Change, Comparison, Kind, Options as WordOptions, Side};
 // How far Office export reads into form XObjects; `OfficeExport::truncated_pages` lists the pages
 // that draw more.
 pub use pdfcraft_edit::{MAX_FORM_DEPTH, MAX_FORM_VISITS};
@@ -236,6 +236,19 @@ impl Session {
         new_range: Option<PageRange>,
         ignore_case: bool,
     ) -> Result<Comparison, EditError> {
+        self.compare_in_options(old, new, old_range, new_range, WordOptions { ignore_case, ignore_punctuation: false })
+    }
+
+    /// [`Session::compare_in`] with the word differences `options` names left out (case, sentence
+    /// punctuation). The words in the changes keep their own text; the visual comparison is unaffected.
+    pub fn compare_in_options(
+        &self,
+        old: DocId,
+        new: DocId,
+        old_range: Option<PageRange>,
+        new_range: Option<PageRange>,
+        options: WordOptions,
+    ) -> Result<Comparison, EditError> {
         let a = self.get(old).ok_or(EditError::NoDocument)?;
         let b = self.get(new).ok_or(EditError::NoDocument)?;
         let old_pages = old_range.map(|r| r.resolve(a.info.pages.len())).transpose()?;
@@ -249,7 +262,7 @@ impl Session {
             words
         };
         let (old_words, new_words) = (within(a.words(), old_pages.clone()), within(b.words(), new_pages.clone()));
-        let mut c = pdfcraft_compare::compare_with(&old_words, &new_words, ignore_case);
+        let mut c = pdfcraft_compare::compare_options(&old_words, &new_words, options);
         // A range without words has no neighbour to place a change by: put it on the range's
         // first page rather than page 1.
         for (words, pages, side) in [(&old_words, &old_pages, 0), (&new_words, &new_pages, 1)] {

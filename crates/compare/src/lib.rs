@@ -261,7 +261,70 @@ pub fn compare(old: &[Word], new: &[Word]) -> Comparison {
 /// [`compare`]; with `ignore_case` two words that differ only in letter case (Unicode lowercase
 /// mapping) count as the same word. The words in the result keep their own text.
 pub fn compare_with(old: &[Word], new: &[Word], ignore_case: bool) -> Comparison {
-    let key = |w: &Word| if ignore_case { hash(&w.text.to_lowercase()) } else { hash(&w.text) };
+    compare_options(old, new, Options { ignore_case, ignore_punctuation: false })
+}
+
+/// What [`compare_options`] does not count as a difference between two words.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Options {
+    /// Words that differ only in letter case (Unicode lowercase mapping) are the same word.
+    pub ignore_case: bool,
+    /// Words that differ only in sentence punctuation ([`is_ignorable_punctuation`]) are the same
+    /// word. Words made only of such marks equal one another, never a word with any other character.
+    pub ignore_punctuation: bool,
+}
+
+/// Whether `c` is punctuation that `ignore_punctuation` removes: full stop, comma, semicolon,
+/// colon, exclamation and question marks, quotes, apostrophes, brackets, hyphen and underscore,
+/// and the Unicode punctuation for dashes, quotes, bullets and ellipsis (U+2010 to U+2027, U+2038
+/// to U+2043, U+2045 to U+2051, U+2053 to U+205E), CJK stops (U+3001 to U+3003) and the Latin-1
+/// marks (inverted marks, guillemets, pilcrow, middle dot). Kept, because they change a figure or
+/// a name: symbols (`$ + = < > ^ | ~`), `# % & @ * / \`, the section sign, per mille and basis
+/// point signs (U+2030 to U+2031), primes (U+2032 to U+2037), the fraction slash (U+2044) and the
+/// commercial minus (U+2052). Two further rules, in [`strip_punctuation`], keep a `.` or `,`
+/// between two digits and a dash before a digit.
+pub fn is_ignorable_punctuation(c: char) -> bool {
+    matches!(c, '.' | ',' | ';' | ':' | '!' | '?' | '\'' | '"' | '(' | ')' | '[' | ']' | '{' | '}' | '-' | '_')
+        || matches!(c, '\u{A1}' | '\u{AB}' | '\u{B6}' | '\u{B7}' | '\u{BB}' | '\u{BF}')
+        || matches!(c as u32, 0x2010..=0x2027 | 0x2038..=0x2043 | 0x2045..=0x2051 | 0x2053..=0x205E | 0x3001..=0x3003)
+}
+
+/// The word without its ignorable punctuation, or `None` when it has none. A `.` or `,` between
+/// two digits stays (10.5 is not 105, 1.000 is not 1,000), and so does a dash directly before a
+/// digit unless a letter comes before it (-5 is not 5, but A-5 is A5). A word of only marks gives
+/// an empty string.
+fn strip_punctuation(text: &str) -> Option<String> {
+    if !text.chars().any(is_ignorable_punctuation) {
+        return None;
+    }
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = String::with_capacity(text.len());
+    for (i, &c) in chars.iter().enumerate() {
+        let prev = i.checked_sub(1).and_then(|p| chars.get(p)).copied();
+        let next = chars.get(i + 1).copied();
+        let digit = |x: Option<char>| x.is_some_and(char::is_numeric);
+        let keep = !is_ignorable_punctuation(c)
+            || (matches!(c, '.' | ',') && digit(prev) && digit(next))
+            || (matches!(c, '-' | '\u{2010}'..='\u{2015}') && digit(next) && !prev.is_some_and(char::is_alphabetic));
+        if keep {
+            out.push(c);
+        }
+    }
+    Some(out)
+}
+
+/// [`compare`] with the differences [`Options`] names left out. The words in the result keep
+/// their own text.
+pub fn compare_options(old: &[Word], new: &[Word], options: Options) -> Comparison {
+    let key = |w: &Word| {
+        let mut text = std::borrow::Cow::Borrowed(w.text.as_str());
+        // Words of only marks all share one key; a word with any kept character never has it,
+        // so they still differ from lettered words.
+        if let Some(stripped) = options.ignore_punctuation.then(|| strip_punctuation(&w.text)).flatten() {
+            text = std::borrow::Cow::Owned(if stripped.is_empty() { "\u{0}".to_string() } else { stripped });
+        }
+        if options.ignore_case { hash(&text.to_lowercase()) } else { hash(&text) }
+    };
     let a: Vec<u64> = old.iter().map(key).collect();
     let b: Vec<u64> = new.iter().map(key).collect();
     let mut ops = Vec::with_capacity(a.len().max(b.len()));
@@ -370,6 +433,52 @@ mod tests {
         // A real word change is still a change, and the result keeps each side's own text.
         let c = compare_with(&words("Alpha Beta", 0), &words("alpha GAMMA", 0), true);
         assert_eq!((c.changes.len(), c.changes[0].old.text.as_str(), c.changes[0].new.text.as_str()), (1, "Beta", "GAMMA"));
+    }
+
+    #[test]
+    fn ignoring_punctuation_treats_words_that_differ_only_in_marks_as_equal() {
+        let punct = Options { ignore_punctuation: true, ..Options::default() };
+        let (old, new) = (words("Hello, world. (Total) don't \u{201C}quoted\u{201D} end;", 0), words("Hello world Total dont quoted end", 0));
+        assert!(!compare(&old, &new).identical(), "marks differ with the option off");
+        assert!(compare_options(&old, &new, punct).identical());
+        assert!(!compare_options(&old, &new, Options::default()).identical());
+        // A figure that changes is still a change: symbols, separators between digits, a sign,
+        // per mille, primes, the fraction slash and the section sign are kept.
+        for (a, b) in [
+            ("$50", "$60"),
+            ("$5", "5"),
+            ("50%", "50"),
+            ("10.5", "105"),
+            ("$5.00", "$500"),
+            ("1.000", "1,000"),
+            ("1,5", "15"),
+            ("-5", "5"),
+            ("\u{2212}5", "5"),
+            ("\u{2013}5", "5"),
+            ("50\u{2030}", "50"),
+            ("1\u{2044}2", "12"),
+            ("5\u{2032}", "5\u{2033}"),
+            ("5\u{2032}", "5"),
+            ("\u{A7}5", "5"),
+            ("1-2", "12"),
+        ] {
+            let c = compare_options(&words(a, 0), &words(b, 0), punct);
+            assert!(!c.identical(), "{a} and {b} must differ");
+        }
+        // Marks next to figures and letters still go: a trailing stop, a hyphen inside a word.
+        for (a, b) in [("5.", "5"), ("10.5,", "10.5"), ("A-5", "A5"), ("well-known", "wellknown"), ("(-5)", "-5"), ("1,000.", "1,000")] {
+            let c = compare_options(&words(a, 0), &words(b, 0), punct);
+            assert!(c.identical(), "{a} and {b} must be equal");
+        }
+        // Words of only marks equal each other, but not a missing word or a lettered word.
+        assert!(compare_options(&words("a - b", 0), &words("a \u{2014} b", 0), punct).identical());
+        assert!(compare_options(&words("a ... b", 0), &words("a \u{2026} b", 0), punct).identical());
+        let c = compare_options(&words("a - b", 0), &words("a b", 0), punct);
+        assert_eq!((c.changes.len(), c.changes[0].kind), (1, Kind::Deleted));
+        assert!(!compare_options(&words("a - b", 0), &words("a x b", 0), punct).identical());
+        let c = compare_options(&words("Done. DONE", 0), &words("done", 0), Options { ignore_case: true, ignore_punctuation: true });
+        assert_eq!(c.changes.len(), 1);
+        assert_eq!(c.changes[0].kind, Kind::Deleted);
     }
 
     #[test]
