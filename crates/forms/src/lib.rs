@@ -49,8 +49,8 @@ pub use appearances::{FieldAppearanceCache, declares_pdfa, need_appearances, und
 pub(crate) use read::page_refs;
 pub use read::selected_options;
 pub use read::{
-    Fields, MAX_OPTION_BYTES, MAX_OPTION_ENTRIES, acroform, adopted_page_fields, fields, fields_with_adopted, form_reads_on_this_thread,
-    options_omitted,
+    Fields, MAX_OPTION_BYTES, MAX_OPTION_ENTRIES, MAX_VALUE_BYTES, acroform, adopted_page_fields, fields, fields_with_adopted,
+    form_reads_on_this_thread, options_omitted, value_omitted,
 };
 #[cfg(test)]
 use read::{MAX_SCRIPT_BYTES, PageWalk, enumerate, form_reads_on_this_thread as form_reads};
@@ -177,6 +177,11 @@ pub struct Field {
     /// [`MAX_OPTION_ENTRIES`] and [`MAX_OPTION_BYTES`]): `options` is empty though the file has
     /// options. Values and options of such a choice field are neither written nor redrawn.
     pub options_omitted: bool,
+    /// The field's `/V` or `/DV` text was not read (the form's allowance of value text was spent,
+    /// see [`MAX_VALUE_BYTES`]): `value` or `default` is empty though the file has text there.
+    /// Such a field is neither written, reset, exported nor redrawn, and its default is not
+    /// known ([`default_value_known`]).
+    pub value_omitted: bool,
     /// Combo and list boxes: the selected options, as ascending positions in `options` (see
     /// [`selected_options`]). Two options can share an export value, so `value` alone can't say
     /// which of them is selected. Empty for other kinds.

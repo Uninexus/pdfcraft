@@ -347,6 +347,21 @@ impl Session {
         .map_err(EditError::Write)
     }
 
+    /// The names of the form fields an export of `id`'s form data (any format but an XFA form's
+    /// datasets) leaves out because their value was not read (`Field::value_omitted`), instead of
+    /// writing them empty. Empty for an XFA export and when nothing is left out.
+    pub fn export_data_left_out(&self, id: DocId) -> Vec<String> {
+        let Some(doc) = self.get(id) else { return Vec::new() };
+        let cos = match doc.editor.as_ref() {
+            Some(e) => e.cos.clone(),
+            None => match pdfcraft_cos::Document::open_with_password(doc.bytes.clone(), doc.password.as_deref()) {
+                Ok(cos) => cos,
+                Err(_) => return Vec::new(),
+            },
+        };
+        pdfcraft_xfdf::fields_left_out(&cos)
+    }
+
     /// What Convert colours would change on `pages` of `id`, without changing the document.
     pub fn count_colours(&self, id: DocId, pages: &[usize], settings: &pdfcraft_edit::ConvertColours) -> pdfcraft_edit::ColoursConverted {
         let Some(doc) = self.get(id) else { return Default::default() };

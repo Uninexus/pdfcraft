@@ -33,12 +33,15 @@ pub(crate) fn undrawn_field_warnings(doc: &pdfcraft_cos::Document) -> Vec<String
 }
 
 /// The form's fields as the XFA data layer wants them.
-fn xfa_field_data(doc: &pdfcraft_cos::Document) -> Vec<pdfcraft_xfa::FieldDatum> {
+pub(crate) fn xfa_field_data(doc: &pdfcraft_cos::Document) -> Vec<pdfcraft_xfa::FieldDatum> {
     use pdfcraft_forms::FieldKind as K;
     pdfcraft_forms::fields(doc)
         .into_iter()
         .map(|f| {
+            // A field whose value was not read holds no data to write: the datasets keep what
+            // they have for it, and what they hold is not read into it.
             let data = match f.kind {
+                _ if f.value_omitted => pdfcraft_xfa::FieldData::None,
                 K::Text | K::Combo | K::List => pdfcraft_xfa::FieldData::Text(f.value.join("\n")),
                 K::CheckBox => pdfcraft_xfa::FieldData::Check(!f.value.is_empty()),
                 K::Radio => pdfcraft_xfa::FieldData::Radio(f.value.first().cloned()),

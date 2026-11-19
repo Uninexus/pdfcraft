@@ -345,6 +345,12 @@ pub fn redraw_fields(doc: &mut Document, mut keep: impl FnMut(&Document, &Field)
 
 /// [`redraw_widgets`] for the field `f`, as `fields(doc)` read it.
 fn redraw_widgets_of(doc: &mut Document, f: &Field, only: Option<usize>) -> Result<(), FormError> {
+    // A text or choice field whose value was not read ([`Field::value_omitted`]) would be drawn
+    // empty: its appearance stays as the file has it (an edit of its tooltip or font, a copy, a
+    // redaction or an XFA layout all come here).
+    if f.value_omitted && matches!(f.kind, FieldKind::Text | FieldKind::Combo | FieldKind::List) {
+        return Ok(());
+    }
     let mut undrawn = false;
     for (index, w) in f.widgets.iter().enumerate() {
         if only.is_some_and(|only| only != index) {

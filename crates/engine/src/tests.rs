@@ -10877,6 +10877,73 @@ fn choice_fields_with_unread_options_are_noted_as_a_repair() {
     assert!(log.len() == 1 && log[0].contains("1 choice field's options") && log[0].contains("left as it is"), "{log:?}");
 }
 
+/// Fields sharing one huge `/V` array read past the form's allowance of value text with no value:
+/// they are flagged, and opening the file says so in the repair log.
+#[test]
+fn fields_with_unread_values_are_noted_as_a_repair() {
+    let entries = "(a)".repeat(2_000_000);
+    let objs: Vec<String> = vec![
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm 4 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 200 300] >>".into(),
+        "<< /Type /Page /Parent 2 0 R /Annots [6 0 R 7 0 R] >>".into(),
+        "<< /Fields [6 0 R 7 0 R] /DA (/Helv 0 Tf 0 g) >>".into(),
+        format!("[{entries}]"),
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (a) /V 5 0 R /Rect [10 200 90 220] /P 3 0 R >>".into(),
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (b) /V 5 0 R /Rect [10 150 90 170] /P 3 0 R >>".into(),
+    ];
+    let mut bytes = b"%PDF-1.7\n".to_vec();
+    let mut offsets = Vec::new();
+    for (i, o) in objs.iter().enumerate() {
+        offsets.push(bytes.len());
+        bytes.extend_from_slice(format!("{} 0 obj\n{o}\nendobj\n", i + 1).as_bytes());
+    }
+    let xref = bytes.len();
+    bytes.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1).as_bytes());
+    for o in offsets {
+        bytes.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+    }
+    bytes.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objs.len() + 1).as_bytes());
+    let mut s = Session::new().with_clock(|| 1_700_000_000);
+    let id = s.open("values.pdf", None, Arc::new(bytes), None).expect("opens");
+    let doc = s.get(id).unwrap();
+    let flags: Vec<bool> = doc.form.iter().map(|f| f.value_omitted).collect();
+    assert!(flags == [false, true], "per-field flags: {flags:?}");
+    let log = doc.repair_log();
+    assert!(log.len() == 1 && log[0].contains("1 field's value") && log[0].contains("left as it is"), "{log:?}");
+}
+
+/// The XFA data layer is given no data for a field whose value was not read, so the datasets are
+/// not rewritten empty for it and what they hold is not read into it.
+#[test]
+fn an_xfa_sync_gives_no_data_for_a_field_whose_value_was_not_read() {
+    let entries = "(a)".repeat(2_000_000);
+    let objs: Vec<String> = vec![
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm 4 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 200 300] >>".into(),
+        "<< /Type /Page /Parent 2 0 R /Annots [6 0 R 7 0 R] >>".into(),
+        "<< /Fields [6 0 R 7 0 R] /DA (/Helv 0 Tf 0 g) >>".into(),
+        format!("[{entries}]"),
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (a) /V 5 0 R /Rect [10 200 90 220] /P 3 0 R >>".into(),
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (b) /V 5 0 R /Rect [10 150 90 170] /P 3 0 R >>".into(),
+    ];
+    let mut bytes = b"%PDF-1.7\n".to_vec();
+    let mut offsets = Vec::new();
+    for (i, o) in objs.iter().enumerate() {
+        offsets.push(bytes.len());
+        bytes.extend_from_slice(format!("{} 0 obj\n{o}\nendobj\n", i + 1).as_bytes());
+    }
+    let xref = bytes.len();
+    bytes.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1).as_bytes());
+    for o in offsets {
+        bytes.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+    }
+    bytes.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objs.len() + 1).as_bytes());
+    let cos = pdfcraft_cos::Document::open(Arc::new(bytes)).expect("opens");
+    let data = crate::xfa_form::xfa_field_data(&cos);
+    let kinds: Vec<bool> = data.iter().map(|d| matches!(d.data, pdfcraft_xfa::FieldData::None)).collect();
+    assert!(kinds == [false, true], "no data for the second field only: {kinds:?}");
+}
+
 /// A page too large for the renderer at the asked resolution exports at the most it allows (and
 /// says at what), as File ▸ Export does; a source that asks for strictness refuses it instead.
 #[test]

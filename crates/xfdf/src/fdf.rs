@@ -231,6 +231,10 @@ pub fn export_fdf(doc: &Document, comments: bool, fields: bool, file: &str) -> R
             if matches!(f.kind, FieldKind::PushButton | FieldKind::Signature) {
                 continue;
             }
+            // Its value was not read, and would be written empty: left out ([`fields_left_out`]).
+            if f.value_omitted {
+                continue;
+            }
             // Field dictionary, /T string and /V scalar/array, plus every emitted list
             // entry. Other field kinds emit only their first value (or a default).
             let field_nodes = if matches!(f.kind, FieldKind::List) && f.value.len() > 1 { f.value.len().saturating_add(3) } else { 3 };
