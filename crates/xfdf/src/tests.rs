@@ -2296,6 +2296,22 @@ fn merge_csv_lists_each_column_once_in_order() {
     assert_eq!(lines.next(), Some("2-3,,2-0,2-1,2-2"));
 }
 
+/// Files that each bring their own names make a table that grows with the square of their
+/// number; it is refused past `MAX_MERGE_CELLS` cells instead of being written, and the column
+/// count it reports counts a header cell that holds commas or line breaks once.
+#[test]
+fn merge_csv_limited_refuses_a_table_past_the_cell_cap() {
+    let side = (MAX_MERGE_CELLS as f64).sqrt() as usize + 1;
+    let files: Vec<Vec<(String, Vec<String>)>> = (0..side).map(|f| vec![(format!("n{f}"), vec!["x".into()])]).collect();
+    let err = merge_csv_limited(&files).unwrap_err();
+    assert!(err.contains("at most 2000000 cells"), "{err}");
+    let ok: Vec<Vec<(String, Vec<String>)>> = (0..3).map(|f| vec![("a,b\nc".into(), vec![f.to_string()]), ("d".into(), vec![])]).collect();
+    let (csv, columns) = merge_csv_limited(&ok).unwrap();
+    assert_eq!(columns, 2, "{csv}");
+    assert_eq!(csv, merge_csv(&ok));
+    assert_eq!(merge_csv_limited(&[]).unwrap().1, 0);
+}
+
 /// A long parent name is written into every descendant's full name: past the import's text
 /// bound the file is refused rather than expanded.
 #[test]

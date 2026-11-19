@@ -4938,8 +4938,8 @@ milestone = "M6"
 status = "shipped"
 commands = ["form.merge_data"]
 tools = ["form_merge_data"]
-evidence = ["crates/xfdf/src/tests.rs::data_files_merge_into_a_spreadsheet", "crates/automation/tests/it/automation.rs::merging_form_data_into_a_spreadsheet", "crates/ui-egui/tests/it/javascript.rs::merge_data_files_into_a_spreadsheet", "crates/xfdf/src/tests.rs::csv_headers_with_tabs_survive_export_import_and_save"]
-notes = "FDF, XFDF or filled-in PDF forms \u2192 CSV, a column per field and a row per file. CSV header tabs, quotes and line breaks retain field identities through import and save/reopen; ambiguous external table detection remains heuristic."
+evidence = ["crates/xfdf/src/tests.rs::data_files_merge_into_a_spreadsheet", "crates/automation/tests/it/automation.rs::merging_form_data_into_a_spreadsheet", "crates/ui-egui/tests/it/javascript.rs::merge_data_files_into_a_spreadsheet", "crates/xfdf/src/tests.rs::csv_headers_with_tabs_survive_export_import_and_save", "crates/xfdf/src/tests.rs::merge_csv_limited_refuses_a_table_past_the_cell_cap", "crates/automation/tests/it/automation.rs::merging_form_data_counts_columns_and_refuses_a_huge_table"]
+notes = "FDF, XFDF or filled-in PDF forms \u2192 CSV, a column per field and a row per file; a table of more than 2,000,000 cells is refused. CSV header tabs, quotes and line breaks retain field identities through import and save/reopen; ambiguous external table detection remains heuristic."
 
 [[feature]]
 id = "form.flatten-fields"
