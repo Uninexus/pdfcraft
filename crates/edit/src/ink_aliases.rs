@@ -29,6 +29,12 @@ pub const MAX_ALIASES: usize = 64;
 const MAX_NAME_BYTES: usize = 127;
 /// References followed to reach a part of a colour space.
 const MAX_HOPS: usize = 8;
+/// The colorant entries (DeviceN names, colorants dictionary keys, printing order names) one
+/// reading or one pass of an aliasing may look at, added up over every colour space. A names
+/// array or dictionary that many spaces share is looked at once per space that names it, so
+/// without a total a small file of thousands of spaces over one array of a million names would
+/// cost billions of steps. Real files use a few dozen entries a space.
+pub const MAX_COLORANT_ENTRIES: usize = 2_000_000;
 
 /// Which colorant is renamed to which.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -115,13 +121,20 @@ fn target(doc: &Document, o: &Object) -> (Option<ObjRef>, Arc<Object>) {
 
 /// The spot colorants the document's Separation and DeviceN spaces name, with how many spaces
 /// name each, in name order.
-pub fn list_inks(doc: &Document) -> Vec<Ink> {
+pub fn list_inks(doc: &Document) -> InkList {
+    list_inks_within(doc, MAX_COLORANT_ENTRIES)
+}
+
+/// [`list_inks`] with the colorant entries it may look at (the limit, [`MAX_COLORANT_ENTRIES`]).
+fn list_inks_within(doc: &Document, entries: usize) -> InkList {
     let mut counts: BTreeMap<Vec<u8>, usize> = BTreeMap::new();
+    let mut left = entries;
+    let mut unread_spaces = 0;
     for num in doc.object_numbers() {
         let object = doc.get(ObjRef::new(num, doc.generation(num)));
-        collect(doc, &object, 0, &mut counts);
+        collect(doc, &object, 0, &mut counts, &mut left, &mut unread_spaces);
     }
-    counts
+    let inks = counts
         .into_iter()
         .map(|(name, spaces)| match String::from_utf8(name) {
             Ok(name) => Ink { name, spaces, aliasable: true },
@@ -130,37 +143,71 @@ pub fn list_inks(doc: &Document) -> Vec<Ink> {
                 Ink { name: format!("0x{hex}"), spaces, aliasable: false }
             }
         })
-        .collect()
+        .collect();
+    InkList { inks, unread_spaces }
 }
 
-fn collect(doc: &Document, object: &Object, depth: usize, counts: &mut BTreeMap<Vec<u8>, usize>) {
+/// What [`list_inks`] found.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct InkList {
+    /// The spot colorants read, in name order.
+    pub inks: Vec<Ink>,
+    /// DeviceN colour spaces whose names were not read because the [`MAX_COLORANT_ENTRIES`]
+    /// allowance was spent. Their inks are missing from `inks` and the counts may be low.
+    pub unread_spaces: usize,
+}
+
+fn collect(doc: &Document, object: &Object, depth: usize, counts: &mut BTreeMap<Vec<u8>, usize>, left: &mut usize, unread: &mut usize) {
     if depth > MAX_DEPTH {
         return;
     }
     match object {
         Object::Array(items) => {
-            for name in colorants(doc, items).into_iter().flatten().filter(|n| is_spot(n)) {
-                *counts.entry(name).or_default() += 1;
+            match colorants(doc, items, left) {
+                Some(Some(names)) => {
+                    for name in names.into_iter().filter(|n| is_spot(n)) {
+                        *counts.entry(name).or_default() += 1;
+                    }
+                }
+                Some(None) => *unread = unread.saturating_add(1),
+                None => {}
             }
             for item in items {
-                collect(doc, item, depth + 1, counts);
+                collect(doc, item, depth + 1, counts, left, unread);
             }
         }
-        Object::Dict(dict) => dict.iter().for_each(|(_, v)| collect(doc, v, depth + 1, counts)),
-        Object::Stream(stream) => stream.dict.iter().for_each(|(_, v)| collect(doc, v, depth + 1, counts)),
+        Object::Dict(dict) => dict.iter().for_each(|(_, v)| collect(doc, v, depth + 1, counts, left, unread)),
+        Object::Stream(stream) => stream.dict.iter().for_each(|(_, v)| collect(doc, v, depth + 1, counts, left, unread)),
         _ => {}
     }
 }
 
-/// The colorant names a Separation or DeviceN array holds, or `None` when it is not one.
-fn colorants(doc: &Document, items: &[Object]) -> Option<Vec<Vec<u8>>> {
+/// The colorant names a Separation or DeviceN array holds: `None` when it is not one, and
+/// `Some(None)` when it is a DeviceN space with more names than `left` entries allow (nothing is
+/// read then; otherwise its names are taken off `left`).
+fn colorants(doc: &Document, items: &[Object], left: &mut usize) -> Option<Option<Vec<Vec<u8>>>> {
     match items.first()?.as_name()? {
-        b"Separation" => doc.resolve(items.get(1)?).as_name().map(|n| vec![n.to_vec()]),
+        b"Separation" => doc.resolve(items.get(1)?).as_name().map(|n| Some(vec![n.to_vec()])),
         b"DeviceN" => {
             let list = doc.resolve(items.get(1)?);
-            Some(list.as_array()?.iter().filter_map(|n| doc.resolve(n).as_name().map(<[u8]>::to_vec)).collect())
+            let list = list.as_array()?;
+            if !spend(left, list.len()) {
+                return Some(None);
+            }
+            Some(Some(list.iter().filter_map(|n| doc.resolve(n).as_name().map(<[u8]>::to_vec)).collect()))
         }
         _ => None,
+    }
+}
+
+/// Takes `n` entries off `left`; `false` (and nothing taken) when there are not that many.
+fn spend(left: &mut usize, n: usize) -> bool {
+    match left.checked_sub(n) {
+        Some(rest) => {
+            *left = rest;
+            true
+        }
+        None => false,
     }
 }
 
@@ -172,7 +219,12 @@ fn colorants(doc: &Document, items: &[Object]) -> Option<Vec<Vec<u8>>> {
 /// DeviceN space the same colorant twice (`Gold` and `Gold2` both aliased to `Gold`) or one
 /// dictionary of it two entries of one name. Nothing is written then.
 pub fn alias_inks(doc: &mut Document, aliases: &InkAliases) -> Result<Aliased, EditError> {
-    let (done, writes) = plan(doc, aliases)?;
+    alias_inks_within(doc, aliases, MAX_COLORANT_ENTRIES)
+}
+
+/// [`alias_inks`] with the colorant entries each pass may look at.
+fn alias_inks_within(doc: &mut Document, aliases: &InkAliases, entries: usize) -> Result<Aliased, EditError> {
+    let (done, writes) = plan_within(doc, aliases, entries)?;
     for (r, object) in writes {
         doc.set(r, object);
     }
@@ -188,12 +240,26 @@ pub fn preview_aliases(doc: &Document, aliases: &InkAliases) -> Result<Aliased, 
 }
 
 fn plan(doc: &Document, aliases: &InkAliases) -> Result<(Aliased, Vec<(ObjRef, Object)>), EditError> {
+    plan_within(doc, aliases, MAX_COLORANT_ENTRIES)
+}
+
+/// [`plan`] with the colorant entries each pass may look at.
+fn plan_within(doc: &Document, aliases: &InkAliases, entries: usize) -> Result<(Aliased, Vec<(ObjRef, Object)>), EditError> {
     aliases.check().map_err(EditError::Invalid)?;
     if aliases.aliases.is_empty() {
         return Ok((Aliased::default(), Vec::new()));
     }
-    let mut walk =
-        Walk { doc, aliases, extras: BTreeMap::new(), spaces: 0, skipped: 0, recording: false, sigs: BTreeMap::new(), renamed_to: BTreeSet::new() };
+    let mut walk = Walk {
+        doc,
+        aliases,
+        extras: BTreeMap::new(),
+        spaces: 0,
+        skipped: 0,
+        recording: false,
+        sigs: BTreeMap::new(),
+        renamed_to: BTreeSet::new(),
+        left: entries,
+    };
     let nums = doc.object_numbers();
     // First every space is read, which fills in the objects its parts live in (a names array or
     // an attributes dictionary of its own), so that an object is rewritten once whatever order
@@ -204,6 +270,7 @@ fn plan(doc: &Document, aliases: &InkAliases) -> Result<(Aliased, Vec<(ObjRef, O
     walk.spaces = 0;
     walk.skipped = 0;
     walk.recording = true;
+    walk.left = entries;
     let mut writes = Vec::new();
     for num in nums {
         let r = ObjRef::new(num, doc.generation(num));
@@ -243,9 +310,24 @@ struct Walk<'a> {
     sigs: BTreeMap<Vec<u8>, BTreeSet<String>>,
     /// Names some ink was given.
     renamed_to: BTreeSet<Vec<u8>>,
+    /// Colorant entries this pass may still look at ([`MAX_COLORANT_ENTRIES`] at the start).
+    left: usize,
 }
 
 type Res<T> = Result<T, String>;
+
+impl Walk<'_> {
+    /// Takes `n` colorant entries off the pass's allowance, or refuses the whole aliasing.
+    fn spend(&mut self, n: usize) -> Res<()> {
+        if spend(&mut self.left, n) {
+            Ok(())
+        } else {
+            Err(format!(
+                "the document's DeviceN colour spaces name more than {MAX_COLORANT_ENTRIES} colorant entries between them (spaces sharing one big names array count it once each); nothing was written"
+            ))
+        }
+    }
+}
 
 /// How a part of a Separation (its alternate space or tint transform) is defined, for telling
 /// two definitions apart: a reference stands for its object, a direct value for itself. Never the
@@ -337,6 +419,7 @@ impl Walk<'_> {
         let Some(names_object) = items.get(1) else { return Ok(None) };
         let (names_at, names) = target(self.doc, names_object);
         let Some(list) = names.as_array() else { return Ok(None) };
+        self.spend(list.len())?;
         let mut new_names = Vec::with_capacity(list.len());
         let mut any = false;
         let mut seen: BTreeSet<Vec<u8>> = BTreeSet::new();
@@ -416,6 +499,8 @@ impl Walk<'_> {
     /// mixing hints name colorants in their solidities, dot gains and printing order. The process
     /// dictionary's components are DeviceCMYK's own and are never renamed.
     fn rename_attributes(&mut self, attributes: &Dict) -> Res<Option<Dict>> {
+        // Charged before the copy: spaces sharing one padded attributes dictionary copy it each.
+        self.spend(attributes.len())?;
         let mut out = attributes.clone();
         let mut changed = false;
         if let Some(value) = attributes.get(b"Colorants") {
@@ -430,6 +515,7 @@ impl Walk<'_> {
         if let Some(value) = attributes.get(b"MixingHints") {
             let (at, resolved) = target(self.doc, value);
             if let Object::Dict(hints) = &*resolved {
+                self.spend(hints.len())?;
                 let mut new_hints = hints.clone();
                 let mut hints_changed = false;
                 for key in [&b"Solidities"[..], b"DotGain"] {
@@ -446,6 +532,7 @@ impl Walk<'_> {
                 if let Some(part) = hints.get(b"PrintingOrder") {
                     let (part_at, part) = target(self.doc, part);
                     if let Object::Array(list) = &*part {
+                        self.spend(list.len())?;
                         let mut renamed = false;
                         let new: Vec<Object> = list
                             .iter()
@@ -482,7 +569,8 @@ impl Walk<'_> {
 
     /// A dictionary keyed by colorant name with its keys renamed, built in one pass from the
     /// original so that a swap or a chain loses nothing; a key that comes out twice is refused.
-    fn rekey(&self, dict: &Dict) -> Res<Option<Dict>> {
+    fn rekey(&mut self, dict: &Dict) -> Res<Option<Dict>> {
+        self.spend(dict.len())?;
         let mut out = Dict::new();
         let mut changed = false;
         for (key, value) in dict.iter() {
@@ -588,7 +676,7 @@ mod tests {
     #[test]
     fn every_space_naming_the_ink_is_renamed_and_nothing_else() {
         let (mut doc, objs) = fixture();
-        let before = list_inks(&doc);
+        let before = list_inks(&doc).inks;
         let pairs = |inks: &[Ink]| inks.iter().map(|i| (i.name.clone(), i.spaces)).collect::<Vec<_>>();
         assert_eq!(pairs(&before), vec![("PANTONE 185 C".to_owned(), 6), ("Varnish".to_owned(), 1)], "{before:?}");
         let preview = preview_aliases(&doc, &aliases(&[("PANTONE 185 C", "PANTONE 186 C")])).unwrap();
@@ -599,7 +687,7 @@ mod tests {
         // base and the image's space: 6 spaces in 3 objects.
         assert_eq!((done.spaces, done.objects), (6, 3), "{done:?}");
         assert_ne!(snapshot(&doc), touched);
-        let after = list_inks(&doc);
+        let after = list_inks(&doc).inks;
         assert_eq!(pairs(&after), vec![("PANTONE 186 C".to_owned(), 6), ("Varnish".to_owned(), 1)], "{after:?}");
         // The image's data is untouched, only its dictionary changed.
         match &*doc.get(objs[2]) {
@@ -648,7 +736,7 @@ mod tests {
         let mut doc = Document::new_empty();
         let all = doc.add(sep("All"));
         let black = doc.add(sep("Black"));
-        assert!(list_inks(&doc).is_empty());
+        assert!(list_inks(&doc).inks.is_empty());
         let done = alias_inks(&mut doc, &aliases(&[("All", "X"), ("Black", "Y")])).unwrap();
         assert_eq!(done, Aliased::default());
         assert_eq!(name_at(&doc, all, 1), Some(b"All".to_vec()));
@@ -774,11 +862,11 @@ mod tests {
             Object::Dict(Dict::new()),
             Object::Ref(attrs),
         ]));
-        assert_eq!(list_inks(&doc).iter().map(|i| i.name.as_str()).collect::<Vec<_>>(), vec!["Gold"], "an indirect names array is read");
+        assert_eq!(list_inks(&doc).inks.iter().map(|i| i.name.as_str()).collect::<Vec<_>>(), vec!["Gold"], "an indirect names array is read");
         let done = alias_inks(&mut doc, &aliases(&[("Gold", "Foil")])).unwrap();
         assert_eq!(done.spaces, 2, "the DeviceN and the Separation in its colorants: {done:?}");
         assert_eq!(names_of(&doc.get(names)), vec![b"Foil".to_vec(), b"Cyan".to_vec()]);
-        assert_eq!(list_inks(&doc).iter().map(|i| i.name.as_str()).collect::<Vec<_>>(), vec!["Foil"]);
+        assert_eq!(list_inks(&doc).inks.iter().map(|i| i.name.as_str()).collect::<Vec<_>>(), vec!["Foil"]);
         let renamed = doc.get(colorants);
         let renamed = renamed.as_dict().unwrap();
         assert_eq!(keys_of(renamed), vec![b"Foil".to_vec()]);
@@ -831,7 +919,7 @@ mod tests {
             Object::name("DeviceCMYK"),
             Object::Dict(Dict::new()),
         ]));
-        let inks = list_inks(&doc);
+        let inks = list_inks(&doc).inks;
         assert_eq!(inks, vec![Ink { name: "0x47e96c".to_owned(), spaces: 1, aliasable: false }]);
         // No alias a caller can write matches those bytes.
         assert_eq!(alias_inks(&mut doc, &aliases(&[("G\u{fffd}l", "Foil")])).unwrap(), Aliased::default());
@@ -946,6 +1034,86 @@ mod tests {
         let done = alias_inks(&mut doc, &aliases(&[("Deep", "Shallow")])).unwrap();
         assert_eq!((done.spaces, done.objects), (0, 0), "past the depth limit nothing is read, and nothing overflows");
         assert!(done.skipped_nested > 0, "{done:?}");
-        assert!(list_inks(&doc).is_empty());
+        assert!(list_inks(&doc).inks.is_empty());
+    }
+
+    /// `spaces` DeviceN spaces sharing one names array of `names` names (one of them `Gold`).
+    fn shared_names(names: usize, spaces: usize) -> Document {
+        let mut doc = Document::new_empty();
+        let list: Vec<Object> = (0..names).map(|i| Object::name(&if i == 0 { "Gold".to_owned() } else { format!("Ink{i}") })).collect();
+        let shared = doc.add(Object::Array(list));
+        let spaces: Vec<Object> = (0..spaces)
+            .map(|_| Object::Array(vec![Object::name("DeviceN"), Object::Ref(shared), Object::name("DeviceCMYK"), Object::Dict(Dict::new())]))
+            .collect();
+        doc.add(Object::Array(spaces));
+        doc
+    }
+
+    #[test]
+    fn spaces_sharing_one_big_names_array_spend_the_allowance_once_each() {
+        // 10 spaces over 10 names are 100 entries: 100 is enough, 99 is not.
+        let doc = shared_names(10, 10);
+        let all = list_inks_within(&doc, 100);
+        assert_eq!(all.unread_spaces, 0);
+        assert_eq!(all.inks.iter().map(|i| i.spaces).max(), Some(10));
+        let cut = list_inks_within(&doc, 99);
+        assert_eq!(cut.unread_spaces, 1, "the tenth space is not read, and says so");
+        assert_eq!(cut.inks.iter().find(|i| i.name == "Gold").map(|i| i.spaces), Some(9));
+    }
+
+    #[test]
+    fn aliasing_refuses_when_the_spaces_would_cost_more_than_the_allowance_and_writes_nothing() {
+        let mut doc = shared_names(10, 10);
+        let a = aliases(&[("Gold", "Silver")]);
+        let before = snapshot(&doc);
+        let e = alias_inks_within(&mut doc, &a, 99).unwrap_err();
+        assert!(matches!(&e, EditError::Invalid(m) if m.contains("nothing was written")), "{e:?}");
+        assert_eq!(snapshot(&doc), before);
+        assert_eq!(alias_inks_within(&mut doc, &a, 100).unwrap().spaces, 10);
+        assert_ne!(snapshot(&doc), before, "within the allowance the aliases are written");
+    }
+
+    /// `spaces` DeviceN spaces sharing one names array of one name and one attributes dictionary
+    /// padded with `pad` entries, with `hints_pad` more in a shared MixingHints dictionary.
+    fn shared_attributes(spaces: usize, pad: usize, hints_pad: usize) -> Document {
+        let mut doc = Document::new_empty();
+        let names = doc.add(Object::Array(vec![Object::name("Gold")]));
+        let mut hints = Dict::new();
+        for i in 0..hints_pad {
+            hints.set(format!("H{i}").into_bytes(), Object::Int(1));
+        }
+        let hints = doc.add(Object::Dict(hints));
+        let mut attrs = Dict::new();
+        for i in 0..pad {
+            attrs.set(format!("Pad{i}").into_bytes(), Object::Int(1));
+        }
+        attrs.set(b"MixingHints".to_vec(), Object::Ref(hints));
+        let attrs = doc.add(Object::Dict(attrs));
+        let spaces: Vec<Object> = (0..spaces)
+            .map(|_| {
+                Object::Array(vec![
+                    Object::name("DeviceN"),
+                    Object::Ref(names),
+                    Object::name("DeviceCMYK"),
+                    Object::Dict(Dict::new()),
+                    Object::Ref(attrs),
+                ])
+            })
+            .collect();
+        doc.add(Object::Array(spaces));
+        doc
+    }
+
+    #[test]
+    fn spaces_sharing_one_padded_attributes_or_hints_dictionary_are_charged_for_each_copy() {
+        let a = aliases(&[("Gold", "Silver")]);
+        // 10 spaces: 1 name + 51 attribute entries each = 520 per pass, and 10 x (1 + 51 + 31) with hints.
+        let doc = shared_attributes(10, 50, 0);
+        assert!(plan_within(&doc, &a, 519).is_err(), "attributes are charged before they are copied");
+        assert!(plan_within(&doc, &a, 520).is_ok());
+        let doc = shared_attributes(10, 0, 30);
+        // 1 name + 1 attribute entry + 30 hints entries per space.
+        assert!(plan_within(&doc, &a, 319).is_err(), "hints are charged before they are copied");
+        assert!(plan_within(&doc, &a, 320).is_ok());
     }
 }

@@ -11213,6 +11213,7 @@ trailer << /Root 1 0 R >>
     let names: Vec<_> = inks["inks"].as_array().unwrap().iter().map(|i| i["name"].as_str().unwrap().to_owned()).collect();
     assert_eq!(names, vec!["Gold Foil", "PANTONE 871 C"], "{inks}");
     assert_eq!(inks["inks"][0]["aliasable"], true);
+    assert_eq!(inks["unread_spaces"], 0, "{inks}");
     assert!(pdfcraft_automation::tools().iter().any(|t| t.name == "doc_inks" && t.read_only));
 
     let before = a.call("page_render", &json!({ "doc": doc, "page": 1, "dpi": 72 })).unwrap();

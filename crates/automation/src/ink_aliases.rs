@@ -11,14 +11,9 @@ impl Automation {
     /// how many colour spaces name it. Process colorants, All and None are not listed.
     pub(crate) fn doc_inks(&mut self, a: &Args) -> Result<Value> {
         let id = self.doc(a)?.id;
-        let inks: Vec<Value> = self
-            .session
-            .list_inks(id)
-            .map_err(ToolError::from)?
-            .into_iter()
-            .map(|i| json!({ "name": i.name, "spaces": i.spaces, "aliasable": i.aliasable }))
-            .collect();
-        Ok(json!({ "inks": inks }))
+        let found = self.session.list_inks(id).map_err(ToolError::from)?;
+        let inks: Vec<Value> = found.inks.into_iter().map(|i| json!({ "name": i.name, "spaces": i.spaces, "aliasable": i.aliasable })).collect();
+        Ok(json!({ "inks": inks, "unread_spaces": found.unread_spaces }))
     }
 
     /// `aliases`: `{ "from", "to" }` pairs. Each spot colorant named `from` is renamed `to` in

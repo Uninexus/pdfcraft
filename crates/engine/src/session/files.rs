@@ -391,7 +391,7 @@ impl Session {
 
     /// The spot colorants the document's colour spaces name, with how many spaces name each
     /// (what Ink aliases would work on). Nothing is changed.
-    pub fn list_inks(&self, id: DocId) -> Result<Vec<pdfcraft_edit::SpotInk>, EditError> {
+    pub fn list_inks(&self, id: DocId) -> Result<pdfcraft_edit::InkList, EditError> {
         Ok(pdfcraft_edit::list_inks(self.cos(id)?))
     }
 
