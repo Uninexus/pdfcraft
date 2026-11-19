@@ -961,3 +961,65 @@ fn date(v: &str) -> bool {
     };
     zone_ok && clock_ok
 }
+
+#[cfg(test)]
+mod scope_tests {
+    use super::*;
+
+    fn decls(tag: &str, n: usize) -> String {
+        (0..n).map(|i| format!(" xmlns:{tag}{i}=\"urn:{tag}:{i}\"")).collect()
+    }
+
+    /// A packet whose ancestors declare 600 namespaces over one `dc:subject` bag of `items` items.
+    fn wide_packet(items: usize) -> String {
+        let li = "<rdf:li>a</rdf:li>".repeat(items);
+        format!(
+            "<x:xmpmeta xmlns:x=\"adobe:ns:meta/\"{a}><rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\"{b}>\
+             <rdf:Description xmlns:dc=\"http://purl.org/dc/elements/1.1/\"{c}><dc:subject{d}><rdf:Bag{e}>{li}</rdf:Bag></dc:subject>\
+             </rdf:Description></rdf:RDF></x:xmpmeta>",
+            a = decls("a", 120),
+            b = decls("b", 120),
+            c = decls("c", 120),
+            d = decls("d", 120),
+            e = decls("e", 120),
+        )
+    }
+
+    #[test]
+    fn a_scope_is_shared_by_elements_that_declare_nothing() {
+        let packet = wide_packet(2);
+        let doc = crate::xmp::parse(&packet).expect("well-formed");
+        let mut scope = NsScope::root().child(&doc);
+        let mut el = &doc;
+        for _ in 0..4 {
+            el = el.elements().next().expect("a child");
+            scope = scope.child(el);
+        }
+        let bag = scope.clone();
+        let items: Vec<NsScope<'_>> = el.elements().map(|li| bag.child(li)).collect();
+        assert_eq!(items.len(), 2, "two items");
+        assert!(items.iter().all(|i| i.shares_with(&bag)), "an item that declares nothing copied the declarations above it");
+    }
+
+    #[test]
+    fn an_element_that_declares_gets_its_own_chain_and_shadows_as_before() {
+        let doc = crate::xmp::parse("<p:a xmlns:p=\"urn:outer\"><p:b xmlns:p=\"urn:inner\"><p:c/></p:b><p:d/></p:a>").expect("well-formed");
+        let outer = NsScope::root().child(&doc);
+        let mut kids = doc.elements();
+        let (b, d) = (kids.next().expect("b"), kids.next().expect("d"));
+        let inner = outer.child(b);
+        assert!(!inner.shares_with(&outer), "an element that declares a prefix shared its parent's chain");
+        assert_eq!(inner.el_ns(b), Some("urn:inner"), "the inner declaration wins inside");
+        assert_eq!(outer.el_ns(&doc), Some("urn:outer"));
+        assert_eq!(outer.child(d).el_ns(d), Some("urn:outer"), "a sibling keeps the outer binding");
+        let c = b.elements().next().expect("c");
+        assert_eq!(inner.child(c).el_ns(c), Some("urn:inner"), "a child inherits the shadowing binding");
+    }
+
+    #[test]
+    fn a_wide_array_under_many_declarations_is_checked_within_memory() {
+        let packet = wide_packet(40_000);
+        let doc = crate::xmp::parse(&packet).expect("parses within the node limit");
+        assert!(mistyped(&doc).is_empty(), "a bag of strings is well typed");
+    }
+}
