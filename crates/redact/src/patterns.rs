@@ -1,5 +1,6 @@
 //! Search & Redact patterns (Acrobat's Find Text ▸ Patterns): phone numbers, email addresses,
-//! credit card numbers, US Social Security numbers, dates and IBANs. Each matcher works on a page's
+//! credit card numbers, US Social Security numbers, dates and IBANs, plus Canadian SINs and postal
+//! codes and UK National Insurance numbers. Each matcher works on a page's
 //! text as characters and returns character ranges; callers map them to glyphs and areas.
 
 use std::ops::Range;
@@ -16,10 +17,21 @@ pub enum Pattern {
     Sin,
     /// Canadian postal code ("K1A 0B1").
     CaPostalCode,
+    /// United Kingdom National Insurance number ("QQ 12 34 56 C"), by its format only.
+    Nino,
 }
 
-pub const PATTERNS: [Pattern; 8] =
-    [Pattern::Phone, Pattern::Email, Pattern::CreditCard, Pattern::Ssn, Pattern::Date, Pattern::Iban, Pattern::Sin, Pattern::CaPostalCode];
+pub const PATTERNS: [Pattern; 9] = [
+    Pattern::Phone,
+    Pattern::Email,
+    Pattern::CreditCard,
+    Pattern::Ssn,
+    Pattern::Date,
+    Pattern::Iban,
+    Pattern::Sin,
+    Pattern::CaPostalCode,
+    Pattern::Nino,
+];
 
 impl Pattern {
     pub fn label(self) -> &'static str {
@@ -32,6 +44,7 @@ impl Pattern {
             Pattern::Iban => "IBAN Numbers",
             Pattern::Sin => "Canadian Social Insurance Numbers",
             Pattern::CaPostalCode => "Canadian Postal Codes",
+            Pattern::Nino => "UK National Insurance Numbers",
         }
     }
 
@@ -45,6 +58,7 @@ impl Pattern {
             Pattern::Iban => "iban",
             Pattern::Sin => "sin",
             Pattern::CaPostalCode => "ca-postal-code",
+            Pattern::Nino => "nino",
         }
     }
 
@@ -394,6 +408,59 @@ fn ca_postal_code(s: &[char], i: usize) -> Option<usize> {
     (ok && !word(s.get(n + 3))).then_some(n + 3 - i)
 }
 
+/// A United Kingdom National Insurance number by its format alone (there is no checksum): two
+/// letters, six digits and a final letter A to D, in either case. A single space or no-break space
+/// may stand after the letters, between the three pairs of digits and before the final letter, in
+/// any of those places or none ("QQ123456C", "QQ 12 34 56 C", "AB 123456 C"), but every joiner in
+/// one number is the same character. The first letter is never D, F, I, Q, U or V, the second
+/// never D, F, I, O, Q, U or V, and the prefixes BG, GB, KN, NK, NT, TN and ZZ are not allocated.
+/// Neither end may touch a letter or digit. The format also fits other codes, so a match is a
+/// candidate, not proof of a number.
+fn nino(s: &[char], i: usize) -> Option<usize> {
+    if word(i.checked_sub(1).and_then(|p| s.get(p))) {
+        return None;
+    }
+    let at = |k: usize| s.get(k).map(char::to_ascii_uppercase);
+    let (a, b) = (at(i)?, at(i + 1)?);
+    if !a.is_ascii_uppercase()
+        || !b.is_ascii_uppercase()
+        || "DFIQUV".contains(a)
+        || "DFIOQUV".contains(b)
+        || matches!((a, b), ('B', 'G') | ('G', 'B') | ('K', 'N') | ('N', 'K') | ('N', 'T') | ('T', 'N') | ('Z', 'Z'))
+    {
+        return None;
+    }
+    let mut joiner: Option<char> = None;
+    let mut k = i + 2;
+    // Skips one joiner when there is one; false when it differs from the joiner used before.
+    let mut skip = |k: &mut usize| match s.get(*k) {
+        Some(&c) if matches!(c, ' ' | '\u{a0}') => {
+            *k += 1;
+            joiner.is_none_or(|j| j == c) && {
+                joiner = Some(c);
+                true
+            }
+        }
+        _ => true,
+    };
+    if !skip(&mut k) {
+        return None;
+    }
+    for n in 0..3 {
+        if !(digit(s.get(k)) && digit(s.get(k + 1))) {
+            return None;
+        }
+        k += 2;
+        if n < 2 && !skip(&mut k) {
+            return None;
+        }
+    }
+    if !skip(&mut k) || !at(k).is_some_and(|c| matches!(c, 'A'..='D')) || word(s.get(k + 1)) {
+        return None;
+    }
+    Some(k + 1 - i)
+}
+
 /// Month names the date pattern knows: English, then the languages whose dates are written
 /// "5 Ekim 2024" / "5. Oktober 2024" (day, month name, year).
 const MONTHS: [[&str; 12]; 5] = [
@@ -670,6 +737,7 @@ pub fn find(pattern: Pattern, text: &[char]) -> Vec<Range<usize>> {
         Pattern::Iban => iban,
         Pattern::Sin => sin,
         Pattern::CaPostalCode => ca_postal_code,
+        Pattern::Nino => nino,
     };
     let mut out = Vec::new();
     let mut i = 0;
@@ -945,6 +1013,46 @@ mod tests {
         ] {
             assert!(found(Pattern::Sin, text).is_empty(), "{text}");
         }
+    }
+
+    #[test]
+    fn uk_national_insurance_numbers() {
+        assert_eq!(
+            found(Pattern::Nino, "NI AB123456C, AB 12 34 56 D, ab\u{a0}12\u{a0}34\u{a0}56\u{a0}a, AB 123456 C, AB123456 C and jc654321b."),
+            ["AB123456C", "AB 12 34 56 D", "ab\u{a0}12\u{a0}34\u{a0}56\u{a0}a", "AB 123456 C", "AB123456 C", "jc654321b"].map(String::from)
+        );
+        // Every unallocated prefix, and every excluded first or second letter with a valid partner.
+        for prefix in ["BG", "GB", "KN", "NK", "NT", "TN", "ZZ"] {
+            assert!(found(Pattern::Nino, &format!("{prefix}123456A")).is_empty(), "{prefix}");
+        }
+        for first in "DFIQUV".chars() {
+            assert!(found(Pattern::Nino, &format!("{first}A123456A")).is_empty(), "first {first}");
+        }
+        for second in "DFIOQUV".chars() {
+            assert!(found(Pattern::Nino, &format!("A{second}123456A")).is_empty(), "second {second}");
+        }
+        assert_eq!(found(Pattern::Nino, "AB123456A"), ["AB123456A"]);
+        // A suffix past D or missing, mixed joiners, doubled joiners, wrong digit counts and glued text.
+        for text in [
+            "AB123456E",
+            "AB123456",
+            "AB 12 34 56",
+            "AB 12  34 56 A",
+            "AB 12\u{a0}34 56 A",
+            "AB 12 34 56\u{a0}A",
+            "AB 1 23456 A",
+            "AB1234567A",
+            "AB12345A",
+            "XAB123456A",
+            "AB123456AX",
+            "AB123456A1",
+            "1AB123456A",
+        ] {
+            assert!(found(Pattern::Nino, text).is_empty(), "{text}");
+        }
+        // The end of the text mid-number.
+        assert!(found(Pattern::Nino, "AB 12 34 5").is_empty());
+        assert!(found(Pattern::Nino, "A").is_empty());
     }
 
     #[test]
