@@ -1,5 +1,5 @@
 //! View ▸ Guides as tools: list, add and remove the ruler guides of a document (`doc_guides`,
-//! `doc_guide_add`, `doc_guide_remove`). View state, not edits (see `pdfcraft_engine::guides`).
+//! `doc_guide_add`, `doc_guide_remove`) and snap a point to them (`doc_guide_snap`). View state, not edits (see `pdfcraft_engine::guides`).
 
 use pdfcraft_engine::guides::{Guide, GuideAxis};
 use serde_json::{Value, json};
@@ -55,5 +55,28 @@ impl Automation {
             }
         };
         Ok(json!({ "removed": removed }))
+    }
+
+    pub(crate) fn doc_guide_snap(&mut self, a: &Args) -> Result<Value> {
+        let id = self.doc(a)?.id;
+        let page = stale_page(a)?.ok_or_else(|| Args::missing("page"))?;
+        let x = a.opt_num("x")?;
+        let y = a.opt_num("y")?;
+        if x.is_none() && y.is_none() {
+            return Err(ToolError::InvalidArgs("give x, y, or both".into()));
+        }
+        let tolerance = a.opt_num("tolerance")?.unwrap_or(4.0);
+        let (sx, sy) = self.session.snap_to_guides(id, page, x, y, tolerance).map_err(|e| ToolError::InvalidArgs(e.to_string()))?;
+        let one = |s: Option<pdfcraft_engine::guides::AxisSnap>| {
+            s.map(|s| json!({ "position": s.position, "guide": s.guide, "snapped": s.guide.is_some() }))
+        };
+        let mut out = json!({ "tolerance": tolerance });
+        if let Some(v) = one(sx) {
+            out["x"] = v;
+        }
+        if let Some(v) = one(sy) {
+            out["y"] = v;
+        }
+        Ok(out)
     }
 }

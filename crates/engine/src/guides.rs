@@ -17,6 +17,38 @@
 
 use crate::{DocId, EditError, Session};
 
+/// The widest snap distance accepted, in points.
+pub const MAX_SNAP_TOLERANCE: f64 = 72.0;
+
+/// What one axis of a point snapped to.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AxisSnap {
+    /// The position after snapping: the guide's when one was in reach, else the one given.
+    pub position: f64,
+    /// The guide it snapped to, when there was one.
+    pub guide: Option<u64>,
+}
+
+/// The nearest of `candidates` (guide id, position) to `value` within `tolerance` points, both
+/// ends included; on a tie the lower position wins. (The lower-id tie-break is unreachable in practice: `add_guide` merges guides at the same page, axis and position, so two candidates never share a position.)
+fn nearest(candidates: impl Iterator<Item = (u64, f64)>, value: f64, tolerance: f64) -> AxisSnap {
+    let mut best: Option<(f64, f64, u64)> = None;
+    for (id, at) in candidates {
+        let d = (at - value).abs();
+        if d > tolerance {
+            continue;
+        }
+        let better = best.is_none_or(|(bd, bat, bid)| d < bd || (d == bd && (at < bat || (at == bat && id < bid))));
+        if better {
+            best = Some((d, at, id));
+        }
+    }
+    match best {
+        Some((_, at, id)) => AxisSnap { position: at, guide: Some(id) },
+        None => AxisSnap { position: value, guide: None },
+    }
+}
+
 /// The most guides one document keeps, so that a script can't grow the list without bound.
 pub const MAX_GUIDES: usize = 200;
 
@@ -126,5 +158,53 @@ impl Session {
         let before = doc.guides.list.len();
         doc.guides.list.retain(|g| page.is_some_and(|p| g.page != p));
         Ok(before - doc.guides.list.len())
+    }
+
+    /// Where a point on `page` (0-based) lands when it snaps to that page's guides: `x` to the
+    /// nearest vertical guide and `y` to the nearest horizontal one, each only when a guide lies
+    /// within `tolerance` points (0 to [`MAX_SNAP_TOLERANCE`]; 0 snaps only onto a guide). The
+    /// point is in the guides' own frame: points on the displayed page from its left and top
+    /// edges. Read-only, and a page without guides, or one the document no longer has, snaps
+    /// to nothing. Refused for a value or tolerance that is not finite, or a tolerance out of range.
+    pub fn snap_to_guides(
+        &self,
+        id: DocId,
+        page: usize,
+        x: Option<f64>,
+        y: Option<f64>,
+        tolerance: f64,
+    ) -> Result<(Option<AxisSnap>, Option<AxisSnap>), EditError> {
+        let doc = self.get(id).ok_or(EditError::NoDocument)?;
+        if !tolerance.is_finite() || !(0.0..=MAX_SNAP_TOLERANCE).contains(&tolerance) {
+            return Err(EditError::Invalid(format!("a snap tolerance must be between 0 and {MAX_SNAP_TOLERANCE} points (got {tolerance})")));
+        }
+        for v in [x, y].into_iter().flatten() {
+            if !v.is_finite() {
+                return Err(EditError::Invalid(format!("a point to snap must be finite (got {v})")));
+            }
+        }
+        let on = |axis: GuideAxis| doc.guides.list.iter().filter(move |g| g.page == page && g.axis == axis).map(|g| (g.id, g.position));
+        Ok((x.map(|v| nearest(on(GuideAxis::Vertical), v, tolerance)), y.map(|v| nearest(on(GuideAxis::Horizontal), v, tolerance))))
+    }
+}
+
+#[cfg(test)]
+mod snap_tests {
+    use super::*;
+
+    fn c(v: &[(u64, f64)]) -> impl Iterator<Item = (u64, f64)> + '_ {
+        v.iter().copied()
+    }
+
+    #[test]
+    fn nearest_takes_the_closest_within_reach_and_breaks_ties_low() {
+        assert_eq!(nearest(c(&[(1, 10.0), (2, 20.0)]), 14.0, 5.0), AxisSnap { position: 10.0, guide: Some(1) });
+        assert_eq!(nearest(c(&[(1, 10.0), (2, 20.0)]), 15.0, 5.0), AxisSnap { position: 10.0, guide: Some(1) });
+        assert_eq!(nearest(c(&[(2, 20.0), (1, 10.0)]), 15.0, 5.0), AxisSnap { position: 10.0, guide: Some(1) });
+        assert_eq!(nearest(c(&[(1, 10.0)]), 15.1, 5.0), AxisSnap { position: 15.1, guide: None });
+        assert_eq!(nearest(c(&[]), 3.0, 5.0), AxisSnap { position: 3.0, guide: None });
+        assert_eq!(nearest(c(&[(1, 5.0)]), 5.0, 0.0).guide, Some(1));
+        // Huge values do not overflow or panic.
+        assert_eq!(nearest(c(&[(1, 5.0)]), f64::MAX, 72.0).guide, None);
     }
 }

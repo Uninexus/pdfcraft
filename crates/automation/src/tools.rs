@@ -189,6 +189,18 @@ pub fn tools() -> Vec<ToolDef> {
                 }),
                 &["doc"],
             )),
+        t("doc_guide_snap", "Snap a point to guides", "View, Guides: where a point on a page lands when it snaps to that page's guides (doc_guides). x snaps to the nearest vertical guide and y to the nearest horizontal one, each only when a guide lies within tolerance points (default 4, 0 to 72; 0 snaps only onto a guide); the point is in the guides' own frame, points on the displayed page from its left and top edges. Give x, y, or both. Each answer is { position, guide, snapped }: the guide's position and id when one was in reach, else the position given and a null guide. On a tie the lower position wins. A page with no guides, or one the document no longer has, snaps to nothing. Changes nothing, and it is arithmetic on the listed guides only: it does not move or select anything, and the app does not call it while dragging.")
+            .ro()
+            .with(schema(
+                json!({
+                    "doc": doc(),
+                    "page": { "type": "integer", "minimum": 1, "description": "The 1-based page whose guides to use." },
+                    "x": { "type": "number", "description": "Points from the page's left edge, to snap to a vertical guide." },
+                    "y": { "type": "number", "description": "Points from the page's top edge, to snap to a horizontal guide." },
+                    "tolerance": { "type": "number", "minimum": 0, "maximum": 72, "description": "How far a guide may be, in points (default 4)." },
+                }),
+                &["doc", "page"],
+            )),
         t("page_boxes", "List page boxes", "Print production, Set Page Boxes: every page's media, crop, bleed, trim and art boxes as { rect: [x0, y0, x1, y1], set } in PDF user space (points; the origin is the page's bottom-left corner only when the media box starts at 0, 0; not turned by the page's rotate). The rects are the values the viewer uses, not the raw entries: corners put in order, clipped to the media box, and a box the file doesn't set defaults to its parent (crop to media; bleed, trim and art to crop). set is true when the file gives a usable box (a crop or media box inherited from a /Pages node counts); ignored: true marks a key that is present but unusable (not four numbers, no area, or, for crop, bleed, trim and art, outside the media box), which defaulted instead. rotate is the page's effective /Rotate (inherited, 0 to 359). Where both a bleed and a trim box are set, bleed_past_trim gives the bleed beyond the trim as [left, bottom, right, top] (negative where the bleed stops short). pages limits the listing: ascending order, each page once; at most 2000 pages come back, with total (pages in the document) and truncated. Nothing is changed; page_set_box changes boxes.")
             .ro()
             .with(schema(json!({ "doc": doc(), "pages": pages("to list (default: all)") }), &["doc"])),
