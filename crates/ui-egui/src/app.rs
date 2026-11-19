@@ -385,6 +385,8 @@ impl PdfCraftApp {
             convert_colours_draft: Default::default(),
             hairlines_draft: Default::default(),
             readiness_report: None,
+            readiness_options: Default::default(),
+            readiness_edit: Default::default(),
         }
     }
 

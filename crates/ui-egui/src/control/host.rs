@@ -152,6 +152,7 @@ impl Host for crate::PdfCraftApp {
             "ai": json!({ "configured": self.ai.is_configured(), "provider": self.ai.effective().provider.as_str(), "base_url": self.ai.effective().base_url, "model": self.ai.effective().model, "api_key_set": self.ai.effective().api_key.is_some() }),
             "units": self.units.label(),
             "blank_paper": self.blank_paper.token(),
+            "print_readiness": json!({ "ink_limit": self.readiness_options.ink_limit, "min_bleed_mm": self.readiness_options.min_bleed_mm, "min_ppi": self.readiness_options.min_ppi }),
             "compare_ignore": json!({ "case": self.compare_ignore_case, "punctuation": self.compare_ignore_punctuation }),
             // Home's pinned folders, in order, and whether each is folded down to its heading.
             "pinned_folders": self.pinned.folders.iter().map(|f| json!({ "folder": f, "collapsed": self.pinned.collapsed.contains(f) })).collect::<Vec<_>>(),

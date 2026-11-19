@@ -57,6 +57,11 @@
 //!   tool's remembered colour, opacity, width and font size (Preferences ▸ Comment).
 //!   `compare-ignore-case=true|false` and `compare-ignore-punctuation=true|false` set the Compare
 //!   dialog's Ignore checkboxes, which persist; `ui.state.compare_ignore` reports `case` and `punctuation`.
+//!   `readiness-ink-limit=<100-400>`, `readiness-min-bleed-mm=<0-50>` and `readiness-min-ppi=<36-1200>`
+//!   set the thresholds of Print production ▸ Print readiness (the `ink_limit`, `min_bleed_mm` and
+//!   `min_ppi` of the `print_readiness` tool; `default` restores one; any other value is refused and
+//!   changes nothing); they persist, and `ui.state.print_readiness` reports each as a number or null
+//!   for the default.
 //!   `ai-base-url=<url>`, `ai-model=<name>` and `ai-api-key=<key>` set Preferences ▸ AI Assistant
 //!   (saved to `ai.json` in the settings folder); `ui.state.ai` reports `configured`, `base_url`,
 //!   `model` and `api_key_set`, never the key. `dialog=ask-ai` opens Ask AI Assistant.

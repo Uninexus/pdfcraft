@@ -215,6 +215,15 @@ impl PdfCraftApp {
         v["blank_paper"] = serde_json::json!(self.blank_paper.token());
         // The Compare dialog's Ignore checkboxes, so the next comparison starts as the last one did.
         v["compare_ignore"] = serde_json::json!({ "case": self.compare_ignore_case, "punctuation": self.compare_ignore_punctuation });
+        // The Print readiness thresholds; a default one is left out.
+        let o = &self.readiness_options;
+        let mut readiness = serde_json::Map::new();
+        for (key, value) in [("ink_limit", o.ink_limit), ("min_bleed_mm", o.min_bleed_mm), ("min_ppi", o.min_ppi)] {
+            if let Some(n) = value {
+                readiness.insert(key.into(), serde_json::json!(n));
+            }
+        }
+        v["print_readiness"] = serde_json::Value::Object(readiness);
         // Canonical names survive changes to the order of PAPERS and do not depend on UI language;
         // a custom paper is stored by the name it was given.
         let d = &self.print_draft;
@@ -463,6 +472,20 @@ impl PdfCraftApp {
         }
         if let Some(on) = v["compare_ignore"]["punctuation"].as_bool() {
             self.compare_ignore_punctuation = on;
+        }
+        // The Print readiness thresholds; each key is read alone, and anything that is not a number
+        // the engine accepts keeps the current choice.
+        for (key, field) in [
+            ("ink_limit", readiness_ui::ReadinessField::InkLimit),
+            ("min_bleed_mm", readiness_ui::ReadinessField::MinBleed),
+            ("min_ppi", readiness_ui::ReadinessField::MinPpi),
+        ] {
+            if let Some(n) = v["print_readiness"][key].as_f64()
+                && field.accepts(n)
+            {
+                // `-0` is read as 0.
+                self.readiness_options.set(field, Some(n + 0.0));
+            }
         }
         if let Some(on) = v["always_default_view"].as_bool() {
             self.always_default_view = on;
