@@ -290,9 +290,11 @@ impl Automation {
                 })
             })
             .collect();
+        let duplicates: Vec<Value> = list.duplicates.into_iter().map(|d| json!({ "ns": d.ns, "count": d.count, "objects": d.objects })).collect();
         Ok(json!({
             "has_structure_tree": list.has_structure_tree,
             "namespaces": rows,
+            "duplicate_ns": duplicates,
             "count": rows.len(),
             "skipped": list.skipped,
             "truncated": list.truncated,

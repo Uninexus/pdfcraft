@@ -1,5 +1,6 @@
 # Where PdfCraft falls short of Acrobat Pro
 
+> **Last reviewed:** 2026-11-19 | **Last updated:** 2026-11-19 | **Change:** minor (gap 22: `ns_list` reports `/NS` values that more than one structure namespace carries; estimates unchanged)
 > **Last reviewed:** 2026-11-18 | **Last updated:** 2026-11-18 | **Change:** minor (gap 23: `ai_redaction_suggest` suggests passages to redact through the user's own AI endpoint, headless and suggest-only; estimates unchanged)
 > **Last reviewed:** 2026-11-18 | **Last updated:** 2026-11-18 | **Change:** minor (gap 22: `ns_list` lists the PDF 2.0 structure namespaces read-only; estimates unchanged)
 > **Last reviewed:** 2026-11-16 | **Last updated:** 2026-11-16 | **Change:** minor (gap 22: `dpart_list` lists the PDF 2.0 document part tree read-only; estimates unchanged)
@@ -511,8 +512,8 @@ update the numbers.
   creating or editing parts and any UI are not done.
   `core.pdf20-namespaces` is partial: `ns_list` (read-only) lists the namespace dictionaries in the
   structure tree root's `/Namespaces` (object, `/NS`, whether `/Schema` is present, `/RoleMapNS`
-  count and its first 64 entries; at most 1,000 namespaces; the same reference listed twice is listed once). Nothing is validated (unique `/NS`,
-  use by structure elements, role map consistency); adding or editing namespaces and any UI are not done.
+  count and its first 64 entries; at most 1,000 namespaces; the same reference listed twice is listed once). Repeated `/NS` values are reported (`duplicate_ns`, compared as listed text). Nothing else is validated (use by
+  structure elements, role map consistency); adding or editing namespaces and any UI are not done.
 - **Estimate:** 20–35 h. **Doc:** [pdf-spec-parity.md](pdf-spec-parity.md).
 
 ### 23. Local AI provider
@@ -535,6 +536,7 @@ update the numbers.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-19 | minor | Gap 22: `ns_list` lists each `/NS` value that more than one structure namespace dictionary carries (`duplicate_ns`; text compared as listed, cut at 200 characters); other validation, editing and any UI are still not done. Estimates unchanged. |
 | 2026-11-18 | minor | Gap 23: `ai_redaction_suggest` asks the user's own AI endpoint for passages to redact and returns only those that occur in the page text, with pages and counts (`misc.ai-redaction-suggest` is partial); it marks nothing, has no UI and was tested only against a stand-in server. Estimates unchanged. |
 | 2026-11-18 | minor | Gap 22: `ns_list` lists the PDF 2.0 structure namespaces (`/StructTreeRoot` `/Namespaces`, with `/RoleMapNS` entries) read-only (`core.pdf20-namespaces` is partial); no validation, writing or UI. Estimates unchanged. |
 | 2026-11-16 | minor | Gap 22: `dpart_list` lists the PDF 2.0 document part tree (`/DPartRoot`) read-only (`core.pdf20-dpart` is partial); no validation, writing or UI. Estimates unchanged. |

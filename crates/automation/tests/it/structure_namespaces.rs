@@ -66,6 +66,8 @@ fn structure_namespaces_are_listed_through_the_tool_and_survive_a_save() {
         ])
     );
 
+    assert_eq!(listed["duplicate_ns"], json!([]), "{listed}");
+
     // Reading is not an edit; the namespaces are still there after another edit and a save.
     assert_eq!(listed["unsaved_changes"], false);
     call(&mut a, "page_rotate", json!({ "doc": doc, "pages": [1], "degrees": 90 }));
@@ -80,4 +82,19 @@ fn structure_namespaces_are_listed_through_the_tool_and_survive_a_save() {
     let blank = call(&mut a, "doc_create", json!({ "from": "blank" }));
     let none = call(&mut a, "ns_list", json!({ "doc": blank["doc"] }));
     assert_eq!((none["has_structure_tree"].as_bool(), none["count"].as_u64()), (Some(false), Some(0)), "{none}");
+}
+
+#[test]
+fn repeated_namespace_identifiers_are_reported_through_the_tool() {
+    let dir = tempfile::tempdir().unwrap();
+    let bytes = String::from_utf8(pdf_with_namespaces()).unwrap();
+    // The second namespace now repeats the first one's identifier. Offsets in the xref shift, but
+    // the reader rebuilds a damaged table.
+    let bytes = bytes.replace("(urn:example:tags)", "(http://iso.org/pdf2/ssn)");
+    std::fs::write(dir.path().join("dup.pdf"), bytes).unwrap();
+    let mut a = Automation::new().with_root(dir.path()).unwrap();
+    let doc = call(&mut a, "doc_open", json!({ "path": "dup.pdf" }))["doc"].as_u64().unwrap();
+    let listed = call(&mut a, "ns_list", json!({ "doc": doc }));
+    assert_eq!(listed["count"], 2, "{listed}");
+    assert_eq!(listed["duplicate_ns"], json!([{ "ns": "http://iso.org/pdf2/ssn", "count": 2, "objects": [5, 6] }]), "{listed}");
 }

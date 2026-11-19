@@ -4,9 +4,11 @@
 //! structure types the namespace defines to a role in the same or another namespace.
 //!
 //! Reading only: [`list_structure_namespaces`] changes nothing and does not check that the
-//! namespaces are used, that `/NS` values are unique or that the role maps are consistent.
+//! namespaces are used or that the role maps are consistent. It reports `/NS` values that more
+//! than one listed dictionary carries (a namespace is identified by its `/NS`, so two dictionaries with the same `/NS` describe one namespace twice (ISO 32000-2 14.7.4)),
+//! compared as the listed text (cut at [`MAX_NS_CHARS`]).
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use pdfcraft_cos::{Document, ObjRef, Object};
 
@@ -43,6 +45,20 @@ pub struct StructureNamespace {
     pub roles: Vec<NamespaceRole>,
 }
 
+/// Most objects named for one repeated `/NS`.
+pub const MAX_DUPLICATE_OBJECTS: usize = 16;
+
+/// An `/NS` identifier that more than one listed namespace dictionary has.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DuplicateNamespace {
+    /// The identifier as listed.
+    pub ns: String,
+    /// How many listed dictionaries carry it (at least 2).
+    pub count: usize,
+    /// Their object numbers (`None` for a direct dictionary), the first [`MAX_DUPLICATE_OBJECTS`].
+    pub objects: Vec<Option<u32>>,
+}
+
 /// What [`list_structure_namespaces`] read.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct NamespaceList {
@@ -53,6 +69,8 @@ pub struct NamespaceList {
     pub skipped: usize,
     /// More namespaces exist than were read.
     pub truncated: bool,
+    /// `/NS` values carried by more than one of the namespaces read, in order of first appearance.
+    pub duplicates: Vec<DuplicateNamespace>,
 }
 
 fn short(text: &str) -> String {
@@ -124,5 +142,27 @@ pub fn list_structure_namespaces(doc: &Document) -> NamespaceList {
             roles,
         });
     }
+    out.duplicates = duplicate_namespaces(&out.namespaces);
     out
+}
+
+/// The `/NS` values that more than one of `namespaces` has. At most [`MAX_NAMESPACES`] rows are
+/// given, so the work and the result are bounded.
+fn duplicate_namespaces(namespaces: &[StructureNamespace]) -> Vec<DuplicateNamespace> {
+    let mut index: HashMap<&str, usize> = HashMap::new();
+    let mut groups: Vec<(&str, Vec<Option<u32>>, usize)> = Vec::new();
+    for n in namespaces {
+        let Some(ns) = n.ns.as_deref() else { continue };
+        let slot = *index.entry(ns).or_insert_with(|| {
+            groups.push((ns, Vec::new(), 0));
+            groups.len().saturating_sub(1)
+        });
+        if let Some(g) = groups.get_mut(slot) {
+            g.2 = g.2.saturating_add(1);
+            if g.1.len() < MAX_DUPLICATE_OBJECTS {
+                g.1.push(n.object);
+            }
+        }
+    }
+    groups.into_iter().filter(|g| g.2 > 1).map(|(ns, objects, count)| DuplicateNamespace { ns: ns.to_string(), count, objects }).collect()
 }
