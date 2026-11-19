@@ -39,7 +39,10 @@ pub use attachments::{add_attachment, attachment_keys, delete_attachment, mime_f
 pub use boxes::{BoxSpec, PageBox, PageBoxReport, page_box_report, page_boxes, set_page_box};
 pub use comments::import_comments;
 pub use dedupe::dedupe_resources;
-pub use dparts::{DocumentPart, DocumentPartList, MAX_DPART_DEPTH, MAX_DPART_NODES, MAX_DPM_CHARS, MAX_DPM_ENTRIES, list_document_parts};
+pub use dparts::{
+    DPM_ENTRY_COST, DocumentPart, DocumentPartList, MAX_DPART_DEPTH, MAX_DPART_NODES, MAX_DPM_BYTES, MAX_DPM_CHARS, MAX_DPM_ENTRIES,
+    list_document_parts,
+};
 pub use import::{
     CombineOutcome, Combiner, FieldConflicts, ImportOutcome, Run, SplitBy, combine, combine_field_conflicts, combine_grouped, combine_grouped_with,
     combine_selected, combine_selected_with, combine_with, extract_pages, field_name_conflicts, import_pages, import_pages_with, import_value,

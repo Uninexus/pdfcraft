@@ -73,3 +73,46 @@ fn document_parts_are_listed_through_the_tool_and_survive_a_save() {
     let none = call(&mut a, "dpart_list", json!({ "doc": blank["doc"] }));
     assert_eq!((none["has_root"].as_bool(), none["count"].as_u64()), (Some(false), Some(0)), "{none}");
 }
+
+/// Six parts that all name one `/DPM` dictionary holding a 1 MiB string.
+fn pdf_with_shared_big_metadata() -> Vec<u8> {
+    let big = "s".repeat(1 << 20);
+    let mut bodies = vec![
+        "<< /Type /Catalog /Pages 2 0 R /DPartRoot 4 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [11 0 R] /Count 1 /MediaBox [0 0 200 200] >>".to_string(),
+        format!("<< /Run ({big}) >>"),
+        "<< /Type /DPartRoot /DPartRootNode 5 0 R >>".to_string(),
+        "<< /Type /DPart /DParts [[6 0 R 7 0 R 8 0 R 9 0 R 10 0 R]] >>".to_string(),
+    ];
+    bodies.extend((0..5).map(|_| "<< /Type /DPart /DPM 3 0 R >>".to_string()));
+    bodies.push("<< /Type /Page /Parent 2 0 R >>".to_string());
+    let mut out = b"%PDF-2.0\n".to_vec();
+    let mut offsets = Vec::new();
+    for (i, body) in bodies.iter().enumerate() {
+        offsets.push(out.len());
+        out.extend_from_slice(format!("{} 0 obj\n{body}\nendobj\n", i + 1).as_bytes());
+    }
+    let xref = out.len();
+    out.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", bodies.len() + 1).as_bytes());
+    for o in offsets {
+        out.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+    }
+    out.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", bodies.len() + 1).as_bytes());
+    out
+}
+
+#[test]
+fn dpart_list_flags_the_nodes_whose_shared_metadata_did_not_fit_the_allowance() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("shared.pdf"), pdf_with_shared_big_metadata()).unwrap();
+    let mut a = Automation::new().with_root(dir.path()).unwrap();
+    let doc = call(&mut a, "doc_open", json!({ "path": "shared.pdf" }))["doc"].as_u64().unwrap();
+    let listed = call(&mut a, "dpart_list", json!({ "doc": doc }));
+    let parts = listed["parts"].as_array().unwrap();
+    assert_eq!(parts.len(), 6, "{listed}");
+    // The 4 MiB allowance holds three of the five 1 MiB entries; the other two are flagged.
+    let flags: Vec<(usize, bool)> =
+        parts.iter().map(|p| (p["metadata"].as_array().unwrap().len(), p["metadata_truncated"].as_bool().unwrap())).collect();
+    assert_eq!(flags, [(0, false), (1, false), (1, false), (1, false), (0, true), (0, true)], "{listed}");
+    assert_eq!(parts[1]["metadata"][0]["value"].as_str().map(str::len), Some(200));
+}
