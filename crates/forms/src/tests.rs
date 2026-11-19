@@ -2382,6 +2382,53 @@ fn an_order_form_with_blank_drop_down_quantities_totals_only_the_chosen_rows() {
     assert_eq!(totals(&doc), ["1210", "0", "0", "1210"], "kept across a save");
 }
 
+/// A form of one calculated field and one field without a calculation whose name is `long` bytes,
+/// with `/CO` naming that field `times` times.
+fn long_named_field_in_co(long: usize, times: usize) -> Document {
+    let name = "n".repeat(long);
+    let co = "6 0 R ".repeat(times);
+    let objs: Vec<String> = vec![
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm 4 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 600 800] >>".into(),
+        "<< /Type /Page /Parent 2 0 R /Annots [5 0 R 6 0 R] >>".into(),
+        format!("<< /Fields [5 0 R 6 0 R] /DA (/Helv 0 Tf 0 g) /CO [5 0 R {co}] >>"),
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (c) /Rect [50 700 250 720] /P 3 0 R /AA << /C << /S /JavaScript /JS (AFSimple_Calculate\\(\"SUM\", \"a\"\\);) >> >> >>".into(),
+        format!("<< /Type /Annot /Subtype /Widget /FT /Tx /T ({name}) /Rect [50 660 250 680] /P 3 0 R >>"),
+    ];
+    document(&objs)
+}
+
+/// One long field name written in many `/CO` entries is listed within an allowance of 16 MiB of
+/// text (each entry costs its text and 24 bytes), not copied once per entry; the rest are counted
+/// in `extra_omitted`. Twenty entries of a 1 MiB name used to be listed in full (20 MiB).
+#[test]
+fn calculation_order_extra_entries_are_listed_within_an_allowance() {
+    let doc = long_named_field_in_co(1 << 20, 20);
+    let order = calculation_order(&doc, &fields(&doc));
+    assert_eq!(order.extra.len(), 15, "16 MiB holds fifteen entries of 1 MiB and 24 bytes");
+    assert!(order.extra.iter().all(|n| n.len() == 1 << 20));
+    assert_eq!(order.extra_omitted, 5, "the other five are counted, not listed");
+    assert_eq!(order.fields.len(), 1, "the calculated field is read as before");
+}
+
+/// An ordinary form lists every extra entry and omits none; Fix order stays available when the
+/// only extra entries are the omitted ones.
+#[test]
+fn calculation_order_omits_nothing_within_the_allowance_and_stays_fixable_past_it() {
+    let doc = long_named_field_in_co(10, 3);
+    let order = calculation_order(&doc, &fields(&doc));
+    assert_eq!((order.extra.len(), order.extra_omitted), (3, 0));
+    // A name as long as the allowance: nothing is listed, every entry is counted, and the
+    // order still says it can be fixed (the extra entries go when it is set).
+    let mut doc = long_named_field_in_co(16 << 20, 2);
+    let order = calculation_order(&doc, &fields(&doc));
+    assert_eq!((order.extra.len(), order.extra_omitted), (0, 2));
+    assert!(order.fixable());
+    set_calculation_order(&mut doc, &order.fixed()).unwrap();
+    let after = calculation_order(&doc, &fields(&doc));
+    assert_eq!((after.extra.len(), after.extra_omitted, after.fixable()), (0, 0, false), "setting the order writes /CO afresh");
+}
+
 /// `/CO` as other tools leave it: a calculated field missing, a field without a calculation, an
 /// entry repeated, a reference to nothing and a number. The order reads around them, and setting
 /// the order writes `/CO` afresh.

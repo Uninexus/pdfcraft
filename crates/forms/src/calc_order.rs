@@ -12,6 +12,15 @@ use crate::{Field, FormError, acroform, fields};
 /// field under it, so a form could otherwise make a check build billions of them.
 const MAX_LINKS: usize = 1 << 20;
 
+/// The text of the `/CO` entries that calculate nothing, [`CalculationOrder::extra`], is listed up
+/// to this many bytes in all, each entry costing its text and [`EXTRA_ENTRY_COST`]. An entry names
+/// the field it points at, so one long field name written in a million entries would otherwise
+/// be copied a million times.
+const MAX_EXTRA_BYTES: usize = 16 << 20;
+
+/// What each listed extra entry costs besides its text, so entries with empty names are bounded too.
+const EXTRA_ENTRY_COST: usize = 24;
+
 /// A calculated field, at its place in the calculation order.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CalculatedField {
@@ -56,7 +65,12 @@ pub struct CalculationOrder {
     pub fields: Vec<CalculatedField>,
     /// `/CO` entries that calculate nothing: a field without a calculation, a second entry for a
     /// field, or an object that isn't a field (written as `12 0 R`).
+    /// Listed in `/CO` order up to 16 MiB of text in all (each entry costs its text and 24 bytes);
+    /// the rest are counted in `extra_omitted`, not listed.
     pub extra: Vec<String>,
+    /// How many `/CO` entries that calculate nothing are not in `extra`, because listing them
+    /// would have gone past its allowance. Zero for any ordinary form.
+    pub extra_omitted: usize,
     /// Fix order's order, as indexes into `fields`.
     fixed: Vec<usize>,
 }
@@ -70,7 +84,10 @@ impl CalculationOrder {
 
     /// Whether Fix order changes anything: a field moves, joins `/CO`, or an extra entry goes.
     pub fn fixable(&self) -> bool {
-        !self.extra.is_empty() || self.fields.iter().any(|f| !f.listed) || self.fixed.iter().enumerate().any(|(k, &i)| k != i)
+        !self.extra.is_empty()
+            || self.extra_omitted > 0
+            || self.fields.iter().any(|f| !f.listed)
+            || self.fixed.iter().enumerate().any(|(k, &i)| k != i)
     }
 }
 
@@ -112,23 +129,52 @@ fn write_co(doc: &mut Document, co: Vec<Object>) -> Result<(), FormError> {
 
 /// The calculated fields in the order they recalculate, as indexes into `fields` paired with
 /// whether `/CO` lists them, and the `/CO` entries that calculate nothing.
-pub(crate) fn run_order(doc: &Document, fields: &[Field]) -> (Vec<(usize, bool)>, Vec<String>) {
+/// The names are listed within an allowance ([`MAX_EXTRA_BYTES`]) that is charged before a name is
+/// copied; the entries past it are only counted.
+pub(crate) fn run_order(doc: &Document, fields: &[Field]) -> (Vec<(usize, bool)>, Extra) {
     let mut by_obj: HashMap<ObjRef, usize> = HashMap::with_capacity(fields.len());
     for (i, f) in fields.iter().enumerate() {
         by_obj.entry(f.obj).or_insert(i);
     }
     let mut placed = HashSet::new();
-    let (mut run, mut extra) = (Vec::new(), Vec::new());
+    let (mut run, mut extra) = (Vec::new(), Extra::default());
+    let mut left = MAX_EXTRA_BYTES;
     for entry in co_entries(doc) {
         let field = entry.as_ref().and_then(|r| by_obj.get(&r).copied()).and_then(|i| Some((i, fields.get(i)?)));
         match field {
             Some((i, f)) if is_calculated(f) && placed.insert(i) => run.push((i, true)),
-            Some((_, f)) => extra.push(f.name.clone()),
-            None => extra.push(entry.as_ref().map_or_else(|| "not a reference".to_owned(), |r| r.to_string())),
+            Some((_, f)) => extra.push(&mut left, f.name.len(), || f.name.clone()),
+            // A reference prints as at most "4294967295 65535 R" (19 bytes), the other text as 15.
+            None => extra.push(&mut left, 19, || entry.as_ref().map_or_else(|| "not a reference".to_owned(), |r| r.to_string())),
         }
     }
     run.extend(fields.iter().enumerate().filter(|(i, f)| is_calculated(f) && !placed.contains(i)).map(|(i, _)| (i, false)));
     (run, extra)
+}
+
+/// The `/CO` entries that calculate nothing: the names listed, and how many were left out.
+#[derive(Default)]
+pub(crate) struct Extra {
+    names: Vec<String>,
+    omitted: usize,
+}
+
+impl Extra {
+    /// List an entry whose text is `len` bytes long, when the allowance `left` covers it. The
+    /// allowance is charged before `text` copies anything; once one entry does not fit, every
+    /// later one is counted without being listed.
+    fn push(&mut self, left: &mut usize, len: usize, text: impl FnOnce() -> String) {
+        match len.checked_add(EXTRA_ENTRY_COST).and_then(|cost| left.checked_sub(cost)) {
+            Some(rest) => {
+                *left = rest;
+                self.names.push(text());
+            }
+            None => {
+                *left = 0;
+                self.omitted += 1;
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -140,7 +186,7 @@ thread_local! {
 /// The form's calculation order (`fields` as [`fields`] reads them), with each calculated field's
 /// reads and issues, and Fix order's order.
 pub fn calculation_order(doc: &Document, fields: &[Field]) -> CalculationOrder {
-    let (run, extra) = run_order(doc, fields);
+    let (run, Extra { names: extra, omitted: extra_omitted }) = run_order(doc, fields);
     let calculated: Vec<(&Field, bool)> = run.iter().filter_map(|&(i, listed)| Some((fields.get(i)?, listed))).collect();
     let reads: Vec<Vec<String>> = calculated
         .iter()
@@ -190,7 +236,7 @@ pub fn calculation_order(doc: &Document, fields: &[Field]) -> CalculationOrder {
         out.push(CalculatedField { name: f.name.clone(), obj: f.obj, reads, listed: *listed, issues });
     }
     let fixed = fixed_order(&links, &component);
-    CalculationOrder { fields: out, extra, fixed }
+    CalculationOrder { fields: out, extra, extra_omitted, fixed }
 }
 
 /// Whether a formula's read `name` finds a field in `names` (sorted): the field of that name or a

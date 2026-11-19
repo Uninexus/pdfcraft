@@ -878,6 +878,7 @@ impl Automation {
             })
             .collect();
         out["extra"] = json!(order.extra);
+        out["extra_omitted"] = json!(order.extra_omitted);
         out["fixable"] = json!(order.fixable());
         Ok(out)
     }
