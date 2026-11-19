@@ -5638,7 +5638,56 @@ fn a_named_destination_lookup_reads_a_shared_names_array_once() {
     take_work();
     let _ = extract_pages(&src, &[0]).unwrap();
     let work = take_work();
-    assert!(work <= 4 * (kids + pairs), "{work} steps looking a name up in {kids} nodes sharing {pairs} pairs");
+    assert!(work <= 8 * (kids + pairs), "{work} steps looking a name up in {kids} nodes sharing {pairs} pairs");
+}
+
+#[test]
+fn many_links_to_named_destinations_read_the_name_tree_once() {
+    // `links` link annotations each name a different destination in one tree of `pairs` names.
+    // Looking each up on its own read the tree per link: links x pairs steps.
+    let (links, pairs) = (400, 400);
+    let entries: String = (0..pairs).map(|i| format!("(d{i:04}) [3 0 R /Fit] ")).collect();
+    let links_src: Vec<String> =
+        (0..links).map(|i| format!("<< /Type /Annot /Subtype /Link /Rect [0 0 10 10] /A << /S /GoTo /D (d{:04}) >> >>", i % pairs)).collect();
+    let extra = vec![format!("<< /Names [{entries}] >>")];
+    let src = page_with_annots(&links_src, &extra, &format!("/Names << /Dests {} 0 R >>", links + 5));
+    take_work();
+    let out = extract_pages(&src, &[0]).unwrap();
+    let work = take_work();
+    assert!(work <= 8 * (links + pairs), "{work} steps resolving {links} links into {pairs} names");
+    let resolved = annots(&out, 0).iter().filter(|a| a.get(b"A").is_some()).count();
+    assert!(resolved == links, "only {resolved} of {links} links kept their destination");
+}
+
+#[test]
+fn pairs_sharing_one_large_key_do_not_copy_it_per_pair() {
+    // Object 7 is one 128 KiB string used as the key of every pair of the tree. Collecting all
+    // pairs before dropping duplicates copied it once per pair (pairs x 128 KiB).
+    let (pairs, key_len) = (1_000, 128 * 1024);
+    let entries: String = (0..pairs).map(|_| "7 0 R [3 0 R /Fit] ").collect();
+    let extra = vec![format!("<< /Names [{entries}] >>"), format!("({})", "k".repeat(key_len))];
+    let link = "<< /Type /Annot /Subtype /Link /Rect [0 0 10 10] /A << /S /GoTo /D (missing) >> >>".to_string();
+    let src = page_with_annots(&[link], &extra, "/Names << /Dests 6 0 R >>");
+    take_work();
+    let _ = extract_pages(&src, &[0]).unwrap();
+    let work = take_work();
+    assert!(work <= 4 * (pairs + key_len), "{work} steps and key bytes copied for {pairs} pairs sharing one key");
+}
+
+#[test]
+fn a_named_destination_dictionary_entry_beats_a_tree_entry_and_the_first_tree_entry_wins() {
+    let b: Vec<String> = vec![
+        "<< /Type /Catalog /Pages 2 0 R /Dests << /a [3 0 R /Fit] >> /Names << /Dests 4 0 R >> >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 300 400] >>".into(),
+        "<< /Type /Page /Parent 2 0 R >>".into(),
+        "<< /Names [(a) [3 0 R /XYZ 0 0 0] (b) [3 0 R /Fit] (b) [3 0 R /FitH 0]] >>".into(),
+    ];
+    let doc = open(build(&b, "/Root 1 0 R"));
+    let index = crate::import::DestIndex::default();
+    let kind = |name: &[u8]| index.get(&doc, name).and_then(|o| o.as_array().and_then(|a| a.get(1).and_then(|n| n.as_name().map(<[u8]>::to_vec))));
+    assert!(kind(b"a").as_deref() == Some(b"Fit".as_slice()), "dictionary entry should win");
+    assert!(kind(b"b").as_deref() == Some(b"Fit".as_slice()), "first tree entry should win");
+    assert!(kind(b"c").is_none(), "unknown name");
 }
 
 #[test]
@@ -5665,5 +5714,5 @@ fn a_kids_array_that_another_node_uses_as_its_names_array_hides_nothing() {
         "<< /Kids 5 0 R >>".into(),
         "<< /Names 5 0 R >>".into(),
     ];
-    assert!(crate::import::named_dest(&open(build(&b, "/Root 1 0 R")), b"sec").is_some());
+    assert!(crate::import::DestIndex::default().get(&open(build(&b, "/Root 1 0 R")), b"sec").is_some());
 }

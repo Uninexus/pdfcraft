@@ -1,6 +1,7 @@
 use std::rc::Rc;
 
-use super::{Dict, Document, HashMap, HashSet, ObjRef, Object, OrganizeError, named_dest};
+use super::DestIndex;
+use super::{Dict, Document, HashMap, HashSet, ObjRef, Object, OrganizeError};
 
 /// Keys that must not be followed when copying: they point back up or across the source
 /// document, and following them would drag in unrelated objects.
@@ -62,11 +63,13 @@ pub(crate) struct Copier<'a> {
     /// only kids a copied field keeps (see `fields_on`). `None` keeps every kid. Shared, so the
     /// copiers made for a repeated page or an action don't each copy it.
     pub(super) kept: Option<Rc<HashSet<ObjRef>>>,
+    /// The source's named destinations, read once however many links name one.
+    pub(super) dests: DestIndex,
 }
 
 impl<'a> Copier<'a> {
     pub(crate) fn new(src: &'a Document, map: HashMap<ObjRef, ObjRef>, pages: HashMap<ObjRef, ObjRef>) -> Self {
-        Copier { src, depth: 0, map, pages, annots: Vec::new(), fields: Vec::new(), ocgs: Vec::new(), kept: None }
+        Copier { src, depth: 0, map, pages, annots: Vec::new(), fields: Vec::new(), ocgs: Vec::new(), kept: None, dests: DestIndex::default() }
     }
 
     /// Copy an indirect object (once), returning its destination reference.
@@ -219,8 +222,8 @@ impl<'a> Copier<'a> {
             return None;
         }
         match dest {
-            Object::Name(n) => self.map_dest_depth(&named_dest(self.src, n)?, depth + 1),
-            Object::String(s) => self.map_dest_depth(&named_dest(self.src, &s.bytes)?, depth + 1),
+            Object::Name(n) => self.map_dest_depth(&self.dests.get(self.src, n)?, depth + 1),
+            Object::String(s) => self.map_dest_depth(&self.dests.get(self.src, &s.bytes)?, depth + 1),
             Object::Ref(_) => self.map_dest_depth(&self.src.resolve(dest), depth + 1),
             Object::Dict(d) => self.map_dest_depth(d.get(b"D")?, depth + 1),
             Object::Array(a) => {
@@ -274,7 +277,11 @@ impl<'a> Copier<'a> {
                         // Other actions (URI, Launch, JavaScript…) carry no page references. The
                         // copier lends its map out and takes it back with the new copies in it,
                         // so actions sharing an object share its one copy.
-                        let mut c = Copier { kept: self.kept.clone(), ..Copier::new(self.src, std::mem::take(&mut self.map), HashMap::new()) };
+                        let mut c = Copier {
+                            kept: self.kept.clone(),
+                            dests: self.dests.clone(),
+                            ..Copier::new(self.src, std::mem::take(&mut self.map), HashMap::new())
+                        };
                         let copied = c.copy_value(dst, &Object::Dict(ad.clone()), None);
                         self.map = c.map;
                         d.set(b"A".to_vec(), copied?);
