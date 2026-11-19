@@ -11020,6 +11020,46 @@ trailer << /Root 1 0 R >>
     assert_eq!(ok(&mut a, "doc_info", json!({ "doc": doc })), before);
 }
 
+/// The least bleed `print_readiness` accepts is settable: a TrimBox 1 pt inside the page leaves
+/// 0.35 mm, which warns by default, passes at 0.3 and warns at 5 (naming the 5), and bad values
+/// are refused without touching the document.
+#[test]
+fn print_readiness_min_bleed_through_tools() {
+    let dir = workdir("min-bleed");
+    let pdf = "%PDF-1.7
+1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
+2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /TrimBox [1 1 199 199] >> endobj
+trailer << /Root 1 0 R >>
+%%EOF";
+    std::fs::write(dir.join("bleed.pdf"), pdf).unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "bleed.pdf" }))["doc"].as_u64().unwrap();
+    let before = ok(&mut a, "doc_info", json!({ "doc": doc }));
+    let bleed = |r: &serde_json::Value| {
+        r["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|f| f["id"] == "page-bleed")
+            .map(|f| f["message"].as_str().unwrap().to_owned())
+            .collect::<Vec<_>>()
+    };
+    let default = ok(&mut a, "print_readiness", json!({ "doc": doc }));
+    assert_eq!(bleed(&default).len(), 1, "{default}");
+    assert!(bleed(&ok(&mut a, "print_readiness", json!({ "doc": doc, "min_bleed_mm": 0.3 }))).is_empty());
+    assert!(bleed(&ok(&mut a, "print_readiness", json!({ "doc": doc, "min_bleed_mm": 0 }))).is_empty());
+    // null is treated as not given, as it is for ink_limit.
+    assert_eq!(bleed(&ok(&mut a, "print_readiness", json!({ "doc": doc, "min_bleed_mm": null, "ink_limit": null }))).len(), 1);
+    let strict = bleed(&ok(&mut a, "print_readiness", json!({ "doc": doc, "min_bleed_mm": 5, "ink_limit": 250 })));
+    assert!(strict.len() == 1 && strict[0].contains("5 mm was asked for"), "{strict:?}");
+    for bad in [json!(-1), json!(51), json!("2")] {
+        let e = a.call("print_readiness", &json!({ "doc": doc, "min_bleed_mm": bad })).expect_err("refused").to_string();
+        assert!(e.contains("min_bleed_mm") && e.contains("50"), "{bad}: {e}");
+    }
+    assert_eq!(ok(&mut a, "doc_info", json!({ "doc": doc })), before);
+}
+
 /// Ink aliases through the tools: the spot inks are listed, two names become one, the page looks
 /// the same (each space keeps its alternate space and tint transform), and one undo restores them.
 #[test]

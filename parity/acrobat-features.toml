@@ -8534,8 +8534,10 @@ evidence = [
     "crates/automation/tests/it/automation.rs::print_readiness_reports_ink_through_tools",
     "crates/engine/src/printcheck.rs::a_lower_limit_flags_what_the_default_lets_through",
     "crates/engine/src/printcheck.rs::a_limit_outside_100_to_400_or_not_a_number_is_refused",
+    "crates/engine/src/printcheck.rs::the_least_bleed_is_settable_and_bad_values_are_refused",
+    "crates/automation/tests/it/automation.rs::print_readiness_min_bleed_through_tools",
 ]
-notes = "First slice: print_readiness warns when a painted CMYK colour (k, K, or sc/scn in DeviceCMYK or a four-component ICCBased space, inside forms too) has more than 300% total ink, with the highest value found. The limit is settable headlessly only: print_readiness takes ink_limit (100 to 400 percent, default 300; anything else is refused) and says which limit it used; the Print readiness dialog and the app have no setting. Missing: ink inside images, shadings, patterns and annotation appearances, a limit setting in the app, a per-pixel coverage map, a separations preview. Invisible text (Tr 3) is ignored."
+notes = "First slice: print_readiness warns when a painted CMYK colour (k, K, or sc/scn in DeviceCMYK or a four-component ICCBased space, inside forms too) has more than 300% total ink, with the highest value found. The limit is settable headlessly only: print_readiness takes ink_limit (100 to 400 percent, default 300; anything else is refused) and says which limit it used; the Print readiness dialog and the app have no setting. The least bleed the page-bleed finding accepts (default 2 mm on the tightest side, only on pages with a TrimBox) is settable headlessly too: min_bleed_mm, 0 to 50, 0 turns it off. Missing: ink inside images, shadings, patterns and annotation appearances, a limit or bleed setting in the app, a per-pixel coverage map, a separations preview. Invisible text (Tr 3) is ignored."
 
 [[feature]]
 id = "print.color-warnings"

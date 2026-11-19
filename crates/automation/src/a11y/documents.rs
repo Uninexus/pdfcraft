@@ -75,10 +75,11 @@ impl Automation {
             None => None,
             Some(v) => Some(v.as_f64().ok_or_else(|| ToolError::InvalidArgs("ink_limit must be a number from 100 to 400 percent".into()))?),
         };
-        let report = match limit {
-            Some(limit) => doc.print_readiness_with_limit(limit).map_err(ToolError::InvalidArgs)?,
-            None => doc.print_readiness(),
+        let min_bleed = match a.get("min_bleed_mm") {
+            None => None,
+            Some(v) => Some(v.as_f64().ok_or_else(|| ToolError::InvalidArgs("min_bleed_mm must be a number from 0 to 50 millimetres".into()))?),
         };
+        let report = doc.print_readiness_with_options(limit, min_bleed).map_err(ToolError::InvalidArgs)?;
         let findings: Vec<Value> =
             report.findings.iter().map(|f| json!({ "id": f.id, "severity": f.severity, "message": f.message, "page": f.page })).collect();
         let pages: Vec<Value> = report
