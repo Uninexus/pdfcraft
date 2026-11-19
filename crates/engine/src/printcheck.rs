@@ -4,8 +4,8 @@
 //! image is drawn, the page boxes (media, crop, trim, bleed), the output intent, fonts that
 //! aren't embedded, and the existing PDF/A-2b result. There is no fixup and no generated colour
 //! profile. A screen profile such as sRGB is reported as a screen profile, not accepted as a
-//! press condition. Two thresholds can be set by a caller: the total-ink limit and the least
-//! bleed (`print_readiness_with_options`); everything else is fixed.
+//! press condition. Three thresholds can be set by a caller: the total-ink limit, the least
+//! bleed and the least image resolution (`print_readiness_with_options`); everything else is fixed.
 
 use pdfcraft_cos::Document;
 use pdfcraft_edit::PageImage;
@@ -30,6 +30,9 @@ pub const TAC_LIMIT_RANGE: std::ops::RangeInclusive<f64> = 100.0..=400.0;
 /// The bleed a caller may ask for, in millimetres past the trim on the tightest side. Zero turns the
 /// `page-bleed` finding off for every trimmed page and more than 50 mm is a mistake, not a setting.
 pub const MIN_BLEED_RANGE: std::ops::RangeInclusive<f64> = 0.0..=50.0;
+/// The image resolution a caller may ask for, in pixels per inch. Below 36 nothing printable is
+/// ever flagged and above 1200 every ordinary photograph is, so those are mistakes, not settings.
+pub const MIN_PPI_RANGE: std::ops::RangeInclusive<f64> = 36.0..=1200.0;
 /// What the report says it does not check (the text report and the dialog both show it).
 pub const NOT_CHECKED: &str =
     "Not checked: PDF/X, ink inside images, shadings, patterns and annotation appearances, overprint effects, transparency flattening.";
@@ -166,6 +169,14 @@ fn check_limit(limit_percent: f64) -> Result<(), String> {
     Err(format!("ink_limit must be a number from {} to {} percent (got {limit_percent}).", TAC_LIMIT_RANGE.start(), TAC_LIMIT_RANGE.end()))
 }
 
+/// Refuses a minimum resolution that is not a number within [`MIN_PPI_RANGE`] (NaN and infinities included).
+fn check_min_ppi(min_ppi: f64) -> Result<(), String> {
+    if MIN_PPI_RANGE.contains(&min_ppi) {
+        return Ok(());
+    }
+    Err(format!("min_ppi must be a number from {} to {} pixels per inch (got {min_ppi}).", MIN_PPI_RANGE.start(), MIN_PPI_RANGE.end()))
+}
+
 /// Refuses a minimum bleed that is not a number within [`MIN_BLEED_RANGE`] (NaN and infinities included).
 fn check_min_bleed(min_bleed_mm: f64) -> Result<(), String> {
     if MIN_BLEED_RANGE.contains(&min_bleed_mm) {
@@ -190,25 +201,35 @@ impl OpenDocument {
 
     /// Like [`Self::print_readiness`], with either threshold replaced: the total-ink limit
     /// (percent, [`TAC_LIMIT_RANGE`]) and the least bleed (millimetres, [`MIN_BLEED_RANGE`]) the
-    /// `page-bleed` finding accepts instead of 2 mm. `None` keeps the default. Refuses a value
-    /// outside its range before measuring anything.
-    pub fn print_readiness_with_options(&self, ink_limit: Option<f64>, min_bleed_mm: Option<f64>) -> Result<PrintReadiness, String> {
+    /// `page-bleed` finding accepts instead of 2 mm, and the least resolution (pixels per inch,
+    /// [`MIN_PPI_RANGE`]) an image may be drawn at before `image-ppi` warns instead of 300. An
+    /// image under the lesser of 150 and that value is a `fail`. `None` keeps the default. Refuses
+    /// a value outside its range before measuring anything.
+    pub fn print_readiness_with_options(
+        &self,
+        ink_limit: Option<f64>,
+        min_bleed_mm: Option<f64>,
+        min_ppi: Option<f64>,
+    ) -> Result<PrintReadiness, String> {
         if let Some(limit) = ink_limit {
             check_limit(limit)?;
         }
         if let Some(bleed) = min_bleed_mm {
             check_min_bleed(bleed)?;
         }
-        Ok(self.measure(ink_limit.unwrap_or(TAC_LIMIT_PERCENT), min_bleed_mm))
+        if let Some(ppi) = min_ppi {
+            check_min_ppi(ppi)?;
+        }
+        Ok(self.measure(ink_limit.unwrap_or(TAC_LIMIT_PERCENT), min_bleed_mm, min_ppi))
     }
 
     fn print_readiness_with_ink_limit(&self, limit_percent: f64) -> PrintReadiness {
-        self.measure(limit_percent, None)
+        self.measure(limit_percent, None, None)
     }
 
-    fn measure(&self, limit_percent: f64, min_bleed_mm: Option<f64>) -> PrintReadiness {
+    fn measure(&self, limit_percent: f64, min_bleed_mm: Option<f64>, min_ppi: Option<f64>) -> PrintReadiness {
         match &self.editor {
-            Some(editor) => inspect_with(&editor.cos, limit_percent, min_bleed_mm),
+            Some(editor) => inspect_with(&editor.cos, limit_percent, min_bleed_mm, min_ppi),
             None => PrintReadiness {
                 pages: Vec::new(),
                 images: Vec::new(),
@@ -229,11 +250,14 @@ impl OpenDocument {
 
 #[cfg(test)]
 fn inspect(doc: &Document, limit_percent: f64) -> PrintReadiness {
-    inspect_with(doc, limit_percent, None)
+    inspect_with(doc, limit_percent, None, None)
 }
 
-fn inspect_with(doc: &Document, limit_percent: f64, min_bleed_mm: Option<f64>) -> PrintReadiness {
+fn inspect_with(doc: &Document, limit_percent: f64, min_bleed_mm: Option<f64>, min_ppi: Option<f64>) -> PrintReadiness {
     let min_bleed = min_bleed_mm.unwrap_or(MIN_BLEED_MM);
+    // A caller who needs only 100 ppi must not see 120 ppi called a fail by the fixed 150.
+    let warn_ppi = min_ppi.unwrap_or(WARN_PPI);
+    let fail_ppi = FAIL_PPI.min(warn_ppi);
     let declared = pdfcraft_preflight::declared(doc);
     let pdfa_issues = pdfcraft_preflight::verify(doc, Level::A2b);
     let fonts_not_embedded = pdfa_issues
@@ -282,24 +306,32 @@ fn inspect_with(doc: &Document, limit_percent: f64, min_bleed_mm: Option<f64>) -
         }
     }
     for image in &images {
-        if image.ppi < FAIL_PPI {
+        // With no figure asked for the messages keep their fixed wording; with one, they show the
+        // measured and the asked-for figure to a tenth, so 119.6 is not rounded up to the 120 asked for.
+        let drawn = if min_ppi.is_some() { format!("{:.1}", image.ppi) } else { format!("{:.0}", image.ppi) };
+        if image.ppi < fail_ppi {
+            let want = match min_ppi {
+                Some(m) if m < FAIL_PPI => format!(" ({m} ppi was asked for)"),
+                _ => String::new(),
+            };
             findings.push(Finding {
                 id: "image-ppi",
                 severity: "fail",
                 message: format!(
-                    "Image {} on page {} is drawn at {:.0} ppi, below {:.0}. Enlarging it would not add detail.",
-                    image.name, image.page, image.ppi, FAIL_PPI
+                    "Image {} on page {} is drawn at {drawn} ppi, below {fail_ppi}{want}. Enlarging it would not add detail.",
+                    image.name, image.page
                 ),
                 page: Some(image.page),
             });
-        } else if image.ppi < WARN_PPI {
+        } else if image.ppi < warn_ppi {
+            let want = match min_ppi {
+                None => " for close-up print".to_string(),
+                Some(m) => format!(" ({m} ppi was asked for)"),
+            };
             findings.push(Finding {
                 id: "image-ppi",
                 severity: "warn",
-                message: format!(
-                    "Image {} on page {} is drawn at {:.0} ppi, below {:.0} for close-up print.",
-                    image.name, image.page, image.ppi, WARN_PPI
-                ),
+                message: format!("Image {} on page {} is drawn at {drawn} ppi, below {warn_ppi}{want}.", image.name, image.page),
                 page: Some(image.page),
             });
         }
@@ -640,9 +672,9 @@ mod tests {
         doc.update_dict(p, |d| d.set(b"TrimBox".to_vec(), Object::Array(vec![1.into(), 1.into(), 611.into(), 791.into()]))).unwrap();
         let bleed = |r: &PrintReadiness| r.findings.iter().filter(|f| f.id == "page-bleed").map(|f| f.message.clone()).collect::<Vec<_>>();
         assert_eq!(bleed(&inspect(&doc, TAC_LIMIT_PERCENT)).len(), 1);
-        assert!(bleed(&inspect_with(&doc, TAC_LIMIT_PERCENT, Some(0.3))).is_empty());
-        assert!(bleed(&inspect_with(&doc, TAC_LIMIT_PERCENT, Some(0.0))).is_empty());
-        let strict = bleed(&inspect_with(&doc, TAC_LIMIT_PERCENT, Some(5.0)));
+        assert!(bleed(&inspect_with(&doc, TAC_LIMIT_PERCENT, Some(0.3), None)).is_empty());
+        assert!(bleed(&inspect_with(&doc, TAC_LIMIT_PERCENT, Some(0.0), None)).is_empty());
+        let strict = bleed(&inspect_with(&doc, TAC_LIMIT_PERCENT, Some(5.0), None));
         assert!(strict.len() == 1 && strict[0].contains("5 mm was asked for") && !strict[0].contains("about 3 mm"), "{strict:?}");
         for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -0.1, 50.1] {
             let e = check_min_bleed(bad).expect_err("refused");
@@ -658,9 +690,47 @@ mod tests {
             d.set(b"BleedBox".to_vec(), Object::Array(vec![10.into(), 10.into(), 190.into(), 190.into()]));
         })
         .unwrap();
-        assert!(bleed(&inspect_with(&odd, TAC_LIMIT_PERCENT, Some(0.0))).is_empty());
-        assert_eq!(bleed(&inspect_with(&odd, TAC_LIMIT_PERCENT, Some(1.0))).len(), 1);
+        assert!(bleed(&inspect_with(&odd, TAC_LIMIT_PERCENT, Some(0.0), None)).is_empty());
+        assert_eq!(bleed(&inspect_with(&odd, TAC_LIMIT_PERCENT, Some(1.0), None)).len(), 1);
         assert!(check_min_bleed(0.0).is_ok() && check_min_bleed(50.0).is_ok());
+    }
+
+    #[test]
+    fn the_least_resolution_is_settable_and_bad_values_are_refused() {
+        // 200 ppi: a warn by default (under 300), clean when 150 or 200 is enough, and still only a
+        // warn when 600 is asked for, because a fail is under the lesser of 150 and the value.
+        let mut doc = Document::new_empty();
+        let img = image(&mut doc, 200, 200);
+        page(&mut doc, "Im", img, "q 72 0 0 72 36 36 cm /Im Do Q");
+        let ppi = |r: &PrintReadiness| r.findings.iter().filter(|f| f.id == "image-ppi").map(|f| (f.severity, f.message.clone())).collect::<Vec<_>>();
+        let default = ppi(&inspect(&doc, TAC_LIMIT_PERCENT));
+        assert!(default.len() == 1 && default[0].0 == "warn" && default[0].1.contains("below 300 for close-up print"), "{default:?}");
+        assert!(ppi(&inspect_with(&doc, TAC_LIMIT_PERCENT, None, Some(150.0))).is_empty());
+        assert!(ppi(&inspect_with(&doc, TAC_LIMIT_PERCENT, None, Some(200.0))).is_empty(), "equal is not under");
+        let strict = ppi(&inspect_with(&doc, TAC_LIMIT_PERCENT, None, Some(600.0)));
+        assert!(
+            strict.len() == 1
+                && strict[0].0 == "warn"
+                && strict[0].1.contains("below 600 (600 ppi was asked for)")
+                && !strict[0].1.contains("close-up")
+                && strict[0].1.contains("200.0 ppi"),
+            "{strict:?}"
+        );
+        // Asking for less than the fixed 150 also lowers what counts as a fail: 120 ppi passes 100.
+        let mut low = Document::new_empty();
+        let img = image(&mut low, 120, 120);
+        page(&mut low, "Im", img, "q 72 0 0 72 36 36 cm /Im Do Q");
+        assert_eq!(ppi(&inspect(&low, TAC_LIMIT_PERCENT))[0].0, "fail");
+        assert!(ppi(&inspect_with(&low, TAC_LIMIT_PERCENT, None, Some(100.0))).is_empty());
+        let f = ppi(&inspect_with(&low, TAC_LIMIT_PERCENT, None, Some(130.0)));
+        assert!(f.len() == 1 && f[0].0 == "fail" && f[0].1.contains("below 130 (130 ppi was asked for)"), "{f:?}");
+        let plain = ppi(&inspect(&low, TAC_LIMIT_PERCENT));
+        assert!(plain[0].1.contains("120 ppi, below 150."), "{plain:?}");
+        for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, 35.9, 1200.1, 0.0, -300.0] {
+            let e = check_min_ppi(bad).expect_err("refused");
+            assert!(e.contains("min_ppi") && e.contains("1200"), "{e}");
+        }
+        assert!(check_min_ppi(36.0).is_ok() && check_min_ppi(1200.0).is_ok());
     }
 
     #[test]

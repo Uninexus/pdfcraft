@@ -79,7 +79,11 @@ impl Automation {
             None => None,
             Some(v) => Some(v.as_f64().ok_or_else(|| ToolError::InvalidArgs("min_bleed_mm must be a number from 0 to 50 millimetres".into()))?),
         };
-        let report = doc.print_readiness_with_options(limit, min_bleed).map_err(ToolError::InvalidArgs)?;
+        let min_ppi = match a.get("min_ppi") {
+            None => None,
+            Some(v) => Some(v.as_f64().ok_or_else(|| ToolError::InvalidArgs("min_ppi must be a number from 36 to 1200 pixels per inch".into()))?),
+        };
+        let report = doc.print_readiness_with_options(limit, min_bleed, min_ppi).map_err(ToolError::InvalidArgs)?;
         let findings: Vec<Value> =
             report.findings.iter().map(|f| json!({ "id": f.id, "severity": f.severity, "message": f.message, "page": f.page })).collect();
         let pages: Vec<Value> = report
