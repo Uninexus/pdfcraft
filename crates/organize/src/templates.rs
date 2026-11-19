@@ -74,9 +74,11 @@ pub fn spawn_template(doc: &mut Document, name: &str, at: usize, rename: bool) -
 pub fn set_template_hidden(doc: &mut Document, name: &str, hidden: bool) -> Result<(), OrganizeError> {
     let (from, to): (&[u8], &[u8]) = if hidden { (b"Pages", b"Templates") } else { (b"Templates", b"Pages") };
     // Rewritten from every entry, not the listing's first [`MAX_NAMES`], so no name is lost.
-    let mut source = all_entries(doc, from);
+    let mut source = all_entries(doc, from).map_err(|(_, e)| e)?;
+    // Read before anything changes, so a tree that is refused leaves the document as it was.
+    let mut target = all_entries(doc, to).map_err(|(_, e)| e)?;
     let Some(k) = source.iter().position(|(key, _)| text(key) == name) else {
-        return if all_entries(doc, to).iter().any(|(key, _)| text(key) == name) {
+        return if target.iter().any(|(key, _)| text(key) == name) {
             Ok(())
         } else {
             Err(OrganizeError::Invalid(format!("the document has no template named {name}")))
@@ -114,7 +116,6 @@ pub fn set_template_hidden(doc: &mut Document, name: &str, hidden: bool) -> Resu
         order.push((page, attributes));
     }
     rebuild(doc, &order)?;
-    let mut target = all_entries(doc, to);
     target.push((key, value));
     write_tree(doc, from, source)?;
     write_tree(doc, to, target)
@@ -193,18 +194,25 @@ fn top_field(doc: &Document, widget: ObjRef) -> Option<ObjRef> {
 
 /// The (key, value) pairs of the name dictionary's tree `key`, at most [`MAX_NAMES`] (for listing).
 fn entries(doc: &Document, key: &[u8]) -> Vec<(Vec<u8>, Object)> {
-    let mut out = all_entries(doc, key);
+    // Listing and lookup only: a tree past the key allowance shows what was read.
+    let mut out = all_entries(doc, key).unwrap_or_else(|(read, _)| read);
     out.truncate(MAX_NAMES);
     out
 }
 
+type Pairs = Vec<(Vec<u8>, Object)>;
+
 /// Every (key, value) pair of the name dictionary's tree `key`, for rewriting it. The walk is
 /// bounded by the tree reader's depth limit and seen-set; the entries are already in memory.
-fn all_entries(doc: &Document, key: &[u8]) -> Vec<(Vec<u8>, Object)> {
-    let Some(tree) = names(doc).and_then(|n| n.get(key).cloned()) else { return Vec::new() };
+/// A tree past the key allowance (see `name_tree_entries`) is an `Err` holding what was read,
+/// and `set_template_hidden`, which rewrites trees, refuses on it rather than lose the rest.
+fn all_entries(doc: &Document, key: &[u8]) -> Result<Pairs, (Pairs, OrganizeError)> {
+    let Some(tree) = names(doc).and_then(|n| n.get(key).cloned()) else { return Ok(Vec::new()) };
     let mut out = Vec::new();
-    crate::import::name_tree_entries(doc, &tree, 0, &mut Default::default(), &mut out);
-    out
+    match crate::import::name_tree_entries(doc, &tree, 0, &mut Default::default(), &mut out) {
+        Ok(()) => Ok(out),
+        Err(e) => Err((out, e)),
+    }
 }
 
 /// The catalog's name dictionary.

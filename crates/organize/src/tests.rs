@@ -5310,12 +5310,12 @@ fn a_file_listed_on_a_page_or_twice_keeps_its_attachment_and_deletion_goes_by_re
     let mut doc = open(fixture());
     add_associated_file(&mut doc, "a.txt", b"first", "Data", None, None, None).unwrap();
     add_associated_file(&mut doc, "b.txt", b"second", "Data", None, None, None).unwrap();
-    let mut all = crate::attachments::entries(&doc);
+    let mut all = crate::attachments::entries(&doc).0;
     let key = all[0].0.clone();
     all[1].0 = key;
     crate::import::set_attachments_exact(&mut doc, all.clone()).unwrap();
     assert!(remove_associated_file(&mut doc, 2, false).unwrap());
-    let left = crate::attachments::entries(&doc);
+    let left = crate::attachments::entries(&doc).0;
     assert_eq!(left.len(), 1);
     assert_eq!(left[0].1, all[0].1);
     assert_eq!(associated_files(&doc).len(), 1);
@@ -5715,4 +5715,106 @@ fn a_kids_array_that_another_node_uses_as_its_names_array_hides_nothing() {
         "<< /Names 5 0 R >>".into(),
     ];
     assert!(crate::import::DestIndex::default().get(&open(build(&b, "/Root 1 0 R")), b"sec").is_some());
+}
+
+/// A document whose `/EmbeddedFiles` tree has `pairs` pairs that all use object 6, a string of
+/// `key_len` bytes, as their key.
+fn shared_key_attachments(pairs: usize, key_len: usize) -> Document {
+    let entries: String = (0..pairs).map(|_| "6 0 R 3 0 R ".to_string()).collect();
+    let extra = vec![format!("<< /Names [{entries}] >>"), format!("({})", "k".repeat(key_len))];
+    page_with_annots(&[], &extra, "/Names << /EmbeddedFiles 5 0 R >>")
+}
+
+#[test]
+fn attachment_names_sharing_one_large_key_are_refused_not_copied_per_pair() {
+    // 100 pairs on one 1 MiB key would copy 100 MiB (2,000 pairs: 2 GiB) and write it back.
+    let (pairs, key_len) = (100, 1024 * 1024);
+    let cap = crate::import::MAX_NAME_TREE_KEY_BYTES;
+    let mut doc = shared_key_attachments(pairs, key_len);
+    take_work();
+    let listed = attachment_keys(&doc).len();
+    let work = take_work();
+    assert!(work <= cap + 4 * pairs + 1024, "{work} bytes copied listing {pairs} pairs on a {key_len}-byte key");
+    assert!(listed < pairs, "{listed} names listed past the allowance");
+    let before = attachment_keys(&doc);
+    let err = add_attachment(&mut doc, "a.txt", b"x", None, None, None);
+    assert!(err.is_err(), "add rewrote a tree past the allowance");
+    assert!(delete_attachment(&mut doc, "nope").is_err(), "delete rewrote a tree past the allowance");
+    assert!(attachment_keys(&doc) == before, "a refused change altered the tree");
+    take_work();
+    let combined = combine(&[("big.pdf", &doc)]).err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(take_work() <= cap + 4 * pairs + 1024, "combine copied the key per pair");
+    assert!(
+        combined.contains("big.pdf") && combined.contains("attachments (EmbeddedFiles)"),
+        "combine error does not name the file and tree: {combined}"
+    );
+    assert!(combined.contains("page selection") && !combined.contains("not read"), "combine error: {combined}");
+    let grouped = crate::combine_grouped(&[(0, "grouped.pdf", &doc, None)]).err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(grouped.contains("grouped.pdf") && grouped.contains("attachments (EmbeddedFiles)"), "grouped combine error: {grouped}");
+}
+
+#[test]
+fn attachment_names_that_repeat_a_small_shared_key_are_all_kept() {
+    let mut doc = shared_key_attachments(3, 5);
+    assert!(attachment_keys(&doc).len() == 3, "not every pair listed");
+    let key = add_attachment(&mut doc, "kkkkk", b"x", None, None, None).unwrap();
+    assert!(key != "kkkkk", "the new name was not made unique");
+    assert!(attachment_keys(&doc).len() == 4, "an entry was lost by the rewrite");
+}
+
+#[test]
+fn template_names_sharing_one_large_key_refuse_a_rewrite() {
+    let (pairs, key_len) = (100, 1024 * 1024);
+    let entries: String = (0..pairs).map(|_| "6 0 R 3 0 R ".to_string()).collect();
+    let extra = vec![format!("<< /Names [{entries}] >>"), format!("({})", "k".repeat(key_len))];
+    let mut doc = page_with_annots(&[], &extra, "/Names << /Templates 5 0 R >>");
+    let err = set_template_hidden(&mut doc, "kkk", false).unwrap_err().to_string();
+    assert!(err.contains("name tree's keys"), "refused for another reason: {err}");
+}
+
+#[test]
+fn attachment_edits_that_rewrite_refuse_on_a_tree_past_the_allowance() {
+    let mut doc = shared_key_attachments(100, 1024 * 1024);
+    let err = set_attachment_description(&mut doc, "kkk", Some("d")).unwrap_err().to_string();
+    assert!(err.contains("attachments (EmbeddedFiles)") && err.contains("32 MiB"), "{err}");
+    let err = crate::attachments::delete_attachment_by_ref(&mut doc, ObjRef::new(3, 0)).unwrap_err().to_string();
+    assert!(err.contains("nothing was changed"), "{err}");
+}
+
+#[test]
+fn hiding_a_template_leaves_the_document_alone_when_the_target_tree_is_refused() {
+    // Object 7 lists template "t" (page 8) under /Pages; /Templates, where it would go, is
+    // past the key allowance. The refusal must come before the page leaves the page tree.
+    let entries: String = (0..100).map(|_| "6 0 R 3 0 R ".to_string()).collect();
+    let b: Vec<String> = vec![
+        "<< /Type /Catalog /Pages 2 0 R /Names << /Pages 7 0 R /Templates 5 0 R >> >>".into(),
+        "<< /Type /Pages /Kids [3 0 R 8 0 R] /Count 2 /MediaBox [0 0 300 400] >>".into(),
+        "<< /Type /Page /Parent 2 0 R /Contents 4 0 R >>".into(),
+        body("P1"),
+        format!("<< /Names [{entries}] >>"),
+        format!("({})", "k".repeat(1024 * 1024)),
+        "<< /Names [(t) 8 0 R] >>".into(),
+        "<< /Type /Page /Parent 2 0 R /Contents 4 0 R >>".into(),
+    ];
+    let mut doc = open(build(&b, "/Root 1 0 R"));
+    assert!(set_template_hidden(&mut doc, "t", true).is_err());
+    assert_eq!(crate::page_count(&doc).unwrap(), 2, "the page left the tree before the refusal");
+    assert_eq!(doc.get(ObjRef::new(8, 0)).as_dict().and_then(|d| d.name(b"Type")), Some(&b"Page"[..]));
+}
+
+#[test]
+fn removing_an_associated_file_leaves_af_alone_when_the_attachment_tree_is_refused() {
+    let entries: String = (0..100).map(|_| "6 0 R 4 0 R ".to_string()).collect();
+    let b: Vec<String> = vec![
+        "<< /Type /Catalog /Pages 2 0 R /AF [4 0 R] /Names << /EmbeddedFiles 5 0 R >> >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 300 400] >>".into(),
+        "<< /Type /Page /Parent 2 0 R >>".into(),
+        "<< /Type /Filespec /F (a.txt) >>".into(),
+        format!("<< /Names [{entries}] >>"),
+        format!("({})", "k".repeat(1024 * 1024)),
+    ];
+    let mut doc = open(build(&b, "/Root 1 0 R"));
+    assert!(remove_associated_file(&mut doc, 1, false).is_err());
+    let af = doc.root().and_then(|r| doc.get(r).as_dict().and_then(|c| c.get(b"AF").cloned()));
+    assert!(af.is_some_and(|a| doc.resolve(&a).as_array().is_some_and(|l| l.len() == 1)), "/AF changed before the refusal");
 }
