@@ -4,7 +4,8 @@
 //! image is drawn, the page boxes (media, crop, trim, bleed), the output intent, fonts that
 //! aren't embedded, and the existing PDF/A-2b result. There is no fixup and no generated colour
 //! profile. A screen profile such as sRGB is reported as a screen profile, not accepted as a
-//! press condition.
+//! press condition. Two thresholds can be set by a caller: the total-ink limit and the least
+//! bleed (`print_readiness_with_options`); everything else is fixed.
 
 use pdfcraft_cos::Document;
 use pdfcraft_edit::PageImage;
@@ -26,6 +27,9 @@ const TAC_LIMIT_PERCENT: f64 = 300.0;
 /// The limit a caller may set is a percentage of total ink. Below 100 every coloured object is
 /// flagged and above 400 (four full inks) nothing can be, so those are mistakes, not settings.
 pub const TAC_LIMIT_RANGE: std::ops::RangeInclusive<f64> = 100.0..=400.0;
+/// The bleed a caller may ask for, in millimetres past the trim on the tightest side. Zero turns the
+/// `page-bleed` finding off for every trimmed page and more than 50 mm is a mistake, not a setting.
+pub const MIN_BLEED_RANGE: std::ops::RangeInclusive<f64> = 0.0..=50.0;
 /// What the report says it does not check (the text report and the dialog both show it).
 pub const NOT_CHECKED: &str =
     "Not checked: PDF/X, ink inside images, shadings, patterns and annotation appearances, overprint effects, transparency flattening.";
@@ -162,6 +166,14 @@ fn check_limit(limit_percent: f64) -> Result<(), String> {
     Err(format!("ink_limit must be a number from {} to {} percent (got {limit_percent}).", TAC_LIMIT_RANGE.start(), TAC_LIMIT_RANGE.end()))
 }
 
+/// Refuses a minimum bleed that is not a number within [`MIN_BLEED_RANGE`] (NaN and infinities included).
+fn check_min_bleed(min_bleed_mm: f64) -> Result<(), String> {
+    if MIN_BLEED_RANGE.contains(&min_bleed_mm) {
+        return Ok(());
+    }
+    Err(format!("min_bleed_mm must be a number from {} to {} millimetres (got {min_bleed_mm}).", MIN_BLEED_RANGE.start(), MIN_BLEED_RANGE.end()))
+}
+
 impl OpenDocument {
     /// A print-readiness report. Reads the file and does not edit it.
     pub fn print_readiness(&self) -> PrintReadiness {
@@ -170,14 +182,33 @@ impl OpenDocument {
 
     /// Like [`Self::print_readiness`], with the total-ink limit (percent) the `ink-total` finding
     /// uses instead of 300. Refuses a limit that is not a number within [`TAC_LIMIT_RANGE`].
+    /// Retained public API (the tool now calls [`Self::print_readiness_with_options`]).
     pub fn print_readiness_with_limit(&self, limit_percent: f64) -> Result<PrintReadiness, String> {
         check_limit(limit_percent)?;
         Ok(self.print_readiness_with_ink_limit(limit_percent))
     }
 
+    /// Like [`Self::print_readiness`], with either threshold replaced: the total-ink limit
+    /// (percent, [`TAC_LIMIT_RANGE`]) and the least bleed (millimetres, [`MIN_BLEED_RANGE`]) the
+    /// `page-bleed` finding accepts instead of 2 mm. `None` keeps the default. Refuses a value
+    /// outside its range before measuring anything.
+    pub fn print_readiness_with_options(&self, ink_limit: Option<f64>, min_bleed_mm: Option<f64>) -> Result<PrintReadiness, String> {
+        if let Some(limit) = ink_limit {
+            check_limit(limit)?;
+        }
+        if let Some(bleed) = min_bleed_mm {
+            check_min_bleed(bleed)?;
+        }
+        Ok(self.measure(ink_limit.unwrap_or(TAC_LIMIT_PERCENT), min_bleed_mm))
+    }
+
     fn print_readiness_with_ink_limit(&self, limit_percent: f64) -> PrintReadiness {
+        self.measure(limit_percent, None)
+    }
+
+    fn measure(&self, limit_percent: f64, min_bleed_mm: Option<f64>) -> PrintReadiness {
         match &self.editor {
-            Some(editor) => inspect(&editor.cos, limit_percent),
+            Some(editor) => inspect_with(&editor.cos, limit_percent, min_bleed_mm),
             None => PrintReadiness {
                 pages: Vec::new(),
                 images: Vec::new(),
@@ -196,7 +227,13 @@ impl OpenDocument {
     }
 }
 
+#[cfg(test)]
 fn inspect(doc: &Document, limit_percent: f64) -> PrintReadiness {
+    inspect_with(doc, limit_percent, None)
+}
+
+fn inspect_with(doc: &Document, limit_percent: f64, min_bleed_mm: Option<f64>) -> PrintReadiness {
+    let min_bleed = min_bleed_mm.unwrap_or(MIN_BLEED_MM);
     let declared = pdfcraft_preflight::declared(doc);
     let pdfa_issues = pdfcraft_preflight::verify(doc, Level::A2b);
     let fonts_not_embedded = pdfa_issues
@@ -225,12 +262,18 @@ fn inspect(doc: &Document, limit_percent: f64) -> PrintReadiness {
     }
     for page in pages.iter().filter(|page| page.trim_set) {
         let tight = page.bleed_margin_mm.into_iter().fold(f64::INFINITY, f64::min);
-        if tight < MIN_BLEED_MM {
+        // Zero means "don't warn": a BleedBox smaller than the TrimBox gives a negative margin, which
+        // `tight < 0` would still flag.
+        if min_bleed > 0.0 && tight < min_bleed - 1e-6 {
+            let want = match min_bleed_mm {
+                None => "a press usually wants about 3 mm".to_string(),
+                Some(m) => format!("{m} mm was asked for"),
+            };
             findings.push(Finding {
                 id: "page-bleed",
                 severity: "warn",
                 message: format!(
-                    "Page {} has {:.1} mm of bleed past the trim on its tightest side (a press usually wants about 3 mm). Nothing was added.",
+                    "Page {} has {:.1} mm of bleed past the trim on its tightest side ({want}). Nothing was added.",
                     page.page,
                     tight.max(0.0)
                 ),
@@ -585,6 +628,39 @@ mod tests {
         let report = inspect(&doc, TAC_LIMIT_PERCENT);
         assert!(report.findings.iter().any(|f| f.id == "page-bleed" && f.severity == "warn" && f.page == Some(4)));
         assert_eq!(report.findings.iter().filter(|f| f.id == "page-bleed").count(), 1);
+    }
+
+    #[test]
+    fn the_least_bleed_is_settable_and_bad_values_are_refused() {
+        // A 1 pt margin is 0.35 mm: flagged by default, silent when 0.3 is enough, and flagged
+        // when 5 mm is asked for. Zero turns the finding off, even for a BleedBox inside the TrimBox.
+        let mut doc = Document::new_empty();
+        let img = image(&mut doc, 600, 600);
+        let p = page(&mut doc, "Im", img, "q 72 0 0 72 36 36 cm /Im Do Q");
+        doc.update_dict(p, |d| d.set(b"TrimBox".to_vec(), Object::Array(vec![1.into(), 1.into(), 611.into(), 791.into()]))).unwrap();
+        let bleed = |r: &PrintReadiness| r.findings.iter().filter(|f| f.id == "page-bleed").map(|f| f.message.clone()).collect::<Vec<_>>();
+        assert_eq!(bleed(&inspect(&doc, TAC_LIMIT_PERCENT)).len(), 1);
+        assert!(bleed(&inspect_with(&doc, TAC_LIMIT_PERCENT, Some(0.3))).is_empty());
+        assert!(bleed(&inspect_with(&doc, TAC_LIMIT_PERCENT, Some(0.0))).is_empty());
+        let strict = bleed(&inspect_with(&doc, TAC_LIMIT_PERCENT, Some(5.0)));
+        assert!(strict.len() == 1 && strict[0].contains("5 mm was asked for") && !strict[0].contains("about 3 mm"), "{strict:?}");
+        for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -0.1, 50.1] {
+            let e = check_min_bleed(bad).expect_err("refused");
+            assert!(e.contains("min_bleed_mm") && e.contains("50"), "{e}");
+        }
+        // A BleedBox smaller than the TrimBox is a negative margin: still no warning at 0.
+        let mut odd = Document::new_empty();
+        let img2 = image(&mut odd, 600, 600);
+        let q = page(&mut odd, "Im", img2, "q 72 0 0 72 36 36 cm /Im Do Q");
+        odd.update_dict(q, |d| {
+            d.set(b"MediaBox".to_vec(), Object::Array(vec![0.into(), 0.into(), 200.into(), 200.into()]));
+            d.set(b"TrimBox".to_vec(), Object::Array(vec![0.into(), 0.into(), 200.into(), 200.into()]));
+            d.set(b"BleedBox".to_vec(), Object::Array(vec![10.into(), 10.into(), 190.into(), 190.into()]));
+        })
+        .unwrap();
+        assert!(bleed(&inspect_with(&odd, TAC_LIMIT_PERCENT, Some(0.0))).is_empty());
+        assert_eq!(bleed(&inspect_with(&odd, TAC_LIMIT_PERCENT, Some(1.0))).len(), 1);
+        assert!(check_min_bleed(0.0).is_ok() && check_min_bleed(50.0).is_ok());
     }
 
     #[test]

@@ -1,5 +1,6 @@
 # Where PdfCraft falls short of Acrobat Pro
 
+> **Last reviewed:** 2026-11-19 | **Last updated:** 2026-11-19 | **Change:** minor (gap 18: `print_readiness` takes a `min_bleed_mm` for the page-bleed finding, headless only; estimates unchanged)
 > **Last reviewed:** 2026-11-19 | **Last updated:** 2026-11-19 | **Change:** minor (gap 16: `doc_guide_snap` works out, headless, where a point lands when it snaps to a page's guides; the app does not snap yet; estimates unchanged)
 > **Last reviewed:** 2026-11-19 | **Last updated:** 2026-11-19 | **Change:** minor (gap 21: `doc_compare` takes `ignore_case`, headless text comparison that does not count case-only differences; estimates unchanged)
 > **Last reviewed:** 2026-11-19 | **Last updated:** 2026-11-19 | **Change:** minor (gap 22: `ns_list` reports `/NS` values that more than one structure namespace carries; estimates unchanged)
@@ -437,7 +438,7 @@ update the numbers.
   print as image; PostScript output. Fix hairlines is in (Print production ▸ Fix hairlines…).
   Total area coverage and the overprint, rich-black text and spot-colour notes are in as a first slice
   (`print_readiness`, the ink findings): painted vector CMYK colours only, not those inside images,
-  shadings, patterns or annotation appearances, with a settable limit only headlessly (`print_readiness` `ink_limit`, 100 to 400 percent, default 300), none in the app.
+  shadings, patterns or annotation appearances, with a settable limit only headlessly (`print_readiness` `ink_limit`, 100 to 400 percent, default 300; likewise `min_bleed_mm`, 0 to 50, default 2, for the bleed warning), none in the app.
   Ink aliases are in as a headless slice (`doc_inks`, `doc_ink_aliases`: spot colorants listed and renamed
   so two inks print as one), with no Ink Manager window yet.
   Page boxes can be read back headlessly (`page_boxes`: all five boxes, which the file sets, the rotation and the
@@ -539,6 +540,7 @@ update the numbers.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-19 | minor | Gap 18: `print_readiness` takes an optional `min_bleed_mm` (0 to 50 millimetres, default 2, other values refused): the least bleed past the trim, on a page's tightest side, before `page-bleed` warns on a page with a TrimBox; 0 turns it off. Headless only: the Print readiness dialog and Preferences have no setting. Tested: `printcheck::the_least_bleed_is_settable_and_bad_values_are_refused` (engine) and `print_readiness_min_bleed_through_tools` (end to end through the tool, refused values and the document unchanged); the engine test was shown failing with the `min_bleed > 0.0` guard removed (a BleedBox inside the TrimBox flagged at 0), and the tool test with the engine comparison put back to the fixed 2 mm; 0 stays silent for a BleedBox smaller than the TrimBox, `min_bleed_mm: null` is treated as not given (as `ink_limit: null` is), and a margin within 1e-6 mm of the figure is not flagged. Ran on the final tree: `cargo fmt --check`; `cargo clippy -p pdfcraft-engine -p pdfcraft-automation --all-targets -- -D warnings -A clippy::collapsible_match` (the allow is for a pre-existing hit at `crates/xfdf/src/xfdf.rs:326` on main with this toolchain, unrelated); `cargo test -p pdfcraft-engine -p pdfcraft-automation --no-fail-fast` (all pass except `batch_failures::read_only_output_folder_publishes_nothing`, which fails when run as root); `cargo xtask layers`, `assets`, `parity`, `wasm`. Not run: ui-egui tests (the UI is unchanged), the workspace-wide sweep. Estimates unchanged. |
 | 2026-11-19 | minor | Gap 16: `doc_guide_snap` (read-only) gives where an `x` and/or `y` on a page lands on that page's nearest vertical and horizontal guide within `tolerance` points (default 4, 0 to 72, edge included; the lower position wins a tie; a page with no guides snaps to nothing). Headless arithmetic on the listed guides only: the app has no rulers and does not snap while dragging, and guides stay session-only view state. Estimates unchanged. |
 | 2026-11-19 | minor | Gap 21: `doc_compare` takes `ignore_case`: words that differ only in letter case are not text changes (headless; the visual regions still see the different pixels, and `doc_compare_report`, `doc_compare_mark` and the Compare dialog do not take it). Estimates unchanged. |
 | 2026-11-19 | minor | Gap 22: `ns_list` lists each `/NS` value that more than one structure namespace dictionary carries (`duplicate_ns`; text compared as listed, cut at 200 characters); other validation, editing and any UI are still not done. Estimates unchanged. |
