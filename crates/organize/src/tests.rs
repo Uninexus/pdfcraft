@@ -5623,3 +5623,47 @@ fn a_kids_entry_naming_a_node_dictionary_does_not_hide_its_entries() {
     let doc = doc_with_name_tree("6 0 R", "[6 0 R]", "<< /Names [(c.txt) << /Type /Filespec /F (c.txt) >>] >>");
     assert_eq!(attachment_keys(&doc), ["c.txt"]);
 }
+
+#[test]
+fn a_named_destination_lookup_reads_a_shared_names_array_once() {
+    // Link annotation 5 goes to a name no tree entry has. Objects 6..: the root node, one /Names
+    // array of `pairs` entries, and `kids` leaf nodes that all name that array.
+    let (kids, pairs) = (400, 400);
+    let entries: String = (0..pairs).map(|i| format!("(d{i:04}) [3 0 R /Fit] ")).collect();
+    let refs: String = (0..kids).map(|i| format!("{} 0 R ", i + 8)).collect();
+    let mut extra = vec![format!("<< /Kids [{refs}] >>"), format!("[{entries}]")];
+    extra.extend((0..kids).map(|_| "<< /Names 7 0 R >>".to_string()));
+    let link = "<< /Type /Annot /Subtype /Link /Rect [0 0 10 10] /A << /S /GoTo /D (missing) >> >>".to_string();
+    let src = page_with_annots(&[link], &extra, "/Names << /Dests 6 0 R >>");
+    take_work();
+    let _ = extract_pages(&src, &[0]).unwrap();
+    let work = take_work();
+    assert!(work <= 4 * (kids + pairs), "{work} steps looking a name up in {kids} nodes sharing {pairs} pairs");
+}
+
+#[test]
+fn a_kids_array_that_another_node_uses_as_its_names_array_hides_nothing() {
+    // Node 6 names array 5 as its /Kids and node 7 as its /Names. The first must not hide the
+    // entries the second holds, in the attachment listing or in a named-destination lookup.
+    let b: Vec<String> = vec![
+        "<< /Type /Catalog /Pages 2 0 R /Names << /EmbeddedFiles 4 0 R >> >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 300 400] >>".into(),
+        "<< /Type /Page /Parent 2 0 R >>".into(),
+        "<< /Kids [6 0 R 7 0 R] >>".into(),
+        "[(a.txt) << /Type /Filespec /F (a.txt) >>]".into(),
+        "<< /Kids 5 0 R >>".into(),
+        "<< /Names 5 0 R >>".into(),
+    ];
+    assert_eq!(attachment_keys(&open(build(&b, "/Root 1 0 R"))), ["a.txt"]);
+
+    let b: Vec<String> = vec![
+        "<< /Type /Catalog /Pages 2 0 R /Names << /Dests 4 0 R >> >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 300 400] >>".into(),
+        "<< /Type /Page /Parent 2 0 R >>".into(),
+        "<< /Kids [6 0 R 7 0 R] >>".into(),
+        "[(sec) [3 0 R /Fit]]".into(),
+        "<< /Kids 5 0 R >>".into(),
+        "<< /Names 5 0 R >>".into(),
+    ];
+    assert!(crate::import::named_dest(&open(build(&b, "/Root 1 0 R")), b"sec").is_some());
+}

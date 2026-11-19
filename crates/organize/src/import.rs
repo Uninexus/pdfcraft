@@ -405,7 +405,7 @@ fn resources_with_ancestors(src: &Document, page: &Dict) -> Option<Object> {
 }
 
 /// Look up a named destination in the source (`/Dests` dictionary or `/Names /Dests` tree).
-fn named_dest(src: &Document, name: &[u8]) -> Option<Object> {
+pub(crate) fn named_dest(src: &Document, name: &[u8]) -> Option<Object> {
     let catalog = src.get(src.root()?).as_dict().cloned()?;
     if let Some(dests) = catalog.get(b"Dests").map(|d| src.resolve(d))
         && let Some(v) = dests.as_dict().and_then(|d| d.get(name))
@@ -414,39 +414,44 @@ fn named_dest(src: &Document, name: &[u8]) -> Option<Object> {
     }
     let names = src.resolve(catalog.get(b"Names")?);
     let tree = names.as_dict()?.get(b"Dests")?.clone();
-    name_tree_lookup(src, &tree, name, 0, &mut HashSet::new())
+    name_tree_lookup(src, &tree, name, 0, &mut NameTreeSeen::default())
 }
 
-/// Name trees are read once per node: a node listed twice (or a cycle) is skipped.
-fn name_tree_lookup(src: &Document, node: &Object, key: &[u8], depth: u8, seen: &mut HashSet<ObjRef>) -> Option<Object> {
-    if depth > 32 || node.as_ref().is_some_and(|r| !seen.insert(r)) {
+/// Name trees are read once per node, and a `/Names` or `/Kids` array that is an indirect object
+/// once, by the first node to name it: a node listed twice (or a cycle) is skipped, and N nodes
+/// sharing one array of M pairs are not cloned and scanned N x M times.
+fn name_tree_lookup(src: &Document, node: &Object, key: &[u8], depth: u8, seen: &mut NameTreeSeen) -> Option<Object> {
+    if depth > 32 || node.as_ref().is_some_and(|r| !seen.nodes.insert(r)) {
         return None;
     }
     #[cfg(test)]
     crate::work(1);
     let node = src.resolve(node);
     let d = node.as_dict()?;
-    if let Some(names) = d.get(b"Names").map(|n| src.resolve(n)).and_then(|n| n.as_array().cloned()) {
-        for pair in names.chunks(2) {
-            if let [k, v] = pair
-                && src.resolve(k).as_string().is_some_and(|s| s.bytes == key)
-            {
-                return Some(src.resolve(v).as_ref().clone());
-            }
+    let names = first_read_array(src, d.get(b"Names"), &mut seen.names).unwrap_or_default();
+    #[cfg(test)]
+    crate::work(names.len());
+    for pair in names.chunks(2) {
+        if let [k, v] = pair
+            && src.resolve(k).as_string().is_some_and(|s| s.bytes == key)
+        {
+            return Some(src.resolve(v).as_ref().clone());
         }
     }
-    let kids = d.get(b"Kids").map(|k| src.resolve(k)).and_then(|k| k.as_array().cloned()).unwrap_or_default();
+    let kids = first_read_array(src, d.get(b"Kids"), &mut seen.kids).unwrap_or_default();
     kids.iter().find_map(|k| name_tree_lookup(src, k, key, depth + 1, seen))
 }
 
-/// What [`name_tree_entries`] has visited: node objects, and `/Names` and `/Kids` arrays that are
-/// indirect objects. They are kept apart because an array is only recorded once it is known to
-/// be an array, so a malformed `/Kids` entry naming an array object cannot hide it from the node
-/// that really holds it.
+/// What [`name_tree_entries`] and [`name_tree_lookup`] have visited: node objects, and the
+/// `/Names` arrays and the `/Kids` arrays that are indirect objects, in separate sets. An array
+/// is recorded only once it is known to be one, and as the one kind it was read as, so a `/Kids`
+/// entry naming an object that another node uses as its `/Names` array cannot hide that node's
+/// entries: each array is read at most once as each kind.
 #[derive(Default)]
 pub(crate) struct NameTreeSeen {
     nodes: HashSet<ObjRef>,
-    arrays: HashSet<ObjRef>,
+    names: HashSet<ObjRef>,
+    kids: HashSet<ObjRef>,
 }
 
 /// All (key, value) pairs of a name tree, in order, each node read once. A `/Names` or `/Kids`
@@ -461,7 +466,7 @@ pub(crate) fn name_tree_entries(src: &Document, node: &Object, depth: u8, seen: 
     crate::work(1);
     let node = src.resolve(node);
     let Some(d) = node.as_dict() else { return };
-    if let Some(names) = first_read_array(src, d.get(b"Names"), &mut seen.arrays) {
+    if let Some(names) = first_read_array(src, d.get(b"Names"), &mut seen.names) {
         for pair in names.chunks(2) {
             if let [k, v] = pair
                 && let Some(k) = src.resolve(k).as_string()
@@ -470,13 +475,13 @@ pub(crate) fn name_tree_entries(src: &Document, node: &Object, depth: u8, seen: 
             }
         }
     }
-    for k in first_read_array(src, d.get(b"Kids"), &mut seen.arrays).unwrap_or_default() {
+    for k in first_read_array(src, d.get(b"Kids"), &mut seen.kids).unwrap_or_default() {
         name_tree_entries(src, &k, depth + 1, seen, out);
     }
 }
 
 /// The items of `entry` when it resolves to an array not read before. An array reached by
-/// reference is recorded in `arrays` only once it is confirmed to be one; a direct array
+/// reference is recorded in `arrays` (the `/Names` set or the `/Kids` set) only once it is confirmed to be one; a direct array
 /// belongs to its node alone.
 fn first_read_array(src: &Document, entry: Option<&Object>, arrays: &mut HashSet<ObjRef>) -> Option<Vec<Object>> {
     let entry = entry?;

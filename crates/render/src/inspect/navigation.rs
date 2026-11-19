@@ -87,15 +87,19 @@ impl<'a> Inspector<'a> {
     pub(super) fn name_tree_raw(
         &self,
         node: &'a Dictionary,
-        seen: &mut HashSet<*const Dictionary>,
+        seen: &mut NameTreeSeen,
         depth: u32,
         out: &mut HashMap<Vec<u8>, &'a Object>,
         key_budget: &mut usize,
     ) {
-        if depth > 32 || !seen.insert(node as *const _) {
+        if depth > 32 || !seen.nodes.insert(node as *const _) {
             return;
         }
-        if let Ok(Object::Array(pairs)) = node.get(b"Names").map(|o| self.resolve(o)) {
+        // An indirect `/Names` or `/Kids` array is read by the first node to name it: N nodes
+        // sharing one array of M entries (a file of about N + M objects) would otherwise be
+        // scanned N x M times. It is recorded only once it is known to be an array, so a
+        // malformed entry naming some other object hides nothing.
+        if let Some(Object::Array(pairs)) = self.first_read_array(node.get(b"Names").ok(), &mut seen.names) {
             for pair in pairs.chunks(2) {
                 if let [k, v] = pair {
                     let key = match self.resolve(k) {
@@ -114,13 +118,30 @@ impl<'a> Inspector<'a> {
                 }
             }
         }
-        if let Ok(Object::Array(kids)) = node.get(b"Kids").map(|o| self.resolve(o)) {
+        if let Some(Object::Array(kids)) = self.first_read_array(node.get(b"Kids").ok(), &mut seen.kids) {
             for k in kids {
                 if let Some(d) = self.dict(k) {
                     self.name_tree_raw(d, seen, depth + 1, out, key_budget);
                 }
             }
         }
+    }
+
+    /// What `entry` resolves to when it is an array not read before. One reached by reference is
+    /// recorded in `seen` (one set for `/Names` arrays, another for `/Kids` arrays) only once it is
+    /// confirmed to be an array.
+    fn first_read_array(&self, entry: Option<&'a Object>, seen: &mut HashSet<ObjectId>) -> Option<&'a Object> {
+        let entry = entry?;
+        let array = self.resolve(entry);
+        if !matches!(array, Object::Array(_)) {
+            return None;
+        }
+        if let Some(id) = self.resolved_id(entry)
+            && !seen.insert(id)
+        {
+            return None;
+        }
+        Some(array)
     }
 
     /// The entries of an embedded-files name tree. Each string key is spent from `text_budget`
@@ -132,8 +153,7 @@ impl<'a> Inspector<'a> {
         }
         // A `/Names` array that is an indirect object is listed once, by the first node to name
         // it: N nodes sharing one array of M pairs would otherwise list N x M entries.
-        let names = node.get(b"Names").ok().filter(|n| self.resolved_id(n).is_none_or(|id| seen.objects.insert(id)));
-        if let Some(Object::Array(pairs)) = names.map(|o| self.resolve(o)) {
+        if let Some(Object::Array(pairs)) = self.first_read_array(node.get(b"Names").ok(), &mut seen.names) {
             for pair in pairs.chunks(2) {
                 if let [k, v] = pair {
                     let key = match self.resolve(k) {
@@ -147,7 +167,7 @@ impl<'a> Inspector<'a> {
                 }
             }
         }
-        if let Ok(Object::Array(kids)) = node.get(b"Kids").map(|o| self.resolve(o)) {
+        if let Some(Object::Array(kids)) = self.first_read_array(node.get(b"Kids").ok(), &mut seen.kids) {
             for k in kids {
                 if let Some(d) = self.dict(k) {
                     out.extend(self.name_tree(d, seen, depth + 1, text_budget));
@@ -165,14 +185,10 @@ impl<'a> Inspector<'a> {
         if depth > 32 || !seen.nodes.insert(node as *const _) {
             return None;
         }
-        let names = node.get(b"Names").ok();
-        if let Some(names) = names
-            && self.resolved_id(names).is_none_or(|id| seen.objects.insert(id))
-            && let Object::Array(pairs) = self.resolve(names)
-        {
+        if let Some(Object::Array(pairs)) = self.first_read_array(node.get(b"Names").ok(), &mut seen.names) {
             for pair in pairs.chunks(2) {
                 if let [k, v] = pair {
-                    if self.resolved_id(k).is_some_and(|id| !seen.objects.insert(id)) {
+                    if self.resolved_id(k).is_some_and(|id| !seen.keys.insert(id)) {
                         continue;
                     }
                     let found = match self.resolve(k) {
@@ -185,7 +201,7 @@ impl<'a> Inspector<'a> {
                 }
             }
         }
-        if let Ok(Object::Array(kids)) = node.get(b"Kids").map(|o| self.resolve(o)) {
+        if let Some(Object::Array(kids)) = self.first_read_array(node.get(b"Kids").ok(), &mut seen.kids) {
             for k in kids {
                 if let Some(d) = self.dict(k)
                     && let Some(v) = self.name_tree_find(d, key, seen, depth + 1)
@@ -416,13 +432,16 @@ pub(super) fn text_string(bytes: &[u8]) -> String {
     pdfcraft_cos::PdfString::literal(bytes).to_text()
 }
 
-/// What [`Inspector::name_tree`] and [`Inspector::name_tree_find`] have visited: node
-/// dictionaries, and the `/Names` array objects (and, for the find, key objects) they reached by
-/// reference.
+/// What [`Inspector::name_tree`], [`Inspector::name_tree_find`] and [`Inspector::name_tree_raw`]
+/// have visited: node dictionaries, and the indirect `/Names` arrays, `/Kids` arrays (kept apart,
+/// so a `/Kids` entry naming an object another node uses as its `/Names` array hides nothing: an
+/// array is read at most once as each) and, for the find, key objects they reached by reference.
 #[derive(Default)]
 pub(super) struct NameTreeSeen {
     nodes: HashSet<*const Dictionary>,
-    objects: HashSet<ObjectId>,
+    names: HashSet<ObjectId>,
+    kids: HashSet<ObjectId>,
+    keys: HashSet<ObjectId>,
 }
 
 /// A bookmark title's colour from its `/C` entries, each kept within 0–1 (ISO 32000-2 §12.3.3,

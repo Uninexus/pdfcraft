@@ -3110,3 +3110,51 @@ mod javascript_links_tests {
         }
     }
 }
+
+/// 20 leaf nodes name one indirect `/Names` array whose single key is a megabyte long, then a last
+/// node holds `sec`. The key is read once; charging it per node would spend the 16 MiB key
+/// allowance before `sec` and leave the bookmark without a page.
+#[test]
+fn a_names_array_shared_by_many_dests_nodes_spends_the_key_allowance_once() {
+    let long = "k".repeat(1 << 20);
+    let kids: String = (0..21).map(|i| format!("{} 0 R ", 42 + i)).collect();
+    let mut pdf = format!(
+        "%PDF-1.7
+1 0 obj << /Type /Catalog /Pages 2 0 R /Outlines 10 0 R /Names << /Dests 40 0 R >> >> endobj
+2 0 obj << /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 /MediaBox [0 0 300 400] >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R >> endobj
+4 0 obj << /Type /Page /Parent 2 0 R >> endobj
+10 0 obj << /Type /Outlines /First 11 0 R /Last 11 0 R /Count 1 >> endobj
+11 0 obj << /Title (named) /Parent 10 0 R /Dest (sec) >> endobj
+40 0 obj << /Kids [{kids}] >> endobj
+41 0 obj [({long}) [3 0 R /Fit]] endobj
+"
+    );
+    for _ in 0..20 {
+        pdf.push_str(&format!("{} 0 obj << /Names 41 0 R >> endobj\n", 42 + pdf.matches("/Names 41").count()));
+    }
+    pdf.push_str("62 0 obj << /Names [(sec) [4 0 R /Fit]] >> endobj\ntrailer << /Root 1 0 R >>\n%%EOF");
+    let info = inspect(Arc::new(pdf.into_bytes()), None).expect("opens");
+    assert_eq!(info.outline.iter().map(|o| (o.title.as_str(), o.page)).collect::<Vec<_>>(), [("named", Some(1))]);
+}
+
+/// Node 42 names array 41 as its `/Kids`, node 43 as its `/Names`: reading it as the first must not
+/// hide the entries the second holds.
+#[test]
+fn a_kids_array_that_another_node_uses_as_its_names_array_hides_nothing() {
+    let pdf = "%PDF-1.7
+1 0 obj << /Type /Catalog /Pages 2 0 R /Outlines 10 0 R /Names << /Dests 40 0 R >> >> endobj
+2 0 obj << /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 /MediaBox [0 0 300 400] >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R >> endobj
+4 0 obj << /Type /Page /Parent 2 0 R >> endobj
+10 0 obj << /Type /Outlines /First 11 0 R /Last 11 0 R /Count 1 >> endobj
+11 0 obj << /Title (named) /Parent 10 0 R /Dest (sec) >> endobj
+40 0 obj << /Kids [42 0 R 43 0 R] >> endobj
+41 0 obj [(sec) [4 0 R /Fit]] endobj
+42 0 obj << /Kids 41 0 R >> endobj
+43 0 obj << /Names 41 0 R >> endobj
+trailer << /Root 1 0 R >>
+%%EOF";
+    let info = inspect(Arc::new(pdf.as_bytes().to_vec()), None).expect("opens");
+    assert_eq!(info.outline.iter().map(|o| (o.title.as_str(), o.page)).collect::<Vec<_>>(), [("named", Some(1))]);
+}
