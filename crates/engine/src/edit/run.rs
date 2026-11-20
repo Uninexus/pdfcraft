@@ -150,6 +150,7 @@ pub(crate) fn check_permission(edit: &Edit, p: &pdfcraft_cos::Permissions) -> Re
         | Edit::DeleteAttachment { .. }
         | Edit::AddAssociatedFile { .. }
         | Edit::RemoveAssociatedFile { .. }
+        | Edit::SetAssociatedRelationship { .. }
         | Edit::ConvertColours { .. }
         | Edit::EditAttachmentDescription { .. }
         | Edit::AutoTagText
@@ -740,6 +741,9 @@ pub(crate) fn run_edit(doc: &mut pdfcraft_cos::Document, edit: &Edit, cx: &mut E
         }
         Edit::RemoveAssociatedFile { index, keep_attachment } => {
             pdfcraft_organize::remove_associated_file(doc, *index, *keep_attachment)?;
+        }
+        Edit::SetAssociatedRelationship { index, relationship } => {
+            pdfcraft_organize::set_associated_relationship(doc, *index, relationship)?;
         }
         Edit::ConvertColours { pages, settings } => {
             let mut recolour = |doc: &pdfcraft_cos::Document, s: &pdfcraft_cos::Stream, t: pdfcraft_edit::ColourTarget| {

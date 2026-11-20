@@ -365,6 +365,27 @@ impl Automation {
         Ok(json!({ "attachment_kept": keep_attachment || shared, "shared_with_other_af": shared, "note": note, "document": out }))
     }
 
+    pub(crate) fn af_set_relationship(&mut self, a: &Args) -> Result<Value> {
+        let index = usize::try_from(a.int("index")?).map_err(|_| ToolError::InvalidArgs("index counts from 1".into()))?;
+        let relationship = a.str("relationship")?.to_string();
+        let previous = self.doc(a)?.associated_files().into_iter().find(|f| f.page.is_none() && f.index == index).and_then(|f| f.relationship);
+        let was_indirect = self.doc(a)?.associated_array_is_indirect();
+        let out = self.apply(a, pdfcraft_engine::Edit::SetAssociatedRelationship { index, relationship: relationship.clone() })?;
+        // A specification given by reference changes where it is written, so who lists it is the
+        // same after as before. One written in the array itself moves the catalog to a new direct
+        // array, which a page that listed the old indirect array no longer shares.
+        let shared = self.doc(a)?.associated_file_is_shared(index);
+        let array_copied = was_indirect && !self.doc(a)?.associated_array_is_indirect();
+        Ok(json!({
+            "index": index,
+            "relationship": relationship,
+            "previous": previous,
+            "shared_with_other_af": shared,
+            "array_copied": array_copied,
+            "document": out,
+        }))
+    }
+
     pub(crate) fn doc_linearization(&mut self, a: &Args) -> Result<Value> {
         let doc = self.doc(a)?;
         let r = doc.linearization();

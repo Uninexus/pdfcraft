@@ -6153,3 +6153,103 @@ fn removing_an_associated_file_leaves_af_alone_when_the_attachment_tree_is_refus
     let af = doc.root().and_then(|r| doc.get(r).as_dict().and_then(|c| c.get(b"AF").cloned()));
     assert!(af.is_some_and(|a| doc.resolve(&a).as_array().is_some_and(|l| l.len() == 1)), "/AF changed before the refusal");
 }
+
+#[test]
+fn a_relationship_is_set_on_an_entry_with_none_and_every_refusal_changes_nothing() {
+    // The catalog and the one page share the indirect array 4: a file specification with no
+    // relationship (object 5, by reference), one written in the array itself with none, a number.
+    let bodies = vec![
+        "<< /Type /Catalog /Pages 2 0 R /AF 4 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 10 10] >>".to_string(),
+        "<< /Type /Page /Parent 2 0 R /AF 4 0 R >>".to_string(),
+        "[5 0 R << /Type /Filespec /F (direct.xml) >> 7]".to_string(),
+        spec_body("one.txt"),
+    ];
+    let mut doc = open(build(&bodies, "/Root 1 0 R"));
+    let rows = |doc: &Document| associated_files(doc).into_iter().map(|f| (f.page, f.index, f.relationship)).collect::<Vec<_>>();
+    assert_eq!(rows(&doc), vec![(None, 1, None), (None, 2, None)], "array 4 is read once, for the catalog");
+
+    // Everything refused leaves the document exactly as it was.
+    let before = write_full(&doc, &SaveOptions::default()).unwrap();
+    for (index, relationship) in [(1, "Banana"), (1, ""), (1, "data"), (1, "EncryptedPayload"), (0, "Data"), (4, "Data"), (3, "Data"), (99, "Data")] {
+        assert!(matches!(set_associated_relationship(&mut doc, index, relationship), Err(OrganizeError::Invalid(_))), "{index} {relationship:?}");
+    }
+    assert_eq!(write_full(&doc, &SaveOptions::default()).unwrap(), before);
+
+    // The direct specification: the catalog gets a new direct array, the page keeps array 4 as it was.
+    assert!(catalog_af_is_indirect(&doc));
+    assert_eq!(set_associated_relationship(&mut doc, 2, "Schema").unwrap(), None);
+    assert_eq!(rows(&doc), vec![(None, 1, None), (None, 2, Some("Schema".into())), (Some(0), 1, None), (Some(0), 2, None)]);
+    let array = doc.get(pdfcraft_cos::ObjRef { num: 4, generation: 0 });
+    assert_eq!(array.as_array().map(Vec::len), Some(3));
+    assert!(!catalog_af_is_indirect(&doc), "the catalog now has its own direct array");
+    // The same name again would change nothing, so it is refused.
+    assert!(set_associated_relationship(&mut doc, 2, "Schema").is_err());
+
+    // The one by reference changes where it is written, so the page's array, which lists it too, shows it.
+    assert!(associated_file_is_shared(&doc, 1).unwrap());
+    assert_eq!(set_associated_relationship(&mut doc, 1, "Data").unwrap(), None);
+    assert_eq!(set_associated_relationship(&mut doc, 1, "Source").unwrap().as_deref(), Some("Data"));
+    assert_eq!(rows(&doc)[0], (None, 1, Some("Source".into())));
+    assert_eq!(rows(&doc)[2], (Some(0), 1, Some("Source".into())), "the page's array lists the same object");
+    assert_eq!(rows(&doc)[3], (Some(0), 2, None), "and its direct specification is the one that was not changed");
+    assert!(set_associated_relationship(&mut doc, 1, "Source").is_err());
+    // It survives a save.
+    let doc = save_and_reopen(&doc);
+    assert_eq!(rows(&doc)[0], (None, 1, Some("Source".into())));
+}
+
+#[test]
+fn setting_a_relationship_refuses_an_af_that_is_not_a_usable_array_or_a_specification_that_is_not_a_dictionary() {
+    let mut doc = Document::open(Arc::new(fixture())).unwrap();
+    // No /AF at all.
+    assert!(set_associated_relationship(&mut doc, 1, "Data").is_err());
+    let root = doc.root().unwrap();
+    // Not an array.
+    doc.update_dict(root, |c| c.set(b"AF".to_vec(), Object::Int(3))).unwrap();
+    assert!(set_associated_relationship(&mut doc, 1, "Data").is_err());
+    assert_eq!(af_catalog(&doc).get(b"AF"), Some(&Object::Int(3)));
+    // Longer than the listing reads: refused even for an entry it could reach (the first is a specification).
+    let mut spec = pdfcraft_cos::Dict::new();
+    spec.set(b"Type".to_vec(), Object::name("Filespec"));
+    spec.set(b"F".to_vec(), Object::String(PdfString::text("first.xml")));
+    let mut long: Vec<Object> = (0..MAX_AF_ENTRIES).map(|_| Object::Null).collect();
+    long.insert(0, Object::Dict(spec));
+    assert_eq!(long.len(), MAX_AF_ENTRIES + 1);
+    doc.update_dict(root, |c| c.set(b"AF".to_vec(), Object::Array(long.clone()))).unwrap();
+    assert!(set_associated_relationship(&mut doc, 1, "Data").is_err());
+    assert_eq!(af_catalog(&doc).get(b"AF"), Some(&Object::Array(long)));
+    // A reference to something that is not a dictionary.
+    let mut doc = open(build(
+        &["<< /Type /Catalog /Pages 2 0 R /AF [3 0 R] >>".to_string(), "<< /Type /Pages /Kids [] /Count 0 >>".to_string(), "(text)".to_string()],
+        "/Root 1 0 R",
+    ));
+    assert!(set_associated_relationship(&mut doc, 1, "Data").is_err());
+}
+
+#[test]
+fn an_entry_that_points_at_a_stream_the_catalog_or_a_non_specification_is_refused_and_nothing_is_written() {
+    let bodies = vec![
+        // Entries, in order: 1 a stream, 2 the catalog, 3 a dictionary typed as an annotation, 4 a
+        // dictionary with none of /F /UF /EF /FS, 5 a good specification, 6 a direct dictionary
+        // typed as a page, 7 an untyped annotation whose /F is a number, 8 an untyped file
+        // attachment annotation whose /FS is a dictionary, 9 a specification with only /UF,
+        // 10 one with /FS /URL and a string /F, 11 a typed one with only an /EF dictionary.
+        // 1 to 4 and 6 to 8 are refused; 5 and 9 to 11 are accepted.
+        "<< /Type /Catalog /Pages 2 0 R /AF [3 0 R 1 0 R 4 0 R 5 0 R 6 0 R << /Type /Page /F 1 >> << /Subtype /Text /F 4 >> << /Subtype /FileAttachment /F 4 /FS << /F (x) >> >> << /UF (u.xml) >> << /FS /URL /F (http://example.com/a) >> << /Type /Filespec /EF << /F 3 0 R >> >>] >>".to_string(),
+        "<< /Type /Pages /Kids [] /Count 0 >>".to_string(),
+        "<< /Length 1 /F (looks-like-a-spec) >>\nstream\nx\nendstream".to_string(),
+        "<< /Type /Annot /F 4 >>".to_string(),
+        "<< /Foo 1 >>".to_string(),
+        spec_body("good.xml"),
+    ];
+    let mut doc = open(build(&bodies, "/Root 1 0 R"));
+    let before = write_full(&doc, &SaveOptions::default()).unwrap();
+    for index in [1, 2, 3, 4, 6, 7, 8] {
+        assert!(matches!(set_associated_relationship(&mut doc, index, "Data"), Err(OrganizeError::Invalid(_))), "entry {index}");
+    }
+    assert_eq!(write_full(&doc, &SaveOptions::default()).unwrap(), before, "no object was written to");
+    for index in [5, 9, 10, 11] {
+        assert_eq!(set_associated_relationship(&mut doc, index, "Data").unwrap(), None, "entry {index}");
+    }
+}

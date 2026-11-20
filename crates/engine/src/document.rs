@@ -603,6 +603,11 @@ impl Document {
         self.editor.as_ref().is_some_and(|e| pdfcraft_organize::associated_file_is_shared(&e.cos, index).unwrap_or(true))
     }
 
+    /// Whether the catalog's `/AF` is an indirect object (so a page may share it).
+    pub fn associated_array_is_indirect(&self) -> bool {
+        self.editor.as_ref().is_some_and(|e| pdfcraft_organize::catalog_af_is_indirect(&e.cos))
+    }
+
     pub fn initial_view(&self) -> InitialView {
         self.editor.as_ref().map(|e| pdfcraft_organize::initial_view(&e.cos)).unwrap_or_default()
     }

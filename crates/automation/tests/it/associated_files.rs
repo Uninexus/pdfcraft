@@ -217,3 +217,145 @@ fn entries_without_a_relationship_or_an_embedded_file_are_counted_through_the_to
         (Some(true), Some(false), Value::Null)
     );
 }
+
+#[test]
+fn a_missing_relationship_is_set_through_the_tool_in_one_undo_step() {
+    let (dir, mut a) = setup();
+    std::fs::write(dir.path().join("three.pdf"), pdf_with_three_entries()).unwrap();
+    let doc = open(&mut a, "three.pdf");
+    assert_eq!(tool(&mut a, "af_list", json!({ "doc": doc }))["without_relationship"], 1);
+
+    // Entry 3 has none; the tool says so, sets one, and the count drops to 0.
+    let done = tool(&mut a, "af_set_relationship", json!({ "doc": doc, "index": 3, "relationship": "Supplement" }));
+    assert_eq!(
+        (done["previous"].clone(), done["relationship"].as_str(), done["shared_with_other_af"].as_bool()),
+        (Value::Null, Some("Supplement"), Some(false)),
+        "{done}"
+    );
+    let listed = tool(&mut a, "af_list", json!({ "doc": doc }));
+    assert_eq!(
+        (listed["without_relationship"].as_u64(), listed["associated_files"][2]["relationship"].as_str()),
+        (Some(0), Some("Supplement")),
+        "{listed}"
+    );
+    // The other two are as they were.
+    assert_eq!(listed["associated_files"][0]["relationship"], "Data");
+    assert_eq!(listed["associated_files"][1]["relationship"], "Source");
+
+    // A name that is there is replaced, and says what it was.
+    let again = tool(&mut a, "af_set_relationship", json!({ "doc": doc, "index": 1, "relationship": "Alternative" }));
+    assert_eq!(again["previous"], "Data", "{again}");
+
+    // One undo step each.
+    tool(&mut a, "edit_undo", json!({ "doc": doc }));
+    assert_eq!(tool(&mut a, "af_list", json!({ "doc": doc }))["associated_files"][0]["relationship"], "Data");
+    tool(&mut a, "edit_undo", json!({ "doc": doc }));
+    assert_eq!(tool(&mut a, "af_list", json!({ "doc": doc }))["without_relationship"], 1);
+    tool(&mut a, "edit_redo", json!({ "doc": doc }));
+    tool(&mut a, "doc_save", json!({ "doc": doc, "path": "out.pdf" }));
+
+    // The saved file's own object.
+    let cos = Document::open(Arc::new(std::fs::read(dir.path().join("out.pdf")).unwrap())).unwrap();
+    let catalog = cos.get(cos.root().unwrap()).as_dict().unwrap().clone();
+    let list = cos.resolve(catalog.get(b"AF").unwrap()).as_array().cloned().unwrap();
+    assert_eq!(cos.resolve(&list[2]).as_dict().unwrap().get(b"AFRelationship"), Some(&Object::name("Supplement")));
+    assert_eq!(cos.resolve(&list[0]).as_dict().unwrap().get(b"AFRelationship"), Some(&Object::name("Data")));
+}
+
+#[test]
+fn setting_a_relationship_refuses_with_nothing_written_and_a_modify_restriction_holds() {
+    let (dir, mut a) = setup();
+    std::fs::write(dir.path().join("three.pdf"), pdf_with_three_entries()).unwrap();
+    let doc = open(&mut a, "three.pdf");
+    let before = tool(&mut a, "af_list", json!({ "doc": doc }));
+    tool(&mut a, "doc_save", json!({ "doc": doc, "path": "before.pdf" }));
+    for (index, relationship) in [(3, "EncryptedPayload"), (3, "Banana"), (0, "Data"), (4, "Data"), (1, "Data")] {
+        let r = a.call("af_set_relationship", &json!({ "doc": doc, "index": index, "relationship": relationship }));
+        assert!(matches!(r, Err(ToolError::Failed(_) | ToolError::InvalidArgs(_))), "{index} {relationship}: {r:?}");
+    }
+    assert!(a.call("af_set_relationship", &json!({ "doc": doc, "index": 3 })).is_err(), "relationship is required");
+    assert!(a.call("af_set_relationship", &json!({ "doc": doc, "relationship": "Data" })).is_err(), "index is required");
+    assert_eq!(tool(&mut a, "af_list", json!({ "doc": doc })), before);
+    assert_eq!(before["unsaved_changes"], false);
+    tool(&mut a, "doc_save", json!({ "doc": doc, "path": "after.pdf" }));
+    assert_eq!(std::fs::read(dir.path().join("before.pdf")).unwrap(), std::fs::read(dir.path().join("after.pdf")).unwrap());
+
+    // A document that does not allow changes refuses.
+    let plain = open(&mut a, "three.pdf");
+    tool(&mut a, "doc_protect", json!({ "doc": plain, "open_password": "open", "permissions_password": "boss", "changes": "none" }));
+    tool(&mut a, "doc_save", json!({ "doc": plain, "path": "locked.pdf" }));
+    let locked = tool(&mut a, "doc_open", json!({ "path": "locked.pdf", "password": "open" }))["doc"].as_u64().unwrap();
+    match a.call("af_set_relationship", &json!({ "doc": locked, "index": 1, "relationship": "Data" })) {
+        Err(ToolError::Failed(m)) => assert!(m.contains("allow") || m.contains("permission"), "{m}"),
+        other => panic!("refused: {other:?}"),
+    }
+    assert_eq!(tool(&mut a, "af_list", json!({ "doc": locked }))["without_relationship"], 1);
+}
+
+/// A PDF from object bodies (object numbers start at 1; the catalog is object 1).
+fn raw_pdf(bodies: &[&str]) -> Vec<u8> {
+    let mut out = b"%PDF-2.0\n".to_vec();
+    let mut offsets = Vec::new();
+    for (i, body) in bodies.iter().enumerate() {
+        offsets.push(out.len());
+        out.extend_from_slice(format!("{} 0 obj\n{body}\nendobj\n", i + 1).as_bytes());
+    }
+    let xref = out.len();
+    out.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", bodies.len() + 1).as_bytes());
+    for o in offsets {
+        out.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+    }
+    out.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", bodies.len() + 1).as_bytes());
+    out
+}
+
+#[test]
+fn a_shared_array_is_reported_and_a_direct_specification_moves_the_catalog_to_its_own_array() {
+    let (dir, mut a) = setup();
+    // The catalog and one page list array 4: a specification by reference (5), and one written in it.
+    let bytes = raw_pdf(&[
+        "<< /Type /Catalog /Pages 2 0 R /AF 4 0 R >>",
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 10 10] >>",
+        "<< /Type /Page /Parent 2 0 R /AF 4 0 R >>",
+        "[5 0 R << /Type /Filespec /F (direct.xml) >>]",
+        "<< /Type /Filespec /F (ref.xml) >>",
+    ]);
+    std::fs::write(dir.path().join("shared.pdf"), bytes).unwrap();
+    let doc = open(&mut a, "shared.pdf");
+    // Array 4 is read once, for the catalog: two entries without a relationship.
+    let before = tool(&mut a, "af_list", json!({ "doc": doc }));
+    assert_eq!((before["count"].as_u64(), before["without_relationship"].as_u64()), (Some(2), Some(2)), "{before}");
+
+    // The direct one: the catalog's array is copied away from the page's, which keeps its entry
+    // with none, so the page now lists it and the count goes up.
+    let direct = tool(&mut a, "af_set_relationship", json!({ "doc": doc, "index": 2, "relationship": "Schema" }));
+    assert_eq!((direct["array_copied"].as_bool(), direct["shared_with_other_af"].as_bool()), (Some(true), Some(false)), "{direct}");
+    let after = tool(&mut a, "af_list", json!({ "doc": doc }));
+    assert_eq!((after["count"].as_u64(), after["without_relationship"].as_u64()), (Some(4), Some(3)), "{after}");
+
+    // The one by reference is shared with the page's array, and the catalog's array is already its own.
+    let by_ref = tool(&mut a, "af_set_relationship", json!({ "doc": doc, "index": 1, "relationship": "Data" }));
+    assert_eq!((by_ref["array_copied"].as_bool(), by_ref["shared_with_other_af"].as_bool()), (Some(false), Some(true)), "{by_ref}");
+    let last = tool(&mut a, "af_list", json!({ "doc": doc }));
+    assert_eq!(last["without_relationship"], 1, "{last}");
+}
+
+#[test]
+fn an_entry_that_is_not_a_file_specification_is_refused_through_the_tool_with_nothing_written() {
+    let (dir, mut a) = setup();
+    let bytes = raw_pdf(&[
+        "<< /Type /Catalog /Pages 2 0 R /AF [1 0 R 3 0 R] >>",
+        "<< /Type /Pages /Kids [4 0 R] /Count 1 /MediaBox [0 0 10 10] >>",
+        "<< /Length 1 /F (x) >>\nstream\nx\nendstream",
+        "<< /Type /Page /Parent 2 0 R >>",
+    ]);
+    std::fs::write(dir.path().join("odd.pdf"), bytes).unwrap();
+    let doc = open(&mut a, "odd.pdf");
+    tool(&mut a, "doc_save", json!({ "doc": doc, "path": "before.pdf" }));
+    for index in [1, 2] {
+        let r = a.call("af_set_relationship", &json!({ "doc": doc, "index": index, "relationship": "Data" }));
+        assert!(matches!(r, Err(ToolError::Failed(_) | ToolError::InvalidArgs(_))), "{index}: {r:?}");
+    }
+    tool(&mut a, "doc_save", json!({ "doc": doc, "path": "after.pdf" }));
+    assert_eq!(std::fs::read(dir.path().join("before.pdf")).unwrap(), std::fs::read(dir.path().join("after.pdf")).unwrap());
+}
