@@ -67,6 +67,18 @@ pub struct SubmitAction {
     /// Entries of `/Fields` that name nothing (a reference to nothing, a dictionary with no
     /// `/T` up its parents, a number, `null`) and so are not in `fields`.
     pub fields_left_out: usize,
+    /// How many entries of `fields` (`Only` or `Except`; each entry counted, repeats included)
+    /// match no field of the form: a name matches the fully qualified name of a field, or a
+    /// dotted ancestor of one (the parent whose children it stands for). Names are compared
+    /// exactly, letter for letter, and a partial name that itself holds a dot is read as two. 0
+    /// for `All` and `TooMany`, which list nothing to check. "The fields of the form" are those
+    /// [`fields`] returns (terminal fields of type text, button, choice or signature, from the
+    /// form's `/Fields` and adopted page-only widgets); a field with no or an unknown `/FT`, one
+    /// deeper than 64 levels, or a parent whose only kids are such fields is not read, so a name
+    /// for it counts here as unmatched, so the count can be too high. The cost is
+    /// one sorted list of the field names, built once per call and only when an action lists
+    /// names, and a binary search per listed name.
+    pub unmatched: usize,
     /// `/Flags` (the low 32 bits).
     pub flags: u32,
     // The booleans are reported as set, whether or not the format uses them: with `Pdf` the whole
@@ -88,6 +100,28 @@ fn bit(flags: u32, n: u32) -> bool {
     flags & (1 << (n - 1)) != 0
 }
 
+/// The fully qualified names of the fields read (`fields`), sorted, as slices of them: nothing
+/// is copied. A listed name is looked up in it by [`names_a_field`], O(log F) comparisons each.
+fn sorted_names(all: &[crate::Field]) -> Vec<&str> {
+    let mut v: Vec<&str> = all.iter().map(|f| f.name.as_str()).collect();
+    v.sort_unstable();
+    v
+}
+
+/// Whether `name` is one of the sorted `names`, or a dotted ancestor of one (some name starts
+/// with `name` and a dot). `key` is a buffer reused between calls.
+fn names_a_field(names: &[&str], name: &str, key: &mut String) -> bool {
+    if names.binary_search(&name).is_ok() {
+        return true;
+    }
+    key.clear();
+    key.push_str(name);
+    key.push('.');
+    // Everything that starts with the key sorts together, from the first name at or past it.
+    let at = names.partition_point(|n| *n < key.as_str());
+    names.get(at).is_some_and(|n| n.starts_with(key.as_str()))
+}
+
 /// The Submit a Form actions that field `name` (its first widget) runs on each trigger, in the
 /// Actions tab's order. Only the action a trigger starts is read, not the ones chained after it
 /// with `/Next`, and nothing is sent. Triggers whose action is anything else are left out.
@@ -100,6 +134,9 @@ pub fn submit_actions(doc: &Document, name: &str) -> Result<Vec<SubmitAction>, F
     let aa = wd.get(b"AA").map(|a| held(doc, a));
     let aa = aa.as_ref().and_then(|a| a.get().as_dict());
     let mut out = Vec::new();
+    // Built once, and only when an action lists names.
+    let mut known: Option<Vec<&str>> = None;
+    let mut key = String::new();
     for t in Trigger::ALL {
         let o = match t.key() {
             None => wd.get(b"A").or_else(|| aa.and_then(|aa| aa.get(b"U"))),
@@ -148,7 +185,15 @@ pub fn submit_actions(doc: &Document, name: &str) -> Result<Vec<SubmitAction>, F
         } else {
             SubmitFormat::Fdf
         };
+        let unmatched = match &fields {
+            SubmitFields::Only(n) | SubmitFields::Except(n) => {
+                let known = known.get_or_insert_with(|| sorted_names(&all));
+                n.iter().filter(|x| !names_a_field(known, x, &mut key)).count()
+            }
+            _ => 0,
+        };
         out.push(SubmitAction {
+            unmatched,
             trigger: t,
             url,
             url_too_long,
