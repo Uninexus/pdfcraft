@@ -27,9 +27,10 @@ fn request_json(r: &pdfcraft_engine::js::Request) -> Value {
     }
 }
 
-/// The optional `answers` argument: the prompts' answers in order (null cancels one).
+/// The optional `answers` argument: the prompts' answers in order (null cancels one). A null
+/// `answers` is left out, like any argument that is null.
 fn answers(a: &Args) -> Result<Vec<Option<String>>> {
-    match a.0.get("answers") {
+    match a.get("answers") {
         None => Ok(Vec::new()),
         Some(Value::Array(values)) if values.len() <= 32 => values
             .iter()
@@ -46,7 +47,7 @@ fn answers(a: &Args) -> Result<Vec<Option<String>>> {
 /// The optional `field_id` argument: a field's identity from form_fields, selecting one of
 /// fields sharing a name.
 fn field_id(a: &Args) -> Result<Option<u64>> {
-    a.0.get("field_id")
+    a.get("field_id")
         .map(|v| {
             v.as_u64()
                 .filter(|id| *id < 1 << 48)
