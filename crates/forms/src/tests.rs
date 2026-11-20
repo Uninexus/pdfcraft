@@ -9292,3 +9292,77 @@ fn a_submit_action_chained_after_another_is_not_read() {
     doc.update_dict(go, |d| d.set(b"A".to_vec(), Object::Dict(js))).unwrap();
     assert!(submit_actions(&doc, "go").unwrap().is_empty());
 }
+
+/// A walk that stops at a limit says so (`capped`), so a replace refuses instead of leaving
+/// scripts past the cut unsearched without a word.
+#[test]
+fn a_field_tree_65_levels_deep_is_capped_and_one_64_deep_is_not() {
+    let nested = |fields: usize| {
+        let mut objs = vec![
+            "<< /Type /Catalog /Pages 2 0 R /AcroForm 3 0 R >>".to_string(),
+            "<< /Type /Pages /Kids [] /Count 0 >>".to_string(),
+            "<< /Fields [4 0 R] >>".to_string(),
+        ];
+        objs.extend(
+            (0..fields)
+                .map(|k| if k + 1 < fields { format!("<< /T (f{k}) /Kids [{} 0 R] >>", 5 + k) } else { format!("<< /T (f{k}) /A {} >>", js(k)) }),
+        );
+        javascripts(&document(&objs))
+    };
+    // 65 fields: the last is at depth 64 and has no kids. 66: the one at depth 64 has kids the
+    // walk will not enter.
+    let ok = nested(65);
+    assert_eq!((ok.entries.len(), ok.capped), (1, false));
+    let cut = nested(66);
+    assert_eq!((cut.entries.len(), cut.capped), (0, true));
+}
+
+#[test]
+fn an_outline_65_levels_deep_is_capped_and_one_64_deep_is_not() {
+    let nested =
+        |items: usize| {
+            let mut objs = vec![
+                "<< /Type /Catalog /Pages 2 0 R /Outlines 3 0 R >>".to_string(),
+                "<< /Type /Pages /Kids [] /Count 0 >>".to_string(),
+                "<< /First 4 0 R >>".to_string(),
+            ];
+            objs.extend((0..items).map(|k| {
+                if k + 1 < items { format!("<< /Title (t{k}) /First {} 0 R >>", 5 + k) } else { format!("<< /Title (t{k}) /A {} >>", js(k)) }
+            }));
+            javascripts(&document(&objs))
+        };
+    let ok = nested(65);
+    assert_eq!((ok.entries.len(), ok.capped), (1, false));
+    let cut = nested(66);
+    assert_eq!((cut.entries.len(), cut.capped), (0, true));
+}
+
+#[test]
+fn a_name_tree_kids_array_past_the_node_limit_is_capped() {
+    let tree = |kids: usize| {
+        let objs = vec![
+            "<< /Type /Catalog /Pages 2 0 R /Names << /JavaScript 3 0 R >> >>".to_string(),
+            "<< /Type /Pages /Kids [] /Count 0 >>".to_string(),
+            format!("<< /Kids [{}] >>", "4 0 R ".repeat(kids)),
+            format!("<< /Names [(l) {}] >>", js(0)),
+        ];
+        javascripts(&document(&objs))
+    };
+    let ok = tree(100_000);
+    assert_eq!((ok.entries.len(), ok.capped), (1, false));
+    let cut = tree(100_001);
+    assert_eq!((cut.entries.len(), cut.capped), (1, true));
+}
+
+#[test]
+fn a_next_chain_of_300_actions_is_cut_at_256_steps_and_capped() {
+    let chain = |actions: usize| {
+        let mut objs = vec!["<< /Type /Catalog /Pages 2 0 R /OpenAction 3 0 R >>".to_string(), "<< /Type /Pages /Kids [] /Count 0 >>".to_string()];
+        objs.extend((0..actions).map(|k| if k + 1 < actions { format!("<< /S /JavaScript /JS (s{k}();) /Next {} 0 R >>", 4 + k) } else { js(k) }));
+        javascripts(&document(&objs))
+    };
+    let ok = chain(256);
+    assert_eq!((ok.entries.len(), ok.capped), (256, false));
+    let cut = chain(300);
+    assert_eq!((cut.entries.len(), cut.capped), (256, true));
+}

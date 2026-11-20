@@ -143,8 +143,10 @@ pub use pdfcraft_annot::{
 pub use pdfcraft_annot::{MAX_MODEL_BYTES as MAX_3D_MODEL_BYTES, ModelFormat as Model3dFormat};
 pub use pdfcraft_forms::detect;
 pub use pdfcraft_forms::{
-    MAX_SCRIPT_LEN as MAX_JAVASCRIPT_LEN, MAX_SCRIPTS as MAX_JAVASCRIPTS, MAX_TOTAL_CODE as MAX_JAVASCRIPT_TOTAL,
-    MAX_TOTAL_LABELS as MAX_JAVASCRIPT_LABELS, ScriptEntry as JavaScriptEntry, ScriptInventory as JavaScriptInventory, ScriptKind as JavaScriptKind,
+    MAX_FIND_LEN as MAX_JAVASCRIPT_FIND_LEN, MAX_REPLACEMENT_LEN as MAX_JAVASCRIPT_REPLACEMENT_LEN, MAX_SCRIPT_LEN as MAX_JAVASCRIPT_LEN,
+    MAX_SCRIPTS as MAX_JAVASCRIPTS, MAX_TOTAL_CODE as MAX_JAVASCRIPT_TOTAL, MAX_TOTAL_LABELS as MAX_JAVASCRIPT_LABELS,
+    ReplaceReport as JavaScriptReplaceReport, ReplacedScript as JavaScriptReplaced, ScriptEntry as JavaScriptEntry,
+    ScriptInventory as JavaScriptInventory, ScriptKind as JavaScriptKind,
 };
 pub use pdfcraft_optimize as optimize;
 pub use pdfcraft_preflight as pdfa;

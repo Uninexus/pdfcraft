@@ -109,3 +109,45 @@ fn undo_and_redo_shifting_what_an_id_leads_to_is_caught() {
     assert!(s.apply(id, Edit::SetJavaScript { id: oid.clone(), expect: second, code: "x".into() }).is_err());
     s.apply(id, Edit::SetJavaScript { id: oid, expect: first, code: "var first = 3;".into() }).unwrap();
 }
+
+/// Find and replace over every script is one undoable edit that runs nothing, needs the
+/// permission to modify, and writes nothing when it is refused.
+#[test]
+fn replace_in_scripts_is_one_undoable_step_needing_modify_permission() {
+    let (mut s, id) = session();
+    let original = s.get(id).unwrap().bytes.clone();
+    let edit = Edit::ReplaceInJavaScripts { find: "ran".into(), replace: "walked".into(), match_case: true };
+    s.apply(id, edit.clone()).unwrap();
+    assert_eq!(entry(&s, id, "Mouse Up").1.as_deref(), Some("getField('log').value = 'walked';"));
+    assert_eq!(s.get(id).unwrap().can_undo(), Some("Replace in JavaScripts"));
+    // Nothing ran: the field is as it was and the console is empty.
+    assert_eq!(s.get(id).unwrap().form.iter().find(|f| f.name == "log").unwrap().value.join(""), "");
+    let out = s.take_js_output(id);
+    assert!(out.errors.is_empty() && out.alerts.is_empty() && out.console.is_empty());
+    s.undo(id).unwrap();
+    assert_eq!(entry(&s, id, "Mouse Up").1.as_deref(), Some("getField('log').value = 'ran';"));
+    assert_eq!(s.get(id).unwrap().bytes, original);
+
+    // Refused: an empty find changes nothing and leaves no step.
+    let depth = s.get(id).unwrap().undo_depth();
+    let e = s.apply(id, Edit::ReplaceInJavaScripts { find: String::new(), replace: "x".into(), match_case: true }).unwrap_err();
+    assert!(e.to_string().contains("the text to find is empty"), "{e}");
+    assert_eq!(s.get(id).unwrap().undo_depth(), depth);
+
+    let none = pdfcraft_cos::Permissions { bits: 0, owner: false, revision: 3 };
+    assert_eq!(crate::edit::check_permission(&edit, &none), Err(EditError::NotPermitted("changes to the document")));
+}
+
+/// A replace that finds nothing is not an edit: no undo step and nothing unsaved.
+#[test]
+fn a_replace_that_finds_nothing_leaves_no_step_and_nothing_unsaved() {
+    let (mut s, id) = session();
+    let depth = s.get(id).unwrap().undo_depth();
+    s.apply(id, Edit::ReplaceInJavaScripts { find: "no such text".into(), replace: "x".into(), match_case: true }).unwrap();
+    let doc = s.get(id).unwrap();
+    assert_eq!((doc.undo_depth(), doc.dirty), (depth, false));
+    // Case ignored, a find equal to its replacement but for case changes no text either.
+    s.apply(id, Edit::ReplaceInJavaScripts { find: "WILLSAVE".into(), replace: "willSave".into(), match_case: false }).unwrap();
+    let doc = s.get(id).unwrap();
+    assert_eq!((doc.undo_depth(), doc.dirty), (depth, false));
+}

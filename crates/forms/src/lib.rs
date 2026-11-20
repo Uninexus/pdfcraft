@@ -23,6 +23,7 @@ mod author;
 mod calc_order;
 pub mod detect;
 mod js_inventory;
+mod js_replace;
 mod scripting;
 mod submit;
 pub mod table;
@@ -37,6 +38,7 @@ pub use js_inventory::{
     MAX_SCRIPT_LEN, MAX_SCRIPTS, MAX_TOTAL_CODE, MAX_TOTAL_LABELS, ScriptEntry, ScriptInventory, ScriptKind, javascripts, remove_javascript,
     set_javascript,
 };
+pub use js_replace::{MAX_FIND_LEN, MAX_REPLACEMENT_LEN, ReplaceReport, ReplacedScript, preview_javascript_replace, replace_in_javascripts};
 pub use scripting::{
     DocumentTrigger, FieldChange, FieldEvent, NoScripts, PageEvent, PageScript, ScriptResult, Scripts, apply_script_changes, document_action_scripts,
     document_scripts, document_scripts_named, page_scripts, set_document_script, set_field_script,

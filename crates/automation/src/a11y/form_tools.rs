@@ -204,7 +204,7 @@ impl Automation {
             .filter(|e| kind.is_none_or(|k| e.kind == k))
             .map(|e| {
                 json!({ "id": e.id, "kind": e.kind.id(), "trigger": e.trigger, "field": e.field, "page": e.page, "name": e.name,
-                    "code": e.code, "truncated": e.truncated, "fingerprint": e.fingerprint })
+                    "code": e.code, "truncated": e.truncated, "exact": e.exact, "fingerprint": e.fingerprint })
             })
             .collect();
         Ok(
@@ -233,6 +233,27 @@ impl Automation {
         self.apply_with_warnings(id, edit)?;
         let doc = json!({ "doc": a.get("doc").cloned().unwrap_or(Value::Null) });
         self.doc_javascripts(&Args(&doc))
+    }
+
+    /// `doc_javascript_replace`: replace the plain text `find` with `replace` in every script
+    /// `doc_javascripts` lists, as one undoable edit (or only report it, with `dry_run`); nothing
+    /// is run. A replace that finds nothing adds no undo step.
+    pub(crate) fn doc_javascript_replace(&mut self, a: &Args) -> Result<Value> {
+        let find = a.str("find")?.to_string();
+        let replace = a.str("replace")?.to_string();
+        let match_case = a.opt_bool("match_case")?.unwrap_or(true);
+        let dry_run = a.opt_bool("dry_run")?.unwrap_or(false);
+        let doc = self.doc(a)?;
+        let id = doc.id;
+        let report = doc.preview_javascript_replace(&find, &replace, match_case).map_err(|e| ToolError::InvalidArgs(e.to_string()))?;
+        let applied = !dry_run && !report.changed.is_empty();
+        if applied {
+            self.apply_with_warnings(id, pdfcraft_engine::Edit::ReplaceInJavaScripts { find, replace, match_case })?;
+        }
+        let changed: Vec<Value> =
+            report.changed.iter().map(|c| json!({ "id": c.id, "kind": c.kind.id(), "trigger": c.trigger, "occurrences": c.occurrences })).collect();
+        Ok(json!({ "dry_run": dry_run, "applied": applied, "searched": report.searched, "occurrences": report.occurrences, "changed": changed,
+            "skipped_unreadable": report.skipped_unreadable, "max_find_bytes": pdfcraft_engine::MAX_JAVASCRIPT_FIND_LEN, "max_replace_bytes": pdfcraft_engine::MAX_JAVASCRIPT_REPLACEMENT_LEN }))
     }
 
     /// `form_set_script`: set field `field`'s JavaScript for `event` to `script`, or remove it when
