@@ -189,3 +189,21 @@ fn a_step_arg_that_is_not_a_string_is_refused_before_any_folder_is_made() {
     assert!(accepted.is_empty(), "these calls were not refused with the expected message: {accepted:#?}");
     assert!(!dir.join("out").exists(), "a refused call makes no output folder");
 }
+
+/// A JSON null is the same as a left-out argument in the Args helpers, and `js_run` read its
+/// `answers` and `field_id` around them: a null was refused as the wrong type.
+#[test]
+fn a_null_answers_or_field_id_is_left_out_and_a_wrong_one_is_refused_by_name() {
+    let (mut a, doc, dir) = open("null-js-run");
+    let ran = json_of(a.call("js_run", &json!({ "doc": doc, "script": "1 + 1", "answers": null, "field_id": null })).unwrap());
+    assert_eq!(ran["error"], Value::Null, "{ran}");
+    assert_eq!(ran["result"], json!("2"), "{ran}");
+    let cases = vec![
+        ("js_run", json!({ "doc": doc, "script": "1", "answers": "yes" }), "answers must be an array of at most 32 strings or null".to_string()),
+        ("js_run", json!({ "doc": doc, "script": "1", "answers": [1] }), "answers must contain strings or null".to_string()),
+        ("js_run", json!({ "doc": doc, "script": "1", "field_id": "x" }), "field_id must be an integer between 0 and 281474976710655".to_string()),
+        ("js_run", json!({ "doc": doc, "script": "1", "field_id": -1 }), "field_id must be an integer between 0 and 281474976710655".to_string()),
+    ];
+    assert_eq!(not_refused(&mut a, cases), Vec::<String>::new());
+    let _ = std::fs::remove_dir_all(&dir);
+}

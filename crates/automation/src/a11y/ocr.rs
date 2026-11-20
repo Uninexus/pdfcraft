@@ -279,11 +279,7 @@ impl Automation {
                 let job = self.session.ocr_job(id, &pages, settings).ok_or_else(|| failed("the document could not be read"))?;
                 let found = job.run(&recognizers, |_, _| true);
                 let bytes = self.session.editable_ocr_bytes(id, &found).map_err(failed)?;
-                // recognition can take minutes: a file created meanwhile is refused, not replaced
-                if let Some(folder) = out.parent() {
-                    std::fs::create_dir_all(folder).map_err(failed)?;
-                }
-                crate::bates::publish_new(&out, &bytes)?;
+                publish_editable(&out, &bytes)?;
                 Ok(json!({
                     "out": out.to_string_lossy(),
                     "words": found.iter().map(|p| p.words.len()).sum::<usize>(),
@@ -574,6 +570,56 @@ fn shared_file_names(targets: &[std::path::PathBuf]) -> Vec<String> {
         }
     }
     groups.into_values().filter(|(count, _)| *count > 1).flat_map(|(_, spellings)| spellings).collect()
+}
+
+/// Publish the editable output `out` as a new file, making its folder. Recognition can take
+/// minutes, so a file created meanwhile is refused, not replaced. If the publish fails, the folder
+/// this call made is removed again (best effort: when it needed several new levels only the
+/// deepest is removed), so a failed call leaves nothing behind.
+fn publish_editable(out: &std::path::Path, bytes: &[u8]) -> Result<()> {
+    let folder = out.parent().ok_or_else(|| failed("output has no parent directory"))?;
+    crate::paths::Written::within(folder, |written| {
+        crate::bates::publish_new(out, bytes)?;
+        written.record(out);
+        Ok(())
+    })
+}
+
+#[cfg(test)]
+mod publish_editable_tests {
+    use super::publish_editable;
+
+    #[test]
+    fn a_publish_that_is_refused_leaves_the_folder_and_the_file_as_they_were() {
+        let dir = tempfile::tempdir().unwrap();
+        // The file exists already (created while recognition ran): refused, and the folder is as it was.
+        let kept = dir.path().join("kept");
+        std::fs::create_dir(&kept).unwrap();
+        std::fs::write(kept.join("a.pdf"), "mine").unwrap();
+        let message = publish_editable(&kept.join("a.pdf"), b"new").unwrap_err().to_string();
+        assert_eq!(message, format!("output appeared after preflight; refusing to replace it: {}", kept.join("a.pdf").display()));
+        assert_eq!(std::fs::read_to_string(kept.join("a.pdf")).unwrap(), "mine");
+        assert_eq!(std::fs::read_dir(&kept).unwrap().count(), 1, "no staging file is left");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_publish_that_fails_leaves_no_new_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        // A file name over the limit: the made folder is removed again.
+        let long = dir.path().join("new").join(format!("{}.pdf", "z".repeat(260)));
+        let message = publish_editable(&long, b"new").unwrap_err().to_string();
+        assert_eq!(message, "File name too long (os error 36)");
+        assert!(!dir.path().join("new").exists(), "the folder this call made is removed again");
+    }
+
+    #[test]
+    fn a_publish_that_works_makes_the_folder_and_the_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let out = dir.path().join("new/ocr.pdf");
+        publish_editable(&out, b"%PDF").unwrap();
+        assert_eq!(std::fs::read(&out).unwrap(), b"%PDF");
+    }
 }
 
 #[cfg(test)]
