@@ -117,6 +117,13 @@ pub struct ScriptEntry {
     /// `code` is cut: the stored script was longer than [`MAX_SCRIPT_LEN`], or the listing's
     /// total of [`MAX_TOTAL_CODE`] bytes was spent (then `code` is empty).
     pub truncated: bool,
+    /// `code` is the text the script's own encoding gives, with nothing replaced: a string
+    /// decoded as a PDF text string (a UTF-16BE byte-order mark, else UTF-8, else
+    /// PDFDocEncoding) with no U+FFFD in the result, or a stream that is valid UTF-8, does not
+    /// start with a byte-order mark and holds no U+FFFD. A stream in another encoding
+    /// (PDFDocEncoding, UTF-16) or a damaged one is read with replacement characters, so `code`
+    /// is only a reading of it, and it is not safe to write back.
+    pub exact: bool,
     /// A short hash of the stored code (64-bit FNV-1a, hex; not a security measure). Editing
     /// needs it as `expect`, so an id that came to lead to another script is refused.
     pub fingerprint: String,
@@ -126,8 +133,9 @@ pub struct ScriptEntry {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ScriptInventory {
     pub entries: Vec<ScriptEntry>,
-    /// A limit stopped the walk (more than [`MAX_SCRIPTS`] scripts, or the page annotation
-    /// visit limit): some scripts may not be listed.
+    /// A limit stopped the walk (more than [`MAX_SCRIPTS`] scripts, the page annotation visit
+    /// limit, or a chain, name tree, field tree, outline or array past its limit): some scripts
+    /// may not be listed.
     pub capped: bool,
     /// How many listed scripts have `truncated` set.
     pub truncated: usize,
@@ -270,6 +278,7 @@ fn follow(doc: &Document, cur: &Object, segs: &[Seg]) -> Option<Object> {
 /// What the listing has read of one script object, kept so actions sharing it read it once.
 #[derive(Clone)]
 struct Read {
+    exact: bool,
     text: std::rc::Rc<String>,
     fingerprint: std::rc::Rc<str>,
 }
@@ -287,6 +296,9 @@ struct Collector<'a> {
     read_bytes: usize,
     /// Annotations and pages visited, against [`MAX_VISITS`].
     visits: usize,
+    /// A chain, tree or array was cut at its limit ([`MAX_CHAIN`], [`MAX_NODES`], [`MAX_DEPTH`]):
+    /// the walk went on, but scripts past the cut are not listed. Joins `capped` at the end.
+    limited: bool,
     seen_annots: HashSet<u32>,
     /// Name bytes still to be read and still to be copied ([`MAX_TOTAL_LABELS`]).
     read_left: usize,
@@ -314,7 +326,11 @@ impl Collector<'_> {
         let mut visited = 0usize;
         while let Some((route, raw)) = pending.pop() {
             visited += 1;
-            if visited > MAX_CHAIN || self.full() {
+            if self.full() {
+                return;
+            }
+            if visited > MAX_CHAIN {
+                self.limited = true;
                 return;
             }
             if let Some(r) = raw.as_ref()
@@ -371,7 +387,19 @@ impl Collector<'_> {
         if left_out {
             self.out.names_left_out += 1;
         }
-        self.out.entries.push(ScriptEntry { id, kind, trigger: trigger.to_string(), field, page: ctx.page, name, code, truncated, fingerprint });
+        let exact = read.as_ref().is_some_and(|r| r.exact);
+        self.out.entries.push(ScriptEntry {
+            id,
+            kind,
+            trigger: trigger.to_string(),
+            field,
+            page: ctx.page,
+            name,
+            code,
+            truncated,
+            exact,
+            fingerprint,
+        });
     }
 
     /// `text` as an owned string when it fits in what is left to copy, charged before it is
@@ -447,12 +475,16 @@ impl Collector<'_> {
         if let Some(hit) = num.and_then(|n| self.read.get(&n)) {
             return hit.clone();
         }
+        // `exact`: no byte was turned into a replacement character (see [`ScriptEntry::exact`]).
         let text = match &*doc.resolve(&js) {
-            Object::String(s) => Some(s.to_text()),
-            Object::Stream(s) => self.budget.decode(s).ok().map(|b| String::from_utf8_lossy(&b).into_owned()),
+            Object::String(s) => Some(s.to_text()).map(|t| (!t.contains('\u{FFFD}'), t)),
+            Object::Stream(s) => self.budget.decode(s).ok().map(|b| match String::from_utf8(b) {
+                Ok(t) => (!t.starts_with('\u{FEFF}') && !t.contains('\u{FFFD}'), t),
+                Err(e) => (false, String::from_utf8_lossy(e.as_bytes()).into_owned()),
+            }),
             _ => None,
         };
-        let read = text.map(|t| Read { fingerprint: fingerprint(Some(&t)).into(), text: std::rc::Rc::new(t) });
+        let read = text.map(|(exact, t)| Read { exact, fingerprint: fingerprint(Some(&t)).into(), text: std::rc::Rc::new(t) });
         if let (Some(n), Some(r)) = (num, &read) {
             // Kept for the actions sharing it, within the same bound as stream decoding.
             if self.read_bytes.saturating_add(r.text.len()) <= crate::read::MAX_SCRIPT_BYTES {
@@ -492,7 +524,11 @@ impl Collector<'_> {
         let mut visited = 0usize;
         while let Some((route, raw)) = stack.pop() {
             visited += 1;
-            if visited > MAX_NODES || self.full() {
+            if self.full() {
+                return;
+            }
+            if visited > MAX_NODES {
+                self.limited = true;
                 return;
             }
             let node = doc.resolve(&raw);
@@ -504,6 +540,7 @@ impl Collector<'_> {
                 if let Some(list) = doc.resolve(kids).as_array().cloned() {
                     #[cfg(test)]
                     KIDS_READ.with(|n| n.set(n.get().saturating_add(list.len())));
+                    self.limited |= list.len() > MAX_NODES;
                     let new: Vec<(Route, Object)> = list
                         .iter()
                         .enumerate()
@@ -562,7 +599,11 @@ impl Collector<'_> {
         let mut visited = 0usize;
         while let Some((r, depth)) = stack.pop() {
             visited += 1;
-            if visited > MAX_NODES || self.full() {
+            if self.full() {
+                return;
+            }
+            if visited > MAX_NODES {
+                self.limited = true;
                 return;
             }
             if !seen.insert(r.num) {
@@ -577,6 +618,9 @@ impl Collector<'_> {
                 let ctx = Ctx { field, left_out, ..Ctx::default() };
                 self.actions_of(&Route::obj(r.num), d, ScriptKind::Field, &ctx, Some("Mouse Up"), FIELD_AA);
             }
+            if depth >= MAX_DEPTH && d.get(b"Kids").is_some() {
+                self.limited = true;
+            }
             if depth < MAX_DEPTH
                 && d.get(b"Kids").is_none_or(|k| k.as_ref().is_none_or(|r| kids_read.insert(r.num)))
                 && let Some(kids) = d.get(b"Kids").map(|k| doc.resolve(k))
@@ -584,6 +628,7 @@ impl Collector<'_> {
             {
                 #[cfg(test)]
                 KIDS_READ.with(|n| n.set(n.get().saturating_add(kids.len())));
+                self.limited |= kids.len() > MAX_NODES;
                 stack.extend(kids.iter().take(MAX_NODES).filter_map(Object::as_ref).map(|k| (k, depth + 1)).rev().collect::<Vec<_>>());
             }
         }
@@ -661,7 +706,11 @@ impl Collector<'_> {
         let mut visited = 0usize;
         while let Some((r, depth)) = stack.pop() {
             visited += 1;
-            if visited > MAX_NODES || self.full() {
+            if self.full() {
+                return;
+            }
+            if visited > MAX_NODES {
+                self.limited = true;
                 return;
             }
             if !seen.insert(r.num) {
@@ -669,6 +718,9 @@ impl Collector<'_> {
             }
             let obj = doc.get(r);
             let Some(d) = obj.as_dict() else { continue };
+            if depth >= MAX_DEPTH && d.get(b"First").is_some() {
+                self.limited = true;
+            }
             if let Some(next) = d.get(b"Next").and_then(Object::as_ref) {
                 stack.push((next, depth));
             }
@@ -763,6 +815,7 @@ pub fn javascripts(doc: &Document) -> ScriptInventory {
         read: Default::default(),
         read_bytes: 0,
         visits: 0,
+        limited: false,
         seen_annots: HashSet::new(),
         read_left: MAX_TOTAL_LABELS,
         copy_left: MAX_TOTAL_LABELS,
@@ -772,6 +825,7 @@ pub fn javascripts(doc: &Document) -> ScriptInventory {
     c.pages();
     c.fields();
     c.bookmarks();
+    c.out.capped |= c.limited;
     c.out
 }
 
@@ -919,6 +973,116 @@ fn locate(doc: &Document, id: &str, expect: &str) -> Result<(Route, Object), For
         return Err(changed());
     }
     Ok((route, start))
+}
+
+/// Where a script physically is: the nearest indirect object on its route (the route's root, or
+/// an object a reference on it leads to) and the direct keys and positions from that object down
+/// to the action. Two ids with the same place are one script.
+pub(crate) struct Place {
+    pub(crate) object: ObjRef,
+    path: Vec<Seg>,
+}
+
+impl Place {
+    /// A text that is the same for the same place.
+    pub(crate) fn key(&self) -> String {
+        let mut s = self.object.num.to_string();
+        for seg in &self.path {
+            match seg {
+                Seg::Key(k) => {
+                    s.push('/');
+                    s.push_str(k);
+                }
+                Seg::Idx(i) => s.push_str(&format!("[{i}]")),
+            }
+        }
+        s
+    }
+}
+
+/// The object at `path` below `node`, through direct dictionaries and arrays only.
+fn within<'a>(mut node: &'a Object, path: &[Seg]) -> Option<&'a Object> {
+    for seg in path {
+        node = match (seg, node) {
+            (Seg::Key(k), Object::Dict(d)) => d.get(k.as_bytes())?,
+            (Seg::Idx(i), Object::Array(a)) => a.get(*i)?,
+            _ => return None,
+        };
+    }
+    Some(node)
+}
+
+fn within_mut<'a>(mut node: &'a mut Object, path: &[Seg]) -> Option<&'a mut Object> {
+    for seg in path {
+        node = match (seg, node) {
+            (Seg::Key(k), Object::Dict(d)) => d.get_mut(k.as_bytes())?,
+            (Seg::Idx(i), Object::Array(a)) => a.get_mut(*i)?,
+            _ => return None,
+        };
+    }
+    Some(node)
+}
+
+/// The place of the script at `id`, read without copying any direct object on the way (each
+/// step borrows). `None` when the route is broken, passes through one object twice, or does not
+/// end at a JavaScript action that is a dictionary.
+pub(crate) fn place_of(doc: &Document, id: &str) -> Option<Place> {
+    let route = Route::parse(id)?;
+    let Object::Ref(start) = route.start(doc)? else { return None };
+    let mut object = start;
+    let mut path: Vec<Seg> = Vec::new();
+    let mut held = doc.get(object);
+    let mut passed = vec![start.num];
+    for seg in &route.segs {
+        let next = match (seg, within(&held, &path)?) {
+            (Seg::Key(k), Object::Dict(d)) => d.get(k.as_bytes())?.as_ref(),
+            (Seg::Idx(i), Object::Array(a)) => a.get(*i)?.as_ref(),
+            _ => return None,
+        };
+        match next {
+            Some(r) => {
+                if passed.contains(&r.num) {
+                    return None;
+                }
+                passed.push(r.num);
+                object = r;
+                path.clear();
+                held = doc.get(r);
+            }
+            None => path.push(seg.clone()),
+        }
+    }
+    matches!(within(&held, &path)?, Object::Dict(d) if is_javascript(d)).then_some(Place { object, path })
+}
+
+/// Give each of the actions at the given places the script text beside it, as a string in its
+/// `/JS` (an old stream or string that was there is left where it is, unreferenced from this
+/// action). Each object that holds actions is copied and rewritten once, however many actions it
+/// holds, and the actions are written in place, so an action that several places refer to
+/// changes for all of them. Every object is built before the first is written: when one cannot
+/// be, nothing is written. The places must be different.
+pub(crate) fn rewrite_places(doc: &mut Document, edits: &[(&Place, &str)]) -> Result<(), FormError> {
+    type Group<'a> = (ObjRef, Vec<(&'a Place, &'a str)>);
+    let mut groups: std::collections::BTreeMap<u32, Group<'_>> = std::collections::BTreeMap::new();
+    for (place, code) in edits {
+        groups.entry(place.object.num).or_insert_with(|| (place.object, Vec::new())).1.push((place, code));
+    }
+    let mut built: Vec<(ObjRef, Object)> = Vec::with_capacity(groups.len());
+    for (object, list) in groups.into_values() {
+        let mut new = (*doc.get(object)).clone();
+        for (place, code) in list {
+            let Some(Object::Dict(action)) = within_mut(&mut new, &place.path) else { return Err(stale("a script")) };
+            if !is_javascript(action) {
+                return Err(stale("a script"));
+            }
+            action.set(b"JS".to_vec(), PdfString::text(code));
+        }
+        built.push((object, new));
+    }
+    for (object, new) in built {
+        doc.set(object, new);
+    }
+    Ok(())
 }
 
 /// Replace the source of the JavaScript at `id` (from [`javascripts`]) with `code`; every other

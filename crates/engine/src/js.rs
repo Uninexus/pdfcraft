@@ -829,6 +829,21 @@ impl crate::Document {
         self.editor.as_ref().map(|e| pdfcraft_forms::javascripts(&e.cos)).unwrap_or_default()
     }
 
+    /// What replacing `find` with `replace` in every JavaScript would do, without changing
+    /// anything ([`pdfcraft_forms::preview_javascript_replace`]). A document with no editor
+    /// finds nothing.
+    pub fn preview_javascript_replace(
+        &self,
+        find: &str,
+        replace: &str,
+        match_case: bool,
+    ) -> Result<pdfcraft_forms::ReplaceReport, pdfcraft_forms::FormError> {
+        match self.editor.as_ref() {
+            Some(e) => pdfcraft_forms::preview_javascript_replace(&e.cos, find, replace, match_case),
+            None => Ok(pdfcraft_forms::ReplaceReport::default()),
+        }
+    }
+
     /// Document JavaScripts (name, source), in name order.
     pub fn document_scripts(&self) -> Vec<(String, String)> {
         self.editor.as_ref().map(|e| document_scripts(&e.cos)).unwrap_or_default()

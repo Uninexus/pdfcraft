@@ -307,6 +307,7 @@ impl Edit {
             Edit::SetDocumentScript { .. } => Label::of("Edit document JavaScript"),
             Edit::SetJavaScript { .. } => Label::of("Edit JavaScript"),
             Edit::RemoveJavaScript { .. } => Label::of("Delete JavaScript"),
+            Edit::ReplaceInJavaScripts { .. } => Label::of("Replace in JavaScripts"),
             Edit::EditTextLine { .. } | Edit::EditTextBlock { .. } => Label::of("Edit text"),
             Edit::PrepareText { .. } => Label::of("Prepare grouped text"),
             Edit::RegisterTextFont { .. } => Label::of("Load document font"),

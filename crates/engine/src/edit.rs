@@ -501,6 +501,14 @@ pub enum Edit {
         id: String,
         expect: String,
     },
+    /// Edit all JavaScripts: replace every find of `find` with `replace` in every script the
+    /// document lists, as one edit ([`pdfcraft_forms::replace_in_javascripts`] says what is
+    /// refused). Nothing is run.
+    ReplaceInJavaScripts {
+        find: String,
+        replace: String,
+        match_case: bool,
+    },
     /// Field Properties ▸ a custom script: set or remove field `name`'s JavaScript for `event`
     /// (keystroke, format, validate, calculate or mouse_up).
     SetFieldScript {

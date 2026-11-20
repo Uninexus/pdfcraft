@@ -167,6 +167,7 @@ pub(crate) fn check_permission(edit: &Edit, p: &pdfcraft_cos::Permissions) -> Re
         | Edit::SetFieldScript { .. }
         | Edit::SetJavaScript { .. }
         | Edit::RemoveJavaScript { .. }
+        | Edit::ReplaceInJavaScripts { .. }
         | Edit::RemoveStandardId { .. }
         | Edit::EditTextLine { .. }
         | Edit::EditTextBlock { .. }
@@ -970,7 +971,7 @@ pub(crate) fn run_edit(doc: &mut pdfcraft_cos::Document, edit: &Edit, cx: &mut E
             pdfcraft_preflight::convert(doc, *level).map_err(|e| EditError::Invalid(e.to_string()))?;
         }
         Edit::RemoveStandardId { standard } => pdfcraft_organize::remove_standard_id(doc, *standard)?,
-        Edit::SetJavaScript { .. } | Edit::RemoveJavaScript { .. } => run_javascript_edit(doc, edit, cx)?,
+        Edit::SetJavaScript { .. } | Edit::RemoveJavaScript { .. } | Edit::ReplaceInJavaScripts { .. } => run_javascript_edit(doc, edit, cx)?,
         Edit::SetDocumentScript { name, script } => pdfcraft_forms::set_document_script(doc, name, script.as_deref())?,
         Edit::AddOcrText { page, words } => {
             crate::ocr::layer::add_text(doc, *page, words)?;
@@ -1267,6 +1268,9 @@ fn run_javascript_edit(doc: &mut pdfcraft_cos::Document, edit: &Edit, cx: &mut E
     match edit {
         Edit::SetJavaScript { id, expect, code } => pdfcraft_forms::set_javascript(doc, id, expect, code)?,
         Edit::RemoveJavaScript { id, expect } => pdfcraft_forms::remove_javascript(doc, id, expect)?,
+        Edit::ReplaceInJavaScripts { find, replace, match_case } => {
+            pdfcraft_forms::replace_in_javascripts(doc, find, replace, *match_case)?;
+        }
         _ => return Ok(()),
     }
     if let Some(js) = cx.js.as_mut() {

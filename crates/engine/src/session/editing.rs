@@ -177,6 +177,13 @@ impl Session {
         if matches!(&edit, Edit::FlattenFillSign) && !pdfcraft_annot::has_visible_fill_sign(&editor.cos) {
             return Ok(None);
         }
+        // A replace that finds nothing to change leaves no undo step and nothing unsaved. A
+        // refusal is left for the edit itself to give.
+        if let Edit::ReplaceInJavaScripts { find, replace, match_case } = &edit
+            && pdfcraft_forms::preview_javascript_replace(&editor.cos, find, replace, *match_case).is_ok_and(|r| r.changed.is_empty())
+        {
+            return Ok(None);
+        }
         let mut next = editor.cos.clone();
         if !js_off && uses_scripts(&edit) {
             let mut runner = js::JsRunner::new(&next, &name, highlight);
