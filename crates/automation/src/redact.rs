@@ -200,8 +200,7 @@ impl Automation {
         if a.get("rect").is_some() {
             let page = self.page(a)?;
             let info = &self.doc(a)?.info.pages[page];
-            let r: Vec<f64> = a.get("rect").and_then(Value::as_array).map(|x| x.iter().filter_map(Value::as_f64).collect()).unwrap_or_default();
-            let r = <[f64; 4]>::try_from(r).map_err(|_| ToolError::InvalidArgs("rect must be 4 numbers".into()))?;
+            let r = a.nums::<4>("rect")?.ok_or_else(|| ToolError::InvalidArgs("rect must be 4 numbers".into()))?;
             let q = info.view_rect_to_quad([r[0] as f32, r[1] as f32, r[2] as f32, r[3] as f32]);
             marks.push((page, vec![q]));
         } else if a.opt_bool("whole_pages")?.unwrap_or(false) {

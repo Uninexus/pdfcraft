@@ -498,8 +498,7 @@ impl Automation {
             "signature" => NewField::Signature,
             t => return Err(ToolError::InvalidArgs(format!("unknown field type {t:?}"))),
         };
-        let r: Vec<f64> = a.get("rect").and_then(Value::as_array).map(|x| x.iter().filter_map(Value::as_f64).collect()).unwrap_or_default();
-        let r = <[f64; 4]>::try_from(r).map_err(|_| ToolError::InvalidArgs("rect must be 4 numbers".into()))?;
+        let r = a.nums::<4>("rect")?.ok_or_else(|| ToolError::InvalidArgs("rect must be 4 numbers".into()))?;
         // Top-left-origin points on the displayed page → user space.
         let p = &doc.info.pages[page];
         let (u0, u1) = (p.view_to_user(r[0] as f32, r[1] as f32), p.view_to_user(r[2] as f32, r[3] as f32));
@@ -680,11 +679,9 @@ impl Automation {
         let doc = self.doc(a)?;
         let f = doc.form.iter().find(|f| f.name == name).ok_or_else(|| failed(format!("there is no field named {name:?} (see form_fields)")))?;
         // Position: top-left-origin points on the displayed page → user space.
-        let rect = match a.get("rect") {
+        let rect = match a.nums::<4>("rect")? {
             None => None,
-            Some(v) => {
-                let r: Vec<f64> = v.as_array().map(|x| x.iter().filter_map(Value::as_f64).collect()).unwrap_or_default();
-                let r = <[f64; 4]>::try_from(r).map_err(|_| ToolError::InvalidArgs("rect must be 4 numbers".into()))?;
+            Some(r) => {
                 let page = f.widgets.first().and_then(|w| w.page).ok_or_else(|| failed(format!("{name} is not on a page")))?;
                 let p = doc.info.pages.get(page).ok_or_else(|| failed(format!("{name} is on page {}, which could not be read", page + 1)))?;
                 let (u0, u1) = (p.view_to_user(r[0] as f32, r[1] as f32), p.view_to_user(r[2] as f32, r[3] as f32));

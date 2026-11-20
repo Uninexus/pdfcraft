@@ -138,15 +138,7 @@ impl Automation {
             None => PageBox::Crop,
             Some(b) => PageBox::from_name(b).ok_or_else(|| ToolError::InvalidArgs(format!("unknown box {b:?}")))?,
         };
-        let nums = |key: &str| -> Result<Option<[f64; 4]>> {
-            a.get(key)
-                .map(|v| {
-                    let v: Vec<f64> = v.as_array().map(|x| x.iter().filter_map(Value::as_f64).collect()).unwrap_or_default();
-                    <[f64; 4]>::try_from(v).map_err(|_| ToolError::InvalidArgs(format!("{key} must be 4 numbers")))
-                })
-                .transpose()
-        };
-        let spec = match (nums("margins")?, nums("rect")?) {
+        let spec = match (a.nums::<4>("margins")?, a.nums::<4>("rect")?) {
             (Some(_), Some(_)) => return Err(ToolError::InvalidArgs("pass margins or rect, not both".into())),
             (Some(m), None) => BoxSpec::Margins(m),
             (None, Some(r)) => {
