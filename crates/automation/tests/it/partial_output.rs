@@ -104,6 +104,36 @@ fn an_image_export_removes_the_folder_it_made() {
     assert!(!dir.path().join("out").exists(), "pages 1 to 9 and the folder are removed again");
 }
 
+/// The folder needs three new levels under one that is there: all three are taken back, and the
+/// one that was there stays with what it holds.
+#[cfg(unix)]
+#[test]
+fn a_folder_that_needed_several_new_levels_is_removed_whole() {
+    let dir = tempfile::tempdir().unwrap();
+    let stem = "x".repeat(244);
+    let (mut a, id) = open(dir.path(), &stem, 10);
+    std::fs::create_dir_all(dir.path().join("keep")).unwrap();
+    std::fs::write(dir.path().join("keep/mine.txt"), "mine").unwrap();
+    let message = refused(&mut a, "doc_export_images", json!({ "doc": id, "folder": "keep/one/two/out", "dpi": 18 }));
+    assert!(message.ends_with("_page_10.png: File name too long (os error 36)"), "{message}");
+    assert_eq!(names(&dir.path().join("keep")), ["mine.txt"], "one, two and out are removed again");
+    assert_eq!(std::fs::read_to_string(dir.path().join("keep/mine.txt")).unwrap(), "mine");
+}
+
+/// `create_dir_all` makes `one`, then cannot make a level whose name is over 255 bytes: `one` is
+/// taken back, and the error is the system's, with nothing after it.
+#[cfg(unix)]
+#[test]
+fn a_folder_that_cannot_be_made_whole_removes_the_levels_it_made() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut a, id) = open(dir.path(), "in", 1);
+    std::fs::create_dir_all(dir.path().join("keep")).unwrap();
+    let long = "z".repeat(300);
+    let message = refused(&mut a, "doc_export_images", json!({ "doc": id, "folder": format!("keep/one/{long}/out"), "dpi": 18 }));
+    assert!(message.ends_with(&format!("/keep/one/{long}/out: File name too long (os error 36)")), "{message}");
+    assert!(names(&dir.path().join("keep")).is_empty(), "one is removed again");
+}
+
 fn image_document(dir: &std::path::Path) -> (Automation, u64) {
     let (mut a, id) = open(dir, "a", 2);
     call(&mut a, "doc_export_images", json!({ "doc": id, "folder": "src", "dpi": 36, "pages": [1] }));

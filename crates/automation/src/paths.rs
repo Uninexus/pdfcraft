@@ -131,22 +131,37 @@ pub(crate) fn unused(dir: &Path, stem: &str) -> PathBuf {
 
 /// What one call wrote into a folder, so that a call that fails part way can take it back.
 pub(crate) struct Written {
-    dir: PathBuf,
-    made_dir: bool,
+    /// The folders this call made, deepest first.
+    made_dirs: Vec<PathBuf>,
     created: Vec<PathBuf>,
 }
 
 impl Written {
     /// Run `body`, which writes files into `dir` through [`Written::write`] or [`Written::record`].
     /// `dir` is made first. If `body` fails, the files it wrote to a name that was free are removed
-    /// again, and `dir` if this call made it (best effort: when `dir` needed several new folders
-    /// only the deepest is removed). The error returned is `body`'s, followed by
+    /// again, and the folders this call made, `dir` and any of its parents that did not exist,
+    /// deepest first, also when making them failed part way (best effort: a folder that something else put a file in stays, and is listed).
+    /// The error returned is `body`'s, followed by
     /// `; could not remove: <paths>` for whatever could not be removed. A file that replaced one
     /// already there is not removed, and what it replaced is not restored.
     pub(crate) fn within<T>(dir: &Path, body: impl FnOnce(&mut Written) -> Result<T>) -> Result<T> {
-        let made_dir = dir.symlink_metadata().is_err();
-        std::fs::create_dir_all(dir).map_err(|e| failed(format!("{}: {e}", dir.display())))?;
-        let mut written = Written { dir: dir.to_path_buf(), made_dir, created: Vec::new() };
+        // `dir` and each parent that is not there yet, deepest first. The walk stops at an empty
+        // path (the start of a relative `dir`) and at the first folder that is there; a path that
+        // ends in `..` or `.` names no folder of its own, so it is not listed (its parent is).
+        let mut made_dirs = Vec::new();
+        for path in dir.ancestors() {
+            if path.as_os_str().is_empty() || path.symlink_metadata().is_ok() {
+                break;
+            }
+            if path.file_name().is_some() {
+                made_dirs.push(path.to_path_buf());
+            }
+        }
+        let mut written = Written { made_dirs, created: Vec::new() };
+        // A `create_dir_all` that fails part way has made some of the folders already.
+        if let Err(e) = std::fs::create_dir_all(dir) {
+            return Err(written.take_back(failed(format!("{}: {e}", dir.display()))));
+        }
         match body(&mut written) {
             Ok(value) => Ok(value),
             Err(error) => Err(written.take_back(error)),
@@ -171,8 +186,11 @@ impl Written {
 
     fn take_back(self, error: ToolError) -> ToolError {
         let mut stuck: Vec<String> = self.created.iter().filter(|p| std::fs::remove_file(p).is_err()).map(|p| p.display().to_string()).collect();
-        if self.made_dir && std::fs::remove_dir(&self.dir).is_err() {
-            stuck.push(self.dir.display().to_string());
+        for made in &self.made_dirs {
+            // A folder that is not there (the call did not get to make it) is not stuck.
+            if std::fs::remove_dir(made).is_err() && made.symlink_metadata().is_ok() {
+                stuck.push(made.display().to_string());
+            }
         }
         if stuck.is_empty() { error } else { failed(format!("{error}; could not remove: {}", stuck.join(", "))) }
     }
@@ -232,4 +250,22 @@ pub(crate) fn write_atomic_synced(
     // any step removes it and leaves the destination as it was.
     pdfcraft_platform::staging::write_atomically_with(path, bytes, StagingName::SuffixThenTag, suffixes, sync)
         .map_err(|e| failed(format!("{}: {e}", path.display())))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A relative folder of new levels, which has no root to stop at: nothing is left, and the
+    /// error is the body's, with no `could not remove` after it. Made under the working folder
+    /// with a name no other test uses.
+    #[test]
+    fn a_failed_call_in_a_new_relative_folder_leaves_nothing_and_adds_nothing_to_the_error() {
+        let top = format!("pdfcraft-within-relative-{}", std::process::id());
+        for dir in [format!("{top}/a/b"), format!("{top}/a/.."), format!("{top}/a/../b")] {
+            let error = Written::within(Path::new(&dir), |_| Err::<(), _>(failed("boom"))).expect_err("the body fails");
+            assert_eq!(error.to_string(), failed("boom").to_string(), "{dir}");
+            assert!(!Path::new(&top).exists(), "{dir}: the folders it made are removed again");
+        }
+    }
 }

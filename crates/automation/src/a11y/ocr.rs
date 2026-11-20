@@ -574,8 +574,7 @@ fn shared_file_names(targets: &[std::path::PathBuf]) -> Vec<String> {
 
 /// Publish the editable output `out` as a new file, making its folder. Recognition can take
 /// minutes, so a file created meanwhile is refused, not replaced. If the publish fails, the folder
-/// this call made is removed again (best effort: when it needed several new levels only the
-/// deepest is removed), so a failed call leaves nothing behind.
+/// this call made, with any parent it made, is removed again (best effort), so a failed call leaves nothing behind.
 fn publish_editable(out: &std::path::Path, bytes: &[u8]) -> Result<()> {
     let folder = out.parent().ok_or_else(|| failed("output has no parent directory"))?;
     crate::paths::Written::within(folder, |written| {
