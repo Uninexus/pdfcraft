@@ -1,6 +1,7 @@
 //! Catalog JavaScript actions (#269, ported from #344): the `/OpenAction` runs once on opening
 //! and again on Revert, `/AA /WS` before a save and `/AA /WP` before printing, all in the
-//! document's retained realm.
+//! document's retained realm. Will Close, Did Save and Did Print (`/AA /WC`, `/DS`, `/DP`) are
+//! read from their own keys, from a direct or an indirect `/AA`.
 
 use std::sync::Arc;
 
@@ -152,6 +153,40 @@ fn will_print_runs_in_the_document_realm() {
     assert_eq!(log(&s, id), "");
     s.run_document_actions(id, DocumentScriptEvent::WillPrint);
     assert_eq!(log(&s, id), "WillPrint");
+}
+
+/// Will Close, Did Save and Did Print each run their own key's action and see their own
+/// `event.name`; the other four actions of the catalog do not run, and a catalog whose `/AA` is
+/// a reference, or a reference to a reference, reads the same.
+#[test]
+fn will_close_did_save_and_did_print_run_only_their_own_actions() {
+    let act = |tag: &str| format!("<< /S /JavaScript /JS (getField\\('log'\\).value += '{tag}:' + event.name + ';';) >>");
+    let all = format!("/WC {} /WS {} /DS {} /WP {} /DP {}", act("wc"), act("ws"), act("ds"), act("wp"), act("dp"));
+    // Object 6 is the /AA dictionary, or (second reference case) a bare reference to object 7, which is
+    // the dictionary, so that the reference to follow is two hops long.
+    for (catalog, hop) in [(format!("/AA << {all} >>"), false), ("/AA 6 0 R".to_string(), false), ("/AA 6 0 R".to_string(), true)] {
+        let extra = [if hop { "7 0 R".to_string() } else { format!("<< {all} >>") }, format!("<< {all} >>")];
+        let bytes = form(&catalog, &extra.iter().map(String::as_str).collect::<Vec<_>>());
+        let mut s = Session::new();
+        let id = s.open("aa.pdf", None, Arc::new(bytes), None).unwrap();
+        for (event, expected) in [
+            (DocumentScriptEvent::WillClose, "wc:WillClose;"),
+            (DocumentScriptEvent::DidSave, "wc:WillClose;ds:DidSave;"),
+            (DocumentScriptEvent::DidPrint, "wc:WillClose;ds:DidSave;dp:DidPrint;"),
+        ] {
+            let out = s.run_document_actions(id, event);
+            assert!(out.errors.is_empty(), "{catalog} {hop}: {out:?}");
+            assert_eq!(log(&s, id), expected, "{catalog} {hop}");
+        }
+    }
+    // No such action: nothing runs and nothing changes.
+    let bytes = form("/AA << /WS << /S /JavaScript /JS (getField\\('log'\\).value = 'x';) >> >>", &[]);
+    let mut s = Session::new();
+    let id = s.open("none.pdf", None, Arc::new(bytes), None).unwrap();
+    for event in [DocumentScriptEvent::WillClose, DocumentScriptEvent::DidSave, DocumentScriptEvent::DidPrint] {
+        assert!(s.run_document_actions(id, event).is_empty());
+    }
+    assert_eq!(log(&s, id), "");
 }
 
 /// A form with a text field `log` and a text field `hot` whose widget has JavaScript for every
