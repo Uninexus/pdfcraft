@@ -6509,6 +6509,41 @@ fn redacting_a_us_individual_taxpayer_identification_number_through_tools() {
 }
 
 #[test]
+/// US Employer Identification Numbers are removed from the saved content stream; a number with a
+/// prefix the IRS does not use, a Social Security number and a bare nine-digit order number stay.
+fn redacting_a_us_employer_identification_number_through_tools() {
+    let table = tools();
+    let advertised: Vec<&str> = table.iter().find(|t| t.name == "redact_mark").unwrap().input_schema["properties"]["pattern"]["enum"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+    assert!(advertised.contains(&"ein"), "{advertised:?}");
+    let dir = workdir("redact-ein");
+    std::fs::write(
+        dir.join("form.txt"),
+        "EIN 12-3456789 for Acme\nFederal EIN: 453456789 too\nBad 07-1234567\nSSN 123-45-6789\nOrder 123456789 shipped",
+    )
+    .unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_create", json!({ "from": "text", "path": "form.txt" }))["doc"].as_u64().unwrap();
+    assert_eq!(ok(&mut a, "redact_mark", json!({ "doc": doc, "pattern": "ein" }))["marked"], 2);
+    assert!(page_text(&mut a, doc)[0].contains("12-3456789"), "marks alone remove nothing");
+    assert_eq!(ok(&mut a, "redact_apply", json!({ "doc": doc }))["applied"], 2);
+    ok(&mut a, "doc_save", json!({ "doc": doc, "path": "redacted.pdf" }));
+    let reopened = ok(&mut a, "doc_open", json!({ "path": "redacted.pdf" }))["doc"].as_u64().unwrap();
+    let text = &page_text(&mut a, reopened)[0];
+    for gone in ["12-3456789", "12-34", "453456789", "45345"] {
+        assert!(!text.contains(gone), "{gone} must be removed from the saved page: {text}");
+    }
+    for kept in ["for Acme", "Federal EIN:", "Bad 07-1234567", "SSN 123-45-6789", "Order 123456789 shipped"] {
+        assert!(text.contains(kept), "{kept} must remain: {text}");
+    }
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
 /// UK National Insurance numbers are removed from the saved content stream; an unallocated prefix
 /// and a number with a suffix past D stay.
 fn redacting_a_uk_national_insurance_number_through_tools() {

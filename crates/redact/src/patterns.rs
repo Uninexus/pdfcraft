@@ -1,7 +1,7 @@
 //! Search & Redact patterns (Acrobat's Find Text ▸ Patterns): phone numbers, email addresses,
 //! credit card numbers, US Social Security numbers, dates and IBANs, plus Canadian SINs and postal
 //! codes, UK National Insurance numbers and Australian Tax File Numbers, and US Individual
-//! Taxpayer Identification Numbers. Each matcher works on a page's
+//! Taxpayer Identification Numbers and Employer Identification Numbers. Each matcher works on a page's
 //! text as characters and returns character ranges; callers map them to glyphs and areas.
 
 use std::ops::Range;
@@ -24,9 +24,11 @@ pub enum Pattern {
     Tfn,
     /// US Individual Taxpayer Identification Number ("912-70-1234").
     Itin,
+    /// US Employer Identification Number ("12-3456789").
+    Ein,
 }
 
-pub const PATTERNS: [Pattern; 11] = [
+pub const PATTERNS: [Pattern; 12] = [
     Pattern::Phone,
     Pattern::Email,
     Pattern::CreditCard,
@@ -38,6 +40,7 @@ pub const PATTERNS: [Pattern; 11] = [
     Pattern::Nino,
     Pattern::Tfn,
     Pattern::Itin,
+    Pattern::Ein,
 ];
 
 impl Pattern {
@@ -54,6 +57,7 @@ impl Pattern {
             Pattern::Nino => "UK National Insurance Numbers",
             Pattern::Tfn => "Australian Tax File Numbers",
             Pattern::Itin => "US Individual Taxpayer Identification Numbers",
+            Pattern::Ein => "US Employer Identification Numbers",
         }
     }
 
@@ -70,6 +74,7 @@ impl Pattern {
             Pattern::Nino => "nino",
             Pattern::Tfn => "tfn",
             Pattern::Itin => "itin",
+            Pattern::Ein => "ein",
         }
     }
 
@@ -461,6 +466,37 @@ fn itin(s: &[char], i: usize) -> Option<usize> {
     (digits.first() == Some(&9) && matches!(group, 50..=65 | 70..=88 | 90..=92 | 94..=99)).then_some(len)
 }
 
+/// Labels (lowercase) that name the number after them a US Employer Identification Number.
+const EIN_LABELS: [&str; 8] = ["ein", "e.i.n", "ein no", "ein number", "fein", "fein no", "fein number", "employer identification number"];
+
+/// A US Employer Identification Number: two digits, one hyphen and seven digits ("12-3456789"),
+/// or nine plain digits after a label ([`EIN_LABELS`], read like the SIN labels). The first two
+/// digits are a prefix the Internal Revenue Service lists: 01 to 06, 10 to 16, 20 to 27, 30 to
+/// 48, 50 to 68, 71 to 77, 80 to 88, 90 to 95, 98 or 99. There is no checksum, so a match is a
+/// candidate; a spaced form is not matched. The number may not touch other digits, nor sit in a
+/// longer hyphenated run of digits (the tail of a telephone number, say).
+fn ein(s: &[char], i: usize) -> Option<usize> {
+    if digit(i.checked_sub(1).and_then(|p| s.get(p))) {
+        return None;
+    }
+    let g = |from: usize, n: usize| (from..from + n).all(|k| digit(s.get(k)));
+    let (len, ok) = match s.get(i + 2) {
+        Some('-') => (10, g(i, 2) && g(i + 3, 7)),
+        _ => (9, g(i, 9) && labelled_by(s, i, &EIN_LABELS)),
+    };
+    if !ok || digit(s.get(i + len)) {
+        return None;
+    }
+    if len == 10 {
+        let before = i.checked_sub(2).and_then(|p| s.get(p));
+        if s.get(i.wrapping_sub(1)) == Some(&'-') && digit(before) || s.get(i + len) == Some(&'-') && digit(s.get(i + len + 1)) {
+            return None;
+        }
+    }
+    let prefix = s.get(i)?.to_digit(10)? * 10 + s.get(i + 1)?.to_digit(10)?;
+    matches!(prefix, 1..=6 | 10..=16 | 20..=27 | 30..=48 | 50..=68 | 71..=77 | 80..=88 | 90..=95 | 98 | 99).then_some(len)
+}
+
 /// A Canadian postal code: letter, digit, letter, an optional space or hyphen, digit, letter,
 /// digit ("K1A 0B1"), in either case. The first letter is one of Canada's postal districts and D,
 /// F, I, O, Q and U are never used; neither end may touch a letter or digit.
@@ -809,6 +845,7 @@ pub fn find(pattern: Pattern, text: &[char]) -> Vec<Range<usize>> {
         Pattern::Nino => nino,
         Pattern::Tfn => tfn,
         Pattern::Itin => itin,
+        Pattern::Ein => ein,
     };
     let mut out = Vec::new();
     let mut i = 0;
@@ -1200,6 +1237,51 @@ mod tests {
         }
         assert!(found(Pattern::Itin, "912-70").is_empty());
         assert!(found(Pattern::Itin, "9").is_empty());
+    }
+
+    #[test]
+    fn us_employer_identification_numbers() {
+        assert_eq!(
+            found(Pattern::Ein, "EIN 12-3456789, 01-0000001 and 99-9999999; EIN: 123456789; FEIN no. 987654321, (45-1234567)."),
+            ["12-3456789", "01-0000001", "99-9999999", "123456789", "987654321", "45-1234567"].map(String::from)
+        );
+        for label in ["E.I.N.", "EIN No.", "ein number", "FEIN", "FEIN number", "Employer Identification Number:", "ein:"] {
+            let text = format!("{label} 123456789");
+            assert_eq!(found(Pattern::Ein, &text), ["123456789"], "{text}");
+        }
+        // Every prefix the list allows, at both ends of each range, and the ones around them.
+        for prefix in ["01", "06", "10", "16", "20", "27", "30", "48", "50", "68", "71", "77", "80", "88", "90", "95", "98", "99"] {
+            let text = format!("{prefix}-1234567");
+            assert_eq!(found(Pattern::Ein, &text), std::slice::from_ref(&text), "{text}");
+        }
+        for prefix in ["00", "07", "09", "17", "19", "28", "29", "49", "69", "70", "78", "79", "89", "96", "97"] {
+            let text = format!("{prefix}-1234567");
+            assert!(found(Pattern::Ein, &text).is_empty(), "{text}");
+        }
+        for text in [
+            // Digits touching, wrong grouping, other separators.
+            "112-3456789",
+            "12-34567890",
+            "12-345678",
+            "12 3456789",
+            "12.3456789",
+            "1-23456789",
+            "12-345-6789",
+            // Inside a longer hyphenated run: a telephone number's tail, a Social Security number.
+            "555-12-3456789",
+            "12-3456789-01",
+            "123-45-6789",
+            // Plain digits without a label, or after other labels.
+            "123456789",
+            "order 123456789",
+            "ITIN 123456789",
+            "noein 123456789",
+            "EIN 1234567890",
+        ] {
+            assert!(found(Pattern::Ein, text).is_empty(), "{text}");
+        }
+        assert!(found(Pattern::Ein, "12-").is_empty());
+        assert!(found(Pattern::Ein, "1").is_empty());
     }
 
     #[test]
