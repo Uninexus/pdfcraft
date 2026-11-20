@@ -628,6 +628,31 @@ impl Automation {
         Ok(out)
     }
 
+    /// Document Properties ▸ Advanced ▸ base URL for relative links (`/URI` `/Base`): read, and
+    /// change when `base` is given (an empty string takes it away).
+    pub(crate) fn doc_base_url(&mut self, a: &Args) -> Result<Value> {
+        let wanted = a.opt_str("base")?.map(|b| (!b.is_empty()).then(|| b.to_owned()));
+        let (stored, unreadable_before) = self.doc(a)?.base_url();
+        // A stored base sent back as it is is no change, so it is not checked again.
+        if let Some(Some(b)) = wanted.as_ref().filter(|w| **w != stored) {
+            pdfcraft_engine::check_base_url(b).map_err(ToolError::InvalidArgs)?;
+        }
+        let (mut out, now, unreadable) = match wanted {
+            Some(base) if base != stored => {
+                let out = self.apply(a, Edit::SetBaseUrl(base))?;
+                let (now, unreadable) = self.doc(a)?.base_url();
+                (out, now, unreadable)
+            }
+            _ => (json!({}), stored, unreadable_before),
+        };
+        out["base_url"] = json!({
+            "base": now,
+            "links_use_it": now.as_deref().is_some_and(|b| pdfcraft_render::resolve_uri(Some(b), "x").is_some()),
+            "unreadable": unreadable,
+        });
+        Ok(out)
+    }
+
     pub(crate) fn doc_optimize(&mut self, a: &Args) -> Result<Value> {
         use pdfcraft_engine::optimize::{Compatibility, Compression, ImageSettings, MonoCompression, Preset};
         const MONO_KEYS: [&str; 4] = ["downsample", "ppi", "above_ppi", "compression"];

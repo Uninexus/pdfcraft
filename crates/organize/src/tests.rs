@@ -6582,3 +6582,222 @@ fn a_huge_direct_range_array_is_unreadable_from_its_length_and_kept() {
     assert!(matches!(vp.get(b"PrintPageRange"), Some(Object::Array(a)) if a.len() == 1_000_000));
     assert_eq!(vp.name(b"Duplex"), Some(&b"Simplex"[..]));
 }
+
+/// The catalog's `/URI`, resolved.
+fn uri_dict_of(doc: &Document) -> Option<pdfcraft_cos::Dict> {
+    let c = doc.get(doc.root().unwrap()).as_dict().cloned().unwrap();
+    c.get(b"URI").map(|o| doc.resolve(o)).and_then(|o| o.as_dict().cloned())
+}
+
+fn set_catalog_entry(doc: &mut Document, key: &str, value: Object) {
+    let root = doc.root().unwrap();
+    doc.update_dict(root, |c| c.set(key.as_bytes().to_vec(), value)).unwrap();
+}
+
+fn uri_with(entries: Vec<(&str, Object)>) -> Object {
+    let mut d = pdfcraft_cos::Dict::new();
+    for (k, v) in entries {
+        d.set(k.as_bytes().to_vec(), v);
+    }
+    Object::Dict(d)
+}
+
+fn string(bytes: &[u8]) -> Object {
+    Object::String(pdfcraft_cos::PdfString::literal(bytes.to_vec()))
+}
+
+#[test]
+fn base_url_round_trips_through_a_save_and_none_removes_the_entry() {
+    use crate::base_url::{read_base_url, set_base_url};
+    let mut doc = open(fixture());
+    assert_eq!(read_base_url(&doc), (None, vec![]));
+    set_base_url(&mut doc, Some("https://example.com/docs/")).unwrap();
+    let mut doc = open(write_full(&doc, &SaveOptions::default()).unwrap());
+    assert_eq!(read_base_url(&doc), (Some("https://example.com/docs/".to_owned()), vec![]));
+    assert_eq!(uri_dict_of(&doc).unwrap().get(b"Base"), Some(&string(b"https://example.com/docs/")));
+    // A new value replaces it, and none takes the entry away with the empty dictionary.
+    set_base_url(&mut doc, Some("HTTP://Example.org/")).unwrap();
+    assert_eq!(read_base_url(&doc).0.as_deref(), Some("HTTP://Example.org/"));
+    set_base_url(&mut doc, None).unwrap();
+    assert!(uri_dict_of(&doc).is_none());
+    assert_eq!(read_base_url(&doc), (None, vec![]));
+}
+
+#[test]
+fn a_base_url_beside_other_entries_and_through_references() {
+    use crate::base_url::{read_base_url, set_base_url};
+    // /URI behind a chain of two references, /Base behind another.
+    let mut doc = open(fixture());
+    let base = doc.add(string(b"https://a.example/x/"));
+    let dict = doc.add(uri_with(vec![("IsMap", Object::Bool(true)), ("Base", Object::Ref(base))]));
+    let hop = doc.add(Object::Ref(dict));
+    set_catalog_entry(&mut doc, "URI", Object::Ref(hop));
+    assert_eq!(read_base_url(&doc), (Some("https://a.example/x/".to_owned()), vec![]));
+    set_base_url(&mut doc, Some("https://b.example/")).unwrap();
+    let c = doc.get(doc.root().unwrap()).as_dict().cloned().unwrap();
+    assert_eq!(c.get(b"URI"), Some(&Object::Ref(hop)), "the catalog still holds the reference");
+    let d = doc.get(dict).as_dict().cloned().unwrap();
+    assert_eq!(d.get(b"Base"), Some(&string(b"https://b.example/")), "changed where it is");
+    assert_eq!(d.get(b"IsMap"), Some(&Object::Bool(true)), "the other entry stays");
+    // None removes /Base only; the other entry keeps the dictionary.
+    set_base_url(&mut doc, None).unwrap();
+    let d = doc.get(dict).as_dict().cloned().unwrap();
+    assert!(d.get(b"Base").is_none());
+    assert_eq!(d.get(b"IsMap"), Some(&Object::Bool(true)));
+    assert!(uri_dict_of(&doc).is_some());
+    // A direct dictionary with only /Base goes whole, and so does an indirect one.
+    let mut doc = open(fixture());
+    set_catalog_entry(&mut doc, "URI", uri_with(vec![("Base", string(b"https://a.example/"))]));
+    set_base_url(&mut doc, None).unwrap();
+    assert!(uri_dict_of(&doc).is_none());
+    let only = doc.add(uri_with(vec![("Base", string(b"https://a.example/"))]));
+    set_catalog_entry(&mut doc, "URI", Object::Ref(only));
+    set_base_url(&mut doc, None).unwrap();
+    assert!(uri_dict_of(&doc).is_none(), "the emptied indirect dictionary is taken out of the catalog");
+}
+
+#[test]
+fn a_base_url_that_cannot_be_read_is_named_kept_and_replaced_only_by_a_real_value() {
+    use crate::base_url::{MAX_BASE_URL_BYTES, read_base_url, set_base_url};
+    let long = vec![b'a'; MAX_BASE_URL_BYTES + 1];
+    for bad in [Object::Int(3), Object::name("https"), string(&long), string(&[0xFF, 0xFE, b'a']), Object::Array(vec![])] {
+        let mut doc = open(fixture());
+        set_catalog_entry(&mut doc, "URI", uri_with(vec![("Base", bad.clone())]));
+        assert_eq!(read_base_url(&doc), (None, vec!["base"]), "{bad:?}");
+        // Asking for none is asking for what is read: nothing changes, the entry stays.
+        let before = write_full(&doc, &SaveOptions::default()).unwrap();
+        set_base_url(&mut doc, None).unwrap();
+        assert_eq!(write_full(&doc, &SaveOptions::default()).unwrap(), before, "{bad:?}");
+        set_base_url(&mut doc, Some("https://example.com/")).unwrap();
+        assert_eq!(read_base_url(&doc), (Some("https://example.com/".to_owned()), vec![]), "{bad:?}");
+    }
+    // The longest base that is read: exactly the limit.
+    let mut doc = open(fixture());
+    let edge = format!("https://e.example/{}", "a".repeat(MAX_BASE_URL_BYTES - 18));
+    assert_eq!(edge.len(), MAX_BASE_URL_BYTES);
+    set_base_url(&mut doc, Some(&edge)).unwrap();
+    assert_eq!(read_base_url(&doc).0.as_deref(), Some(edge.as_str()));
+}
+
+#[test]
+fn a_base_url_that_is_refused_writes_nothing() {
+    use crate::base_url::{MAX_BASE_URL_BYTES, set_base_url};
+    let mut doc = open(fixture());
+    let before = write_full(&doc, &SaveOptions::default()).unwrap();
+    let too_long = format!("https://e.example/{}", "a".repeat(MAX_BASE_URL_BYTES - 17));
+    let web = "a base URL must be a web address that names its host, such as https://example.com/docs/";
+    let ascii = "a base URL must be printable ASCII with no space";
+    for (base, message) in [
+        (too_long.as_str(), "a base URL holds at most 8192 bytes, not 8193"),
+        ("https://example.com/a b", ascii),
+        ("https://example.com/\u{e9}", ascii),
+        ("https://example.com/\n", ascii),
+        ("ftp://example.com/", web),
+        ("example.com/docs/", web),
+        ("https://", web),
+        ("https:///example.com/", web),
+        ("http://?x", web),
+        ("javascript:alert(1)", web),
+        ("", web),
+    ] {
+        assert_eq!(set_base_url(&mut doc, Some(base)).unwrap_err().to_string(), message, "{base:?}");
+        assert_eq!(write_full(&doc, &SaveOptions::default()).unwrap(), before, "{base:?}");
+    }
+    // A stored base that would be refused as a new value is accepted when it is sent back as it
+    // is, and changes no byte; a different one is checked.
+    let mut stored = open(fixture());
+    set_catalog_entry(&mut stored, "URI", uri_with(vec![("Base", string(b"ftp://example.com/x/"))]));
+    let before = write_full(&stored, &SaveOptions::default()).unwrap();
+    set_base_url(&mut stored, Some("ftp://example.com/x/")).unwrap();
+    assert_eq!(write_full(&stored, &SaveOptions::default()).unwrap(), before);
+    assert_eq!(set_base_url(&mut stored, Some("ftp://example.com/y/")).unwrap_err().to_string(), web);
+    assert_eq!(write_full(&stored, &SaveOptions::default()).unwrap(), before);
+    // A /URI that is not a dictionary is not replaced, and none is not a change to it.
+    for other in [Object::Int(7), Object::name("x"), Object::Array(vec![]), string(b"https://a.example/")] {
+        let mut doc = open(fixture());
+        set_catalog_entry(&mut doc, "URI", other);
+        let before = write_full(&doc, &SaveOptions::default()).unwrap();
+        assert_eq!(
+            set_base_url(&mut doc, Some("https://example.com/")).unwrap_err().to_string(),
+            "the document's /URI is not a dictionary, or is behind more than 128 references, so it was left as it is"
+        );
+        set_base_url(&mut doc, None).unwrap();
+        assert_eq!(write_full(&doc, &SaveOptions::default()).unwrap(), before);
+    }
+}
+
+#[test]
+fn a_null_dangling_or_endless_uri_is_read_as_the_tool_describes() {
+    use crate::base_url::{read_base_url, set_base_url};
+    // Null and a reference to nothing are absent: nothing unreadable, and a base starts a dictionary.
+    for absent in [Object::Null, Object::Ref(pdfcraft_cos::ObjRef::new(900, 0))] {
+        let mut doc = open(fixture());
+        set_catalog_entry(&mut doc, "URI", absent);
+        assert_eq!(read_base_url(&doc), (None, vec![]));
+        set_base_url(&mut doc, Some("https://example.com/")).unwrap();
+        assert_eq!(read_base_url(&doc).0.as_deref(), Some("https://example.com/"));
+        assert!(uri_dict_of(&doc).unwrap().get(b"Base").is_some());
+    }
+    // A chain of 100 references to the dictionary is followed, for /URI and for /Base, and the
+    // dictionary at its end is the one changed.
+    let chain = |doc: &mut Document, end: Object, hops: usize| {
+        let mut at = doc.add(end);
+        for _ in 0..hops {
+            at = doc.add(Object::Ref(at));
+        }
+        at
+    };
+    let mut doc = open(fixture());
+    let base = chain(&mut doc, string(b"https://deep.example/"), 100);
+    let end = chain(&mut doc, uri_with(vec![("Base", Object::Ref(base))]), 100);
+    set_catalog_entry(&mut doc, "URI", Object::Ref(end));
+    assert_eq!(read_base_url(&doc), (Some("https://deep.example/".to_owned()), vec![]));
+    set_base_url(&mut doc, Some("https://example.com/")).unwrap();
+    assert_eq!(read_base_url(&doc).0.as_deref(), Some("https://example.com/"));
+    // A chain of 200 is not reached: /URI is `uri`, refused and left, and /Base is `base`.
+    let mut doc = open(fixture());
+    let far = chain(&mut doc, uri_with(vec![("Base", string(b"https://a.example/"))]), 200);
+    set_catalog_entry(&mut doc, "URI", Object::Ref(far));
+    assert_eq!(read_base_url(&doc), (None, vec!["uri"]));
+    let before = write_full(&doc, &SaveOptions::default()).unwrap();
+    assert_eq!(
+        set_base_url(&mut doc, Some("https://example.com/")).unwrap_err().to_string(),
+        "the document's /URI is not a dictionary, or is behind more than 128 references, so it was left as it is"
+    );
+    assert_eq!(write_full(&doc, &SaveOptions::default()).unwrap(), before);
+    let mut doc = open(fixture());
+    let far_base = chain(&mut doc, string(b"https://a.example/"), 200);
+    set_catalog_entry(&mut doc, "URI", uri_with(vec![("Base", Object::Ref(far_base))]));
+    assert_eq!(read_base_url(&doc), (None, vec!["base"]));
+}
+
+#[test]
+fn a_uri_that_is_a_stream_counts_by_its_dictionary_like_the_viewers_reader() {
+    use crate::base_url::{read_base_url, set_base_url};
+    let mut doc = open(fixture());
+    let mut d = pdfcraft_cos::Dict::new();
+    d.set(b"Base".to_vec(), string(b"https://stream.example/"));
+    d.set(b"IsMap".to_vec(), Object::Bool(true));
+    let at = doc.add(Object::Stream(pdfcraft_cos::Stream::from_raw(d, b"x".to_vec())));
+    set_catalog_entry(&mut doc, "URI", Object::Ref(at));
+    assert_eq!(read_base_url(&doc), (Some("https://stream.example/".to_owned()), vec![]));
+    set_base_url(&mut doc, Some("https://example.com/")).unwrap();
+    let doc = open(write_full(&doc, &SaveOptions::default()).unwrap());
+    assert_eq!(read_base_url(&doc).0.as_deref(), Some("https://example.com/"));
+    let held = uri_dict_of(&doc).unwrap();
+    assert_eq!(held.get(b"IsMap"), Some(&Object::Bool(true)), "the stream's other entry stays");
+}
+
+#[test]
+fn asking_for_the_stored_base_url_changes_no_byte() {
+    use crate::base_url::set_base_url;
+    let mut doc = open(fixture());
+    let before = write_full(&doc, &SaveOptions::default()).unwrap();
+    set_base_url(&mut doc, None).unwrap();
+    assert_eq!(write_full(&doc, &SaveOptions::default()).unwrap(), before, "no base, none asked");
+    set_base_url(&mut doc, Some("https://example.com/")).unwrap();
+    let with = write_full(&doc, &SaveOptions::default()).unwrap();
+    assert_ne!(with, before);
+    set_base_url(&mut doc, Some("https://example.com/")).unwrap();
+    assert_eq!(write_full(&doc, &SaveOptions::default()).unwrap(), with);
+}

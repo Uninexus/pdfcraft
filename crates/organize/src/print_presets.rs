@@ -71,7 +71,7 @@ pub struct PrintPresets {
 
 /// An object that is borrowed when it is direct and shared when it was a reference, so that
 /// neither is copied.
-enum Held<'a> {
+pub(crate) enum Held<'a> {
     Direct(&'a Object),
     Resolved(Arc<Object>),
 }
@@ -86,7 +86,7 @@ impl Deref for Held<'_> {
     }
 }
 
-fn held<'a>(doc: &Document, o: &'a Object) -> Held<'a> {
+pub(crate) fn held<'a>(doc: &Document, o: &'a Object) -> Held<'a> {
     match o {
         Object::Ref(_) => Held::Resolved(doc.resolve(o)),
         o => Held::Direct(o),

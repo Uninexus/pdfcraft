@@ -387,6 +387,9 @@ pub enum Edit {
     SetInitialView(Box<InitialView>),
     /// Document Properties ▸ Advanced ▸ Print Dialog Presets (`/ViewerPreferences`).
     SetPrintPresets(Box<crate::PrintPresets>),
+    /// Document Properties ▸ Advanced ▸ base URL for relative links (`/URI` `/Base`); `None`
+    /// takes it away.
+    SetBaseUrl(Option<String>),
     /// Print production ▸ Add printer marks: trim and bleed marks, registration targets, colour
     /// bars and page information outside the trim box, as a page mark; the page may be widened
     /// to make room (`settings.make_room`), so the page geometry is read again.
