@@ -50,3 +50,4 @@ mod text_copy;
 mod timesheet_compat;
 mod unreadable_objects;
 mod white_margins;
+mod write_before_refuse;
