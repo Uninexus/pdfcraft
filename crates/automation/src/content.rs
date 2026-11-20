@@ -258,9 +258,13 @@ impl Automation {
                     let path = self.resolve(p, false)?;
                     let bytes = crate::read_input(&path)?;
                     let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-                    // Box and transforms first, then the new picture.
-                    self.apply(a, Edit::UpdateContent { page, index, content: content.clone() })?;
-                    return self.apply(a, Edit::ReplaceImage { page, index, name, bytes: std::sync::Arc::new(bytes) });
+                    // Box and transforms first, then the new picture, as one edit: a picture that
+                    // cannot be used refuses the whole call and leaves the item as it was.
+                    let edits = vec![
+                        Edit::UpdateContent { page, index, content: content.clone() },
+                        Edit::ReplaceImage { page, index, name, bytes: std::sync::Arc::new(bytes) },
+                    ];
+                    return self.apply(a, Edit::Batch { label: "Replace image".into(), edits });
                 }
             }
         }
