@@ -141,3 +141,27 @@ fn a_part_whose_pages_run_backwards_is_flagged_through_the_tool() {
     let plain = call(&mut a, "doc_open", json!({ "path": "parts.pdf" }))["doc"].as_u64().unwrap();
     assert_eq!(call(&mut a, "dpart_list", json!({ "doc": plain }))["inverted_ranges"], 0);
 }
+
+#[test]
+fn a_part_whose_start_or_end_names_no_page_is_flagged_unresolved_through_the_tool() {
+    // The first part's /End becomes a direct string and the second's /End the catalog; each
+    // replacement is as long as what it replaces, so the xref offsets still hold.
+    let text = String::from_utf8(pdf_with_parts()).unwrap();
+    let edited = text.replace("/Start 3 0 R /End 3 0 R", "/Start 3 0 R /End (a b)").replace("/Start 4 0 R /End 4 0 R", "/Start 4 0 R /End 1 0 R");
+    assert_eq!(text.len(), edited.len());
+    assert_ne!(text, edited);
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("unresolved.pdf"), edited).unwrap();
+    let mut a = Automation::new().with_root(dir.path()).unwrap();
+    let doc = call(&mut a, "doc_open", json!({ "path": "unresolved.pdf" }))["doc"].as_u64().unwrap();
+    let listed = call(&mut a, "dpart_list", json!({ "doc": doc }));
+    let parts = listed["parts"].as_array().unwrap();
+    let rows: Vec<_> = parts.iter().map(|p| (p["start_page"].as_u64(), p["end_page"].as_u64(), p["range_unresolved"].as_bool())).collect();
+    assert_eq!(rows, [(None, None, Some(false)), (Some(1), None, Some(true)), (Some(2), None, Some(true))], "{listed}");
+    assert_eq!(listed["unresolved_ranges"], 2);
+
+    // The ordinary file has none.
+    std::fs::write(dir.path().join("parts.pdf"), pdf_with_parts()).unwrap();
+    let plain = call(&mut a, "doc_open", json!({ "path": "parts.pdf" }))["doc"].as_u64().unwrap();
+    assert_eq!(call(&mut a, "dpart_list", json!({ "doc": plain }))["unresolved_ranges"], 0);
+}

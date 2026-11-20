@@ -264,6 +264,7 @@ impl Automation {
                     "start_page": p.start_page,
                     "end_page": p.end_page,
                     "range_inverted": p.range_inverted,
+                    "range_unresolved": p.range_unresolved,
                     "children": p.children,
                     "metadata": metadata,
                     "metadata_truncated": p.metadata_truncated,
@@ -277,6 +278,7 @@ impl Automation {
             "count": rows.len(),
             "skipped": list.skipped,
             "inverted_ranges": list.inverted_ranges,
+            "unresolved_ranges": list.unresolved_ranges,
             "truncated": list.truncated,
             "unsaved_changes": doc.dirty,
         }))
