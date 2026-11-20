@@ -288,7 +288,6 @@ impl Automation {
     pub(crate) fn form_set_image(&mut self, a: &Args) -> Result<Value> {
         let name = a.str("field")?.to_owned();
         let object = a
-            .0
             .get("field_id")
             .map(|value| -> Result<pdfcraft_cos::ObjRef> {
                 let key =
