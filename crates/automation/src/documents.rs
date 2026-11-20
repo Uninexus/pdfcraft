@@ -221,6 +221,7 @@ impl Automation {
     pub(crate) fn af_list(&mut self, a: &Args) -> Result<Value> {
         let doc = self.doc(a)?;
         let list = doc.associated_list();
+        let (without_relationship, not_embedded) = (list.without_relationship, list.not_embedded);
         let rows: Vec<Value> = list
             .files
             .into_iter()
@@ -238,7 +239,14 @@ impl Automation {
                 })
             })
             .collect();
-        Ok(json!({ "associated_files": rows, "count": rows.len(), "truncated": list.truncated, "unsaved_changes": doc.dirty }))
+        Ok(json!({
+            "associated_files": rows,
+            "count": rows.len(),
+            "without_relationship": without_relationship,
+            "not_embedded": not_embedded,
+            "truncated": list.truncated,
+            "unsaved_changes": doc.dirty,
+        }))
     }
 
     pub(crate) fn dpart_list(&mut self, a: &Args) -> Result<Value> {

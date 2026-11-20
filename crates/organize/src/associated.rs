@@ -51,6 +51,12 @@ pub struct AssociatedList {
     pub files: Vec<AssociatedFile>,
     /// More entries (or pages) exist than were read: [`MAX_AF_ROWS`] rows or [`MAX_PAGES_READ`] pages.
     pub truncated: bool,
+    /// How many of `files` have no `/AFRelationship` that is a name. ISO 32000-2 requires one on a
+    /// file specification that an `/AF` array lists; a reader treats the entry as Unspecified.
+    pub without_relationship: usize,
+    /// How many of `files` carry no embedded file stream (a link to a file outside the document,
+    /// which a PDF/A-3 file may not rely on).
+    pub not_embedded: usize,
 }
 
 /// The `/AF` entries of the document and of every page, document first, at most
@@ -76,6 +82,9 @@ pub fn list_associated_files(doc: &Document) -> AssociatedList {
             }
         }
     }
+    // Counted from the rows already read (at most [`MAX_AF_ROWS`]): nothing more is read or copied.
+    out.without_relationship = out.files.iter().filter(|f| f.relationship.is_none()).count();
+    out.not_embedded = out.files.iter().filter(|f| !f.embedded).count();
     out
 }
 
