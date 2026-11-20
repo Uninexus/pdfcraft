@@ -5240,6 +5240,37 @@ fn page_level_associated_files_are_listed_with_their_page() {
     assert!(!found[0].embedded);
 }
 
+#[test]
+fn entries_without_a_relationship_name_or_an_embedded_file_are_counted() {
+    let mut doc = Document::open(Arc::new(fixture())).unwrap();
+    // One embedded file with a relationship, then three links to outside files added by hand: one
+    // with a relationship name, one whose relationship is a string, one with none; and a number.
+    add_associated_file(&mut doc, "in.csv", b"a", "Data", None, None, None).unwrap();
+    let link = |relationship: Option<Object>| {
+        let mut spec = pdfcraft_cos::Dict::new();
+        spec.set(b"Type".to_vec(), Object::name("Filespec"));
+        spec.set(b"F".to_vec(), Object::String(PdfString::text("out.xml")));
+        if let Some(r) = relationship {
+            spec.set(b"AFRelationship".to_vec(), r);
+        }
+        Object::Dict(spec)
+    };
+    let extra = [link(Some(Object::name("Source"))), link(Some(Object::String(PdfString::text("Data")))), link(None), Object::Int(7)];
+    let root = doc.root().unwrap();
+    doc.update_dict(root, |c| {
+        let mut list = c.get(b"AF").and_then(Object::as_array).cloned().unwrap_or_default();
+        list.extend(extra);
+        c.set(b"AF".to_vec(), Object::Array(list));
+    })
+    .unwrap();
+    let listed = list_associated_files(&doc);
+    assert_eq!(listed.files.len(), 4, "the number is skipped");
+    assert_eq!((listed.without_relationship, listed.not_embedded), (2, 3));
+    // Nothing listed: nothing counted.
+    let empty = list_associated_files(&Document::open(Arc::new(fixture())).unwrap());
+    assert_eq!((empty.files.len(), empty.without_relationship, empty.not_embedded), (0, 0, 0));
+}
+
 fn spec_body(name: &str) -> String {
     format!("<< /Type /Filespec /F ({name}) /UF ({name}) >>")
 }

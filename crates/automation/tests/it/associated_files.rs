@@ -171,3 +171,49 @@ fn removal_is_one_undo_step_unknown_types_get_a_media_type_and_pdfa_is_warned_ab
     assert!(warnings.len() == 1 && warnings[0].as_str().unwrap().contains("PDF/A-2"), "{added}");
     assert_eq!(added["index"], 1, "the file was added anyway");
 }
+
+/// A one-page file whose catalog `/AF` lists, in order, an embedded file with a relationship, a
+/// link to an outside file with a relationship, and a link with none.
+fn pdf_with_three_entries() -> Vec<u8> {
+    let bodies = [
+        "<< /Type /Catalog /Pages 2 0 R /AF [4 0 R 6 0 R 7 0 R] >>",
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 200 200] >>",
+        "<< /Type /Page /Parent 2 0 R >>",
+        "<< /Type /Filespec /F (a.csv) /AFRelationship /Data /EF << /F 5 0 R >> >>",
+        "<< /Type /EmbeddedFile /Subtype /text#2Fcsv /Length 1 >>\nstream\nx\nendstream",
+        "<< /Type /Filespec /F (b.xml) /AFRelationship /Source >>",
+        "<< /Type /Filespec /F (c.xml) >>",
+    ];
+    let mut out = b"%PDF-2.0\n".to_vec();
+    let mut offsets = Vec::new();
+    for (i, body) in bodies.iter().enumerate() {
+        offsets.push(out.len());
+        out.extend_from_slice(format!("{} 0 obj\n{body}\nendobj\n", i + 1).as_bytes());
+    }
+    let xref = out.len();
+    out.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", bodies.len() + 1).as_bytes());
+    for o in offsets {
+        out.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+    }
+    out.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", bodies.len() + 1).as_bytes());
+    out
+}
+
+#[test]
+fn entries_without_a_relationship_or_an_embedded_file_are_counted_through_the_tool() {
+    let (dir, mut a) = setup();
+    let plain = open(&mut a, "a.pdf");
+    let none = tool(&mut a, "af_list", json!({ "doc": plain }));
+    assert_eq!((none["without_relationship"].as_u64(), none["not_embedded"].as_u64()), (Some(0), Some(0)), "{none}");
+
+    std::fs::write(dir.path().join("three.pdf"), pdf_with_three_entries()).unwrap();
+    let doc = open(&mut a, "three.pdf");
+    let listed = tool(&mut a, "af_list", json!({ "doc": doc }));
+    assert_eq!(listed["count"], 3, "{listed}");
+    assert_eq!((listed["without_relationship"].as_u64(), listed["not_embedded"].as_u64()), (Some(1), Some(2)), "{listed}");
+    let rows = listed["associated_files"].as_array().unwrap();
+    assert_eq!(
+        (rows[0]["embedded"].as_bool(), rows[1]["embedded"].as_bool(), rows[2]["relationship"].clone()),
+        (Some(true), Some(false), Value::Null)
+    );
+}
