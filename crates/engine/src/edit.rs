@@ -385,6 +385,8 @@ pub enum Edit {
     },
     /// Document Properties ▸ Initial View (and the language and binding).
     SetInitialView(Box<InitialView>),
+    /// Document Properties ▸ Advanced ▸ Print Dialog Presets (`/ViewerPreferences`).
+    SetPrintPresets(Box<crate::PrintPresets>),
     /// Print production ▸ Add printer marks: trim and bleed marks, registration targets, colour
     /// bars and page information outside the trim box, as a page mark; the page may be widened
     /// to make room (`settings.make_room`), so the page geometry is read again.
