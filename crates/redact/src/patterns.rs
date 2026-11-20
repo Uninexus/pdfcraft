@@ -1,6 +1,6 @@
 //! Search & Redact patterns (Acrobat's Find Text ▸ Patterns): phone numbers, email addresses,
 //! credit card numbers, US Social Security numbers, dates and IBANs, plus Canadian SINs and postal
-//! codes and UK National Insurance numbers. Each matcher works on a page's
+//! codes, UK National Insurance numbers and Australian Tax File Numbers. Each matcher works on a page's
 //! text as characters and returns character ranges; callers map them to glyphs and areas.
 
 use std::ops::Range;
@@ -19,9 +19,11 @@ pub enum Pattern {
     CaPostalCode,
     /// United Kingdom National Insurance number ("QQ 12 34 56 C"), by its format only.
     Nino,
+    /// Australian Tax File Number ("123 456 782").
+    Tfn,
 }
 
-pub const PATTERNS: [Pattern; 9] = [
+pub const PATTERNS: [Pattern; 10] = [
     Pattern::Phone,
     Pattern::Email,
     Pattern::CreditCard,
@@ -31,6 +33,7 @@ pub const PATTERNS: [Pattern; 9] = [
     Pattern::Sin,
     Pattern::CaPostalCode,
     Pattern::Nino,
+    Pattern::Tfn,
 ];
 
 impl Pattern {
@@ -45,6 +48,7 @@ impl Pattern {
             Pattern::Sin => "Canadian Social Insurance Numbers",
             Pattern::CaPostalCode => "Canadian Postal Codes",
             Pattern::Nino => "UK National Insurance Numbers",
+            Pattern::Tfn => "Australian Tax File Numbers",
         }
     }
 
@@ -59,6 +63,7 @@ impl Pattern {
             Pattern::Sin => "sin",
             Pattern::CaPostalCode => "ca-postal-code",
             Pattern::Nino => "nino",
+            Pattern::Tfn => "tfn",
         }
     }
 
@@ -377,6 +382,11 @@ const SIN_LABELS: [&str; 14] = [
 /// Whether a SIN label, in any case, stands directly before `i` with up to six spaces, no-break
 /// spaces, colons, dots, hyphens or hashes between, so nine unseparated digits are read as a SIN.
 fn sin_labelled(s: &[char], i: usize) -> bool {
+    labelled_by(s, i, &SIN_LABELS)
+}
+
+/// [`sin_labelled`] for any list of lowercase labels.
+fn labelled_by(s: &[char], i: usize, labels: &[&str]) -> bool {
     let mut k = i;
     let mut gap = 0;
     while let Some(c) = k.checked_sub(1).and_then(|p| s.get(p)) {
@@ -389,7 +399,33 @@ fn sin_labelled(s: &[char], i: usize) -> bool {
     let head = s.get(..k).unwrap_or_default();
     let tail: Vec<char> = head.iter().rev().take(30).rev().flat_map(|c| c.to_lowercase()).collect();
     let tail: String = tail.into_iter().map(|c| if c == '\u{a0}' { ' ' } else { c }).collect();
-    SIN_LABELS.iter().any(|l| tail.strip_suffix(l).is_some_and(|rest| !rest.chars().last().is_some_and(char::is_alphanumeric)))
+    labels.iter().any(|l| tail.strip_suffix(l).is_some_and(|rest| !rest.chars().last().is_some_and(char::is_alphanumeric)))
+}
+
+/// Labels (lowercase) that name the number after them an Australian Tax File Number.
+const TFN_LABELS: [&str; 5] = ["tfn", "t.f.n", "tfn no", "tfn number", "tax file number"];
+
+/// An Australian Tax File Number of nine digits: three groups of three joined by one consistent
+/// hyphen, space or no-break space, or nine plain digits after a label ([`TFN_LABELS`], read like
+/// the SIN labels). The weighted checksum of the Australian Taxation Office's published
+/// check-digit rule must hold: the digits times 1, 4, 3, 7, 5, 8, 6, 9 and 10 sum to a multiple
+/// of 11. The number may not touch other digits. The older eight-digit form is not matched, and
+/// about one nine-digit number in eleven passes the checksum, so a match is a candidate.
+fn tfn(s: &[char], i: usize) -> Option<usize> {
+    if digit(i.checked_sub(1).and_then(|p| s.get(p))) {
+        return None;
+    }
+    let g = |from: usize, n: usize| (from..from + n).all(|k| digit(s.get(k)));
+    let (len, ok) = match s.get(i + 3) {
+        Some(&c) if matches!(c, '-' | ' ' | '\u{a0}') => (11, g(i, 3) && s.get(i + 7) == Some(&c) && g(i + 4, 3) && g(i + 8, 3)),
+        _ => (9, g(i, 9) && labelled_by(s, i, &TFN_LABELS)),
+    };
+    if !ok || digit(s.get(i + len)) {
+        return None;
+    }
+    const WEIGHTS: [u32; 9] = [1, 4, 3, 7, 5, 8, 6, 9, 10];
+    let sum: u32 = s.get(i..i + len)?.iter().filter_map(|c| c.to_digit(10)).zip(WEIGHTS).map(|(d, w)| d * w).sum();
+    sum.is_multiple_of(11).then_some(len)
 }
 
 /// A Canadian postal code: letter, digit, letter, an optional space or hyphen, digit, letter,
@@ -738,6 +774,7 @@ pub fn find(pattern: Pattern, text: &[char]) -> Vec<Range<usize>> {
         Pattern::Sin => sin,
         Pattern::CaPostalCode => ca_postal_code,
         Pattern::Nino => nino,
+        Pattern::Tfn => tfn,
     };
     let mut out = Vec::new();
     let mut i = 0;
@@ -1053,6 +1090,36 @@ mod tests {
         // The end of the text mid-number.
         assert!(found(Pattern::Nino, "AB 12 34 5").is_empty());
         assert!(found(Pattern::Nino, "A").is_empty());
+    }
+
+    #[test]
+    fn australian_tax_file_numbers() {
+        // 123 456 782 and 865 432 102 satisfy the weighted checksum.
+        assert_eq!(
+            found(Pattern::Tfn, "TFN 123 456 782, 123-456-782, 123\u{a0}456\u{a0}782, TFN: 123456782 and tax file number 865432102."),
+            ["123 456 782", "123-456-782", "123\u{a0}456\u{a0}782", "123456782", "865432102"].map(String::from)
+        );
+        // Every label form, glued to the digits after punctuation.
+        for label in ["T.F.N.", "TFN No.", "TFN number", "tfn:", "Tax File Number"] {
+            let text = format!("{label} 123456782");
+            assert_eq!(found(Pattern::Tfn, &text), ["123456782"], "{text}");
+        }
+        for text in [
+            "order 123456782",
+            "notfn 123456782",
+            "TFN 1234567821",
+            "1234567821",
+            "1123 456 782",
+            "123 456 7821",
+            "123 456 783",
+            "123-456 782",
+            "123.456.782",
+            "123 456 78",
+            "123456782",
+        ] {
+            assert!(found(Pattern::Tfn, text).is_empty(), "{text}");
+        }
+        assert!(found(Pattern::Tfn, "123 456 7").is_empty());
     }
 
     #[test]
