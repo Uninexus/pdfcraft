@@ -413,7 +413,7 @@ impl Automation {
                     S::TooMany => json!({ "mode": "too_many" }),
                 };
                 let mut v = json!({
-                    "trigger": s.trigger.id(), "url": s.url, "format": s.format.id(), "fields": fields, "fields_left_out": s.fields_left_out, "flags": s.flags,
+                    "trigger": s.trigger.id(), "url": s.url, "format": s.format.id(), "fields": fields, "fields_left_out": s.fields_left_out, "unmatched": s.unmatched, "flags": s.flags,
                     "get_method": s.get_method, "include_no_value_fields": s.include_no_value_fields,
                     "submit_coordinates": s.submit_coordinates, "include_append_saves": s.include_append_saves,
                     "include_annotations": s.include_annotations, "canonical_format": s.canonical_format,

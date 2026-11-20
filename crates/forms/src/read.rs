@@ -279,7 +279,21 @@ pub(crate) fn qualified_name_within(doc: &Document, r: ObjRef, limit: usize) -> 
         cur = parent_of(doc, d);
     }
     parts.reverse();
-    if parts.is_empty() { Named::None } else { Named::Found(parts.join(".")) }
+    if parts.is_empty() {
+        return Named::None;
+    }
+    // Joined as the field walk joins them: an empty part before any other text adds nothing, so
+    // a field under a parent whose `/T` is empty is named by its own part alone, not ".x".
+    let mut name = String::new();
+    for part in parts {
+        if name.is_empty() {
+            name = part;
+        } else {
+            name.push('.');
+            name.push_str(&part);
+        }
+    }
+    Named::Found(name)
 }
 
 /// The field `d` names as its `/Parent`, when that is a dictionary. A reference to an object the

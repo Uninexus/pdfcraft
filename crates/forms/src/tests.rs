@@ -9142,6 +9142,78 @@ fn submit_actions_read_the_target_the_field_list_and_every_flag() {
     assert!(submit_actions(&doc, "name").unwrap().is_empty());
 }
 
+/// A name in a Submit's list is counted as unmatched when it is neither a field's fully
+/// qualified name nor a dotted ancestor of one; the match is exact and repeats each count.
+#[test]
+fn submit_actions_count_the_listed_names_that_match_no_field() {
+    use pdfcraft_cos::ObjRef;
+    let mut doc = fixture();
+    let go = field(&fields(&doc), "go").obj;
+    let names = ["name", "address", "address.city", "name", "Name", "nope", "address.", "address.zip", "addr", "size"];
+    let list = |extra: Option<Object>| {
+        let mut v: Vec<Object> = names.iter().map(|n| url(n)).collect();
+        v.extend(extra);
+        Object::Array(v)
+    };
+    // Only, with a reference to the parent field (object 15) that names an ancestor: matched.
+    let only = submit_action(&mut doc, url("https://example.org"), None, Some(list(Some(Object::Ref(ObjRef::new(15, 0))))));
+    let except = submit_action(&mut doc, url("https://example.org"), Some(1), Some(list(None)));
+    let all = submit_action(&mut doc, url("https://example.org"), None, None);
+    let mut aa = Dict::new();
+    aa.set(b"D".to_vec(), except);
+    aa.set(b"X".to_vec(), all);
+    doc.update_dict(go, |d| {
+        d.set(b"A".to_vec(), only);
+        d.set(b"AA".to_vec(), Object::Dict(aa));
+    })
+    .unwrap();
+    let got = submit_actions(&doc, "go").unwrap();
+    // "Name", "nope", "address.", "address.zip", "addr" match nothing; "size" is a radio group's name.
+    assert_eq!(got.iter().map(|s| s.unmatched).collect::<Vec<_>>(), [5, 5, 0]);
+    assert_eq!(got[0].fields_left_out, 0);
+}
+
+/// A field whose `/T` is hundreds of thousands of dots is looked up by a few comparisons; hashing
+/// every dotted prefix of it (the first version) took minutes.
+#[test]
+fn a_field_named_with_hundreds_of_thousands_of_dots_is_matched_quickly() {
+    let dots = ".".repeat(300_000);
+    let objs: Vec<String> = vec![
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm 3 0 R >>".into(),
+        "<< /Type /Pages /Kids [] /Count 0 >>".into(),
+        "<< /Fields [4 0 R 5 0 R] >>".into(),
+        "<< /Type /Annot /Subtype /Widget /FT /Btn /Ff 65536 /T (go) /Rect [0 0 10 10] /A << /S /SubmitForm /F (u) /Fields [(x) (go) (.) (..)] >> >>"
+            .into(),
+        format!("<< /Type /Annot /Subtype /Widget /FT /Tx /T ({dots}) /Rect [0 0 10 10] >>"),
+    ];
+    let doc = document(&objs);
+    let started = std::time::Instant::now();
+    let got = submit_actions(&doc, "go").unwrap();
+    // "x" matches nothing; "go" is a field; "." and ".." are dotted ancestors of the long name
+    // (it is 300,000 dots, which read as 300,001 empty parts).
+    assert_eq!(got[0].unmatched, 1);
+    assert!(started.elapsed().as_secs() < 10, "took {:?}", started.elapsed());
+}
+
+/// A reference to a field under a parent with an empty `/T` is named as the field list names it
+/// (`x`), not `.x`, so it matches.
+#[test]
+fn a_reference_to_a_field_under_an_empty_named_parent_is_matched() {
+    let objs: Vec<String> = vec![
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm 3 0 R >>".into(),
+        "<< /Type /Pages /Kids [] /Count 0 >>".into(),
+        "<< /Fields [4 0 R 5 0 R] >>".into(),
+        "<< /Type /Annot /Subtype /Widget /FT /Btn /Ff 65536 /T (go) /Rect [0 0 10 10] /A << /S /SubmitForm /F (u) /Fields [6 0 R] >> >>".into(),
+        "<< /T () /Kids [6 0 R] >>".into(),
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (x) /Parent 5 0 R /Rect [0 0 10 10] >>".into(),
+    ];
+    let doc = document(&objs);
+    assert!(fields(&doc).iter().any(|f| f.name == "x"));
+    let got = submit_actions(&doc, "go").unwrap();
+    assert_eq!(got[0].fields, SubmitFields::Only(vec!["x".into()]));
+    assert_eq!(got[0].unmatched, 0);
+}
+
 #[test]
 fn submit_flag_bits_each_mean_what_the_specification_says() {
     let mut doc = fixture();

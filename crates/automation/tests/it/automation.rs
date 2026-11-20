@@ -10548,6 +10548,7 @@ fn submit_form_actions_are_listed_through_tools_and_send_nothing() {
         "{r}"
     );
     assert_eq!(s["fields"], json!({ "mode": "all" }));
+    assert_eq!(s["unmatched"], 0, "{r}");
     // form_set_actions writes the HTML format (bit 3) with a file specification address.
     assert_eq!((s["flags"].as_u64(), s["get_method"].as_bool()), (Some(4), Some(false)));
     // A field with no submit action lists none; an unknown field is an error an agent can act on.
@@ -10590,6 +10591,8 @@ fn submit_form_actions_are_listed_through_tools_and_send_nothing() {
     assert_eq!((s["url"].as_str(), s["format"].as_str(), s["flags"].as_u64()), (Some("https://example.org/xfdf"), Some("xfdf"), Some(33)), "{r}");
     assert_eq!(s["fields"], json!({ "mode": "except", "names": ["a", "b"] }), "{r}");
     assert_eq!(s["fields_left_out"], 0, "{r}");
+    // Neither "a" nor "b" is a field of this form (its fields are Go and Long).
+    assert_eq!(s["unmatched"], 2, "{r}");
     let r = ok(&mut a, "form_submit_actions", json!({ "doc": doc, "field": "Long" }));
     assert_eq!((r["submits"][0]["url"].as_str(), r["submits"][0]["url_too_long"].as_bool()), (Some(""), Some(true)), "{r}");
 }
