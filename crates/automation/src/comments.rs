@@ -17,14 +17,14 @@ use crate::{Args, Automation, Content, DEFAULT_DPI, MAX_DPI, Result, ToolError, 
 pub(crate) const DEFAULT_AUTHOR: &str = "PdfCraft";
 
 impl Automation {
-    /// A comment's author: the call's `author`, else Preferences ▸ Identity ▸ Name, else
+    /// A comment's author: the call's `author`, else Preferences ▸ Identity ▸ Name (or the Login Name, see `Identity::author`), else
     /// [`DEFAULT_AUTHOR`].
     pub(crate) fn author_arg(&self, a: &Args) -> Result<String> {
         if let Some(author) = a.opt_str("author")? {
             return Ok(author.to_string());
         }
-        let name = &self.session.identity().name;
-        Ok(if name.is_empty() { DEFAULT_AUTHOR.to_string() } else { name.clone() })
+        let name = self.session.identity().author();
+        Ok(if name.is_empty() { DEFAULT_AUTHOR.to_string() } else { name.to_string() })
     }
 
     /// The text a typed signature (or its initials) starts from when none is given: the

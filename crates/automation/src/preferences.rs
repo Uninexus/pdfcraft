@@ -7,11 +7,14 @@ use crate::comments::DEFAULT_AUTHOR;
 use crate::{Args, Automation, Result, ToolError};
 
 impl Automation {
-    /// `identity`: set or read the name and email.
+    /// `identity`: set or read the name, email and login name.
     pub(crate) fn identity(&mut self, a: &Args) -> Result<Value> {
         let name = a.opt_str("name")?;
         let email = a.opt_str("email")?;
-        for (key, v) in [("name", name), ("email", email)] {
+        let login_name = a.opt_str("login_name")?;
+        let from_login = a.opt_bool("author_from_login_name")?;
+        // All checked before anything changes, so a refused call changes nothing.
+        for (key, v) in [("name", name), ("email", email), ("login_name", login_name)] {
             if v.is_some_and(|v| v.trim().chars().count() > MAX_IDENTITY_CHARS) {
                 return Err(ToolError::InvalidArgs(format!("{key} may be at most {MAX_IDENTITY_CHARS} characters")));
             }
@@ -20,9 +23,16 @@ impl Automation {
             let now = self.session.identity().clone();
             self.session.set_identity(name.unwrap_or(&now.name), email.unwrap_or(&now.email));
         }
+        if login_name.is_some() || from_login.is_some() {
+            let now = self.session.identity().clone();
+            self.session.set_login_name(login_name.unwrap_or(&now.login_name), from_login.unwrap_or(now.author_from_login_name));
+        }
         let id = self.session.identity();
-        let author = if id.name.is_empty() { DEFAULT_AUTHOR } else { id.name.as_str() };
-        Ok(json!({ "name": id.name, "email": id.email, "author": author }))
+        let author = if id.author().is_empty() { DEFAULT_AUTHOR } else { id.author() };
+        Ok(json!({
+            "name": id.name, "email": id.email, "login_name": id.login_name,
+            "author_from_login_name": id.author_from_login_name, "author": author,
+        }))
     }
 
     /// `form_preferences`: Highlight fields and Auto-Complete.

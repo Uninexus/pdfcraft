@@ -907,12 +907,29 @@ fn unasked_requests(requests: &mut Vec<Request>) {
 /// The longest identity name or email kept, in characters.
 pub const MAX_IDENTITY_CHARS: usize = 200;
 
-/// Preferences ▸ Identity: the user's name, the default author of new comments and the default
-/// signer name text, and their email, the contact information of a new digital signature.
+/// Preferences ▸ Identity: the user's name (the default signer name text, and the default author
+/// of new comments unless the login name is used instead, see [`Identity::author`]), their email
+/// (the contact information of a new digital signature), and a login name with the switch that
+/// makes it the default author. The login name is a separate setting; it is not read from the
+/// operating system.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Identity {
     pub name: String,
     pub email: String,
+    /// Preferences ▸ Identity ▸ Login Name: the account name, empty when unset. Only
+    /// [`Identity::author`] reads it, and only when `author_from_login_name` is on.
+    pub login_name: String,
+    /// Preferences ▸ Commenting ▸ Always use Log-in Name for Author name (off by default).
+    pub author_from_login_name: bool,
+}
+
+impl Identity {
+    /// The name new comments are authored with when a call gives none: the login name when
+    /// [`Identity::author_from_login_name`] is on and one is set, else the name. Empty when
+    /// neither applies.
+    pub fn author(&self) -> &str {
+        if self.author_from_login_name && !self.login_name.is_empty() { &self.login_name } else { &self.name }
+    }
 }
 
 impl Session {
@@ -927,13 +944,24 @@ impl Session {
     }
 
     /// Preferences ▸ Identity: the name and email of the person using this session. Each is
-    /// trimmed and cut to [`MAX_IDENTITY_CHARS`] characters; an empty one is unset.
+    /// trimmed and cut to [`MAX_IDENTITY_CHARS`] characters; an empty one is unset. The login name
+    /// and its switch are left as they are (see [`Session::set_login_name`]).
     pub fn set_identity(&mut self, name: &str, email: &str) {
         let clean = |s: &str| s.trim().chars().take(MAX_IDENTITY_CHARS).collect::<String>();
-        self.identity = Identity { name: clean(name), email: clean(email) };
+        self.identity.name = clean(name);
+        self.identity.email = clean(email);
     }
 
-    /// Preferences ▸ Identity as set (both empty when unset).
+    /// Preferences ▸ Identity ▸ Login Name, trimmed and cut to [`MAX_IDENTITY_CHARS`]
+    /// characters; an empty one is unset. `author_from_login_name` is Preferences ▸ Commenting ▸
+    /// Always use Log-in Name for Author name. Neither changes the name or the email.
+    pub fn set_login_name(&mut self, login_name: &str, author_from_login_name: bool) {
+        self.identity.login_name = login_name.trim().chars().take(MAX_IDENTITY_CHARS).collect();
+        self.identity.author_from_login_name = author_from_login_name;
+    }
+
+    /// Preferences ▸ Identity as set (the name, email and login name empty and the switch off when
+    /// unset).
     pub fn identity(&self) -> &Identity {
         &self.identity
     }
