@@ -171,16 +171,30 @@ impl Automation {
         // Saving to a new file is a full rewrite unless asked otherwise, like Save As.
         let full = a.opt_bool("full")?.unwrap_or(!same_file);
         let flatten_fill_sign = a.opt_bool("flatten_fill_sign")?.unwrap_or(false);
+        // The flatten is an undoable edit made only to be saved. When it added a step and the save
+        // then fails, that step is taken back, so a refused save leaves the document as it was.
+        // Not when something else changed the document after it (a Will Save script): the last
+        // step is then not the flatten, so the document is left alone and the error says so.
+        let before = self.doc(a)?.edit_generation();
         if flatten_fill_sign {
             self.apply(a, Edit::FlattenFillSign)?;
         }
-        // The document's Will Save actions run first: what they change is saved (#269).
-        let scripts = self.session.run_document_actions(id, pdfcraft_engine::js::DocumentScriptEvent::WillSave);
-        let bytes = if full { self.session.save_full_bytes(id) } else { self.session.save_bytes(id) }.map_err(failed)?;
-        // A save that adds or removes encryption, or must not keep the old revision (Sanitize,
-        // redaction), is rewritten in full even when an incremental save was asked for.
-        let incremental = !full && bytes.starts_with(&self.doc(a)?.saved_bytes());
-        let mut out = self.publish_save(id, &target, bytes, incremental, write)?;
+        let doc = self.doc(a)?;
+        let flattened = (doc.edit_generation() != before).then(|| (doc.edit_generation(), doc.can_undo().map(str::to_owned)));
+        let saved = self.save_prepared(a, id, &target, full, write);
+        if let (Err(error), Some((generation, label))) = (&saved, flattened) {
+            let doc = self.doc(a)?;
+            if doc.edit_generation() == generation && doc.can_undo() == label.as_deref() {
+                if let Err(undo) = self.session.discard_last_edit(id) {
+                    return Err(failed(format!("{error}; the Fill & Sign flatten could not be taken back: {undo}")));
+                }
+            } else {
+                return Err(failed(format!(
+                    "{error}; the Fill & Sign flatten was kept, because the document changed after it (a Will Save script): undo it to take it back"
+                )));
+            }
+        }
+        let (mut out, scripts) = saved?;
         // The document's Did Save actions run once the file is written (a save that failed ran none).
         // What they change is not in the file: the document is left with unsaved changes.
         let did_save = self.session.run_document_actions(id, pdfcraft_engine::js::DocumentScriptEvent::DidSave);
@@ -196,6 +210,25 @@ impl Automation {
             }
         }
         Ok(out)
+    }
+
+    /// Run the Will Save actions, make the bytes and publish them: the part of a save that can fail.
+    fn save_prepared(
+        &mut self,
+        a: &Args,
+        id: DocId,
+        target: &Path,
+        full: bool,
+        write: impl FnOnce(&Path, &[u8]) -> Result<()>,
+    ) -> Result<(Value, pdfcraft_engine::js::JsOutput)> {
+        // The document's Will Save actions run first: what they change is saved (#269).
+        let scripts = self.session.run_document_actions(id, pdfcraft_engine::js::DocumentScriptEvent::WillSave);
+        let bytes = if full { self.session.save_full_bytes(id) } else { self.session.save_bytes(id) }.map_err(failed)?;
+        // A save that adds or removes encryption, or must not keep the old revision (Sanitize,
+        // redaction), is rewritten in full even when an incremental save was asked for.
+        let incremental = !full && bytes.starts_with(&self.doc(a)?.saved_bytes());
+        let out = self.publish_save(id, target, bytes, incremental, write)?;
+        Ok((out, scripts))
     }
 
     /// Validate the prepared bytes before publishing them or marking the document saved.

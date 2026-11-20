@@ -434,6 +434,16 @@ impl Session {
         Ok(label)
     }
 
+    /// Take back the last edit of document `id` as [`Session::undo`] does, and forget it: it is not
+    /// kept for [`Session::redo`]. For an edit made only to be saved, when the save then failed.
+    pub fn discard_last_edit(&mut self, id: DocId) -> Result<Label, EditError> {
+        let label = self.undo(id)?;
+        if let Some(editor) = self.doc_mut(id)?.editor.as_mut() {
+            editor.redo.pop();
+        }
+        Ok(label)
+    }
+
     /// Redo the last edit of document `id` that [`Session::undo`] took back. Returns its label.
     pub fn redo(&mut self, id: DocId) -> Result<Label, EditError> {
         let doc = self.doc_mut(id)?;
