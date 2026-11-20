@@ -875,6 +875,9 @@ pub enum DocumentScriptEvent {
     CatalogOpen,
     WillSave,
     WillPrint,
+    WillClose,
+    DidSave,
+    DidPrint,
 }
 
 impl DocumentScriptEvent {
@@ -883,6 +886,9 @@ impl DocumentScriptEvent {
             Self::CatalogOpen => "Open",
             Self::WillSave => "WillSave",
             Self::WillPrint => "WillPrint",
+            Self::WillClose => "WillClose",
+            Self::DidSave => "DidSave",
+            Self::DidPrint => "DidPrint",
         }
     }
 
@@ -892,6 +898,9 @@ impl DocumentScriptEvent {
             Self::CatalogOpen => pdfcraft_forms::DocumentTrigger::Open,
             Self::WillSave => pdfcraft_forms::DocumentTrigger::WillSave,
             Self::WillPrint => pdfcraft_forms::DocumentTrigger::WillPrint,
+            Self::WillClose => pdfcraft_forms::DocumentTrigger::WillClose,
+            Self::DidSave => pdfcraft_forms::DocumentTrigger::DidSave,
+            Self::DidPrint => pdfcraft_forms::DocumentTrigger::DidPrint,
         }
     }
 }
@@ -1276,11 +1285,12 @@ impl Session {
         }
     }
 
-    /// Run the catalog's JavaScript actions for document event `event` (`/AA /WS` before a save,
-    /// `/AA /WP` before printing, `/OpenAction` on opening) in document `id`'s retained realm.
-    /// Each action's field changes are one undoable edit. A failing action is reported in the
-    /// output and the next one still runs; it never stops the save or print, which must not
-    /// lose the user's work. Requests are limited to what an unasked script may make. With
+    /// Run the catalog's JavaScript actions for document event `event` (`/OpenAction` on opening,
+    /// `/AA /WS` before a save, `/AA /DS` after one, `/AA /WP` before printing, `/AA /DP` after,
+    /// `/AA /WC` before a close) in document `id`'s retained realm. Each action's field changes are
+    /// one undoable edit. A failing action is reported in the output and the next one still runs;
+    /// it never stops the save, print or close, which must not lose the user's work. Each script
+    /// may run up to 10 seconds and a chain holds up to 256 actions. Requests are limited to what an unasked script may make. With
     /// JavaScript off, on an XFA form, or with no such action, nothing runs.
     pub fn run_document_actions(&mut self, id: DocId, event: DocumentScriptEvent) -> JsOutput {
         if self.js_off {
@@ -2083,9 +2093,14 @@ mod snapshot_review_tests {
         let second = session.open("second.pdf", None, bytes, None).unwrap();
         session.run_javascript(first, "var counter = 4;", None).unwrap();
 
-        for (event, name) in
-            [(DocumentScriptEvent::CatalogOpen, "Open"), (DocumentScriptEvent::WillSave, "WillSave"), (DocumentScriptEvent::WillPrint, "WillPrint")]
-        {
+        for (event, name) in [
+            (DocumentScriptEvent::CatalogOpen, "Open"),
+            (DocumentScriptEvent::WillSave, "WillSave"),
+            (DocumentScriptEvent::WillPrint, "WillPrint"),
+            (DocumentScriptEvent::WillClose, "WillClose"),
+            (DocumentScriptEvent::DidSave, "DidSave"),
+            (DocumentScriptEvent::DidPrint, "DidPrint"),
+        ] {
             let result = session.run_document_script_event(first, event, "[event.name,counter].join('/');").unwrap();
             assert_eq!(result.result, Some(format!("{name}/4")));
         }

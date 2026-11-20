@@ -445,6 +445,14 @@ impl Automation {
                 out["job"] = json!(spool::submit(&bytes, &job).map_err(|e| failed(e.to_string()))?);
             }
         }
+        // The document's Did Print actions run once the print-ready file is written or the job is
+        // queued (a print that failed ran none), as Will Print does only where printing is allowed.
+        if self.doc(a)?.allows_printing() {
+            let did_print = self.session.run_document_actions(id, pdfcraft_engine::js::DocumentScriptEvent::DidPrint);
+            if !did_print.is_empty() {
+                out["did_print"] = crate::a11y::form_tools::js_output_json(&did_print);
+            }
+        }
         Ok(out)
     }
 }

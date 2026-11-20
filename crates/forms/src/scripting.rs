@@ -549,6 +549,12 @@ pub enum DocumentTrigger {
     WillSave,
     /// `/AA /WP`, before the document is printed.
     WillPrint,
+    /// `/AA /WC`, before the document is closed.
+    WillClose,
+    /// `/AA /DS`, after the document has been saved.
+    DidSave,
+    /// `/AA /DP`, after the document has been printed.
+    DidPrint,
 }
 
 /// Most actions read for one document trigger, along its `/Next` chain. A chain can be cyclic
@@ -565,9 +571,23 @@ pub fn document_action_scripts(doc: &Document, trigger: DocumentTrigger) -> Vec<
     let Some(cat) = cat.as_dict() else { return Vec::new() };
     let first = match trigger {
         DocumentTrigger::Open => cat.get(b"OpenAction").cloned(),
-        DocumentTrigger::WillSave | DocumentTrigger::WillPrint => {
-            let key: &[u8] = if trigger == DocumentTrigger::WillSave { b"WS" } else { b"WP" };
-            cat.get(b"AA").map(|a| doc.resolve(a)).and_then(|a| a.as_dict().and_then(|d| d.get(key)).cloned())
+        _ => {
+            let key: &[u8] = match trigger {
+                DocumentTrigger::Open => b"",
+                DocumentTrigger::WillSave => b"WS",
+                DocumentTrigger::WillPrint => b"WP",
+                DocumentTrigger::WillClose => b"WC",
+                DocumentTrigger::DidSave => b"DS",
+                DocumentTrigger::DidPrint => b"DP",
+            };
+            // An /AA given by reference is resolved through any chain of references (which does not
+            // copy the dictionary it ends at); a direct one is read in place, since resolving a direct
+            // object would copy it.
+            match cat.get(b"AA") {
+                Some(a @ Object::Ref(_)) => doc.resolve(a).as_dict().and_then(|d| d.get(key)).cloned(),
+                Some(a) => a.as_dict().and_then(|d| d.get(key)).cloned(),
+                None => None,
+            }
         }
     };
     chained_scripts(doc, first)

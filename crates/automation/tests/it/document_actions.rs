@@ -1,6 +1,8 @@
 //! A form's document actions and pointer/focus scripts through the tool table (#269, ported
 //! from #344): the open action runs on doc_open, Will Save on doc_save, Will Print on
-//! doc_print, and js_event runs a widget's pointer and focus scripts, all in one realm.
+//! doc_print, and js_event runs a widget's pointer and focus scripts, all in one realm. Did Save
+//! runs after doc_save has written the file, Did Print after doc_print has delivered, and Will
+//! Close in doc_close before the document goes.
 
 use pdfcraft_automation::{Automation, Content};
 use serde_json::{Value, json};
@@ -89,6 +91,78 @@ fn open_will_save_will_print_and_field_events_share_the_document_realm() {
     tool(&mut a, "js_enabled", json!({ "enabled": false }));
     let reopened = tool(&mut a, "doc_open", json!({ "path": "saved.pdf" }))["doc"].as_u64().unwrap();
     assert_eq!(log(&mut a, reopened), "open1 Mouse Enter2 Blur save3");
+}
+
+/// A form whose Will Close, Did Save and Did Print actions each add a word to `log` and say
+/// something on the console.
+fn closing_form() -> Vec<u8> {
+    let act = |tag: &str| format!("<< /S /JavaScript /JS (getField\\('log'\\).value += '{tag};'; console.println\\('{tag}'\\);) >>");
+    pdf_of(&[
+        format!(
+            "<< /Type /Catalog /Pages 2 0 R /AA << /WC {} /DS {} /DP {} >> /AcroForm << /Fields [4 0 R] /DA (/Helv 0 Tf 0 g) /DR << /Font << /Helv 5 0 R >> >> >> >>",
+            act("wc"),
+            act("ds"),
+            act("dp")
+        ),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 200 300] >>".into(),
+        "<< /Type /Page /Parent 2 0 R /Annots [4 0 R] >>".into(),
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (log) /V () /Rect [20 250 180 270] /P 3 0 R /F 4 >>".into(),
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".into(),
+    ])
+}
+
+#[test]
+fn did_save_did_print_and_will_close_run_after_the_file_or_before_the_close() {
+    let dir = std::env::temp_dir().join(format!("pdfcraft-document-actions-after-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("form.pdf"), closing_form()).unwrap();
+    let mut a = Automation::new().with_root(&dir).unwrap().with_clock(|| 1_700_000_000);
+    let doc = tool(&mut a, "doc_open", json!({ "path": "form.pdf" }))["doc"].as_u64().unwrap();
+
+    // A save that fails writes nothing and runs no Did Save action.
+    assert!(a.call("doc_save", &json!({ "doc": doc, "path": "form.pdf/out.pdf" })).is_err());
+    assert_eq!(log(&mut a, doc), Value::Null);
+
+    // Did Save runs once the file is written: its change is not in the file, and the document is left changed.
+    let saved = tool(&mut a, "doc_save", json!({ "doc": doc, "path": "saved.pdf" }));
+    assert_eq!(saved["did_save"]["console"], json!(["ds"]), "{saved}");
+    assert!(saved.get("will_save").is_none(), "{saved}");
+    assert_eq!(saved["document"]["dirty"], true, "{saved}");
+    assert_eq!(log(&mut a, doc), "ds;");
+    tool(&mut a, "js_enabled", json!({ "enabled": false }));
+    let reopened = tool(&mut a, "doc_open", json!({ "path": "saved.pdf" }))["doc"].as_u64().unwrap();
+    assert_eq!(log(&mut a, reopened), Value::Null, "Did Save's change is not in the saved file");
+    tool(&mut a, "js_enabled", json!({ "enabled": true }));
+
+    // A print that fails delivers nothing and runs no Did Print action; one that is delivered runs it.
+    assert!(a.call("doc_print", &json!({ "doc": doc })).is_err());
+    assert!(a.call("doc_print", &json!({ "doc": doc, "path": "form.pdf/printed.pdf" })).is_err());
+    assert_eq!(log(&mut a, doc), "ds;");
+    let printed = tool(&mut a, "doc_print", json!({ "doc": doc, "path": "printed.pdf" }));
+    assert!(dir.join("printed.pdf").exists());
+    assert_eq!(printed["did_print"]["console"], json!(["dp"]), "{printed}");
+    assert_eq!(log(&mut a, doc), "ds;dp;");
+
+    // The document is changed, so it does not close; Will Close runs only when it does, and what it changes goes with it.
+    assert!(a.call("doc_close", &json!({ "doc": doc })).is_err());
+    assert_eq!(log(&mut a, doc), "ds;dp;");
+    let closed = tool(&mut a, "doc_close", json!({ "doc": doc, "discard_changes": true }));
+    assert_eq!(closed["will_close"]["console"], json!(["wc"]), "{closed}");
+    assert!(a.call("doc_info", &json!({ "doc": doc })).is_err());
+
+    // Will Close changes a clean document (it writes to the log), yet the close still goes ahead:
+    // the document is gone and the action's output is reported.
+    let clean = tool(&mut a, "doc_open", json!({ "path": "form.pdf" }))["doc"].as_u64().unwrap();
+    assert_eq!(tool(&mut a, "doc_list", json!({}))["documents"].as_array().map(|d| d.iter().filter(|d| d["dirty"] == true).count()), Some(0));
+    let closed = tool(&mut a, "doc_close", json!({ "doc": clean }));
+    assert_eq!(closed["will_close"]["console"], json!(["wc"]), "{closed}");
+    assert!(a.call("doc_info", &json!({ "doc": clean })).is_err());
+
+    // A document with no such actions closes as before, with nothing to report.
+    let plain = tool(&mut a, "doc_open", json!({ "path": "printed.pdf" }))["doc"].as_u64().unwrap();
+    let closed = tool(&mut a, "doc_close", json!({ "doc": plain }));
+    assert!(closed.get("will_close").is_none(), "{closed}");
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// Of two fields sharing a name, `field_id` (from form_fields) picks the one js_event runs; by
