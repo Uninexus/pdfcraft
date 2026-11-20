@@ -789,6 +789,7 @@ impl Automation {
             "doc_fix_hairlines" => self.fix_hairlines(&a)?,
             "doc_guides" => self.doc_guides(&a)?,
             "doc_guide_add" => self.doc_guide_add(&a)?,
+            "doc_guide_move" => self.doc_guide_move(&a)?,
             "doc_guide_remove" => self.doc_guide_remove(&a)?,
             "doc_guide_snap" => self.doc_guide_snap(&a)?,
             "doc_grid_snap" => self.doc_grid_snap(&a)?,

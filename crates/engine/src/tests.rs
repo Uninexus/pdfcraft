@@ -16303,6 +16303,45 @@ fn guides_round_to_a_thousandth_and_survive_a_reload_with_their_ids() {
     assert_eq!(s.guides(id, None).unwrap().len(), 3);
 }
 
+#[test]
+fn a_guide_moves_along_its_axis_and_a_refused_move_changes_nothing() {
+    use crate::guides::GuideAxis;
+    // Turned a quarter, the 200 x 300 page is displayed 300 wide and 200 tall.
+    let (mut s, id) = rotated_blank(90);
+    let (v, _) = s.add_guide(id, 0, GuideAxis::Vertical, 10.0).unwrap();
+    let (other, _) = s.add_guide(id, 0, GuideAxis::Vertical, 50.0).unwrap();
+    let (h, _) = s.add_guide(id, 0, GuideAxis::Horizontal, 10.0).unwrap();
+    let dirty_before = s.get(id).unwrap().dirty;
+    // Rounded as an added guide is; id, page and axis stay; the order of the list stays.
+    let (moved, did) = s.move_guide(id, v.id, 72.5004).unwrap();
+    assert!(did && moved.id == v.id && moved.page == 0 && moved.axis == GuideAxis::Vertical && moved.position == 72.5, "{moved:?}");
+    let (same, did) = s.move_guide(id, v.id, 72.5).unwrap();
+    assert!(!did && same == moved, "already there");
+    // The far edges of the displayed page are on it; -0 is 0; the other axis does not matter.
+    assert_eq!(s.move_guide(id, v.id, 300.0).unwrap().0.position, 300.0);
+    assert!(s.move_guide(id, h.id, -0.0).unwrap().0.position.is_sign_positive());
+    assert_eq!(s.move_guide(id, h.id, 200.0).unwrap().0.position, 200.0);
+    s.move_guide(id, v.id, 20.0).unwrap();
+    let before = s.guides(id, None).unwrap();
+    assert_eq!(before.iter().map(|g| g.id).collect::<Vec<_>>(), [v.id, other.id, h.id]);
+    // Each refusal leaves every guide as it was.
+    for (guide, at) in [(v.id, 300.5), (h.id, 200.5), (v.id, -1.0), (v.id, f64::NAN), (v.id, f64::INFINITY), (other.id, 20.0), (99, 5.0)] {
+        assert!(s.move_guide(id, guide, at).is_err(), "{guide} {at}");
+        assert_eq!(s.guides(id, None).unwrap(), before, "{guide} {at}");
+    }
+    // Another axis at the same number is not in the way.
+    assert!(s.move_guide(id, h.id, 20.0).is_ok());
+    assert_eq!(s.get(id).unwrap().dirty, dirty_before, "a guide is not an edit");
+    // A guide on a page the document no longer has cannot be measured, so it stays where it was.
+    let (mut s, id) = session_with(2);
+    let (gone, _) = s.add_guide(id, 1, GuideAxis::Vertical, 10.0).unwrap();
+    s.apply(id, Edit::DeletePages { pages: vec![1] }).unwrap();
+    assert_eq!(s.guides(id, None).unwrap().len(), 1);
+    let msg = s.move_guide(id, gone.id, 20.0).unwrap_err().to_string();
+    assert!(msg.contains("no longer has") && msg.contains("doc_guide_remove") && !msg.contains("out of range"), "{msg}");
+    assert_eq!(s.guides(id, None).unwrap()[0].position, 10.0);
+}
+
 /// The note that the font list may be incomplete is kept when a content edit makes the list be
 /// read again (`refresh_fonts`, which `doc_info` and Properties call), and not repeated.
 #[test]

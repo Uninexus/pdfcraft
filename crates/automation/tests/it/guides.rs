@@ -1,4 +1,4 @@
-//! `doc_guides`, `doc_guide_add`, `doc_guide_remove`, `doc_guide_snap` and `doc_grid_snap` end to end: guides are view state, bounded
+//! `doc_guides`, `doc_guide_add`, `doc_guide_move`, `doc_guide_remove`, `doc_guide_snap` and `doc_grid_snap` end to end: guides are view state, bounded
 //! by the displayed page, and never reach the saved file.
 
 use pdfcraft_automation::{Automation, Content};
@@ -360,4 +360,54 @@ fn grid_preferences_accept_the_limits_and_refuse_beyond_them_storing_nothing() {
     // The stored grid belongs to one tool session.
     let mut c = Automation::new();
     assert_eq!(stored(&mut c), json!({ "set": false }));
+}
+
+#[test]
+fn doc_guide_move_drags_a_guide_along_its_axis_and_a_refused_move_changes_nothing() {
+    let dir = std::env::temp_dir().join(format!("pdfcraft-guide-move-{}-{:?}", std::process::id(), std::thread::current().id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    // Page 2 is turned a quarter, so it is displayed 300 wide and 200 tall.
+    std::fs::write(dir.join("in.pdf"), pdf(&[("", "0 0 0 rg 50 100 70 80 re f"), ("/Rotate 90", "0 0 1 rg 20 40 40 50 re f")])).unwrap();
+    let mut a = Automation::new().with_root(&dir).unwrap().with_clock(|| 1_700_000_000);
+    let doc = call(&mut a, "doc_open", json!({ "path": "in.pdf" }))["doc"].as_u64().unwrap();
+    call(&mut a, "doc_save", json!({ "doc": doc, "path": "before.pdf" }));
+    call(&mut a, "doc_guide_add", json!({ "doc": doc, "page": 1, "axis": "vertical", "position": 10 }));
+    call(&mut a, "doc_guide_add", json!({ "doc": doc, "page": 1, "axis": "vertical", "position": 50 }));
+    call(&mut a, "doc_guide_add", json!({ "doc": doc, "page": 2, "axis": "horizontal", "position": 10 }));
+
+    let moved = call(&mut a, "doc_guide_move", json!({ "doc": doc, "id": 1, "position": 72.5004 }));
+    assert_eq!(moved, json!({ "id": 1, "page": 1, "axis": "vertical", "position": 72.5, "moved": true }));
+    let again = call(&mut a, "doc_guide_move", json!({ "doc": doc, "id": 1, "position": 72.5 }));
+    assert_eq!(again["moved"], false);
+    // A horizontal guide of the turned page is measured against its displayed height (200), not 300.
+    assert_eq!(call(&mut a, "doc_guide_move", json!({ "doc": doc, "id": 3, "position": 200 }))["position"], 200.0);
+    let at_zero = call(&mut a, "doc_guide_move", json!({ "doc": doc, "id": 3, "position": -0.0 }));
+    assert_eq!(at_zero["position"].to_string(), "0.0");
+    let listed = call(&mut a, "doc_guides", json!({ "doc": doc }));
+    let before = listed.clone();
+    assert_eq!(listed["guides"][0]["position"], 72.5);
+
+    // Refused: nothing moves and the list stays as it was.
+    assert!(fails(&mut a, "doc_guide_move", json!({ "doc": doc, "id": 3, "position": 250 })).contains("between 0 and 200"));
+    assert!(fails(&mut a, "doc_guide_move", json!({ "doc": doc, "id": 1, "position": -4 })).contains("must lie on the page"));
+    assert!(fails(&mut a, "doc_guide_move", json!({ "doc": doc, "id": 2, "position": 72.5 })).contains("guide 1 is already at 72.5"));
+    assert!(fails(&mut a, "doc_guide_move", json!({ "doc": doc, "id": 9, "position": 5 })).contains("no guide 9"));
+    assert!(fails(&mut a, "doc_guide_move", json!({ "doc": doc, "id": 0, "position": 5 })).contains("a guide id from doc_guides"));
+    assert!(fails(&mut a, "doc_guide_move", json!({ "doc": doc, "id": 1 })).contains("missing argument position"));
+    assert!(fails(&mut a, "doc_guide_move", json!({ "doc": doc, "position": 5 })).contains("missing argument id"));
+    assert!(fails(&mut a, "doc_guide_move", json!({ "doc": doc, "id": 1, "position": "5" })).contains("position must be a number"));
+    assert_eq!(call(&mut a, "doc_guides", json!({ "doc": doc })), before);
+
+    // A guide whose page is gone cannot be measured: refused, and still removable.
+    call(&mut a, "page_delete", json!({ "doc": doc, "pages": [2] }));
+    assert!(fails(&mut a, "doc_guide_move", json!({ "doc": doc, "id": 3, "position": 5 })).contains("no longer has"));
+    assert_eq!(call(&mut a, "doc_guide_remove", json!({ "doc": doc, "id": 3 })), json!({ "removed": 1 }));
+    call(&mut a, "edit_undo", json!({ "doc": doc }));
+
+    // View state: not an edit, and the saved file carries no guide.
+    call(&mut a, "doc_save", json!({ "doc": doc, "path": "out.pdf" }));
+    assert_eq!(std::fs::read(dir.join("out.pdf")).unwrap(), std::fs::read(dir.join("before.pdf")).unwrap());
+    assert!(pdfcraft_automation::tools().iter().any(|t| t.name == "doc_guide_move" && !t.read_only));
+    let _ = std::fs::remove_dir_all(&dir);
 }

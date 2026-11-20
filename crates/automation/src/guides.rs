@@ -1,5 +1,5 @@
-//! View ▸ Guides as tools: list, add and remove the ruler guides of a document (`doc_guides`,
-//! `doc_guide_add`, `doc_guide_remove`) and snap a point to them (`doc_guide_snap`), and a point to a grid (`doc_grid_snap`). View state, not edits (see `pdfcraft_engine::guides`).
+//! View ▸ Guides as tools: list, add, move and remove the ruler guides of a document (`doc_guides`,
+//! `doc_guide_add`, `doc_guide_move`, `doc_guide_remove`) and snap a point to them (`doc_guide_snap`), and a point to a grid (`doc_grid_snap`). View state, not edits (see `pdfcraft_engine::guides`).
 
 use pdfcraft_engine::guides::{Grid, Guide, GuideAxis};
 use serde_json::{Value, json};
@@ -85,6 +85,17 @@ impl Automation {
         let (guide, created) = self.session.add_guide(id, page, axis, position).map_err(|e| ToolError::InvalidArgs(e.to_string()))?;
         let mut out = guide_json(&guide);
         out["created"] = json!(created);
+        Ok(out)
+    }
+
+    pub(crate) fn doc_guide_move(&mut self, a: &Args) -> Result<Value> {
+        let id = self.doc(a)?.id;
+        let guide = a.opt_int("id")?.ok_or_else(|| Args::missing("id"))?;
+        let guide = u64::try_from(guide).ok().filter(|g| *g >= 1).ok_or_else(|| Args::wrong("id", "a guide id from doc_guides (1 or more)"))?;
+        let position = a.opt_num("position")?.ok_or_else(|| Args::missing("position"))?;
+        let (guide, moved) = self.session.move_guide(id, guide, position).map_err(|e| ToolError::InvalidArgs(e.to_string()))?;
+        let mut out = guide_json(&guide);
+        out["moved"] = json!(moved);
         Ok(out)
     }
 
