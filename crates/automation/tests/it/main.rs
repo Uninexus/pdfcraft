@@ -13,6 +13,7 @@ mod batch_secrets;
 mod button_caption;
 mod compare_ignore_case;
 mod compare_ignore_punctuation;
+mod compare_visual_causes;
 mod document_actions;
 mod document_parts;
 mod edit_all_javascripts;
