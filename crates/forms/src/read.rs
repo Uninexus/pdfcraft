@@ -144,43 +144,111 @@ const MAX_ACTION_FIELDS: usize = 65_536;
 /// widget under the same chain of long partial names would otherwise build its own copy.
 const MAX_ACTION_FIELD_BYTES: usize = 4 << 20;
 
+/// An object that is borrowed when it is direct and shared when a reference led to it, so that
+/// reading a direct value does not clone it (`Document::resolve` clones a direct object).
+pub(crate) enum Held<'a> {
+    Direct(&'a Object),
+    Shared(std::sync::Arc<Object>),
+}
+
+impl Held<'_> {
+    pub(crate) fn get(&self) -> &Object {
+        match self {
+            Held::Direct(o) => o,
+            Held::Shared(o) => o,
+        }
+    }
+}
+
+pub(crate) fn held<'a>(doc: &Document, o: &'a Object) -> Held<'a> {
+    if matches!(o, Object::Ref(_)) { Held::Shared(doc.resolve(o)) } else { Held::Direct(o) }
+}
+
 /// The field names targeted by a `ResetForm` (`/Fields`) or `Hide` (`/T`) action entry: a field
 /// name string, an indirect field or widget dictionary reference, or an array of them. `None`
 /// when the array has more than [`MAX_ACTION_FIELDS`] entries or the names total more than
 /// [`MAX_ACTION_FIELD_BYTES`]: a shortened list would reset or hide the wrong fields (a reset
 /// that excludes the listed ones would reset more), so the action is not read at all.
 pub(crate) fn action_fields(doc: &Document, o: &Object) -> Option<Vec<String>> {
-    let target = |item: &Object| match item {
-        Object::Ref(r) => qualified_name(doc, *r).or_else(|| text_of(&doc.resolve(item))),
-        other => text_of(other),
-    };
+    action_fields_counted(doc, o).map(|(names, _)| names)
+}
+
+/// [`action_fields`], and how many entries name nothing (a reference to nothing, a dictionary
+/// with no `/T` up its parents, a number, `null`) and so are not in the list.
+pub(crate) fn action_fields_counted(doc: &Document, o: &Object) -> Option<(Vec<String>, usize)> {
     let mut bytes = 0usize;
     let mut out = Vec::new();
-    let mut take = |name: Option<String>| -> Option<()> {
-        if let Some(name) = name {
-            bytes = bytes.checked_add(name.len()).filter(|b| *b <= MAX_ACTION_FIELD_BYTES)?;
-            out.push(name);
+    let mut left_out = 0usize;
+    let mut take = |item: &Object| -> Option<()> {
+        // What is left of the allowance is passed down, so a name is not built past it.
+        let left = MAX_ACTION_FIELD_BYTES.checked_sub(bytes)?;
+        let name = match item {
+            Object::Ref(r) => match qualified_name_within(doc, *r, left) {
+                Named::Over => return None,
+                Named::Found(n) => Some(n),
+                Named::None => text_within(&doc.resolve(item), left)?,
+            },
+            other => text_within(other, left)?,
+        };
+        match name {
+            Some(name) => {
+                bytes = bytes.checked_add(name.len()).filter(|b| *b <= MAX_ACTION_FIELD_BYTES)?;
+                out.push(name);
+            }
+            None => left_out += 1,
         }
         Some(())
     };
-    match &*doc.resolve(o) {
+    let list = held(doc, o);
+    match list.get() {
         Object::Array(items) => {
             if items.len() > MAX_ACTION_FIELDS {
                 return None;
             }
             for item in items {
-                take(target(item))?;
+                take(item)?;
             }
         }
-        _ => take(target(o))?,
+        _ => take(o)?,
     }
-    Some(out)
+    Some((out, left_out))
+}
+
+/// `text_of(o)`, built only when its encoded length is within `left` bytes: `None` when it is
+/// not, `Some(None)` when `o` is not text.
+fn text_within(o: &Object, left: usize) -> Option<Option<String>> {
+    let len = match o {
+        Object::String(s) => s.bytes.len(),
+        Object::Name(n) => n.len(),
+        _ => return Some(None),
+    };
+    (len <= left).then(|| text_of(o))
+}
+
+/// What [`qualified_name_within`] found.
+pub(crate) enum Named {
+    Found(String),
+    /// No partial name up the chain.
+    None,
+    /// The partial names are more than the allowance.
+    Over,
 }
 
 /// The fully qualified name of the field that `r` (a field or one of its widgets) belongs to,
 /// from the partial names (`/T`) up its `/Parent` chain.
 pub(crate) fn qualified_name(doc: &Document, r: ObjRef) -> Option<String> {
+    match qualified_name_within(doc, r, usize::MAX) {
+        Named::Found(n) => Some(n),
+        _ => None,
+    }
+}
+
+/// [`qualified_name`] that builds no partial name once the encoded names it has taken, and this
+/// one, exceed `limit` bytes: a chain of 64 ancestors that share one huge `/T` would otherwise
+/// build 64 copies of it.
+pub(crate) fn qualified_name_within(doc: &Document, r: ObjRef, limit: usize) -> Named {
     let mut parts = Vec::new();
+    let mut spent = 0usize;
     let mut seen = std::collections::HashSet::new();
     let mut cur = Some(r);
     while let Some(c) = cur {
@@ -189,14 +257,29 @@ pub(crate) fn qualified_name(doc: &Document, r: ObjRef) -> Option<String> {
         }
         // An object that is only a reference to another is followed, as `Document::resolve` does.
         let obj = doc.resolve(&Object::Ref(c));
-        let d = obj.as_dict()?;
-        if let Some(t) = d.get(b"T").and_then(|o| text_of(&doc.resolve(o))) {
-            parts.push(t);
+        let Some(d) = obj.as_dict() else { return Named::None };
+        if let Some(t) = d.get(b"T") {
+            let t = held(doc, t);
+            let encoded = match t.get() {
+                Object::String(s) => Some(s.bytes.len()),
+                Object::Name(n) => Some(n.len()),
+                _ => None,
+            };
+            if let Some(len) = encoded {
+                // Charged on the encoded length, before any text is built; a dot joins each part.
+                spent = match spent.checked_add(len).and_then(|v| v.checked_add(1)).filter(|v| *v <= limit) {
+                    Some(v) => v,
+                    None => return Named::Over,
+                };
+                if let Some(text) = text_of(t.get()) {
+                    parts.push(text);
+                }
+            }
         }
         cur = parent_of(doc, d);
     }
     parts.reverse();
-    (!parts.is_empty()).then(|| parts.join("."))
+    if parts.is_empty() { Named::None } else { Named::Found(parts.join(".")) }
 }
 
 /// The field `d` names as its `/Parent`, when that is a dictionary. A reference to an object the

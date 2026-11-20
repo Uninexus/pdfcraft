@@ -9082,3 +9082,213 @@ fn a_direct_name_is_looked_at_without_a_copy() {
     // Each of 200 names looks at two direct parts, the document script key and the title.
     assert!(borrowed >= 400 + 2, "{borrowed}");
 }
+
+/// A Submit a Form action dictionary with the given `/F` and `/Flags`.
+fn submit_action(doc: &mut Document, target: Object, flags: Option<i64>, fields: Option<Object>) -> Object {
+    let mut a = Dict::new();
+    a.set(b"S".to_vec(), Object::name("SubmitForm"));
+    a.set(b"F".to_vec(), target);
+    if let Some(f) = flags {
+        a.set(b"Flags".to_vec(), Object::Int(f));
+    }
+    if let Some(f) = fields {
+        a.set(b"Fields".to_vec(), f);
+    }
+    Object::Ref(doc.add(Object::Dict(a)))
+}
+
+fn url(s: &str) -> Object {
+    Object::String(PdfString::literal(s.as_bytes().to_vec()))
+}
+
+#[test]
+fn submit_actions_read_the_target_the_field_list_and_every_flag() {
+    let mut doc = fixture();
+    let go = field(&fields(&doc), "go").obj;
+    // Mouse Up: only two fields, as XFDF with the GET method and the no-value fields (bits 6, 4, 2).
+    let up = submit_action(&mut doc, url("https://example.org/post"), Some(32 | 8 | 2), Some(Object::Array(vec![url("name"), url("zip")])));
+    // Mouse Down: every field but one (bit 1), as HTML (bit 3); the address is a file specification.
+    let mut spec = Dict::new();
+    spec.set(b"FS".to_vec(), Object::name("URL"));
+    spec.set(b"F".to_vec(), url("https://example.org/html"));
+    let down = submit_action(&mut doc, Object::Dict(spec), Some(1 | 4), Some(Object::Array(vec![url("id")])));
+    // Mouse Exit: no flags and no field list is the default, FDF of every field.
+    let exit = submit_action(&mut doc, url("mailto:a@example.org"), None, None);
+    // On Blur is not a submit action.
+    let mut other = Dict::new();
+    other.set(b"S".to_vec(), Object::name("URI"));
+    let blur = Object::Ref(doc.add(Object::Dict(other)));
+    let mut aa = Dict::new();
+    aa.set(b"D".to_vec(), down);
+    aa.set(b"X".to_vec(), exit);
+    aa.set(b"Bl".to_vec(), blur);
+    doc.update_dict(go, |d| {
+        d.set(b"A".to_vec(), up);
+        d.set(b"AA".to_vec(), Object::Dict(aa));
+    })
+    .unwrap();
+    let got = submit_actions(&doc, "go").unwrap();
+    assert_eq!(got.iter().map(|s| s.trigger).collect::<Vec<_>>(), [Trigger::MouseUp, Trigger::MouseDown, Trigger::MouseExit]);
+    let up = &got[0];
+    assert_eq!((up.url.as_str(), up.format, up.flags), ("https://example.org/post", SubmitFormat::Xfdf, 42));
+    assert_eq!(up.fields, SubmitFields::Only(vec!["name".into(), "zip".into()]));
+    assert!(up.get_method && up.include_no_value_fields && !up.submit_coordinates && !up.embed_form);
+    let down = &got[1];
+    assert_eq!((down.url.as_str(), down.format), ("https://example.org/html", SubmitFormat::Html));
+    assert_eq!(down.fields, SubmitFields::Except(vec!["id".into()]));
+    let exit = &got[2];
+    assert_eq!((exit.url.as_str(), exit.format, exit.flags, &exit.fields), ("mailto:a@example.org", SubmitFormat::Fdf, 0, &SubmitFields::All));
+    assert!(submit_actions(&doc, "nope").is_err());
+    assert!(submit_actions(&doc, "name").unwrap().is_empty());
+}
+
+#[test]
+fn submit_flag_bits_each_mean_what_the_specification_says() {
+    let mut doc = fixture();
+    let go = field(&fields(&doc), "go").obj;
+    // The nine booleans, in the order of this list of (bit, name).
+    let names = [
+        "get_method",
+        "include_no_value_fields",
+        "submit_coordinates",
+        "include_append_saves",
+        "include_annotations",
+        "canonical_format",
+        "excl_non_user_annots",
+        "excl_f_key",
+        "embed_form",
+    ];
+    let bits = [4, 2, 5, 7, 8, 10, 11, 12, 14];
+    let read = |s: &SubmitAction| {
+        [
+            s.get_method,
+            s.include_no_value_fields,
+            s.submit_coordinates,
+            s.include_append_saves,
+            s.include_annotations,
+            s.canonical_format,
+            s.excl_non_user_annots,
+            s.excl_f_key,
+            s.embed_form,
+        ]
+    };
+    for (i, n) in bits.into_iter().enumerate() {
+        let act = submit_action(&mut doc, url("https://example.org"), Some(1 << (n - 1)), None);
+        doc.update_dict(go, |d| d.set(b"A".to_vec(), act)).unwrap();
+        let s = submit_actions(&doc, "go").unwrap().remove(0);
+        // One bit sets exactly one boolean, and nothing else changes.
+        let want: Vec<bool> = (0..9).map(|j| j == i).collect();
+        assert_eq!(read(&s).to_vec(), want, "bit {n} is {}", names[i]);
+        assert_eq!(s.flags, 1 << (n - 1));
+        assert_eq!((s.format, &s.fields), (SubmitFormat::Fdf, &SubmitFields::All), "bit {n} changes neither");
+    }
+    // PDF wins over XFDF, which wins over HTML; a negative number is read as its low 32 bits.
+    for (flags, want) in [(256 | 32 | 4, SubmitFormat::Pdf), (32 | 4, SubmitFormat::Xfdf), (4, SubmitFormat::Html), (-1, SubmitFormat::Pdf)] {
+        let act = submit_action(&mut doc, url("https://example.org"), Some(flags), None);
+        doc.update_dict(go, |d| d.set(b"A".to_vec(), act)).unwrap();
+        assert_eq!(submit_actions(&doc, "go").unwrap()[0].format, want, "flags {flags}");
+    }
+}
+
+/// An `/Fields` entry list for the cases of the next tests: strings, a widget under a parent, a
+/// dictionary with no name, a number, `null` and a reference to nothing.
+fn mixed_field_entries(doc: &mut Document) -> Vec<Object> {
+    let nameless = Object::Ref(doc.add(Object::Dict(Dict::new())));
+    let city = Object::Ref(pdfcraft_cos::ObjRef::new(16, 0));
+    vec![url("name"), city, nameless, Object::Int(5), Object::Null, Object::Ref(pdfcraft_cos::ObjRef::new(9999, 0))]
+}
+
+#[test]
+fn submit_field_names_are_qualified_and_entries_that_name_nothing_are_counted() {
+    let mut doc = fixture();
+    let go = field(&fields(&doc), "go").obj;
+    let entries = mixed_field_entries(&mut doc);
+    let direct = submit_action(&mut doc, url("https://example.org"), Some(0), Some(Object::Array(entries.clone())));
+    doc.update_dict(go, |d| d.set(b"A".to_vec(), direct)).unwrap();
+    let s = submit_actions(&doc, "go").unwrap().remove(0);
+    // Widget 16 is `city` under the field `address`; four entries name nothing.
+    assert_eq!(s.fields, SubmitFields::Only(vec!["name".into(), "address.city".into()]));
+    assert_eq!(s.fields_left_out, 4);
+    // The same list held in an indirect array reads the same.
+    let list = Object::Ref(doc.add(Object::Array(entries)));
+    let indirect = submit_action(&mut doc, url("https://example.org"), Some(0), Some(list));
+    doc.update_dict(go, |d| d.set(b"A".to_vec(), indirect)).unwrap();
+    assert_eq!(submit_actions(&doc, "go").unwrap()[0].fields, s.fields);
+    // A lone name that is not an array is one entry; a lone nothing is one left out.
+    for (one, names, left) in [(url("zip"), vec!["zip".to_string()], 0), (Object::Int(3), vec![], 1)] {
+        let act = submit_action(&mut doc, url("https://example.org"), Some(0), Some(one));
+        doc.update_dict(go, |d| d.set(b"A".to_vec(), act)).unwrap();
+        let s = submit_actions(&doc, "go").unwrap().remove(0);
+        assert_eq!((s.fields, s.fields_left_out), (SubmitFields::Only(names), left));
+    }
+}
+
+/// A chain of `n` fields, each the `/Parent` of the next, every one with the same `/T` string
+/// object of `len` bytes. Returns the last.
+fn shared_name_chain(doc: &mut Document, n: usize, len: usize) -> pdfcraft_cos::ObjRef {
+    let big = doc.add(Object::String(PdfString::literal(vec![b'x'; len])));
+    let mut parent: Option<pdfcraft_cos::ObjRef> = None;
+    for _ in 0..n {
+        let mut d = Dict::new();
+        d.set(b"T".to_vec(), Object::Ref(big));
+        if let Some(p) = parent {
+            d.set(b"Parent".to_vec(), Object::Ref(p));
+        }
+        parent = Some(doc.add(Object::Dict(d)));
+    }
+    parent.unwrap()
+}
+
+#[test]
+fn a_name_is_not_built_past_the_allowance_it_is_given() {
+    let mut doc = fixture();
+    // 40 ancestors sharing one 200 KiB name: 8 MB of text if each were built.
+    let last = shared_name_chain(&mut doc, 40, 200 * 1024);
+    assert!(matches!(read::qualified_name_within(&doc, last, 1 << 20), read::Named::Over));
+    assert!(matches!(read::qualified_name_within(&doc, last, 40 * (200 * 1024 + 1)), read::Named::Found(n) if n.len() == 40 * 200 * 1024 + 39));
+    // A chain that fits is the same name `qualified_name` gives.
+    let small = shared_name_chain(&mut doc, 3, 4);
+    assert_eq!(qualified_name(&doc, small).as_deref(), Some("xxxx.xxxx.xxxx"));
+    // A field list naming such a widget is refused as too long to list, without building it.
+    let go = field(&fields(&doc), "go").obj;
+    let act = submit_action(&mut doc, url("https://example.org"), Some(0), Some(Object::Array(vec![Object::Ref(last)])));
+    doc.update_dict(go, |d| d.set(b"A".to_vec(), act)).unwrap();
+    // 8 MB of names is over the 4 MiB an action may list.
+    assert_eq!(submit_actions(&doc, "go").unwrap()[0].fields, SubmitFields::TooMany);
+    // The same through a Reset a Form action.
+    let mut reset = Dict::new();
+    reset.set(b"S".to_vec(), Object::name("ResetForm"));
+    reset.set(b"Fields".to_vec(), Object::Array(vec![Object::Ref(last)]));
+    doc.update_dict(go, |d| d.set(b"A".to_vec(), Object::Dict(reset))).unwrap();
+    assert_eq!(field_actions(&doc, "go").unwrap()[0].1, FieldAction::Other("ResetForm (too many field names to list)".into()));
+}
+
+#[test]
+fn submit_actions_refuse_to_copy_an_address_or_list_past_their_caps() {
+    let mut doc = fixture();
+    let go = field(&fields(&doc), "go").obj;
+    let long = "a".repeat(MAX_SUBMIT_URL_BYTES + 1);
+    let act = submit_action(&mut doc, url(&long), None, Some(Object::Array(vec![Object::Null; 65_537])));
+    doc.update_dict(go, |d| d.set(b"A".to_vec(), act)).unwrap();
+    let s = submit_actions(&doc, "go").unwrap().remove(0);
+    assert!(s.url_too_long && s.url.is_empty());
+    assert_eq!(s.fields, SubmitFields::TooMany);
+    // The cap itself is allowed.
+    let act = submit_action(&mut doc, url(&"a".repeat(MAX_SUBMIT_URL_BYTES)), None, None);
+    doc.update_dict(go, |d| d.set(b"A".to_vec(), act)).unwrap();
+    let s = submit_actions(&doc, "go").unwrap().remove(0);
+    assert!(!s.url_too_long && s.url.len() == MAX_SUBMIT_URL_BYTES);
+}
+
+#[test]
+fn a_submit_action_chained_after_another_is_not_read() {
+    let mut doc = fixture();
+    let go = field(&fields(&doc), "go").obj;
+    let next = submit_action(&mut doc, url("https://example.org"), None, None);
+    let mut js = Dict::new();
+    js.set(b"S".to_vec(), Object::name("JavaScript"));
+    js.set(b"JS".to_vec(), url("1;"));
+    js.set(b"Next".to_vec(), next);
+    doc.update_dict(go, |d| d.set(b"A".to_vec(), Object::Dict(js))).unwrap();
+    assert!(submit_actions(&doc, "go").unwrap().is_empty());
+}

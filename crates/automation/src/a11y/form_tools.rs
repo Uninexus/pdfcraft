@@ -376,6 +376,37 @@ impl Automation {
         Ok(json!({ "field": a.str("field")?, "actions": list }))
     }
 
+    pub(crate) fn form_submit_actions(&self, a: &Args) -> Result<Value> {
+        use pdfcraft_engine::SubmitFields as S;
+        let field = a.str("field")?;
+        let list: Vec<Value> = self
+            .doc(a)?
+            .field_submit_actions(field)
+            .map_err(failed)?
+            .iter()
+            .map(|s| {
+                let fields = match &s.fields {
+                    S::All => json!({ "mode": "all" }),
+                    S::Only(n) => json!({ "mode": "only", "names": n }),
+                    S::Except(n) => json!({ "mode": "except", "names": n }),
+                    S::TooMany => json!({ "mode": "too_many" }),
+                };
+                let mut v = json!({
+                    "trigger": s.trigger.id(), "url": s.url, "format": s.format.id(), "fields": fields, "fields_left_out": s.fields_left_out, "flags": s.flags,
+                    "get_method": s.get_method, "include_no_value_fields": s.include_no_value_fields,
+                    "submit_coordinates": s.submit_coordinates, "include_append_saves": s.include_append_saves,
+                    "include_annotations": s.include_annotations, "canonical_format": s.canonical_format,
+                    "excl_non_user_annots": s.excl_non_user_annots, "excl_f_key": s.excl_f_key, "embed_form": s.embed_form,
+                });
+                if s.url_too_long {
+                    v["url_too_long"] = json!(true);
+                }
+                v
+            })
+            .collect();
+        Ok(json!({ "field": field, "submits": list }))
+    }
+
     pub(crate) fn form_set_actions(&mut self, a: &Args) -> Result<Value> {
         use pdfcraft_engine::{FieldAction as A, FieldTrigger as T};
         let items = a.get("actions").and_then(Value::as_array).ok_or_else(|| ToolError::InvalidArgs("actions must be an array".into()))?;

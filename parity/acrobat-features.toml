@@ -4887,11 +4887,11 @@ title = "Submit form to a URL or email (with a prompt)"
 area = "F"
 tier = "P1"
 milestone = "M6"
-status = "planned"
+status = "partial"
 commands = []
-tools = []
-evidence = []
-notes = ""
+tools = ["form_submit_actions"]
+evidence = ["crates/forms/src/tests.rs::submit_actions_read_the_target_the_field_list_and_every_flag", "crates/forms/src/tests.rs::submit_flag_bits_each_mean_what_the_specification_says", "crates/forms/src/tests.rs::submit_actions_refuse_to_copy_an_address_or_list_past_their_caps", "crates/automation/tests/it/automation.rs::submit_form_actions_are_listed_through_tools_and_send_nothing"]
+notes = "Reading only, headless: form_submit_actions lists, for each trigger of a field whose first action is a Submit a Form action, its address (empty when /F is absent or is a name, a number or a dictionary with no /F string), format (fdf, html, xfdf or pdf; PDF, then XFDF, then HTML when several bits are set, as the specification makes SubmitPDF override every other flag but GetMethod and ExportFormat meaningful only when SubmitPDF and XFDF are clear), field list (all, only, every field except, or too many to list) and the choices in /Flags, reported as set whether or not the format uses them (with pdf the whole document is sent and only get_method applies; get_method and submit_coordinates are for html only; include_append_saves, include_annotations, excl_f_key and embed_form for fdf only; excl_non_user_annots only with include_annotations). Fields named by reference are listed by fully qualified name; entries naming nothing are left out and counted. Nothing is sent, no data is gathered, and there is no prompt, button or email. Only the action a trigger starts is read, not actions chained after it, and the names are not matched against the form. An address over 64 KiB is not copied and a field list over 65,536 entries or 4 MiB of names is not listed, both flagged. The flag bit positions were written from memory of the PDF specification and not re-read from it in this build environment."
 
 [[feature]]
 id = "form.import-data"
