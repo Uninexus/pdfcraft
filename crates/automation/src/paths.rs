@@ -1,4 +1,4 @@
-use super::error::{Result, failed};
+use super::error::{Result, ToolError, failed};
 use super::{Automation, Path, PathBuf, StagingName, file_access, staging_suffixes};
 
 impl Automation {
@@ -127,6 +127,55 @@ pub(crate) fn unused(dir: &Path, stem: &str) -> PathBuf {
         return first;
     }
     (2..10_000u32).map(|n| child(dir, &format!("{stem} ({n}).pdf"))).find(|p| !p.exists()).unwrap_or(first)
+}
+
+/// What one call wrote into a folder, so that a call that fails part way can take it back.
+pub(crate) struct Written {
+    dir: PathBuf,
+    made_dir: bool,
+    created: Vec<PathBuf>,
+}
+
+impl Written {
+    /// Run `body`, which writes files into `dir` through [`Written::write`] or [`Written::record`].
+    /// `dir` is made first. If `body` fails, the files it wrote to a name that was free are removed
+    /// again, and `dir` if this call made it (best effort: when `dir` needed several new folders
+    /// only the deepest is removed). The error returned is `body`'s, followed by
+    /// `; could not remove: <paths>` for whatever could not be removed. A file that replaced one
+    /// already there is not removed, and what it replaced is not restored.
+    pub(crate) fn within<T>(dir: &Path, body: impl FnOnce(&mut Written) -> Result<T>) -> Result<T> {
+        let made_dir = dir.symlink_metadata().is_err();
+        std::fs::create_dir_all(dir).map_err(|e| failed(format!("{}: {e}", dir.display())))?;
+        let mut written = Written { dir: dir.to_path_buf(), made_dir, created: Vec::new() };
+        match body(&mut written) {
+            Ok(value) => Ok(value),
+            Err(error) => Err(written.take_back(error)),
+        }
+    }
+
+    /// [`write_atomic`] to `path`; the file is taken back on failure unless the name was taken.
+    pub(crate) fn write(&mut self, path: &Path, bytes: &[u8]) -> Result<()> {
+        // A dangling link counts as existing: the write replaces it, and it is not ours to remove.
+        let existed = path.symlink_metadata().is_ok();
+        write_atomic(path, bytes)?;
+        if !existed {
+            self.created.push(path.to_path_buf());
+        }
+        Ok(())
+    }
+
+    /// A file the call made at a name that was free (a publish that never replaces).
+    pub(crate) fn record(&mut self, path: &Path) {
+        self.created.push(path.to_path_buf());
+    }
+
+    fn take_back(self, error: ToolError) -> ToolError {
+        let mut stuck: Vec<String> = self.created.iter().filter(|p| std::fs::remove_file(p).is_err()).map(|p| p.display().to_string()).collect();
+        if self.made_dir && std::fs::remove_dir(&self.dir).is_err() {
+            stuck.push(self.dir.display().to_string());
+        }
+        if stuck.is_empty() { error } else { failed(format!("{error}; could not remove: {}", stuck.join(", "))) }
+    }
 }
 
 /// Largest input file a tool reads into memory (512 MiB, matching `doc_batch`).

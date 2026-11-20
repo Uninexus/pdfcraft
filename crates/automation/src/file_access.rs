@@ -508,6 +508,8 @@ mod tests {
         // inputs and out_dir, walks only inside them (skipping links) and resolves every
         // discovered file again before `process` reads it or `publish` writes it. `doc_bates_multi`
         // resolves its paths before checking output collisions and using the probe helpers.
+        // `within` and `take_back` (`Written` in paths.rs) get the folder a tool resolved, and what they
+        // remove is what `Written::write` or `record` was given under it.
         const RESOLVED_BY_CALLER: &[&str] = &[
             "write_atomic",
             "write_atomic_with",
@@ -521,6 +523,8 @@ mod tests {
             "publish",
             "check_unique_outputs",
             "probe_files_for_resolved_outputs",
+            "within",
+            "take_back",
         ];
         let mut dirs = vec![Path::new(env!("CARGO_MANIFEST_DIR")).join("src")];
         let mut files = vec![];

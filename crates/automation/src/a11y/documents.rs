@@ -175,26 +175,29 @@ impl Automation {
             Action { name: "Custom".into(), description: String::new(), steps, builtin: false }
         };
         let folder = self.resolve(a.str("folder")?, true)?;
-        std::fs::create_dir_all(&folder).map_err(|e| failed(e.to_string()))?;
+        let paths = a.strs("paths")?;
         // Each file runs in its own session; it keeps this one's JavaScript preference.
         let javascript = self.session.javascript();
-        let mut out = Vec::new();
-        for p in a.strs("paths")? {
-            let name = std::path::Path::new(p).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "document.pdf".into());
-            let result = self
-                .resolve(p, false)
-                .map_err(|e| e.to_string())
-                .and_then(|src| crate::read_input_bytes(&src).map_err(|e| e.to_string()))
-                .and_then(|bytes| run_on(&action, &name, std::sync::Arc::new(bytes), javascript, |_, _| {}));
-            out.push(match result {
-                Ok(r) => {
-                    let target = crate::batch::publish(&child(&folder, &name), &r.bytes)?;
-                    json!({ "path": p, "output": target.to_string_lossy(), "log": r.log })
-                }
-                Err(e) => json!({ "path": p, "error": e }),
-            });
-        }
-        Ok(json!({ "action": action.name, "files": out }))
+        crate::paths::Written::within(&folder, |written| {
+            let mut out = Vec::new();
+            for p in paths {
+                let name = std::path::Path::new(p).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "document.pdf".into());
+                let result = self
+                    .resolve(p, false)
+                    .map_err(|e| e.to_string())
+                    .and_then(|src| crate::read_input_bytes(&src).map_err(|e| e.to_string()))
+                    .and_then(|bytes| run_on(&action, &name, std::sync::Arc::new(bytes), javascript, |_, _| {}));
+                out.push(match result {
+                    Ok(r) => {
+                        let target = crate::batch::publish(&child(&folder, &name), &r.bytes)?;
+                        written.record(&target);
+                        json!({ "path": p, "output": target.to_string_lossy(), "log": r.log })
+                    }
+                    Err(e) => json!({ "path": p, "error": e }),
+                });
+            }
+            Ok(json!({ "action": action.name, "files": out }))
+        })
     }
 
     fn compare_ids(&self, a: &Args) -> Result<(pdfcraft_engine::DocId, pdfcraft_engine::DocId)> {

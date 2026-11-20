@@ -36,6 +36,7 @@ mod office_stand_in;
 mod optimize_content_boundaries;
 mod page_actions;
 mod page_templates;
+mod partial_output;
 mod portfolio_info;
 mod preferences;
 mod rect_arguments;
