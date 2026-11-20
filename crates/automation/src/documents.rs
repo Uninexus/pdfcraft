@@ -518,6 +518,7 @@ impl Automation {
     pub(crate) fn doc_optimize(&mut self, a: &Args) -> Result<Value> {
         use pdfcraft_engine::optimize::{Compatibility, Compression, ImageSettings, MonoCompression, Preset};
         const MONO_KEYS: [&str; 4] = ["downsample", "ppi", "above_ppi", "compression"];
+        const IMAGE_KEYS: [&str; 5] = ["downsample", "ppi", "above_ppi", "compression", "quality"];
         let id = self.doc(a)?.id;
         let before = self.doc(a)?.bytes.len();
         let path = self.resolve(a.str("path")?, true)?;
@@ -531,24 +532,41 @@ impl Automation {
         }
         let images = |key: &str, base: ImageSettings| -> Result<ImageSettings> {
             let Some(v) = a.get(key) else { return Ok(base) };
+            let v = v.as_object().ok_or_else(|| {
+                ToolError::InvalidArgs(format!("{key} must be an object: {{ downsample, ppi, above_ppi, compression: jpeg|zip|retain, quality }}"))
+            })?;
+            // A misspelled key would otherwise leave the preset's setting in place unnoticed.
+            if let Some(k) = v.keys().find(|k| !IMAGE_KEYS.contains(&k.as_str())) {
+                return Err(ToolError::InvalidArgs(format!("unknown {key} key {k:?} ({})", IMAGE_KEYS.join(", "))));
+            }
             let mut s = base;
-            if let Some(d) = v.get("downsample").and_then(Value::as_bool) {
-                s.downsample = d;
+            // A null key counts as absent, as top-level arguments do (the `mono` block below does not).
+            let given = |k: &str| v.get(k).filter(|x| !x.is_null());
+            if let Some(d) = given("downsample") {
+                s.downsample = d.as_bool().ok_or_else(|| ToolError::InvalidArgs(format!("{key} downsample must be true or false, not {d}")))?;
             }
-            if let Some(p) = v.get("ppi").and_then(Value::as_f64) {
-                s.target_ppi = p.clamp(9.0, 2400.0);
-            }
-            if let Some(p) = v.get("above_ppi").and_then(Value::as_f64) {
-                s.above_ppi = p.clamp(9.0, 2400.0);
+            for (name, ppi) in [("ppi", &mut s.target_ppi), ("above_ppi", &mut s.above_ppi)] {
+                if let Some(p) = given(name) {
+                    *ppi = p
+                        .as_f64()
+                        .filter(|p| p.is_finite())
+                        .ok_or_else(|| ToolError::InvalidArgs(format!("{key} {name} must be a number, not {p}")))?
+                        .clamp(9.0, 2400.0);
+                }
             }
             s.above_ppi = s.above_ppi.max(s.target_ppi);
-            if let Some(c) = v.get("compression").and_then(Value::as_str) {
-                let q = v.get("quality").and_then(Value::as_u64).unwrap_or(60).clamp(1, 100) as u8;
-                s.compression = match c {
-                    "jpeg" => Compression::Jpeg(q),
-                    "zip" | "flate" => Compression::Flate,
-                    "retain" => Compression::Retain,
-                    other => return Err(ToolError::InvalidArgs(format!("unknown compression {other:?} (jpeg, zip, retain)"))),
+            let quality = given("quality")
+                .map(|q| {
+                    q.as_u64().ok_or_else(|| ToolError::InvalidArgs(format!("{key} quality must be a whole number (clamped to 1 to 100), not {q}")))
+                })
+                .transpose()?;
+            if let Some(c) = given("compression") {
+                let q = quality.unwrap_or(60).clamp(1, 100) as u8;
+                s.compression = match c.as_str() {
+                    Some("jpeg") => Compression::Jpeg(q),
+                    Some("zip" | "flate") => Compression::Flate,
+                    Some("retain") => Compression::Retain,
+                    _ => return Err(ToolError::InvalidArgs(format!("unknown {key} compression {c} (jpeg, zip, retain)"))),
                 };
             }
             Ok(s)

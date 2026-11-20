@@ -23,6 +23,7 @@ mod find_text;
 mod form_bulk;
 mod guides;
 mod hostile_args;
+mod lenient_arguments;
 mod linearization;
 mod link_javascript;
 mod list_selection;

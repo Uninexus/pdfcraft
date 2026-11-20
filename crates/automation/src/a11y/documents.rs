@@ -166,7 +166,10 @@ impl Automation {
                 .iter()
                 .map(|it| {
                     let id = it["step"].as_str().unwrap_or("");
-                    Step::from_id(id, it["arg"].as_str().unwrap_or("")).ok_or_else(|| ToolError::InvalidArgs(format!("unknown step {id:?}")))
+                    // `arg` left out or null is "", but one of another type is refused, not read as "".
+                    let it = Args(it);
+                    let arg = it.opt_str("arg")?.unwrap_or("");
+                    Step::from_id(id, arg).ok_or_else(|| ToolError::InvalidArgs(format!("unknown step {id:?}")))
                 })
                 .collect::<Result<Vec<_>>>()?;
             Action { name: "Custom".into(), description: String::new(), steps, builtin: false }

@@ -18,25 +18,37 @@ fn format_arg(v: &Value) -> Result<Format> {
         return Ok(Format::None);
     }
     let o = v.as_object().ok_or_else(|| bad("format must be an object such as {\"type\": \"number\", \"decimals\": 2}, or \"none\""))?;
-    let num = |k: &str, d: u64| o.get(k).and_then(Value::as_u64).unwrap_or(d).min(255) as u8;
-    let s = |k: &str| o.get(k).and_then(Value::as_str).map(str::to_owned);
+    // A present value of the wrong type is refused, not replaced by the default.
+    let given = |k: &str| o.get(k).filter(|v| !v.is_null());
+    let num = |k: &str, d: u64| -> Result<u8> {
+        match given(k) {
+            None => Ok(d.min(255) as u8),
+            Some(v) => v.as_u64().map(|n| n.min(255) as u8).ok_or_else(|| bad(format!("format {k} must be a whole number, not {v}"))),
+        }
+    };
+    let s = |k: &str| -> Result<Option<String>> {
+        given(k).map(|v| v.as_str().map(str::to_owned).ok_or_else(|| bad(format!("format {k} must be a string, not {v}")))).transpose()
+    };
     Ok(match o.get("type").and_then(Value::as_str).unwrap_or("") {
         "none" => Format::None,
         "number" => Format::Number {
-            decimals: num("decimals", 2),
-            sep: num("separator", 0).min(4),
-            neg: num("negative", 0).min(3),
-            currency: s("currency").unwrap_or_default(),
-            prepend: !o.get("currency_after").and_then(Value::as_bool).unwrap_or(false),
+            decimals: num("decimals", 2)?,
+            sep: num("separator", 0)?.min(4),
+            neg: num("negative", 0)?.min(3),
+            currency: s("currency")?.unwrap_or_default(),
+            prepend: !match given("currency_after") {
+                None => false,
+                Some(v) => v.as_bool().ok_or_else(|| bad(format!("format currency_after must be true or false, not {v}")))?,
+            },
         },
-        "percent" => Format::Percent { decimals: num("decimals", 2), sep: num("separator", 0).min(4) },
-        "date" => Format::Date(s("pattern").unwrap_or_else(|| "mm/dd/yyyy".into())),
-        "time" => Format::Time(s("pattern").unwrap_or_else(|| "HH:MM".into())),
+        "percent" => Format::Percent { decimals: num("decimals", 2)?, sep: num("separator", 0)?.min(4) },
+        "date" => Format::Date(s("pattern")?.unwrap_or_else(|| "mm/dd/yyyy".into())),
+        "time" => Format::Time(s("pattern")?.unwrap_or_else(|| "HH:MM".into())),
         "zip" => Format::Special(0),
         "zip4" => Format::Special(1),
         "phone" => Format::Special(2),
         "ssn" => Format::Special(3),
-        "mask" => Format::Mask(s("mask").ok_or_else(|| bad("mask needs \"mask\""))?),
+        "mask" => Format::Mask(s("mask")?.ok_or_else(|| bad("mask needs \"mask\""))?),
         t => return Err(bad(format!("unknown format type {t:?} (none, number, percent, date, time, zip, zip4, phone, ssn, mask)"))),
     })
 }
