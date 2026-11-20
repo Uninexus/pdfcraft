@@ -5681,6 +5681,8 @@ fn structure_namespaces_are_listed_with_their_role_maps() {
     let list = list_structure_namespaces(&doc);
     assert!(list.has_structure_tree && !list.truncated);
     assert_eq!(list.skipped, 2, "{list:?}");
+    // Only the dictionary with no /NS lacks an identifier.
+    assert_eq!(list.without_ns, 1, "{list:?}");
     let rows: Vec<_> = list.namespaces.iter().map(|n| (n.object, n.ns.as_deref(), n.role_count)).collect();
     assert_eq!(
         rows,
@@ -5689,6 +5691,29 @@ fn structure_namespaces_are_listed_with_their_role_maps() {
     let roles: Vec<_> =
         list.namespaces[1].roles.iter().map(|r| (r.structure_type.as_str(), r.role.as_deref(), r.role_namespace.as_deref())).collect();
     assert_eq!(roles, [("Note", Some("P"), Some("http://iso.org/pdf2/ssn")), ("Plain", Some("Span"), None), ("Odd", None, None)]);
+}
+
+#[test]
+fn namespaces_without_a_string_identifier_are_counted() {
+    let mut doc = open(fixture());
+    let named = ns_dict(&mut doc, Some("urn:named"), &[]);
+    let empty = ns_dict(&mut doc, Some(""), &[]);
+    let none = ns_dict(&mut doc, None, &[]);
+    // A /NS that is a number names nothing either.
+    let number = {
+        let mut d = pdfcraft_cos::Dict::new();
+        d.set(b"NS".to_vec(), Object::Int(5));
+        doc.add(Object::Dict(d))
+    };
+    set_namespaces(&mut doc, vec![Object::Ref(named), Object::Ref(empty), Object::Ref(none), Object::Ref(none), Object::Ref(number), Object::Int(1)]);
+    let list = list_structure_namespaces(&doc);
+    assert_eq!((list.namespaces.len(), list.without_ns, list.skipped), (4, 2, 1), "{list:?}");
+    assert!(list.namespaces.iter().filter(|n| n.ns.is_none()).map(|n| n.object).eq([Some(none.num), Some(number.num)]));
+
+    let mut doc = open(fixture());
+    let x = ns_dict(&mut doc, Some("urn:x"), &[]);
+    set_namespaces(&mut doc, vec![Object::Ref(x)]);
+    assert_eq!(list_structure_namespaces(&doc).without_ns, 0);
 }
 
 #[test]
