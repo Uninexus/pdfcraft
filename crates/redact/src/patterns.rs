@@ -1,6 +1,7 @@
 //! Search & Redact patterns (Acrobat's Find Text ▸ Patterns): phone numbers, email addresses,
 //! credit card numbers, US Social Security numbers, dates and IBANs, plus Canadian SINs and postal
-//! codes, UK National Insurance numbers and Australian Tax File Numbers. Each matcher works on a page's
+//! codes, UK National Insurance numbers and Australian Tax File Numbers, and US Individual
+//! Taxpayer Identification Numbers. Each matcher works on a page's
 //! text as characters and returns character ranges; callers map them to glyphs and areas.
 
 use std::ops::Range;
@@ -21,9 +22,11 @@ pub enum Pattern {
     Nino,
     /// Australian Tax File Number ("123 456 782").
     Tfn,
+    /// US Individual Taxpayer Identification Number ("912-70-1234").
+    Itin,
 }
 
-pub const PATTERNS: [Pattern; 10] = [
+pub const PATTERNS: [Pattern; 11] = [
     Pattern::Phone,
     Pattern::Email,
     Pattern::CreditCard,
@@ -34,6 +37,7 @@ pub const PATTERNS: [Pattern; 10] = [
     Pattern::CaPostalCode,
     Pattern::Nino,
     Pattern::Tfn,
+    Pattern::Itin,
 ];
 
 impl Pattern {
@@ -49,6 +53,7 @@ impl Pattern {
             Pattern::CaPostalCode => "Canadian Postal Codes",
             Pattern::Nino => "UK National Insurance Numbers",
             Pattern::Tfn => "Australian Tax File Numbers",
+            Pattern::Itin => "US Individual Taxpayer Identification Numbers",
         }
     }
 
@@ -64,6 +69,7 @@ impl Pattern {
             Pattern::CaPostalCode => "ca-postal-code",
             Pattern::Nino => "nino",
             Pattern::Tfn => "tfn",
+            Pattern::Itin => "itin",
         }
     }
 
@@ -428,6 +434,33 @@ fn tfn(s: &[char], i: usize) -> Option<usize> {
     sum.is_multiple_of(11).then_some(len)
 }
 
+/// Labels (lowercase) that name the number after them a US Individual Taxpayer Identification
+/// Number.
+const ITIN_LABELS: [&str; 4] = ["itin", "i.t.i.n", "itin no", "itin number"];
+
+/// A US Individual Taxpayer Identification Number: nine digits as 3-2-4 joined by one consistent
+/// hyphen, space or no-break space, or nine plain digits after a label ([`ITIN_LABELS`], read like
+/// the SIN labels). It begins with 9 and its fourth and fifth digits are 50 to 65, 70 to 88, 90
+/// to 92 or 94 to 99, the ranges the Internal Revenue Service publishes. There is no checksum, so
+/// a match is a candidate. Social Security numbers never begin with 9, so this does not overlap
+/// [`ssn`]. The number may not touch other digits.
+fn itin(s: &[char], i: usize) -> Option<usize> {
+    if digit(i.checked_sub(1).and_then(|p| s.get(p))) {
+        return None;
+    }
+    let g = |from: usize, n: usize| (from..from + n).all(|k| digit(s.get(k)));
+    let (len, ok) = match s.get(i + 3) {
+        Some(&c) if matches!(c, '-' | ' ' | '\u{a0}') => (11, g(i, 3) && s.get(i + 6) == Some(&c) && g(i + 4, 2) && g(i + 7, 4)),
+        _ => (9, g(i, 9) && labelled_by(s, i, &ITIN_LABELS)),
+    };
+    if !ok || digit(s.get(i + len)) {
+        return None;
+    }
+    let digits: Vec<u32> = s.get(i..i + len)?.iter().filter_map(|c| c.to_digit(10)).collect();
+    let group = digits.get(3).copied()? * 10 + digits.get(4).copied()?;
+    (digits.first() == Some(&9) && matches!(group, 50..=65 | 70..=88 | 90..=92 | 94..=99)).then_some(len)
+}
+
 /// A Canadian postal code: letter, digit, letter, an optional space or hyphen, digit, letter,
 /// digit ("K1A 0B1"), in either case. The first letter is one of Canada's postal districts and D,
 /// F, I, O, Q and U are never used; neither end may touch a letter or digit.
@@ -775,6 +808,7 @@ pub fn find(pattern: Pattern, text: &[char]) -> Vec<Range<usize>> {
         Pattern::CaPostalCode => ca_postal_code,
         Pattern::Nino => nino,
         Pattern::Tfn => tfn,
+        Pattern::Itin => itin,
     };
     let mut out = Vec::new();
     let mut i = 0;
@@ -1120,6 +1154,52 @@ mod tests {
             assert!(found(Pattern::Tfn, text).is_empty(), "{text}");
         }
         assert!(found(Pattern::Tfn, "123 456 7").is_empty());
+    }
+
+    #[test]
+    fn us_individual_taxpayer_identification_numbers() {
+        assert_eq!(
+            found(Pattern::Itin, "ITIN 912-70-1234, 900 50 0001, 999\u{a0}99\u{a0}9999, ITIN: 912701234 and itin no. 977651234."),
+            ["912-70-1234", "900 50 0001", "999\u{a0}99\u{a0}9999", "912701234", "977651234"].map(String::from)
+        );
+        for label in ["I.T.I.N.", "ITIN No.", "ITIN number", "itin:", "ITIN no"] {
+            let text = format!("{label} 912701234");
+            assert_eq!(found(Pattern::Itin, &text), ["912701234"], "{text}");
+        }
+        // The fourth and fifth digits at both ends of every allowed range.
+        for group in ["50", "65", "70", "88", "90", "92", "94", "99"] {
+            let text = format!("900-{group}-1234");
+            assert_eq!(found(Pattern::Itin, &text), std::slice::from_ref(&text), "{text}");
+        }
+        for text in [
+            // Outside the ranges: 49, 66, 69, 89, 93 and 00.
+            "912-49-1234",
+            "912-66-1234",
+            "912-69-1234",
+            "912-89-1234",
+            "912-93-1234",
+            "912-00-1234",
+            // Not a 9 first: a Social Security number's shape.
+            "812-70-1234",
+            "123-45-6789",
+            // Digits touching, wrong grouping, mixed or other separators.
+            "9912-70-1234",
+            "912-70-12345",
+            "912-70 1234",
+            "912.70.1234",
+            "912-7-01234",
+            "912-70-123",
+            // Plain digits without a label, or after other labels.
+            "912701234",
+            "order 912701234",
+            "SSN 912701234",
+            "noitin 912701234",
+            "ITIN 9127012345",
+        ] {
+            assert!(found(Pattern::Itin, text).is_empty(), "{text}");
+        }
+        assert!(found(Pattern::Itin, "912-70").is_empty());
+        assert!(found(Pattern::Itin, "9").is_empty());
     }
 
     #[test]
