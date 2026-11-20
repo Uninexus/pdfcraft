@@ -28,6 +28,9 @@ const MAX_ARRAY: usize = 16;
 pub struct HintStream {
     pub offset: u64,
     pub length: u64,
+    /// The object number of the `N G obj` header found at `offset` (the hint stream is an object,
+    /// and `/H` gives where it starts); `None` when no such header is there.
+    pub object: Option<u64>,
 }
 
 /// What the file declares, and whether it holds.
@@ -111,7 +114,9 @@ pub fn report(bytes: &[u8]) -> Linearization {
         Some(h) if h.len() == 2 || h.len() == 4 => {
             for pair in h.chunks(2) {
                 match pair {
-                    [Num { int: Some(o), .. }, Num { int: Some(l), .. }] => out.hint_streams.push(HintStream { offset: *o, length: *l }),
+                    [Num { int: Some(o), .. }, Num { int: Some(l), .. }] => {
+                        out.hint_streams.push(HintStream { offset: *o, length: *l, object: object_at(bytes, *o) })
+                    }
                     _ => problems.push("/H holds a value that is not a non-negative integer".to_string()),
                 }
             }
@@ -134,6 +139,8 @@ pub fn report(bytes: &[u8]) -> Linearization {
     for h in &out.hint_streams {
         if h.offset.checked_add(h.length).is_none_or(|end| end > len) {
             problems.push(format!("a hint stream at {} of {} bytes reaches past the end of the file", h.offset, h.length));
+        } else if h.object.is_none() {
+            problems.push(format!("/H says a hint stream object starts at byte {}, but no `N G obj` header is there", h.offset));
         }
     }
     for (key, value) in [("E", out.first_page_end), ("T", out.main_xref_offset)] {
@@ -152,6 +159,33 @@ pub fn report(bytes: &[u8]) -> Linearization {
     out.valid = problems.is_empty();
     out.problems = problems;
     out
+}
+
+/// The object number of the `N G obj` header that starts at byte `offset` of `bytes`, when one
+/// does. Reads at most 24 bytes from there (10 digits, 5 digits, `obj` and the spaces), so a
+/// hostile offset costs a constant.
+fn object_at(bytes: &[u8], offset: u64) -> Option<u64> {
+    let start = usize::try_from(offset).ok()?;
+    let window = bytes.get(start..)?;
+    let window = window.get(..window.len().min(24)).unwrap_or(window);
+    let mut i = 0;
+    let mut number = [0u64; 2];
+    for (part, slot) in number.iter_mut().enumerate() {
+        let from = i;
+        while window.get(i).is_some_and(u8::is_ascii_digit) {
+            i += 1;
+        }
+        if i == from || i - from > if part == 0 { 10 } else { 5 } {
+            return None;
+        }
+        *slot = std::str::from_utf8(window.get(from..i)?).ok()?.parse().ok()?;
+        if !window.get(i).is_some_and(|c| is_space(*c)) {
+            return None;
+        }
+        skip_space(window, &mut i);
+    }
+    let rest = window.get(i..)?;
+    (rest.starts_with(b"obj") && rest.get(3).is_none_or(|c| is_space(*c) || is_delim(*c))).then_some(number[0])
 }
 
 /// A number read from the dictionary.
@@ -378,7 +412,12 @@ mod tests {
             .into_bytes()
         };
         let len = mk(0).len();
-        mk(len)
+        let mut out = mk(len);
+        // The hint stream object /H points at (offset 300), inside the filler.
+        if let Some(at) = out.get_mut(300..308) {
+            at.copy_from_slice(b"6 0 obj ");
+        }
+        out
     }
 
     #[test]
@@ -389,7 +428,7 @@ mod tests {
             (r.version, r.first_page_object, r.first_page_end, r.page_count, r.main_xref_offset),
             (Some(1.0), Some(4), Some(900), Some(2), Some(700))
         );
-        assert_eq!(r.hint_streams, vec![HintStream { offset: 300, length: 40 }]);
+        assert_eq!(r.hint_streams, vec![HintStream { offset: 300, length: 40, object: Some(6) }]);
         assert_eq!((r.first_page_number, r.appended_bytes, r.declared_length), (0, 0, Some(r.file_length)));
     }
 
@@ -503,5 +542,28 @@ mod tests {
         let r = report(text.as_bytes());
         assert_eq!((r.page_count, r.main_xref_offset, r.first_page_end), (Some(2), Some(700), Some(900)), "{:?}", r.problems);
         assert!(r.linearized);
+    }
+
+    #[test]
+    fn a_hint_stream_offset_must_start_an_object() {
+        // Aimed at the filler instead of the object: named, and not valid.
+        let text = String::from_utf8_lossy(&linearized("")).replace("/H [ 300 40 ]", "/H [ 301 40 ]");
+        let r = report(text.as_bytes());
+        assert!(!r.valid && r.hint_streams.first().is_some_and(|h| h.object.is_none()), "{:?}", r.problems);
+        assert!(r.problems.iter().any(|p| p.contains("no `N G obj` header")), "{:?}", r.problems);
+        // The header must be complete: `obj` runs on into a letter, a number is too long, the file ends.
+        let b = linearized("");
+        for (at, bad) in [(300usize, &b"6 0 objx"[..]), (300, b"6 000000 obj"), (300, b"12345678901 0 obj")] {
+            let mut c = b.clone();
+            if let Some(w) = c.get_mut(at..at + bad.len()) {
+                w.copy_from_slice(bad);
+            }
+            assert_eq!(object_at(&c, 300), None, "{}", String::from_utf8_lossy(bad));
+        }
+        assert_eq!(object_at(b"7 0 obj", 0), Some(7));
+        assert_eq!(object_at(b"7 0 obj<<", 0), Some(7));
+        assert_eq!(object_at(b"7 0 ob", 0), None);
+        assert_eq!(object_at(b"7 0 obj", 7), None);
+        assert_eq!(object_at(b"7 0 obj", u64::MAX), None);
     }
 }

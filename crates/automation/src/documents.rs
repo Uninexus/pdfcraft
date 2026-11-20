@@ -357,7 +357,7 @@ impl Automation {
     pub(crate) fn doc_linearization(&mut self, a: &Args) -> Result<Value> {
         let doc = self.doc(a)?;
         let r = doc.linearization();
-        let hints: Vec<Value> = r.hint_streams.iter().map(|h| json!({ "offset": h.offset, "length": h.length })).collect();
+        let hints: Vec<Value> = r.hint_streams.iter().map(|h| json!({ "offset": h.offset, "length": h.length, "object": h.object })).collect();
         Ok(json!({
             "linearized": r.linearized,
             "valid": r.valid,
