@@ -390,6 +390,12 @@ pub enum Edit {
     /// Document Properties ▸ Advanced ▸ base URL for relative links (`/URI` `/Base`); `None`
     /// takes it away.
     SetBaseUrl(Option<String>),
+    /// Structure tree role map (`/StructTreeRoot` `/RoleMap`): map `role` to `maps_to`, or take
+    /// the entry away when `maps_to` is `None`.
+    SetRoleMap {
+        role: String,
+        maps_to: Option<String>,
+    },
     /// Print production ▸ Add printer marks: trim and bleed marks, registration targets, colour
     /// bars and page information outside the trim box, as a page mark; the page may be widened
     /// to make room (`settings.make_room`), so the page geometry is read again.

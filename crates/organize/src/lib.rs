@@ -28,6 +28,7 @@ mod outline_io;
 mod pdfx;
 pub mod print_presets;
 mod prune;
+pub mod role_map;
 mod templates;
 mod transition;
 pub mod view;

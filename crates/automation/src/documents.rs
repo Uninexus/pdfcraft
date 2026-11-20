@@ -653,6 +653,37 @@ impl Automation {
         Ok(out)
     }
 
+    /// The structure tree's role map (`/StructTreeRoot` `/RoleMap`): read, and change one entry
+    /// when `role` and `maps_to` are given (an empty `maps_to` takes the entry away).
+    pub(crate) fn role_map(&mut self, a: &Args) -> Result<Value> {
+        let role = a.opt_str("role")?;
+        let maps_to = a.opt_str("maps_to")?;
+        let mut out = match (role, maps_to) {
+            (None, None) => json!({}),
+            (Some(role), Some(maps_to)) => {
+                let maps_to = (!maps_to.is_empty()).then_some(maps_to);
+                if self.doc(a)?.role_map_changes(role, maps_to).map_err(ToolError::Failed)? {
+                    self.apply(a, Edit::SetRoleMap { role: role.to_owned(), maps_to: maps_to.map(str::to_owned) })?
+                } else {
+                    json!({})
+                }
+            }
+            (Some(_), None) => return Err(ToolError::InvalidArgs("role needs maps_to (an empty string takes the entry away)".into())),
+            (None, Some(_)) => return Err(ToolError::InvalidArgs("maps_to needs role".into())),
+        };
+        let map = self.doc(a)?.role_map();
+        let entries: Vec<Value> =
+            map.entries.iter().map(|e| json!({ "role": e.role, "maps_to": e.maps_to, "exact": e.exact, "loops": e.loops })).collect();
+        out["role_map"] = json!({
+            "has_structure_tree": map.has_structure_tree,
+            "count": map.count,
+            "truncated": map.truncated,
+            "entries": entries,
+            "unreadable": map.unreadable,
+        });
+        Ok(out)
+    }
+
     pub(crate) fn doc_optimize(&mut self, a: &Args) -> Result<Value> {
         use pdfcraft_engine::optimize::{Compatibility, Compression, ImageSettings, MonoCompression, Preset};
         const MONO_KEYS: [&str; 4] = ["downsample", "ppi", "above_ppi", "compression"];
