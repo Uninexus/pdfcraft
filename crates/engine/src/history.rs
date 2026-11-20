@@ -57,7 +57,8 @@ pub(crate) fn scope_of(edit: &Edit) -> Scope {
         | Edit::DeleteAttachment { .. }
         | Edit::EditAttachmentDescription { .. }
         | Edit::AddAssociatedFile { .. }
-        | Edit::RemoveAssociatedFile { .. } => Scope::Full,
+        | Edit::RemoveAssociatedFile { .. }
+        | Edit::SetAssociatedRelationship { .. } => Scope::Full,
         // A file attachment also changes the Attachments list.
         Edit::AddAnnotation(a) if matches!(a.shape, Shape::Attachment { .. }) => Scope::Full,
         Edit::AddMeasurement(_)

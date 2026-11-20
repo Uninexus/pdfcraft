@@ -815,6 +815,7 @@ impl Automation {
             "ns_list" => self.ns_list(&a)?,
             "af_add" => self.af_add(&a)?,
             "af_remove" => self.af_remove(&a)?,
+            "af_set_relationship" => self.af_set_relationship(&a)?,
             "attachment_delete" => {
                 let edit = Edit::DeleteAttachment { key: a.str("name")?.into() };
                 self.apply(&a, edit)?

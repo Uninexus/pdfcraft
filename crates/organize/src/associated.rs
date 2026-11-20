@@ -168,8 +168,8 @@ fn write_catalog_af(doc: &mut Document, root: ObjRef, list: Vec<Object>) -> Resu
 /// Embed `bytes` as `name` (made unique, as for any attachment) and associate it with the
 /// document: the file specification gets `/AFRelationship` and joins the catalog's `/AF`.
 /// Returns the attachment key and the 1-based position in `/AF`. Refuses before changing
-/// anything: an unknown relationship, `EncryptedPayload` (its stream needs a cryptographic
-/// filter description this does not write), an empty name, a file over [`MAX_AF_BYTES`], an `/AF`
+/// anything: an unknown relationship, `EncryptedPayload` (its file specification needs an
+/// `/EP` encrypted-payload dictionary, which this does not write), an empty name, a file over [`MAX_AF_BYTES`], an `/AF`
 /// that is not an array, or one already holding [`MAX_AF_ENTRIES`].
 pub fn add_associated_file(
     doc: &mut Document,
@@ -185,7 +185,7 @@ pub fn add_associated_file(
     }
     if relationship == "EncryptedPayload" {
         return Err(OrganizeError::Invalid(
-            "EncryptedPayload is not supported: it marks an encrypted file whose stream needs an /EncryptedPayload description, which is not written; use Data, Source, Alternative, Supplement, FormData, Schema or Unspecified".into(),
+            "EncryptedPayload is not supported: it marks an encrypted file, and its file specification then needs an /EP encrypted-payload dictionary, which is not written; use Data, Source, Alternative, Supplement, FormData, Schema or Unspecified".into(),
         ));
     }
     if bytes.len() > MAX_AF_BYTES {
@@ -259,5 +259,134 @@ pub fn remove_associated_file(doc: &mut Document, index: usize, keep_attachment:
     match removed {
         Object::Ref(spec) if !keep_attachment && !shared => delete_attachment_by_ref(doc, spec),
         _ => Ok(false),
+    }
+}
+
+/// Whether `dict` can be a file specification: its `/Type`, when it has one, is `Filespec`, and at
+/// least one of its entries has the type a file specification gives it: `/F` or `/UF` a string,
+/// `/EF` a dictionary, `/FS` a name (references are followed). An annotation, whose `/F` is a
+/// number of flags, and a file attachment annotation, whose `/FS` is a dictionary, are not.
+fn looks_like_filespec(doc: &Document, dict: &Dict) -> bool {
+    let has = |key: &[u8], ok: fn(&Object) -> bool| match dict.get(key) {
+        None => false,
+        Some(o @ Object::Ref(_)) => ok(&doc.resolve(o)),
+        Some(o) => ok(o),
+    };
+    let type_ok = match dict.get(b"Type") {
+        None => true,
+        Some(o @ Object::Ref(_)) => doc.resolve(o).as_name() == Some(&b"Filespec"[..]),
+        Some(o) => o.as_name() == Some(&b"Filespec"[..]),
+    };
+    type_ok
+        && (has(b"F", |o| o.as_string().is_some())
+            || has(b"UF", |o| o.as_string().is_some())
+            || has(b"EF", |o| matches!(o, Object::Dict(_)))
+            || has(b"FS", |o| o.as_name().is_some()))
+}
+
+/// Whether the catalog's `/AF` is written as an indirect object (so it may be shared with a page),
+/// as opposed to a direct array or none at all.
+pub fn catalog_af_is_indirect(doc: &Document) -> bool {
+    doc.root().and_then(|r| doc.get(r).as_dict().and_then(|c| c.get(b"AF")).map(|o| matches!(o, Object::Ref(_)))).unwrap_or(false)
+}
+
+/// Give the file specification at 1-based `index` of the catalog's `/AF` the `/AFRelationship`
+/// `relationship`, replacing the name it had (or adding one where it had none or a value that was
+/// not a name: ISO 32000-2 requires one on every file specification an `/AF` array lists).
+/// Returns the name that was there, `None` when it was missing or not a name.
+///
+/// Refuses before changing anything: an unknown relationship, `EncryptedPayload` (its file
+/// specification needs an `/EP` encrypted-payload dictionary, which this does not write), an `/AF` that is
+/// not an array or holds more than [`MAX_AF_ENTRIES`] entries (the listing reads no further), an
+/// `index` outside it, an entry that is not a file specification dictionary (a number, a
+/// string, a stream, or a dictionary that has a `/Type` other than `Filespec`, or has none
+/// of `/F` or `/UF` as a string, `/EF` as a dictionary and `/FS` as a name: the catalog, a page,
+/// an annotation, with its `/F` flags number, and a file attachment annotation, with its `/FS`
+/// dictionary, are refused),
+/// and a specification that already has this relationship (nothing would change). A
+/// specification given by reference that a page's `/AF` (or another catalog entry) also lists is
+/// the same object, so it changes for them too; see [`associated_file_is_shared`]. A specification
+/// written in the array itself is changed in a new direct array for the catalog; if that array
+/// was indirect, the old array object is left as it was, so another holder of it keeps the old
+/// entry (see [`catalog_af_is_indirect`]).
+pub fn set_associated_relationship(doc: &mut Document, index: usize, relationship: &str) -> Result<Option<String>, OrganizeError> {
+    if !AF_RELATIONSHIPS.contains(&relationship) {
+        return Err(OrganizeError::Invalid(format!("unknown relationship {relationship:?}; use one of {}", AF_RELATIONSHIPS.join(", "))));
+    }
+    if relationship == "EncryptedPayload" {
+        return Err(OrganizeError::Invalid(
+            "EncryptedPayload is not supported: it marks an encrypted file, and its file specification then needs an /EP encrypted-payload dictionary, which is not written; use Data, Source, Alternative, Supplement, FormData, Schema or Unspecified".into(),
+        ));
+    }
+    let root = doc.root().ok_or(OrganizeError::NoPageTree)?;
+    let name_of =
+        |spec: &Dict| spec.get(b"AFRelationship").map(|o| doc.resolve(o)).and_then(|o| o.as_name().map(|n| String::from_utf8_lossy(n).into_owned()));
+    // Read in place: only the one entry is copied, after the array's length has been checked.
+    let entry = {
+        let catalog = doc.get(root);
+        let Some(af) = catalog.as_dict().and_then(|c| c.get(b"AF")) else {
+            return Err(OrganizeError::Invalid("the document has no associated files".into()));
+        };
+        let resolved;
+        let list = match af {
+            Object::Array(list) => list,
+            other => {
+                resolved = doc.resolve(other);
+                match resolved.as_array() {
+                    Some(list) => list,
+                    None => return Err(OrganizeError::Invalid("the catalog's /AF is not an array; it is left as it is".into())),
+                }
+            }
+        };
+        if list.len() > MAX_AF_ENTRIES {
+            return Err(OrganizeError::Invalid(format!(
+                "the catalog's /AF holds {} entries; only the first {MAX_AF_ENTRIES} are listed, so it is left as it is",
+                list.len()
+            )));
+        }
+        match index.checked_sub(1).and_then(|i| list.get(i)) {
+            Some(entry) => entry.clone(),
+            None => return Err(OrganizeError::Invalid(format!("there is no associated file {index}; the document has {}", list.len()))),
+        }
+    };
+    match entry {
+        Object::Ref(spec) => {
+            let previous = {
+                let obj = doc.get(spec);
+                let dict = match &*obj {
+                    Object::Dict(d) if looks_like_filespec(doc, d) => d,
+                    _ => {
+                        return Err(OrganizeError::Invalid(format!(
+                            "associated file {index} is not a file specification dictionary; it is left as it is"
+                        )));
+                    }
+                };
+                name_of(dict)
+            };
+            if previous.as_deref() == Some(relationship) {
+                return Err(OrganizeError::Invalid(format!("associated file {index} already has the relationship {relationship}")));
+            }
+            doc.update_dict(spec, |s| s.set(b"AFRelationship".to_vec(), Object::name(relationship)))?;
+            Ok(previous)
+        }
+        Object::Dict(mut spec) => {
+            if !looks_like_filespec(doc, &spec) {
+                return Err(OrganizeError::Invalid(format!("associated file {index} is not a file specification dictionary; it is left as it is")));
+            }
+            let previous = name_of(&spec);
+            if previous.as_deref() == Some(relationship) {
+                return Err(OrganizeError::Invalid(format!("associated file {index} already has the relationship {relationship}")));
+            }
+            spec.set(b"AFRelationship".to_vec(), Object::name(relationship));
+            // The specification is written in the array itself: write the array again, as a new
+            // direct one, so an indirect array a page also uses keeps what it said.
+            let (root, mut list) = catalog_af(doc)?;
+            if let Some(slot) = index.checked_sub(1).and_then(|i| list.get_mut(i)) {
+                *slot = Object::Dict(spec);
+            }
+            write_catalog_af(doc, root, list)?;
+            Ok(previous)
+        }
+        _ => Err(OrganizeError::Invalid(format!("associated file {index} is not a file specification dictionary; it is left as it is"))),
     }
 }

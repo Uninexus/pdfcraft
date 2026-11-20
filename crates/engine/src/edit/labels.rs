@@ -284,6 +284,7 @@ impl Edit {
             Edit::DeleteAttachment { key } => Label::with("Delete attachment {key}", key.as_str()),
             Edit::AddAssociatedFile { name, .. } => Label::with("Associate {name}", name.as_str()),
             Edit::RemoveAssociatedFile { .. } => Label::of("Remove associated file"),
+            Edit::SetAssociatedRelationship { .. } => Label::of("Set associated file relationship"),
             Edit::ConvertColours { .. } => Label::of("Convert colours"),
             Edit::EditAttachmentDescription { .. } => Label::of("Edit attachment description"),
             Edit::AutoTagText => Label::of("Automatically tag text"),

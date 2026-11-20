@@ -430,6 +430,11 @@ pub enum Edit {
         index: usize,
         keep_attachment: bool,
     },
+    /// Set the `/AFRelationship` of the catalog's `/AF` entry at 1-based `index`.
+    SetAssociatedRelationship {
+        index: usize,
+        relationship: String,
+    },
     /// Print production ▸ Convert colours: every colour on the pages in grayscale, RGB or CMYK.
     ConvertColours {
         pages: Vec<usize>,
