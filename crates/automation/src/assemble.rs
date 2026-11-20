@@ -1,6 +1,6 @@
 use super::error::{Result, ToolError, failed};
 use super::json::{Args, one_based, summary};
-use super::paths::{child, read_input, read_input_bytes, unused, write_atomic};
+use super::paths::{Written, child, read_input, read_input_bytes, unused, write_atomic};
 use super::{Arc, Automation, CombineSource, Edit, Path, PathBuf, Value, json};
 
 /// The most pages `page_boxes` lists in one call.
@@ -364,27 +364,28 @@ impl Automation {
     /// One PDF per file, written into `out_dir`; a file that fails doesn't stop the others.
     fn create_separate(&mut self, a: &Args, paths: &[&str]) -> Result<Value> {
         let dir = self.resolve(a.str("out_dir").map_err(|_| ToolError::InvalidArgs("mode \"separate\" needs out_dir".into()))?, true)?;
-        std::fs::create_dir_all(&dir).map_err(|e| failed(format!("{}: {e}", dir.display())))?;
-        let mut out = Vec::new();
-        for &p in paths {
-            let converted = self.resolve(p, false).map_err(|e| e.to_string()).and_then(|src| {
-                let bytes = read_input_bytes(&src).map_err(|e| format!("{}: {e}", src.display()))?;
-                let name = src.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-                let stem = src.file_stem().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "document".into());
-                let (kind, pdf) = self.session.convert_to_pdf(&name, &Arc::new(bytes)).map_err(|e| e.to_string())?;
-                Ok((kind, stem, pdf))
-            });
-            out.push(match converted {
-                Ok((pdfcraft_engine::SourceKind::Pdf, ..)) => json!({ "path": p, "skipped": "already a PDF" }),
-                Ok((_, stem, pdf)) => {
-                    let target = unused(&dir, &stem);
-                    write_atomic(&target, &pdf)?;
-                    json!({ "path": p, "output": target.to_string_lossy(), "bytes": pdf.len() })
-                }
-                Err(e) => json!({ "path": p, "error": e }),
-            });
-        }
-        Ok(json!({ "files": out }))
+        Written::within(&dir, |written| {
+            let mut out = Vec::new();
+            for &p in paths {
+                let converted = self.resolve(p, false).map_err(|e| e.to_string()).and_then(|src| {
+                    let bytes = read_input_bytes(&src).map_err(|e| format!("{}: {e}", src.display()))?;
+                    let name = src.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                    let stem = src.file_stem().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "document".into());
+                    let (kind, pdf) = self.session.convert_to_pdf(&name, &Arc::new(bytes)).map_err(|e| e.to_string())?;
+                    Ok((kind, stem, pdf))
+                });
+                out.push(match converted {
+                    Ok((pdfcraft_engine::SourceKind::Pdf, ..)) => json!({ "path": p, "skipped": "already a PDF" }),
+                    Ok((_, stem, pdf)) => {
+                        let target = unused(&dir, &stem);
+                        written.write(&target, &pdf)?;
+                        json!({ "path": p, "output": target.to_string_lossy(), "bytes": pdf.len() })
+                    }
+                    Err(e) => json!({ "path": p, "error": e }),
+                });
+            }
+            Ok(json!({ "files": out }))
+        })
     }
 
     /// `page_extract`: the chosen pages as one new PDF, or with `separate` one file per page in
@@ -424,35 +425,19 @@ impl Automation {
         let Some(&first) = pages.first() else { return Ok(Vec::new()) };
         let mut first_bytes = Some(self.session.extract(id, &[first]).map_err(failed)?);
         let dir = self.resolve(out_dir, true)?;
-        let made_dir = !dir.exists();
-        std::fs::create_dir_all(&dir).map_err(|e| failed(format!("{}: {e}", dir.display())))?;
-        let (mut files, mut created) = (Vec::new(), Vec::new());
-        let outcome = pages.iter().try_for_each(|&p| -> Result<()> {
-            let bytes = match first_bytes.take() {
-                Some(bytes) => bytes,
-                None => self.session.extract(id, &[p]).map_err(failed)?,
-            };
-            let path = child(&dir, &format!("{stem}-page{}.pdf", p.saturating_add(1)));
-            // A dangling link counts as existing: the write replaces it, and it is not ours to remove.
-            let existed = path.symlink_metadata().is_ok();
-            write_atomic(&path, &bytes)?;
-            if !existed {
-                created.push(path.clone());
+        Written::within(&dir, |written| {
+            let mut files = Vec::new();
+            for &p in pages {
+                let bytes = match first_bytes.take() {
+                    Some(bytes) => bytes,
+                    None => self.session.extract(id, &[p]).map_err(failed)?,
+                };
+                let path = child(&dir, &format!("{stem}-page{}.pdf", p.saturating_add(1)));
+                written.write(&path, &bytes)?;
+                files.push(path.to_string_lossy().into_owned());
             }
-            files.push(path.to_string_lossy().into_owned());
-            Ok(())
-        });
-        if let Err(e) = outcome {
-            // Best effort: whatever can't be removed stays, and the error reported is the extraction's.
-            for path in &created {
-                let _ = std::fs::remove_file(path);
-            }
-            if made_dir {
-                let _ = std::fs::remove_dir(&dir);
-            }
-            return Err(e);
-        }
-        Ok(files)
+            Ok(files)
+        })
     }
 
     pub(crate) fn doc_combine(&mut self, a: &Args) -> Result<Value> {
@@ -583,49 +568,32 @@ impl Automation {
             self.session.split(id, &by).map_err(failed)?
         };
         let dir = self.resolve(a.str("out_dir")?, true)?;
-        let made_dir = !dir.exists();
-        std::fs::create_dir_all(&dir).map_err(|e| failed(format!("{}: {e}", dir.display())))?;
-        let mut files = Vec::new();
-        // Parts this call wrote to a name that was free; a later failure removes them (a part that
-        // replaced a file already there is not removed, and what it replaced is not restored).
-        let mut created = Vec::new();
-        let mut used = std::collections::HashSet::new();
-        let outcome = parts.iter().enumerate().try_for_each(|(i, (first, last, bytes))| -> Result<()> {
-            let safe = |t: &str| t.chars().map(|c| if c.is_alphanumeric() || " -_.,()".contains(c) { c } else { '_' }).collect::<String>();
-            let mut base = match titles.iter().find(|t| t.0 + 1 == *first) {
-                Some((_, t)) => format!("{stem}-{}", safe(t)),
-                None => format!("{stem}-part{}", i + 1),
-            };
-            // A file name is at most 255 bytes: keep the base to 200, cut between characters, which leaves room for ".pdf" and a -N suffix.
-            if let Some((end, _)) = base.char_indices().find(|(at, c)| at + c.len_utf8() > 200) {
-                base.truncate(end);
+        Written::within(&dir, |written| {
+            let mut files = Vec::new();
+            let mut used = std::collections::HashSet::new();
+            for (i, (first, last, bytes)) in parts.iter().enumerate() {
+                let safe = |t: &str| t.chars().map(|c| if c.is_alphanumeric() || " -_.,()".contains(c) { c } else { '_' }).collect::<String>();
+                let mut base = match titles.iter().find(|t| t.0 + 1 == *first) {
+                    Some((_, t)) => format!("{stem}-{}", safe(t)),
+                    None => format!("{stem}-part{}", i + 1),
+                };
+                // A file name is at most 255 bytes: keep the base to 200, cut between characters, which leaves room for ".pdf" and a -N suffix.
+                if let Some((end, _)) = base.char_indices().find(|(at, c)| at + c.len_utf8() > 200) {
+                    base.truncate(end);
+                }
+                let file = format!("{base}.pdf");
+                // Equal titles (or titles that sanitize alike) get -2, -3, ... so no part overwrites another; compared case-insensitively.
+                let mut unique = file;
+                let mut n = 1;
+                while !used.insert(unique.to_lowercase()) {
+                    n += 1;
+                    unique = format!("{base}-{n}.pdf");
+                }
+                let path = child(&dir, &unique);
+                written.write(&path, bytes)?;
+                files.push(json!({ "path": path.to_string_lossy(), "first_page": first, "last_page": last }));
             }
-            let file = format!("{base}.pdf");
-            // Equal titles (or titles that sanitize alike) get -2, -3, ... so no part overwrites another; compared case-insensitively.
-            let mut unique = file;
-            let mut n = 1;
-            while !used.insert(unique.to_lowercase()) {
-                n += 1;
-                unique = format!("{base}-{n}.pdf");
-            }
-            let path = child(&dir, &unique);
-            // A dangling link counts as existing: the write replaces it, and it is not ours to remove.
-            let existed = path.symlink_metadata().is_ok();
-            write_atomic(&path, bytes)?;
-            if !existed {
-                created.push(path.clone());
-            }
-            files.push(json!({ "path": path.to_string_lossy(), "first_page": first, "last_page": last }));
-            Ok(())
-        });
-        if let Err(e) = outcome {
-            // Best effort: the write's error comes first, followed by what could not be removed.
-            let mut stuck: Vec<String> = created.iter().filter(|p| std::fs::remove_file(p).is_err()).map(|p| p.display().to_string()).collect();
-            if made_dir && std::fs::remove_dir(&dir).is_err() {
-                stuck.push(dir.display().to_string());
-            }
-            return Err(if stuck.is_empty() { e } else { failed(format!("{e}; could not remove: {}", stuck.join(", "))) });
-        }
-        Ok(json!({ "files": files }))
+            Ok(json!({ "files": files }))
+        })
     }
 }

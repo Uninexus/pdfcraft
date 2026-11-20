@@ -1,6 +1,6 @@
 use super::error::{Result, ToolError, failed};
 use super::json::{Args, nest_rows, security, summary};
-use super::paths::{child, read_input, write_atomic};
+use super::paths::{Written, child, read_input, write_atomic};
 use super::{Arc, Automation, BlockKey, DocId, Document, Edit, Path, TextBlock, Value, comments, json};
 
 /// How far a watermark may be moved from the page centre, in points (a page is at most 14,400).
@@ -972,18 +972,20 @@ impl Automation {
             return Ok(json!({ "path": path.to_string_lossy(), "pages": pages.len(), "bytes": text.len() }));
         }
         let folder = self.resolve(a.str("folder")?, true)?;
-        std::fs::create_dir_all(&folder).map_err(|e| failed(format!("{}: {e}", folder.display())))?;
+        // min_size is read before the folder is made.
         if tool == "doc_export_all_images" {
             let min = u32::try_from(a.opt_int("min_size")?.unwrap_or(0).max(0)).unwrap_or(u32::MAX);
             let out = pdfcraft_engine::export::extract_images(&doc.export_source(), &pages, min).map_err(failed)?;
-            let mut files = Vec::new();
-            for (k, img) in out.images.iter().enumerate() {
-                let path = child(&folder, &pdfcraft_engine::export::image_file_name(&stem, img, k + 1, doc.info.pages.len()));
-                write_atomic(&path, &img.data)?;
-                files.push(json!({ "path": path.to_string_lossy(), "page": img.page + 1, "width": img.width, "height": img.height }));
-            }
-            let skipped: Vec<Value> = out.skipped.iter().map(|(p, r, why)| json!({ "page": p + 1, "object": r.num, "reason": why })).collect();
-            return Ok(json!({ "count": files.len(), "files": files, "skipped": skipped }));
+            return Written::within(&folder, |written| {
+                let mut files = Vec::new();
+                for (k, img) in out.images.iter().enumerate() {
+                    let path = child(&folder, &pdfcraft_engine::export::image_file_name(&stem, img, k + 1, doc.info.pages.len()));
+                    written.write(&path, &img.data)?;
+                    files.push(json!({ "path": path.to_string_lossy(), "page": img.page + 1, "width": img.width, "height": img.height }));
+                }
+                let skipped: Vec<Value> = out.skipped.iter().map(|(p, r, why)| json!({ "page": p + 1, "object": r.num, "reason": why })).collect();
+                Ok(json!({ "count": files.len(), "files": files, "skipped": skipped }))
+            });
         }
         let dpi = a.opt_num("dpi")?.unwrap_or(150.0);
         let quality = a.opt_int("quality")?.unwrap_or(85).clamp(1, 100) as u8;
@@ -993,24 +995,27 @@ impl Automation {
             "tiff" | "tif" => pdfcraft_engine::export::ImageFormat::Tiff,
             f => return Err(ToolError::InvalidArgs(format!("unknown format {f:?} (png, jpeg, tiff)"))),
         };
-        let mut files = Vec::new();
+        let files = Written::within(&folder, |written| {
+            let mut files = Vec::new();
+            // A write error stops the export as it is, not as a page error.
+            let mut write_error = None;
+            let exported = ex.images(&pages, dpi, format, |p, img| {
+                let path = child(&folder, &format!("{stem}_page_{}.{}", p + 1, format.extension()));
+                written.write(&path, &img).map_err(|e| {
+                    let message = e.to_string();
+                    write_error = Some(e);
+                    message
+                })?;
+                files.push(path.to_string_lossy().into_owned());
+                Ok(())
+            });
+            if let Some(e) = write_error {
+                return Err(e);
+            }
+            exported.map_err(failed)?;
+            Ok(files)
+        })?;
         let mut lowered = Vec::new();
-        // A write error stops the export as it is, not as a page error.
-        let mut write_error = None;
-        let exported = ex.images(&pages, dpi, format, |p, img| {
-            let path = child(&folder, &format!("{stem}_page_{}.{}", p + 1, format.extension()));
-            write_atomic(&path, &img).map_err(|e| {
-                let message = e.to_string();
-                write_error = Some(e);
-                message
-            })?;
-            files.push(path.to_string_lossy().into_owned());
-            Ok(())
-        });
-        if let Some(e) = write_error {
-            return Err(e);
-        }
-        exported.map_err(failed)?;
         for &p in &pages {
             // A page too large for the renderer at `dpi` is drawn at the most it allows.
             let used = ex.dpi_used(p, dpi);

@@ -140,7 +140,6 @@ impl Automation {
                 shared.join(", ")
             )));
         }
-        std::fs::create_dir_all(&folder).map_err(|e| failed(e.to_string()))?;
         let names: Vec<String> = paths.iter().map(|p| input_file_name(p)).collect();
         // Collision pre-flight: a searchable copy never silently overwrites. Every target is
         // checked before the first page is read; a collision aborts the whole batch with the
@@ -166,13 +165,16 @@ impl Automation {
         let recognizers = pdfcraft_engine::ocr::recognizers(&settings).map_err(failed)?;
         // Each file opens in its own session; it keeps this one's JavaScript preference.
         let javascript = self.session.javascript();
-        let mut out = Vec::new();
-        let (mut ok, mut skipped_files, mut words) = (0usize, 0usize, 0usize);
-        for p in paths {
-            let name = input_file_name(p);
-            let result =
-                self.resolve(p, false).map_err(|e| e.to_string()).and_then(|src| crate::read_input_bytes(&src).map_err(|e| e.to_string())).and_then(
-                    |bytes| {
+        crate::paths::Written::within(&folder, |written| {
+            let mut out = Vec::new();
+            let (mut ok, mut skipped_files, mut words) = (0usize, 0usize, 0usize);
+            for p in paths {
+                let name = input_file_name(p);
+                let result = self
+                    .resolve(p, false)
+                    .map_err(|e| e.to_string())
+                    .and_then(|src| crate::read_input_bytes(&src).map_err(|e| e.to_string()))
+                    .and_then(|bytes| {
                         pdfcraft_engine::ocr::recognize_file(
                             &name,
                             std::sync::Arc::new(bytes),
@@ -182,35 +184,35 @@ impl Automation {
                             javascript,
                             |_, _| true,
                         )
-                    },
-                );
-            match result {
-                Ok(r) => {
-                    let skipped_pages: Vec<usize> = r.pages.iter().filter(|p| p.skipped.is_some()).map(|p| p.page + 1).collect();
-                    if r.skipped() {
-                        // A file passed over by the skip-files option is its own bucket: its
-                        // original is left alone and nothing is written.
-                        skipped_files += 1;
-                        out.push(json!({ "path": p, "skipped": r.file_skipped, "skipped_pages": skipped_pages }));
-                        continue;
+                    });
+                match result {
+                    Ok(r) => {
+                        let skipped_pages: Vec<usize> = r.pages.iter().filter(|p| p.skipped.is_some()).map(|p| p.page + 1).collect();
+                        if r.skipped() {
+                            // A file passed over by the skip-files option is its own bucket: its
+                            // original is left alone and nothing is written.
+                            skipped_files += 1;
+                            out.push(json!({ "path": p, "skipped": r.file_skipped, "skipped_pages": skipped_pages }));
+                            continue;
+                        }
+                        let target = child(&folder, &name);
+                        written.write(&target, &r.bytes)?;
+                        ok += 1;
+                        words += r.words();
+                        let mut entry = json!({ "path": p, "output": target.to_string_lossy(), "words": r.words(), "skipped_pages": skipped_pages });
+                        // The batch's low-confidence note: at or under the settings' threshold (60
+                        // by default), on 1-based sorted pages.
+                        let threshold = settings.low_confidence_threshold;
+                        if let Some((count, pages)) = pdfcraft_engine::ocr::low_confidence_pages(&r.pages, threshold) {
+                            entry["low_confidence"] = json!({ "count": count, "pages": pages, "threshold": threshold });
+                        }
+                        out.push(entry);
                     }
-                    let target = child(&folder, &name);
-                    write_atomic(&target, &r.bytes)?;
-                    ok += 1;
-                    words += r.words();
-                    let mut entry = json!({ "path": p, "output": target.to_string_lossy(), "words": r.words(), "skipped_pages": skipped_pages });
-                    // The batch's low-confidence note: at or under the settings' threshold (60
-                    // by default), on 1-based sorted pages.
-                    let threshold = settings.low_confidence_threshold;
-                    if let Some((count, pages)) = pdfcraft_engine::ocr::low_confidence_pages(&r.pages, threshold) {
-                        entry["low_confidence"] = json!({ "count": count, "pages": pages, "threshold": threshold });
-                    }
-                    out.push(entry);
+                    Err(e) => out.push(json!({ "path": p, "error": e })),
                 }
-                Err(e) => out.push(json!({ "path": p, "error": e })),
             }
-        }
-        Ok(json!({ "files": out, "recognized": ok, "words": words, "skipped_files": skipped_files }))
+            Ok(json!({ "files": out, "recognized": ok, "words": words, "skipped_files": skipped_files }))
+        })
     }
 
     pub(crate) fn ocr_recognize(&mut self, a: &Args) -> Result<Value> {
