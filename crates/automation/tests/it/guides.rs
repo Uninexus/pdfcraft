@@ -1,4 +1,4 @@
-//! `doc_guides`, `doc_guide_add`, `doc_guide_remove` and `doc_guide_snap` end to end: guides are view state, bounded
+//! `doc_guides`, `doc_guide_add`, `doc_guide_remove`, `doc_guide_snap` and `doc_grid_snap` end to end: guides are view state, bounded
 //! by the displayed page, and never reach the saved file.
 
 use pdfcraft_automation::{Automation, Content};
@@ -149,6 +149,83 @@ fn doc_guide_snap_picks_the_nearest_guide_within_reach_and_changes_nothing() {
     }
     // Nothing changed: no guide added or removed, nothing unsaved.
     assert_eq!(call(&mut a, "doc_guides", json!({ "doc": doc }))["guides"].as_array().unwrap().len(), 4);
+    assert_eq!(call(&mut a, "doc_info", json!({ "doc": doc }))["document"]["dirty"], false);
+    call(&mut a, "doc_save", json!({ "doc": doc, "path": "after.pdf" }));
+    assert_eq!(std::fs::read(dir.join("after.pdf")).unwrap(), std::fs::read(dir.join("before.pdf")).unwrap(), "snapping leaves the file as it was");
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn doc_grid_snap_lands_on_the_nearest_grid_line_on_the_page_and_changes_nothing() {
+    let dir = std::env::temp_dir().join(format!("pdfcraft-grid-{}-{:?}", std::process::id(), std::thread::current().id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("in.pdf"), pdf(&[("", "0 0 0 rg 50 100 70 80 re f"), ("/Rotate 90", "")])).unwrap();
+    let mut a = Automation::new().with_root(&dir).unwrap().with_clock(|| 1_700_000_000);
+    let doc = call(&mut a, "doc_open", json!({ "path": "in.pdf" }))["doc"].as_u64().unwrap();
+    call(&mut a, "doc_save", json!({ "doc": doc, "path": "before.pdf" }));
+    assert!(pdfcraft_automation::tools().iter().any(|t| t.name == "doc_grid_snap" && t.read_only));
+
+    // The page is 200 by 300 points. A one-inch grid has lines at 0, 72 and 144 across.
+    let v = call(&mut a, "doc_grid_snap", json!({ "doc": doc, "page": 1, "x": 100, "y": 250, "spacing": 1, "unit": "in" }));
+    assert_eq!(v["x"], json!({ "position": 72.0, "snapped": true }), "{v}");
+    assert_eq!(v["y"], json!({ "position": 216.0, "snapped": true }), "{v}");
+    assert_eq!((v["spacing_pt"].clone(), v["pitch_pt"].clone(), v["tolerance"].clone()), (json!(72.0), json!(72.0), Value::Null));
+    // Points are the default unit, and a lone x answers only x.
+    let v = call(&mut a, "doc_grid_snap", json!({ "doc": doc, "page": 1, "x": 100, "spacing": 72 }));
+    assert_eq!(v["x"]["position"], 72.0);
+    assert!(v.get("y").is_none());
+    // Subdivisions: lines every 18 points. An offset of half an inch moves the main lines to 36, 108.
+    assert_eq!(call(&mut a, "doc_grid_snap", json!({ "doc": doc, "page": 1, "x": 100, "spacing": 72, "subdivisions": 4 }))["x"]["position"], 108.0);
+    let v = call(&mut a, "doc_grid_snap", json!({ "doc": doc, "page": 1, "x": 95, "spacing": 1, "unit": "in", "offset_x": 0.5 }));
+    assert_eq!(v["x"]["position"], 108.0, "{v}");
+    // Millimetres and centimetres: 25.4 mm and 2.54 cm are one inch.
+    assert_eq!(call(&mut a, "doc_grid_snap", json!({ "doc": doc, "page": 1, "x": 100, "spacing": 25.4, "unit": "mm" }))["x"]["position"], 72.0);
+    assert_eq!(call(&mut a, "doc_grid_snap", json!({ "doc": doc, "page": 1, "x": 100, "spacing": 2.54, "unit": "cm" }))["pitch_pt"], 72.0);
+    // A line past the page is not a place to land, though it is nearer: 240 is 50 from 190, 120 is 70.
+    assert_eq!(
+        call(&mut a, "doc_grid_snap", json!({ "doc": doc, "page": 1, "x": 190, "spacing": 120 }))["x"],
+        json!({ "position": 120.0, "snapped": true })
+    );
+    // An unmoved position is returned as given, not rounded.
+    assert_eq!(
+        call(&mut a, "doc_grid_snap", json!({ "doc": doc, "page": 1, "x": 100.12345, "spacing": 72, "tolerance": 0 }))["x"],
+        json!({ "position": 100.12345, "snapped": false })
+    );
+    // Page 2 is turned a quarter, so it is 300 wide and 200 tall: 288 is on it across, 288 is not down.
+    let v = call(&mut a, "doc_grid_snap", json!({ "doc": doc, "page": 2, "x": 290, "y": 190, "spacing": 144 }));
+    assert_eq!((v["x"]["position"].clone(), v["y"]["position"].clone()), (json!(288.0), json!(144.0)), "{v}");
+    // Tolerance limits the reach (edge included); without it the nearest line always wins.
+    assert_eq!(call(&mut a, "doc_grid_snap", json!({ "doc": doc, "page": 1, "x": 100, "spacing": 72, "tolerance": 28 }))["x"]["snapped"], true);
+    let v = call(&mut a, "doc_grid_snap", json!({ "doc": doc, "page": 1, "x": 100, "spacing": 72, "tolerance": 27 }));
+    assert_eq!(v["x"], json!({ "position": 100.0, "snapped": false }));
+    assert_eq!(v["tolerance"], 27.0);
+
+    // Hostile arguments are refused with something to act on.
+    for (args, want) in [
+        (json!({ "doc": doc, "page": 1, "spacing": 72 }), "x, y"),
+        (json!({ "doc": doc, "page": 1, "x": 1 }), "spacing"),
+        (json!({ "doc": doc, "page": 1, "x": 1, "spacing": 0 }), "between 0.01 and 14400"),
+        (json!({ "doc": doc, "page": 1, "x": 1, "spacing": -5 }), "between 0.01 and 14400"),
+        (json!({ "doc": doc, "page": 1, "x": 1, "spacing": 1e300, "unit": "in" }), "between 0.01 and 14400"),
+        (json!({ "doc": doc, "page": 1, "x": 1, "spacing": 1, "unit": "furlong" }), "unit"),
+        (json!({ "doc": doc, "page": 1, "x": 1, "spacing": 72, "subdivisions": 0 }), "subdivisions"),
+        (json!({ "doc": doc, "page": 1, "x": 1, "spacing": 72, "subdivisions": -3 }), "subdivisions"),
+        (json!({ "doc": doc, "page": 1, "x": 1, "spacing": 72, "subdivisions": 1e30 }), "subdivisions"),
+        (json!({ "doc": doc, "page": 1, "x": 1, "spacing": 0.5, "subdivisions": 100 }), "too fine"),
+        (json!({ "doc": doc, "page": 1, "x": 1, "spacing": 72, "offset_x": 1e300 }), "offset"),
+        (json!({ "doc": doc, "page": 1, "x": 1, "spacing": 72, "tolerance": 73 }), "between 0 and 72"),
+        (json!({ "doc": doc, "page": 1, "x": 201, "spacing": 72 }), "must lie on the page"),
+        (json!({ "doc": doc, "page": 1, "y": -1, "spacing": 72 }), "must lie on the page"),
+        (json!({ "doc": doc, "page": 3, "x": 1, "spacing": 72 }), "out of range"),
+        (json!({ "doc": doc, "x": 1, "spacing": 72 }), "page"),
+        (json!({ "doc": doc, "page": 1, "x": "1", "spacing": 72 }), "x"),
+    ] {
+        let e = fails(&mut a, "doc_grid_snap", args.clone());
+        assert!(e.contains(want), "{args}: {e}");
+    }
+    // Nothing changed: no guide added, nothing unsaved, and the saved file is as it was.
+    assert_eq!(call(&mut a, "doc_guides", json!({ "doc": doc })), json!({ "guides": [] }));
     assert_eq!(call(&mut a, "doc_info", json!({ "doc": doc }))["document"]["dirty"], false);
     call(&mut a, "doc_save", json!({ "doc": doc, "path": "after.pdf" }));
     assert_eq!(std::fs::read(dir.join("after.pdf")).unwrap(), std::fs::read(dir.join("before.pdf")).unwrap(), "snapping leaves the file as it was");

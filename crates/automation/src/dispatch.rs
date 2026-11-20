@@ -790,6 +790,7 @@ impl Automation {
             "doc_guide_add" => self.doc_guide_add(&a)?,
             "doc_guide_remove" => self.doc_guide_remove(&a)?,
             "doc_guide_snap" => self.doc_guide_snap(&a)?,
+            "doc_grid_snap" => self.doc_grid_snap(&a)?,
             "doc_inks" => self.doc_inks(&a)?,
             "page_boxes" => self.page_boxes(&a)?,
             "doc_ink_aliases" => self.doc_ink_aliases(&a)?,
