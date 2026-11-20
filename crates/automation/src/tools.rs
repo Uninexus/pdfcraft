@@ -133,7 +133,7 @@ impl T {
 /// Every tool, in a stable order.
 pub fn tools() -> Vec<ToolDef> {
     let save_out = json!({ "type": "string", "description": "File to write. Omit to open the result as a new unsaved document instead." });
-    let open = json!({ "type": "boolean", "description": "Also open the result as a new document (default: only when out is omitted)." });
+    let open = json!({ "type": "boolean", "description": "Also open the result as a new document (default: only when out is omitted). A value that is not true or false is refused before out is written. If opening the result then fails, out has already been written and the error is returned." });
     vec![
         t("doc_bates_multi", "Add Bates numbering across files", "Apply one consecutive Bates sequence to an ordered list of PDFs. Each file entry has input and output paths and an optional open or permissions password. The operation first validates every input/output and computes inclusive numeric intervals; dry_run returns that allocation without writing. Existing output files are never replaced. On application, files that cannot be edited or saved are reported individually and later files continue.")
             .destructive()
@@ -524,7 +524,7 @@ pub fn tools() -> Vec<ToolDef> {
                 }),
                 &["paths"],
             )),
-        t("doc_split", "Split a document", "Split into several files written to out_dir: every N pages, before given pages, at top-level bookmarks (bookmarks: true; files named after them, repeated titles get -2, -3), or by file size (max_mb). Files are <name>-partK.pdf.")
+        t("doc_split", "Split a document", "Split into several files written to out_dir: every N pages, before given pages, at top-level bookmarks (bookmarks: true; files named after them, repeated titles get -2, -3), or by file size (max_mb). Files are <name>-partK.pdf. If a part cannot be written, the parts this call wrote to a free name are removed again, and the out_dir folder if the call made it (best effort: when out_dir needed several new folders only the deepest is removed, and what could not be removed is listed after the error as \"could not remove\"); a part that replaced an existing file (a link counts) stays, with the new content. Another process writing to the folder meanwhile is not guarded against.")
             .cmd("page.split")
             .with(schema(
                 json!({ "doc": doc(), "every": { "type": "integer", "minimum": 1 }, "before": pages("that start a new part"), "bookmarks": { "type": "boolean" }, "max_mb": { "type": "number", "exclusiveMinimum": 0 }, "out_dir": { "type": "string" } }),

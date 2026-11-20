@@ -316,12 +316,14 @@ impl Automation {
     pub(crate) fn deliver(&mut self, a: &Args, name: &str, bytes: Arc<Vec<u8>>) -> Result<Value> {
         let mut result = json!({ "bytes": bytes.len() });
         let out = a.opt_str("out")?;
+        // Read before anything is written: a mistyped `open` is refused with no file left behind.
+        let open = a.opt_bool("open")?.unwrap_or(out.is_none());
         if let Some(out) = out {
             let path = self.resolve(out, true)?;
             write_atomic(&path, &bytes)?;
             result["path"] = json!(path.to_string_lossy());
         }
-        if a.opt_bool("open")?.unwrap_or(out.is_none()) {
+        if open {
             let id = self.session.open_new(name, bytes).map_err(failed)?;
             result["document"] = summary(self.session.get(id).ok_or_else(|| failed("the document vanished"))?);
         }
@@ -431,7 +433,8 @@ impl Automation {
                 None => self.session.extract(id, &[p]).map_err(failed)?,
             };
             let path = child(&dir, &format!("{stem}-page{}.pdf", p.saturating_add(1)));
-            let existed = path.exists();
+            // A dangling link counts as existing: the write replaces it, and it is not ours to remove.
+            let existed = path.symlink_metadata().is_ok();
             write_atomic(&path, &bytes)?;
             if !existed {
                 created.push(path.clone());
@@ -580,10 +583,14 @@ impl Automation {
             self.session.split(id, &by).map_err(failed)?
         };
         let dir = self.resolve(a.str("out_dir")?, true)?;
+        let made_dir = !dir.exists();
         std::fs::create_dir_all(&dir).map_err(|e| failed(format!("{}: {e}", dir.display())))?;
         let mut files = Vec::new();
+        // Parts this call wrote to a name that was free; a later failure removes them (a part that
+        // replaced a file already there is not removed, and what it replaced is not restored).
+        let mut created = Vec::new();
         let mut used = std::collections::HashSet::new();
-        for (i, (first, last, bytes)) in parts.iter().enumerate() {
+        let outcome = parts.iter().enumerate().try_for_each(|(i, (first, last, bytes))| -> Result<()> {
             let safe = |t: &str| t.chars().map(|c| if c.is_alphanumeric() || " -_.,()".contains(c) { c } else { '_' }).collect::<String>();
             let mut base = match titles.iter().find(|t| t.0 + 1 == *first) {
                 Some((_, t)) => format!("{stem}-{}", safe(t)),
@@ -602,8 +609,22 @@ impl Automation {
                 unique = format!("{base}-{n}.pdf");
             }
             let path = child(&dir, &unique);
+            // A dangling link counts as existing: the write replaces it, and it is not ours to remove.
+            let existed = path.symlink_metadata().is_ok();
             write_atomic(&path, bytes)?;
+            if !existed {
+                created.push(path.clone());
+            }
             files.push(json!({ "path": path.to_string_lossy(), "first_page": first, "last_page": last }));
+            Ok(())
+        });
+        if let Err(e) = outcome {
+            // Best effort: the write's error comes first, followed by what could not be removed.
+            let mut stuck: Vec<String> = created.iter().filter(|p| std::fs::remove_file(p).is_err()).map(|p| p.display().to_string()).collect();
+            if made_dir && std::fs::remove_dir(&dir).is_err() {
+                stuck.push(dir.display().to_string());
+            }
+            return Err(if stuck.is_empty() { e } else { failed(format!("{e}; could not remove: {}", stuck.join(", "))) });
         }
         Ok(json!({ "files": files }))
     }
