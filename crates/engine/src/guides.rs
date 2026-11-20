@@ -188,6 +188,204 @@ impl Session {
     }
 }
 
+/// The smallest distance between two grid lines, in points.
+pub const MIN_GRID_PITCH: f64 = 0.01;
+/// The widest distance between grid lines, in points.
+pub const MAX_GRID_SPACING: f64 = 14_400.0;
+/// The most divisions one grid spacing may have.
+pub const MAX_GRID_SUBDIVISIONS: u32 = 100;
+/// The furthest a grid may be shifted, in points either way.
+pub const MAX_GRID_OFFSET: f64 = 1_000_000.0;
+
+/// A grid of lines over a page, in the guides' frame: vertical lines are measured from the page's
+/// left edge, horizontal ones from its top edge. Lines run every `spacing / subdivisions` points
+/// and one of each runs through the offset. The page is the displayed one, after `/Rotate` and `/UserUnit`, as for guides. This is the arithmetic of a snap-to-grid only: nothing
+/// draws or stores a grid.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Grid {
+    /// Points between two main lines.
+    pub spacing: f64,
+    /// Equal parts a main spacing is divided into (1 for none).
+    pub subdivisions: u32,
+    /// Where a vertical line runs, from the left edge (any other is a whole pitch away).
+    pub offset_x: f64,
+    /// Where a horizontal line runs, from the top edge.
+    pub offset_y: f64,
+}
+
+impl Grid {
+    /// A grid of this spacing with no subdivisions and lines through the page's top left corner.
+    pub fn new(spacing: f64) -> Self {
+        Grid { spacing, subdivisions: 1, offset_x: 0.0, offset_y: 0.0 }
+    }
+
+    /// Points between two neighbouring lines.
+    pub fn pitch(&self) -> f64 {
+        self.spacing / f64::from(self.subdivisions.max(1))
+    }
+
+    /// Refuses a grid that is not finite, whose spacing is not 0.01 to 14,400 points, whose
+    /// subdivisions are not 1 to 100, whose pitch is under 0.01 point or whose offset is past a
+    /// million points.
+    pub fn check(&self) -> Result<(), EditError> {
+        if !self.spacing.is_finite() || !(MIN_GRID_PITCH..=MAX_GRID_SPACING).contains(&self.spacing) {
+            return Err(EditError::Invalid(format!(
+                "a grid spacing must be between {MIN_GRID_PITCH} and {MAX_GRID_SPACING} points (got {})",
+                self.spacing
+            )));
+        }
+        if !(1..=MAX_GRID_SUBDIVISIONS).contains(&self.subdivisions) {
+            return Err(EditError::Invalid(format!("grid subdivisions must be between 1 and {MAX_GRID_SUBDIVISIONS} (got {})", self.subdivisions)));
+        }
+        if self.pitch() < MIN_GRID_PITCH {
+            return Err(EditError::Invalid(format!(
+                "grid lines must be at least {MIN_GRID_PITCH} point apart: a spacing of {} points in {} parts is too fine",
+                self.spacing, self.subdivisions
+            )));
+        }
+        for v in [self.offset_x, self.offset_y] {
+            if !v.is_finite() || v.abs() > MAX_GRID_OFFSET {
+                return Err(EditError::Invalid(format!("a grid offset must be within {MAX_GRID_OFFSET} points either way (got {v})")));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// What one axis of a point snapped to on a grid.
+#[derive(Clone, Debug, PartialEq)]
+pub struct GridSnap {
+    /// The grid line's position, rounded to a thousandth of a point, when one was in reach; else
+    /// the position given, exactly as given.
+    pub position: f64,
+    /// Whether it moved to a grid line.
+    pub snapped: bool,
+}
+
+/// The nearest grid line to `value` that lies on the page (0 to `limit`), both ends included, within
+/// `tolerance` points when one is given; on a tie the lower line wins (the lower of the two candidates is tried first and a later one must be strictly nearer). Lines are rounded to a
+/// thousandth of a point before they are compared with the page.
+fn nearest_line(value: f64, limit: f64, pitch: f64, offset: f64, tolerance: Option<f64>) -> GridSnap {
+    let unmoved = GridSnap { position: value, snapped: false };
+    let base = offset.rem_euclid(pitch);
+    let k = ((value - base) / pitch).floor();
+    if !k.is_finite() {
+        return unmoved;
+    }
+    let lo = base + k * pitch;
+    let round = |v: f64| (v * 1000.0).round() / 1000.0 + 0.0;
+    let mut best: Option<(f64, f64)> = None;
+    for line in [round(lo), round(lo + pitch)] {
+        if !(0.0..=limit).contains(&line) {
+            continue;
+        }
+        let d = (line - value).abs();
+        if tolerance.is_some_and(|t| d > t) {
+            continue;
+        }
+        if best.is_none_or(|(bd, _)| d < bd) {
+            best = Some((d, line));
+        }
+    }
+    match best {
+        Some((_, line)) => GridSnap { position: line, snapped: true },
+        None => unmoved,
+    }
+}
+
+impl Session {
+    /// Where a point on `page` (0-based) lands when it snaps to `grid`: `x` to the nearest vertical
+    /// line and `y` to the nearest horizontal one, each only when a line of the grid that lies on
+    /// the page is within `tolerance` points (0 to [`MAX_SNAP_TOLERANCE`]; `None` snaps to the
+    /// nearest line however far). The point is in the guides' own frame (see [`Grid`]) and must
+    /// lie on the page. Read-only: no guide is added and the document is not touched. Refused for
+    /// a page the document does not have, a grid [`Grid::check`] refuses, a point that is not
+    /// finite or off the page, and a tolerance out of range.
+    pub fn snap_to_grid(
+        &self,
+        id: DocId,
+        page: usize,
+        x: Option<f64>,
+        y: Option<f64>,
+        grid: &Grid,
+        tolerance: Option<f64>,
+    ) -> Result<(Option<GridSnap>, Option<GridSnap>), EditError> {
+        let doc = self.get(id).ok_or(EditError::NoDocument)?;
+        let Some(info) = doc.info.pages.get(page) else {
+            return Err(EditError::Invalid(format!("page {} is out of range: the document has {} pages", page + 1, doc.info.pages.len())));
+        };
+        grid.check()?;
+        if let Some(t) = tolerance
+            && (!t.is_finite() || !(0.0..=MAX_SNAP_TOLERANCE).contains(&t))
+        {
+            return Err(EditError::Invalid(format!("a snap tolerance must be between 0 and {MAX_SNAP_TOLERANCE} points (got {t})")));
+        }
+        let (width, height) = (f64::from(info.width), f64::from(info.height));
+        for (v, limit, what) in [(x, width, "x"), (y, height, "y")] {
+            if let Some(v) = v
+                && (!v.is_finite() || v < 0.0 || v > limit)
+            {
+                return Err(EditError::Invalid(format!("{what} must lie on the page, between 0 and {limit} points (got {v})")));
+            }
+        }
+        let pitch = grid.pitch();
+        Ok((x.map(|v| nearest_line(v, width, pitch, grid.offset_x, tolerance)), y.map(|v| nearest_line(v, height, pitch, grid.offset_y, tolerance))))
+    }
+}
+
+#[cfg(test)]
+mod grid_tests {
+    use super::*;
+
+    #[test]
+    fn nearest_line_takes_the_closest_line_on_the_page_and_breaks_ties_low() {
+        let snap = |v, limit, pitch, offset, tol| nearest_line(v, limit, pitch, offset, tol);
+        let at = |position, snapped| GridSnap { position, snapped };
+        assert_eq!(snap(100.0, 200.0, 72.0, 0.0, None), at(72.0, true));
+        assert_eq!(snap(110.0, 200.0, 72.0, 0.0, None), at(144.0, true));
+        // A tie goes to the lower line.
+        assert_eq!(snap(36.0, 200.0, 72.0, 0.0, None), at(0.0, true));
+        // A shifted grid, and a negative offset is the same grid as the positive one a pitch on.
+        assert_eq!(snap(100.0, 200.0, 72.0, 10.0, None), at(82.0, true));
+        assert_eq!(snap(100.0, 200.0, 72.0, -62.0, None), at(82.0, true));
+        // A line past the page does not count, though it is nearer: 200 is 45 away from 155, 100 is 55.
+        assert_eq!(snap(155.0, 160.0, 100.0, 0.0, None), at(100.0, true));
+        // Both ends of the page are on it.
+        assert_eq!(snap(200.0, 200.0, 100.0, 0.0, None), at(200.0, true));
+        assert_eq!(snap(0.0, 200.0, 100.0, 0.0, None), at(0.0, true));
+        // No line on the page: the offset is past it and the pitch is wide.
+        assert_eq!(snap(50.0, 200.0, 400.0, 300.0, None), at(50.0, false));
+        // Tolerance: edge included, beyond it nothing moves.
+        assert_eq!(snap(100.0, 200.0, 72.0, 0.0, Some(28.0)), at(72.0, true));
+        assert_eq!(snap(100.0, 200.0, 72.0, 0.0, Some(27.9)), at(100.0, false));
+        // A pitch that does not divide the page evenly still lands on a line, to a thousandth.
+        assert_eq!(snap(0.29, 0.3, 0.1, 0.0, None), at(0.3, true));
+        // Huge values do not panic.
+        assert!(!snap(f64::MAX, 200.0, 0.01, 0.0, None).snapped);
+    }
+
+    #[test]
+    fn a_grid_is_checked() {
+        let ok = Grid { spacing: 72.0, subdivisions: 8, offset_x: -5.0, offset_y: 1e6 };
+        assert!(ok.check().is_ok());
+        assert_eq!(ok.pitch(), 9.0);
+        for bad in [
+            Grid::new(0.0),
+            Grid::new(0.009),
+            Grid::new(14_400.1),
+            Grid::new(f64::NAN),
+            Grid::new(f64::INFINITY),
+            Grid { subdivisions: 0, ..Grid::new(72.0) },
+            Grid { subdivisions: 101, ..Grid::new(72.0) },
+            Grid { subdivisions: 100, ..Grid::new(0.5) },
+            Grid { offset_x: 1e6 + 1.0, ..Grid::new(72.0) },
+            Grid { offset_y: f64::NAN, ..Grid::new(72.0) },
+        ] {
+            assert!(bad.check().is_err(), "{bad:?}");
+        }
+    }
+}
+
 #[cfg(test)]
 mod snap_tests {
     use super::*;

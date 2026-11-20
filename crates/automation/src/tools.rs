@@ -201,6 +201,23 @@ pub fn tools() -> Vec<ToolDef> {
                 }),
                 &["doc", "page"],
             )),
+        t("doc_grid_snap", "Snap a point to a grid", "View, Grid: where a point on a page lands when it snaps to a grid of lines you describe. spacing is the distance between main lines in unit (pt, in, mm or cm; default pt), subdivisions (1 to 100, default 1) divides it into equal parts, and offset_x and offset_y (same unit) move where a line runs; the grid is measured in the guides' frame, from the displayed page's left and top edges (after rotation and /UserUnit). x snaps to the nearest vertical line and y to the nearest horizontal one, never to a line past the page; give x, y, or both, each on the page in points. tolerance (points, 0 to 72) limits how far a line may be; without it the nearest line always wins. On a tie the lower line wins (unlike doc_guide_snap, tolerance has no default). Each answer is { position, snapped }: a line's position is rounded to a thousandth of a point, and a point that did not snap is returned as given; spacing_pt and pitch_pt say the grid in points. Arithmetic only: it changes nothing, and the app has no grid to show or snap to yet.")
+            .ro()
+            .with(schema(
+                json!({
+                    "doc": doc(),
+                    "page": { "type": "integer", "minimum": 1, "description": "The 1-based page; its size bounds the grid." },
+                    "x": { "type": "number", "description": "Points from the page's left edge." },
+                    "y": { "type": "number", "description": "Points from the page's top edge." },
+                    "spacing": { "type": "number", "exclusiveMinimum": 0, "description": "Distance between main lines, in unit: 0.01 to 14,400 points." },
+                    "unit": { "type": "string", "enum": ["pt", "in", "mm", "cm"], "description": "The unit of spacing and the offsets (default pt)." },
+                    "subdivisions": { "type": "integer", "minimum": 1, "maximum": 100, "description": "Equal parts a spacing is divided into (default 1); a line may be no closer than 0.01 point." },
+                    "offset_x": { "type": "number", "description": "Where a vertical line runs, from the left edge, in unit (default 0)." },
+                    "offset_y": { "type": "number", "description": "Where a horizontal line runs, from the top edge, in unit (default 0)." },
+                    "tolerance": { "type": "number", "minimum": 0, "maximum": 72, "description": "How far a line may be, in points (default: any distance)." },
+                }),
+                &["doc", "page", "spacing"],
+            )),
         t("page_boxes", "List page boxes", "Print production, Set Page Boxes: every page's media, crop, bleed, trim and art boxes as { rect: [x0, y0, x1, y1], set } in PDF user space (points; the origin is the page's bottom-left corner only when the media box starts at 0, 0; not turned by the page's rotate). The rects are the values the viewer uses, not the raw entries: corners put in order, clipped to the media box, and a box the file doesn't set defaults to its parent (crop to media; bleed, trim and art to crop). set is true when the file gives a usable box (a crop or media box inherited from a /Pages node counts); a box is read from the first four entries of its array, which must all be numbers, as the viewer reads them, and any later entry is not read; ignored: true marks a key that is present but unusable (its first four entries are not all numbers, no area, or, for crop, bleed, trim and art, outside the media box), which defaulted instead. rotate is the page's effective /Rotate (inherited, 0 to 359). Where both a bleed and a trim box are set, bleed_past_trim gives the bleed beyond the trim as [left, bottom, right, top] (negative where the bleed stops short). pages limits the listing: ascending order, each page once; at most 2000 pages come back, with total (pages in the document) and truncated. Nothing is changed; page_set_box changes boxes.")
             .ro()
             .with(schema(json!({ "doc": doc(), "pages": pages("to list (default: all)") }), &["doc"])),

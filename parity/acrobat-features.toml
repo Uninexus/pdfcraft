@@ -1631,11 +1631,11 @@ title = "Grid and snap to grid"
 area = "B"
 tier = "P2"
 milestone = "M12"
-status = "planned"
+status = "partial"
 commands = []
-tools = []
-evidence = []
-notes = ""
+tools = ["doc_grid_snap"]
+evidence = ["crates/engine/src/guides.rs::nearest_line_takes_the_closest_line_on_the_page_and_breaks_ties_low", "crates/engine/src/guides.rs::a_grid_is_checked", "crates/automation/tests/it/guides.rs::doc_grid_snap_lands_on_the_nearest_grid_line_on_the_page_and_changes_nothing"]
+notes = "Headless arithmetic only: doc_grid_snap gives where an x and/or y on a page lands on the nearest line of a grid you describe: spacing in pt, in, mm or cm (0.01 to 14,400 points), subdivisions (1 to 100, a line no closer than 0.01 point), offset_x and offset_y, and an optional tolerance (0 to 72 points; without one the nearest line always wins; the lower line on a tie, as doc_guide_snap does, though that tool defaults its tolerance to 4). Lines are measured in the guides' frame, from the displayed page's left and top edges (after rotation and /UserUnit), and a line past the page is never chosen; the position of a line it snaps to is rounded to a thousandth of a point (an unmoved point is returned as given). Read-only, no guide is made and nothing is stored. Missing: the app has no grid to show, no Preferences for grid spacing, subdivisions or colour, no snapping while dragging, and no check against what Acrobat's grid measures from"
 
 [[feature]]
 id = "view.guides"
