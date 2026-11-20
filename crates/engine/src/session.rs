@@ -55,6 +55,9 @@ pub struct Session {
     /// it back (off by default), and what it has remembered (see [`crate::form_entries`]).
     pub(crate) form_autocomplete: bool,
     pub(crate) form_entries: crate::form_entries::FormEntries,
+    /// Preferences ▸ Units & Guides ▸ Grid, as set for this session (`None` until set); see
+    /// [`Session::grid_preference`].
+    pub(crate) grid_preference: Option<crate::guides::Grid>,
     /// What the XFA scripts' time limits are multiplied by (`None`: 1); see
     /// [`Session::with_xfa_time_scale`].
     pub(crate) xfa_time_scale: Option<u32>,

@@ -231,3 +231,133 @@ fn doc_grid_snap_lands_on_the_nearest_grid_line_on_the_page_and_changes_nothing(
     assert_eq!(std::fs::read(dir.join("after.pdf")).unwrap(), std::fs::read(dir.join("before.pdf")).unwrap(), "snapping leaves the file as it was");
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+/// What `grid_preferences` stores, as the tool answers it.
+fn stored(a: &mut Automation) -> Value {
+    call(a, "grid_preferences", json!({}))
+}
+
+#[test]
+fn grid_preferences_are_set_read_cleared_and_fill_in_what_doc_grid_snap_is_not_given() {
+    let dir = std::env::temp_dir().join(format!("pdfcraft-gridprefs-{}-{:?}", std::process::id(), std::thread::current().id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("in.pdf"), pdf(&[("", "")])).unwrap();
+    let mut a = Automation::new().with_root(&dir).unwrap().with_clock(|| 1_700_000_000);
+    let doc = call(&mut a, "doc_open", json!({ "path": "in.pdf" }))["doc"].as_u64().unwrap();
+    // It changes session state, so it is not a read-only tool; doc_grid_snap still is.
+    assert!(pdfcraft_automation::tools().iter().any(|t| t.name == "grid_preferences" && !t.read_only));
+    assert!(pdfcraft_automation::tools().iter().any(|t| t.name == "doc_grid_snap" && t.read_only));
+
+    // Nothing stored: as before, the spacing is required and the rest default.
+    assert_eq!(stored(&mut a), json!({ "set": false }));
+    assert!(fails(&mut a, "doc_grid_snap", json!({ "doc": doc, "page": 1, "x": 100 })).contains("store a grid with grid_preferences"));
+    let v = call(&mut a, "doc_grid_snap", json!({ "doc": doc, "page": 1, "x": 100, "spacing": 72 }));
+    assert_eq!(v["from_preferences"], json!([]));
+    // doc_grid_snap converts units the same exact way: 5080 mm is a spacing of exactly 14400 points.
+    let v = call(&mut a, "doc_grid_snap", json!({ "doc": doc, "page": 1, "x": 100, "spacing": 5080, "unit": "mm" }));
+    assert_eq!(v["spacing_pt"], 14400.0);
+
+    // A one-inch grid, given in inches; stored and answered in points.
+    let v = call(&mut a, "grid_preferences", json!({ "spacing": 1, "unit": "in" }));
+    assert_eq!(v, json!({ "set": true, "spacing_pt": 72.0, "subdivisions": 1, "pitch_pt": 72.0, "offset_x_pt": 0.0, "offset_y_pt": 0.0 }));
+    assert_eq!(stored(&mut a), v);
+    // Giving the same values again leaves the same grid (the tool is announced as idempotent).
+    assert_eq!(call(&mut a, "grid_preferences", json!({ "spacing": 1, "unit": "in" })), v);
+    let v = call(&mut a, "doc_grid_snap", json!({ "doc": doc, "page": 1, "x": 100, "y": 250 }));
+    assert_eq!((v["x"]["position"].clone(), v["y"]["position"].clone(), v["spacing_pt"].clone()), (json!(72.0), json!(216.0), json!(72.0)));
+    assert_eq!(v["from_preferences"], json!(["spacing", "offset_x", "offset_y", "subdivisions"]));
+
+    // A later call changes only what it names; the unit applies to what that call gives.
+    let v = call(&mut a, "grid_preferences", json!({ "subdivisions": 4, "offset_x": 0.5, "unit": "in" }));
+    assert_eq!(
+        (v["spacing_pt"].clone(), v["subdivisions"].clone(), v["offset_x_pt"].clone(), v["pitch_pt"].clone()),
+        (json!(72.0), json!(4), json!(36.0), json!(18.0))
+    );
+    // A call's own value wins over the stored one, which stays stored in points whatever unit is named.
+    let v = call(&mut a, "doc_grid_snap", json!({ "doc": doc, "page": 1, "x": 95, "spacing": 144, "offset_x": 0 }));
+    assert_eq!(
+        (v["x"]["position"].clone(), v["pitch_pt"].clone(), v["from_preferences"].clone()),
+        (json!(108.0), json!(36.0), json!(["offset_y", "subdivisions"]))
+    );
+    let v = call(&mut a, "doc_grid_snap", json!({ "doc": doc, "page": 1, "x": 95, "unit": "mm" }));
+    assert_eq!((v["x"]["position"].clone(), v["spacing_pt"].clone()), (json!(90.0), json!(72.0)));
+    assert_eq!(stored(&mut a)["offset_x_pt"], 36.0, "naming a unit to snap does not convert the stored grid");
+
+    // Cleared: back to requiring a spacing, and subdivisions default to 1 again.
+    assert_eq!(call(&mut a, "grid_preferences", json!({ "clear": true })), json!({ "set": false }));
+    assert_eq!(call(&mut a, "grid_preferences", json!({ "clear": false })), json!({ "set": false }));
+    assert!(fails(&mut a, "doc_grid_snap", json!({ "doc": doc, "page": 1, "x": 100 })).contains("spacing"));
+    let v = call(&mut a, "doc_grid_snap", json!({ "doc": doc, "page": 1, "x": 100, "spacing": 72 }));
+    assert_eq!(v["pitch_pt"], 72.0);
+    // From nothing stored, a lone value starts from one inch, no subdivisions and no offset.
+    let v = call(&mut a, "grid_preferences", json!({ "subdivisions": 3 }));
+    assert_eq!((v["spacing_pt"].clone(), v["subdivisions"].clone(), v["offset_y_pt"].clone()), (json!(72.0), json!(3), json!(0.0)));
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn grid_preferences_accept_the_limits_and_refuse_beyond_them_storing_nothing() {
+    let mut a = Automation::new();
+    // Exactly at each limit.
+    assert_eq!(call(&mut a, "grid_preferences", json!({ "spacing": 14400 }))["spacing_pt"], 14400.0);
+    assert_eq!(call(&mut a, "grid_preferences", json!({ "spacing": 200, "unit": "in" }))["spacing_pt"], 14400.0);
+    // Units divide last, so a value exactly at a limit stays exact (a pre-divided 72/25.4 gave 14400.000000000002).
+    assert_eq!(call(&mut a, "grid_preferences", json!({ "spacing": 5080, "unit": "mm" }))["spacing_pt"], 14400.0);
+    assert_eq!(call(&mut a, "grid_preferences", json!({ "spacing": 508, "unit": "cm" }))["spacing_pt"], 14400.0);
+    assert_eq!(call(&mut a, "grid_preferences", json!({ "spacing": 25.4, "unit": "mm" }))["spacing_pt"], 72.0);
+    assert_eq!(call(&mut a, "grid_preferences", json!({ "spacing": 2.54, "unit": "cm" }))["spacing_pt"], 72.0);
+    // An offset in another unit, and a negative zero stored as 0.
+    let v = call(&mut a, "grid_preferences", json!({ "offset_x": 13888, "offset_y": 0.25, "unit": "in" }));
+    assert_eq!((v["offset_x_pt"].clone(), v["offset_y_pt"].clone()), (json!(999936.0), json!(18.0)));
+    let v = call(&mut a, "grid_preferences", json!({ "offset_x": -0.0, "offset_y": -0.0, "unit": "mm" }));
+    assert_eq!((v["offset_x_pt"].to_string(), v["offset_y_pt"].to_string()), ("0.0".to_string(), "0.0".to_string()));
+    assert_eq!(call(&mut a, "grid_preferences", json!({ "spacing": 0.01 }))["pitch_pt"], 0.01);
+    let v = call(&mut a, "grid_preferences", json!({ "spacing": 1, "subdivisions": 100 }));
+    assert_eq!((v["subdivisions"].clone(), v["pitch_pt"].clone()), (json!(100), json!(0.01)));
+    let v = call(&mut a, "grid_preferences", json!({ "spacing": 72, "subdivisions": 1, "offset_x": 1000000, "offset_y": -1000000 }));
+    assert_eq!((v["offset_x_pt"].clone(), v["offset_y_pt"].clone()), (json!(1e6), json!(-1e6)));
+
+    let before = call(&mut a, "grid_preferences", json!({ "spacing": 36, "subdivisions": 2, "offset_x": 3, "offset_y": 4 }));
+    for (args, want) in [
+        (json!({ "spacing": 14400.01 }), "between 0.01 and 14400"),
+        (json!({ "spacing": 0.009 }), "between 0.01 and 14400"),
+        (json!({ "spacing": 0 }), "between 0.01 and 14400"),
+        (json!({ "spacing": -1 }), "between 0.01 and 14400"),
+        (json!({ "spacing": 1e300, "unit": "in" }), "between 0.01 and 14400"),
+        (json!({ "spacing": 201, "unit": "in" }), "between 0.01 and 14400"),
+        (json!({ "spacing": 5080.01, "unit": "mm" }), "between 0.01 and 14400"),
+        (json!({ "offset_x": 13889, "unit": "in" }), "offset"),
+        (json!({ "subdivisions": 101 }), "between 1 and 100"),
+        (json!({ "subdivisions": 0 }), "between 1 and 100"),
+        (json!({ "subdivisions": -3 }), "subdivisions"),
+        (json!({ "subdivisions": 1e30 }), "subdivisions"),
+        (json!({ "spacing": 0.5, "subdivisions": 100 }), "too fine"),
+        (json!({ "offset_x": 1000000.5 }), "offset"),
+        (json!({ "offset_y": -1e300 }), "offset"),
+        (json!({ "offset_x": 1e300, "unit": "cm" }), "offset"),
+        (json!({ "unit": "furlong" }), "unit"),
+        (json!({ "spacing": 72, "unit": "furlong" }), "unit"),
+        (json!({ "spacing": "1" }), "spacing"),
+        (json!({ "spacing": 72, "offset_x": "1" }), "offset_x"),
+        (json!({ "spacing": 72, "clear": "yes" }), "clear"),
+        (json!({ "spacing": 72, "clear": true }), "not both"),
+        (json!({ "offset_y": 1, "clear": true }), "not both"),
+    ] {
+        let e = fails(&mut a, "grid_preferences", args.clone());
+        assert!(e.contains(want), "{args}: {e}");
+        assert_eq!(stored(&mut a), before, "{args} stored something");
+    }
+    // A refusal caused only by merging with what is stored: 0.5 points in 100 parts is too fine.
+    let half = call(&mut a, "grid_preferences", json!({ "spacing": 0.5, "subdivisions": 1, "offset_x": 0, "offset_y": 0 }));
+    assert!(fails(&mut a, "grid_preferences", json!({ "subdivisions": 100 })).contains("too fine"));
+    assert_eq!(stored(&mut a), half, "the merged grid was refused, so the stored one stays");
+    // The same checks stand when nothing is stored yet: a refused call leaves it unset.
+    let mut b = Automation::new();
+    assert!(fails(&mut b, "grid_preferences", json!({ "subdivisions": 101 })).contains("between 1 and 100"));
+    assert!(fails(&mut b, "grid_preferences", json!({ "spacing": 14400.01 })).contains("between 0.01 and 14400"));
+    assert_eq!(stored(&mut b), json!({ "set": false }));
+    // The stored grid belongs to one tool session.
+    let mut c = Automation::new();
+    assert_eq!(stored(&mut c), json!({ "set": false }));
+}

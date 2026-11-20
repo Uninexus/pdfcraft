@@ -13067,6 +13067,18 @@ fn conventions_annotations_and_strict_keys_in_both_modes() {
 
 #[cfg(feature = "mcp")]
 #[test]
+fn grid_preferences_is_announced_as_a_writing_idempotent_tool() {
+    let mut s = McpServer::new(Automation::new());
+    let r = rpc(&mut s, 1, "tools/list", json!({}));
+    let tools = r["result"]["tools"].as_array().unwrap();
+    let hints = |name: &str| tools.iter().find(|t| t["name"] == name).unwrap()["annotations"].clone();
+    let h = hints("grid_preferences");
+    assert_eq!((h["readOnlyHint"].clone(), h["destructiveHint"].clone(), h["idempotentHint"].clone()), (json!(false), json!(false), json!(true)));
+    assert_eq!(hints("doc_grid_snap")["readOnlyHint"], true);
+}
+
+#[cfg(feature = "mcp")]
+#[test]
 fn conventions_resources() {
     let dir = workdir("conventions-resources");
     let mut s = McpServer::new(auto(&dir));
