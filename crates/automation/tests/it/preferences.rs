@@ -143,3 +143,68 @@ fn auto_complete_is_off_until_asked_for_and_remembers_only_plain_text_fields() {
     assert!(matches!(a.call("form_preferences", &json!({ "auto_complete": "advanced" })), Err(ToolError::InvalidArgs(_))));
     assert!(matches!(a.call("form_preferences", &json!({ "clear_entries": "yes" })), Err(ToolError::InvalidArgs(_))));
 }
+
+#[test]
+fn the_login_name_authors_comments_only_when_asked_and_a_refused_call_changes_nothing() {
+    let (mut a, doc) = setup("login");
+    let note = |a: &mut Automation| {
+        tool(a, "comment_add", json!({ "doc": doc, "page": 1, "type": "note", "at": [20, 20], "contents": "Check" }));
+    };
+    let first = tool(&mut a, "identity", json!({}));
+    assert_eq!((first["login_name"].clone(), first["author_from_login_name"].clone()), (json!(""), json!(false)));
+    let set = tool(&mut a, "identity", json!({ "name": "Grace Hopper", "login_name": "  ghopper " }));
+    // Set but not asked for: the name is still the author.
+    assert_eq!((set["login_name"].clone(), set["author"].clone()), (json!("ghopper"), json!("Grace Hopper")));
+    note(&mut a);
+    let on = tool(&mut a, "identity", json!({ "author_from_login_name": true }));
+    assert_eq!((on["author"].clone(), on["name"].clone(), on["login_name"].clone()), (json!("ghopper"), json!("Grace Hopper"), json!("ghopper")));
+    note(&mut a);
+    // Changing the name leaves the login name and the switch alone; the typed signature still uses the name.
+    let renamed = tool(&mut a, "identity", json!({ "name": "G. Hopper" }));
+    assert_eq!((renamed["author"].clone(), renamed["author_from_login_name"].clone()), (json!("ghopper"), json!(true)));
+    // A typed signature with no text and no author: its text is the name, its author the login name.
+    tool(&mut a, "fill_sign_add", json!({ "doc": doc, "page": 1, "type": "signature", "at": [20, 150] }));
+    let width = |a: &mut Automation, doc: u64, idx: usize| {
+        let list = tool(a, "comment_list", json!({ "doc": doc }));
+        let stamps: Vec<&Value> = list["comments"].as_array().map(|c| c.iter().filter(|c| c["type"] == "Stamp").collect()).unwrap_or_default();
+        let r = stamps[idx]["rect"].clone();
+        (r[2].as_f64().unwrap_or(0.0) - r[0].as_f64().unwrap_or(0.0), r[3].as_f64().unwrap_or(0.0) - r[1].as_f64().unwrap_or(0.0))
+    };
+    let list = tool(&mut a, "comment_list", json!({ "doc": doc }));
+    let sig_authors: Vec<&Value> =
+        list["comments"].as_array().map(|c| c.iter().filter(|c| c["type"] == "Stamp").map(|c| &c["author"]).collect()).unwrap_or_default();
+    assert_eq!(sig_authors, [&json!("ghopper")]);
+    let from_name = width(&mut a, doc, 0);
+    // The same signature drawn with the text given: the name's text is the same size, the login name's is not.
+    let (mut b, doc_b) = setup("login-text");
+    tool(&mut b, "identity", json!({ "name": "G. Hopper", "login_name": "ghopper", "author_from_login_name": true }));
+    tool(&mut b, "fill_sign_add", json!({ "doc": doc_b, "page": 1, "type": "signature", "at": [20, 150], "text": "G. Hopper" }));
+    tool(&mut b, "fill_sign_add", json!({ "doc": doc_b, "page": 1, "type": "signature", "at": [20, 150], "text": "ghopper" }));
+    let (named, logged) = (width(&mut b, doc_b, 0), width(&mut b, doc_b, 1));
+    assert_ne!(named, logged, "the two texts must draw differently for this check to mean anything");
+    assert_eq!(from_name, named, "a signature with no text is drawn from the name, not the login name");
+    // With no login name the name is used, and the switch stays on.
+    let cleared = tool(&mut a, "identity", json!({ "login_name": "" }));
+    assert_eq!((cleared["author"].clone(), cleared["author_from_login_name"].clone()), (json!("G. Hopper"), json!(true)));
+    note(&mut a);
+    assert_eq!(authors(&mut a, doc), ["Grace Hopper", "ghopper", "G. Hopper", "ghopper"]);
+    // A refused call changes nothing, whichever argument is bad: a long login name beside a valid name,
+    // and a switch that is not a boolean beside a valid login name.
+    // The cap counts characters, not bytes, and is applied after trimming.
+    let set = tool(&mut a, "identity", json!({ "login_name": "é".repeat(200) }));
+    assert_eq!(set["login_name"].as_str().map(|s| s.chars().count()), Some(200));
+    let set = tool(&mut a, "identity", json!({ "login_name": format!("   {}  ", "y".repeat(200)) }));
+    assert_eq!(set["login_name"], json!("y".repeat(200)));
+    assert!(matches!(a.call("identity", &json!({ "login_name": "é".repeat(201) })), Err(ToolError::InvalidArgs(_))));
+    tool(&mut a, "identity", json!({ "login_name": "ghopper" }));
+    let before = tool(&mut a, "identity", json!({}));
+    let long = "x".repeat(201);
+    for bad in [
+        json!({ "name": "Other", "login_name": long }),
+        json!({ "login_name": "other", "author_from_login_name": "yes" }),
+        json!({ "login_name": 7 }),
+    ] {
+        assert!(matches!(a.call("identity", &bad), Err(ToolError::InvalidArgs(_))), "{bad}");
+        assert_eq!(tool(&mut a, "identity", json!({})), before, "{bad}");
+    }
+}
