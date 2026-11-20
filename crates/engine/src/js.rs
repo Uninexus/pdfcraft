@@ -810,6 +810,14 @@ impl crate::Document {
         self.editor.as_ref().and_then(|e| pdfcraft_forms::field_actions(&e.cos, name).ok()).unwrap_or_default()
     }
 
+    /// The Submit a Form actions of field `name` as written (nothing is sent), by trigger.
+    pub fn field_submit_actions(&self, name: &str) -> Result<Vec<pdfcraft_forms::SubmitAction>, pdfcraft_forms::FormError> {
+        match self.editor.as_ref() {
+            Some(e) => pdfcraft_forms::submit_actions(&e.cos, name),
+            None => Ok(Vec::new()),
+        }
+    }
+
     /// Field Properties ▸ Actions: how many actions are chained after each trigger's first one.
     pub fn field_action_chains(&self, name: &str) -> Vec<(pdfcraft_forms::Trigger, usize)> {
         self.editor.as_ref().and_then(|e| pdfcraft_forms::field_action_chains(&e.cos, name).ok()).unwrap_or_default()

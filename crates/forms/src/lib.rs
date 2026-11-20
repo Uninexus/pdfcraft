@@ -24,6 +24,7 @@ mod calc_order;
 pub mod detect;
 mod js_inventory;
 mod scripting;
+mod submit;
 pub mod table;
 pub use actions::{FieldAction, Trigger, field_action_chains, field_actions, set_field_actions, widget_scripts};
 pub use author::{
@@ -40,6 +41,7 @@ pub use scripting::{
     DocumentTrigger, FieldChange, FieldEvent, NoScripts, PageEvent, PageScript, ScriptResult, Scripts, apply_script_changes, document_action_scripts,
     document_scripts, document_scripts_named, page_scripts, set_document_script, set_field_script,
 };
+pub use submit::{MAX_SUBMIT_URL_BYTES, SubmitAction, SubmitFields, SubmitFormat, submit_actions};
 
 mod appearances;
 mod read;

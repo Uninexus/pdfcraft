@@ -47,7 +47,7 @@ impl Trigger {
     }
 
     /// The `/AA` key (`None`: Mouse Up lives in `/A`).
-    fn key(self) -> Option<&'static [u8]> {
+    pub(crate) fn key(self) -> Option<&'static [u8]> {
         match self {
             Trigger::MouseUp => None,
             Trigger::MouseDown => Some(b"D"),

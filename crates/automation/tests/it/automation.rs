@@ -10524,6 +10524,76 @@ fn field_actions_through_tools() {
     assert!(a.call("form_set_actions", &json!({ "doc": doc, "field": "Go", "actions": [{ "trigger": "wave" }] })).is_err());
 }
 
+/// `form_submit_actions` reads a Submit a Form action the way a viewer would start it and sends
+/// nothing: the address, the format, the field list and the flags, for the triggers that have one.
+#[test]
+fn submit_form_actions_are_listed_through_tools_and_send_nothing() {
+    use pdfcraft_cos::{Dict, ObjRef, Object, PdfString};
+    let dir = workdir("submit-actions");
+    let mut a = auto(&dir);
+    // A button whose Mouse Up submits through the tool that writes the address (nothing else).
+    let doc = ok(&mut a, "doc_open", json!({ "path": "a.pdf" }))["doc"].as_u64().unwrap();
+    ok(&mut a, "form_add_field", json!({ "doc": doc, "page": 1, "type": "button", "rect": [20, 20, 120, 42], "name": "Send" }));
+    ok(
+        &mut a,
+        "form_set_actions",
+        json!({ "doc": doc, "field": "Send", "actions": [{ "trigger": "mouse_up", "submit": "https://example.org/in" }] }),
+    );
+    let r = ok(&mut a, "form_submit_actions", json!({ "doc": doc, "field": "Send" }));
+    assert_eq!(r["submits"].as_array().unwrap().len(), 1, "{r}");
+    let s = &r["submits"][0];
+    assert_eq!(
+        (s["trigger"].as_str(), s["url"].as_str(), s["format"].as_str()),
+        (Some("mouse_up"), Some("https://example.org/in"), Some("html")),
+        "{r}"
+    );
+    assert_eq!(s["fields"], json!({ "mode": "all" }));
+    // form_set_actions writes the HTML format (bit 3) with a file specification address.
+    assert_eq!((s["flags"].as_u64(), s["get_method"].as_bool()), (Some(4), Some(false)));
+    // A field with no submit action lists none; an unknown field is an error an agent can act on.
+    ok(&mut a, "form_add_field", json!({ "doc": doc, "page": 1, "type": "text", "rect": [20, 60, 120, 80], "name": "Plain" }));
+    assert_eq!(ok(&mut a, "form_submit_actions", json!({ "doc": doc, "field": "Plain" }))["submits"], json!([]));
+    assert!(a.call("form_submit_actions", &json!({ "doc": doc, "field": "Nope" })).is_err());
+
+    // A file whose button submits as XFDF every field except two (flags 33: XFDF and Include/Exclude), and one whose address is too long.
+    let mut cos = pdfcraft_cos::Document::open(std::sync::Arc::new(fixture(1))).unwrap();
+    let text = |t: &[u8]| Object::String(PdfString::literal(t.to_vec()));
+    let mut act = Dict::new();
+    act.set(b"S".to_vec(), Object::name("SubmitForm"));
+    act.set(b"F".to_vec(), text(b"https://example.org/xfdf"));
+    act.set(b"Fields".to_vec(), Object::Array(vec![text(b"a"), text(b"b")]));
+    act.set(b"Flags".to_vec(), Object::Int(32 | 1));
+    let mut long = act.clone();
+    long.set(b"F".to_vec(), Object::String(PdfString::literal(vec![b'x'; 70_000])));
+    let mut widget = |name: &[u8], act: Dict| {
+        let mut w = Dict::new();
+        w.set(b"Type".to_vec(), Object::name("Annot"));
+        w.set(b"Subtype".to_vec(), Object::name("Widget"));
+        w.set(b"FT".to_vec(), Object::name("Btn"));
+        w.set(b"Ff".to_vec(), Object::Int(65536));
+        w.set(b"T".to_vec(), text(name));
+        w.set(b"Rect".to_vec(), Object::Array(vec![10.into(), 10.into(), 60.into(), 30.into()]));
+        w.set(b"A".to_vec(), Object::Dict(act));
+        Object::Ref(cos.add(Object::Dict(w)))
+    };
+    let (w1, w2) = (widget(b"Go", act), widget(b"Long", long));
+    cos.update_dict(ObjRef::new(1, 0), |d| {
+        let mut form = Dict::new();
+        form.set(b"Fields".to_vec(), Object::Array(vec![w1.clone(), w2.clone()]));
+        d.set(b"AcroForm".to_vec(), Object::Dict(form));
+    })
+    .unwrap();
+    std::fs::write(dir.join("submit.pdf"), pdfcraft_cos::write_full(&cos, &Default::default()).unwrap()).unwrap();
+    let doc = ok(&mut a, "doc_open", json!({ "path": "submit.pdf" }))["doc"].as_u64().unwrap();
+    let r = ok(&mut a, "form_submit_actions", json!({ "doc": doc, "field": "Go" }));
+    let s = &r["submits"][0];
+    assert_eq!((s["url"].as_str(), s["format"].as_str(), s["flags"].as_u64()), (Some("https://example.org/xfdf"), Some("xfdf"), Some(33)), "{r}");
+    assert_eq!(s["fields"], json!({ "mode": "except", "names": ["a", "b"] }), "{r}");
+    assert_eq!(s["fields_left_out"], 0, "{r}");
+    let r = ok(&mut a, "form_submit_actions", json!({ "doc": doc, "field": "Long" }));
+    assert_eq!((r["submits"][0]["url"].as_str(), r["submits"][0]["url_too_long"].as_bool()), (Some(""), Some(true)), "{r}");
+}
+
 #[test]
 fn detecting_form_fields_through_tools() {
     let dir = workdir("detect-fields");
