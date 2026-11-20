@@ -19,6 +19,7 @@ mod content_update_image;
 mod document_actions;
 mod document_parts;
 mod edit_all_javascripts;
+mod extract_delete_refused;
 mod find_folder;
 mod find_text;
 mod form_bulk;

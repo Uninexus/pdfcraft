@@ -392,6 +392,12 @@ impl Automation {
         let (id, name) = (doc.id, format!("{} (extract)", doc.name));
         let stem = Path::new(&doc.name).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "page".into());
         let pages = self.pages(a, "pages")?;
+        let delete = a.opt_bool("delete")?.unwrap_or(false);
+        // Refused before anything is written or opened: the pages are removed only after the copy
+        // is delivered, and a removal refused then would leave the copy behind with an error.
+        if delete {
+            self.session.check_delete_pages(id, &pages).map_err(failed)?;
+        }
         let mut out = if a.opt_bool("separate")?.unwrap_or(false) {
             // Each page as its own file.
             let out_dir = a.str("out_dir").map_err(|_| ToolError::InvalidArgs("separate files need out_dir".into()))?;
@@ -400,7 +406,7 @@ impl Automation {
             let bytes = self.session.extract(id, &pages).map_err(failed)?;
             self.deliver(a, &name, bytes)?
         };
-        if a.opt_bool("delete")?.unwrap_or(false) {
+        if delete {
             let deleted = self.apply(a, Edit::DeletePages { pages })?;
             out["original"] = deleted;
         }

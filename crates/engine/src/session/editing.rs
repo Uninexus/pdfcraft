@@ -125,6 +125,26 @@ fn sync_script_history(doc: &Document, previous: &pdfcraft_cos::Document, restor
 }
 
 impl Session {
+    /// Whether [`Edit::DeletePages`] of `pages` (0-based) would be accepted by document `id`, for
+    /// the refusals checked here: a read-only document, permissions that refuse page changes, a
+    /// page that does not exist, and removing every page; each gives the error [`Session::apply`]
+    /// gives. The edit is tried on a copy of the document: nothing changes, and no undo step or
+    /// unsaved change is made. A refusal it cannot see is not reported: a signed file with no
+    /// revisions to append to (`SignedRewrite`), a write error while an XFA form's data is synced
+    /// or laid out again, and a failure of the refresh after the edit (which rolls the edit back).
+    pub fn check_delete_pages(&self, id: DocId, pages: &[usize]) -> Result<(), EditError> {
+        let doc = self.get(id).ok_or(EditError::NoDocument)?;
+        let editor = doc.editor.as_ref().ok_or_else(|| EditError::ReadOnly(doc.read_only_reason.clone().unwrap_or_default()))?;
+        let edit = Edit::DeletePages { pages: pages.to_vec() };
+        if let Some(p) = editor.cos.permissions() {
+            check_permission(&edit, &p)?;
+        }
+        let mut next = editor.cos.clone();
+        let mut cx = EditCtx::new(self.now(), doc.generation ^ (id.0 << 48));
+        cx.pages = doc.info.pages.len();
+        run_checked_edit(&mut next, &edit, &mut cx)
+    }
+
     /// Apply an edit. On success the previous state is undoable and the view data is refreshed.
     pub fn apply(&mut self, id: DocId, edit: Edit) -> Result<(), EditError> {
         self.apply_reporting(id, edit).map(|_| ())
