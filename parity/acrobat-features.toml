@@ -9394,11 +9394,11 @@ title = "Suggest alternate text via an AI provider"
 area = "M"
 tier = "P2"
 milestone = "M13"
-status = "planned"
+status = "partial"
 commands = []
-tools = []
-evidence = []
-notes = "optional provider; off by default"
+tools = ["ai_alt_text_suggest"]
+evidence = ["crates/automation/tests/it/ai.rs::alt_text_suggestions_answer_only_the_figures_asked_about_and_change_nothing", "crates/automation/tests/it/ai.rs::alt_text_suggestions_send_nothing_when_no_figure_needs_text", "crates/automation/tests/it/ai.rs::a_figure_on_a_page_the_size_limit_left_out_is_not_described", "crates/ai/src/tests.rs::alt_texts_are_read_from_a_wrapped_reply_and_junk_is_dropped"]
+notes = "ai_alt_text_suggest (headless only; optional provider, off until an endpoint is set up) sends the text of the pages that hold tagged figures without alternate text (or the figures named in `figures`) to the endpoint set up for the AI assistant and asks for one short description of each as a JSON list. The model gets page text only, never the pictures, so a suggestion rests on captions and nearby words; check each against the figure. A reply entry counts only for a figure that was asked about and whose page was sent (the text is cut to about 60,000 characters; `not_sent` lists the figures left out, `truncated` says text was cut), the first answer for a figure wins, an alt is one line of at most 250 characters, and at most 100 figures are asked and 200 reply entries read; `unanswered` and `ignored` count the rest. With nothing to describe the endpoint is not contacted. It sets nothing: the person reviews the list and applies the accepted ones with accessibility_set_alt. Tested only against a local stand-in server, not a real model. Missing: any UI, applying a suggestion in one step, figures that are not tagged, and describing the picture itself (no vision model)."
 
 [[feature]]
 id = "a11y.set-language"

@@ -528,5 +528,55 @@ pub fn parse_passages(reply: &str) -> Option<Vec<String>> {
     Some(out)
 }
 
+/// The instruction behind alternate-text suggestions, for the figures `figures` (`(figure number, 1-based page)`).
+/// The model gets page text only, never the pictures, and is told so.
+pub fn alt_text_question(figures: &[(u32, usize)]) -> String {
+    let list = figures.iter().map(|(figure, page)| format!("figure {figure} (page {page})")).collect::<Vec<_>>().join(", ");
+    format!(
+        "These figures have no alternate text: {list}. You are given the text of their pages only and cannot see the pictures, so \
+base each description on what that text says about the figure (a caption, a nearby heading or sentence, a reference such as \"Figure 2\"). \
+Write each as one short sentence a screen reader can read aloud, under {MAX_ALT_CHARS} characters. Leave a figure out when the text gives no \
+basis for describing it, and do not invent details. Reply with only a JSON array of objects, for example \
+[{{\"figure\": 7, \"alt\": \"Bar chart of quarterly revenue\"}}], and no other text. Reply [] when there is none."
+    )
+}
+
+/// The most characters one suggested alternate text may have.
+pub const MAX_ALT_CHARS: usize = 250;
+/// The most entries read from one reply to [`alt_text_question`]; the rest are ignored.
+pub const MAX_ALT_ENTRIES: usize = 200;
+
+/// Reads a model's reply to [`alt_text_question`]: the first JSON array in it that parses and holds an object, else the first that parses
+/// (models often wrap it in a code fence or a sentence). Each entry that is an object with a `figure` that is a whole number of at most
+/// 32 bits and an `alt` that is a string is kept, in order, repeats included, with the whitespace of `alt` (newlines and tabs too) folded
+/// into single spaces; any other entry, and one whose `alt` is then empty, longer than [`MAX_ALT_CHARS`] or still holds a control
+/// character, is dropped. At most [`MAX_ALT_ENTRIES`] entries are looked at. `None` when the reply holds no array.
+pub fn parse_alt_texts(reply: &str) -> Option<Vec<(u32, String)>> {
+    let mut arrays = reply.match_indices('[').filter_map(|(i, _)| {
+        let rest = reply.get(i..)?;
+        match serde_json::Deserializer::from_str(rest).into_iter::<serde_json::Value>().next()? {
+            Ok(serde_json::Value::Array(items)) => Some(items),
+            _ => None,
+        }
+    });
+    let first = arrays.next()?;
+    let items = if first.iter().any(serde_json::Value::is_object) {
+        first
+    } else {
+        arrays.find(|a| a.iter().any(serde_json::Value::is_object)).unwrap_or(first)
+    };
+    let mut out = Vec::new();
+    for item in items.iter().take(MAX_ALT_ENTRIES) {
+        let Some(figure) = item.get("figure").and_then(serde_json::Value::as_u64).and_then(|n| u32::try_from(n).ok()) else { continue };
+        let Some(raw) = item.get("alt").and_then(serde_json::Value::as_str) else { continue };
+        let alt = raw.split_whitespace().collect::<Vec<_>>().join(" ");
+        if alt.is_empty() || alt.chars().count() > MAX_ALT_CHARS || alt.chars().any(char::is_control) {
+            continue;
+        }
+        out.push((figure, alt));
+    }
+    Some(out)
+}
+
 #[cfg(test)]
 mod tests;

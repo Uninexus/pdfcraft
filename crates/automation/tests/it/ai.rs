@@ -180,3 +180,160 @@ fn redaction_suggestions_only_count_text_the_model_was_given() {
     assert_eq!(out["suggestions"], json!([{ "text": "Jane Doe", "pages": [1], "occurrences": 1 }]));
     assert_eq!(out["not_in_text"], 1, "a passage the model was not given is not a finding");
 }
+
+/// One page with a caption and three tagged figures: 7 and 9 have no alternate text (9 an empty one), 8 has some.
+fn figures_pdf() -> Vec<u8> {
+    let c = "BT /F1 12 Tf 20 150 Td (Figure 1: Quarterly revenue) Tj ET /Figure << /MCID 0 >> BDC 10 100 40 20 re f EMC \
+/Figure << /MCID 1 >> BDC 100 100 50 30 re f EMC /Figure << /MCID 2 >> BDC 100 20 50 30 re f EMC";
+    format!(
+        "%PDF-1.7
+1 0 obj << /Type /Catalog /Pages 2 0 R /MarkInfo << /Marked true >> /StructTreeRoot 5 0 R >> endobj
+2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Contents 4 0 R /StructParents 0 /Resources << /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> >> >> >> endobj
+4 0 obj << /Length {} >> stream
+{c}
+endstream endobj
+5 0 obj << /Type /StructTreeRoot /K 6 0 R /ParentTree 10 0 R >> endobj
+6 0 obj << /S /Document /P 5 0 R /K [7 0 R 8 0 R 9 0 R] >> endobj
+7 0 obj << /S /Figure /P 6 0 R /Pg 3 0 R /K 0 >> endobj
+8 0 obj << /S /Figure /P 6 0 R /Pg 3 0 R /K 1 /Alt (Existing text) >> endobj
+9 0 obj << /S /Figure /P 6 0 R /Pg 3 0 R /K 2 /Alt () >> endobj
+10 0 obj << /Nums [0 [7 0 R 8 0 R 9 0 R]] >> endobj
+trailer << /Root 1 0 R >>
+%%EOF",
+        c.len()
+    )
+    .into_bytes()
+}
+
+#[test]
+fn alt_text_suggestions_answer_only_the_figures_asked_about_and_change_nothing() {
+    let dir = std::env::temp_dir().join(format!("pdfcraft-automation-ai-alt-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("f.pdf"), figures_pdf()).unwrap();
+    let mut a = Automation::new().with_root(&dir).unwrap();
+    let doc = json_of(a.call("doc_open", &json!({ "path": "f.pdf" })).unwrap())["doc"].as_u64().unwrap();
+    let before = json_of(a.call("accessibility_figures", &json!({ "doc": doc })).unwrap());
+    assert_eq!(before["count"], 3, "{before}");
+
+    // Figures 7 and 9 are asked about; the model answers 7, a figure that has text (8), one that does not exist (99), 7 again and a
+    // blank text for 9.
+    let (url, req) = server(
+        r#"{"choices":[{"message":{"content":"[{\"figure\":7,\"alt\":\"Bar chart of\\nquarterly revenue\"},{\"figure\":8,\"alt\":\"x\"},{\"figure\":99,\"alt\":\"y\"},{\"figure\":7,\"alt\":\"again\"},{\"figure\":9,\"alt\":\" \"}]"}}]}"#,
+    );
+    let out = json_of(a.call("ai_alt_text_suggest", &json!({ "doc": doc, "base_url": url, "model": "m" })).unwrap());
+    assert_eq!(out["suggestions"], json!([{ "figure": 7, "page": 1, "alt": "Bar chart of quarterly revenue" }]), "{out}");
+    assert_eq!((out["asked"].clone(), out["unanswered"].clone(), out["ignored"].clone()), (json!([7, 9]), json!([9]), json!(3)));
+    assert_eq!((out["not_sent"].clone(), out["pages_sent"].clone(), out["truncated"].clone()), (json!([]), json!([1]), json!(false)));
+    let req = req.join().unwrap();
+    assert!(req.contains("figure 7 (page 1), figure 9 (page 1)") && req.contains("Quarterly revenue") && !req.contains("figure 8 (page"), "{req}");
+    assert_eq!(json_of(a.call("accessibility_figures", &json!({ "doc": doc })).unwrap()), before, "suggesting changes nothing");
+
+    // Naming a figure asks about it even with text; one that is not a figure is refused before the endpoint is contacted.
+    let (url, req) = server(r#"{"choices":[{"message":{"content":"[{\"figure\":8,\"alt\":\"A revenue bar\"}]"}}]}"#);
+    let out = json_of(a.call("ai_alt_text_suggest", &json!({ "doc": doc, "figures": [8], "base_url": url, "model": "m" })).unwrap());
+    assert_eq!(out["suggestions"], json!([{ "figure": 8, "page": 1, "alt": "A revenue bar" }]), "{out}");
+    assert!(req.join().unwrap().contains("figure 8 (page 1)"));
+    let e = a
+        .call("ai_alt_text_suggest", &json!({ "doc": doc, "figures": [6], "base_url": "http://127.0.0.1:1/v1", "model": "m" }))
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("6 is not a figure"), "{e}");
+    // More than 100 names are refused before the document is scanned or anything is sent.
+    let many: Vec<u32> = (1..=101).collect();
+    let e = a
+        .call("ai_alt_text_suggest", &json!({ "doc": doc, "figures": many, "base_url": "http://127.0.0.1:1/v1", "model": "m" }))
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("more than 100 figures"), "{e}");
+
+    // A reply that is not a list is an error that says so.
+    let (url, req) = server(r#"{"choices":[{"message":{"content":"I cannot see them."}}]}"#);
+    let e = a.call("ai_alt_text_suggest", &json!({ "doc": doc, "base_url": url, "model": "m" })).unwrap_err().to_string();
+    assert!(e.contains("JSON list"), "{e}");
+    req.join().unwrap();
+}
+
+#[test]
+fn alt_text_suggestions_send_nothing_when_no_figure_needs_text() {
+    let dir = std::env::temp_dir().join(format!("pdfcraft-automation-ai-alt0-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("a.pdf"), pdf()).unwrap();
+    let mut a = Automation::new().with_root(&dir).unwrap();
+    let doc = json_of(a.call("doc_open", &json!({ "path": "a.pdf" })).unwrap())["doc"].as_u64().unwrap();
+    // An untagged page has no figure; the endpoint does not exist, and nothing tries it.
+    let out = json_of(a.call("ai_alt_text_suggest", &json!({ "doc": doc, "base_url": "http://127.0.0.1:1/v1", "model": "m" })).unwrap());
+    assert_eq!((out["suggestions"].clone(), out["asked"].clone(), out["pages_sent"].clone()), (json!([]), json!([]), json!([])));
+}
+
+#[test]
+fn a_figure_on_a_page_the_size_limit_left_out_is_not_described() {
+    // Page 1 holds about 70,000 characters of text and figure 10; page 2 holds figure 12 and so is never sent.
+    let mut big = String::from("BT /F1 4 Tf 5 TL 5 3990 Td\n");
+    for _ in 0..700 {
+        big.push_str(&format!("({}) '\n", "lorem ipsum ".repeat(8)));
+    }
+    big.push_str("ET /Figure << /MCID 0 >> BDC 10 10 40 20 re f EMC");
+    let small = "/Figure << /MCID 0 >> BDC 10 10 40 20 re f EMC";
+    let pdf = format!(
+        "%PDF-1.7
+1 0 obj << /Type /Catalog /Pages 2 0 R /MarkInfo << /Marked true >> /StructTreeRoot 5 0 R >> endobj
+2 0 obj << /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 /MediaBox [0 0 600 4000] /Resources << /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> >> >> >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R /Contents 6 0 R /StructParents 0 >> endobj
+4 0 obj << /Type /Page /Parent 2 0 R /Contents 7 0 R /StructParents 1 >> endobj
+5 0 obj << /Type /StructTreeRoot /K 8 0 R /ParentTree 11 0 R >> endobj
+6 0 obj << /Length {} >> stream
+{big}
+endstream endobj
+7 0 obj << /Length {} >> stream
+{small}
+endstream endobj
+8 0 obj << /S /Document /P 5 0 R /K [10 0 R 12 0 R] >> endobj
+10 0 obj << /S /Figure /P 8 0 R /Pg 3 0 R /K 0 >> endobj
+12 0 obj << /S /Figure /P 8 0 R /Pg 4 0 R /K 0 >> endobj
+11 0 obj << /Nums [0 [10 0 R] 1 [12 0 R]] >> endobj
+trailer << /Root 1 0 R >>
+%%EOF",
+        big.len(),
+        small.len()
+    );
+    let dir = std::env::temp_dir().join(format!("pdfcraft-automation-ai-alt2-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("two.pdf"), pdf).unwrap();
+    let mut a = Automation::new().with_root(&dir).unwrap();
+    let doc = json_of(a.call("doc_open", &json!({ "path": "two.pdf" })).unwrap())["doc"].as_u64().unwrap();
+    let (url, req) = server(r#"{"choices":[{"message":{"content":"[{\"figure\":10,\"alt\":\"First\"},{\"figure\":12,\"alt\":\"Second\"}]"}}]}"#);
+    let out = json_of(a.call("ai_alt_text_suggest", &json!({ "doc": doc, "base_url": url, "model": "m" })).unwrap());
+    req.join().unwrap();
+    assert_eq!(out["asked"], json!([10, 12]), "{out}");
+    assert_eq!(out["suggestions"], json!([{ "figure": 10, "page": 1, "alt": "First" }]), "{out}");
+    assert_eq!(
+        (out["not_sent"].clone(), out["ignored"].clone(), out["pages_sent"].clone(), out["truncated"].clone()),
+        (json!([12]), json!(1), json!([1]), json!(true))
+    );
+}
+
+#[test]
+fn a_named_figure_drawn_on_no_page_is_refused_before_anything_is_sent() {
+    let pdf = "%PDF-1.7
+1 0 obj << /Type /Catalog /Pages 2 0 R /MarkInfo << /Marked true >> /StructTreeRoot 5 0 R >> endobj
+2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 200 200] >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R >> endobj
+5 0 obj << /Type /StructTreeRoot /K 6 0 R >> endobj
+6 0 obj << /S /Document /P 5 0 R /K [7 0 R] >> endobj
+7 0 obj << /S /Figure /P 6 0 R >> endobj
+trailer << /Root 1 0 R >>
+%%EOF";
+    let dir = std::env::temp_dir().join(format!("pdfcraft-automation-ai-alt3-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("n.pdf"), pdf).unwrap();
+    let mut a = Automation::new().with_root(&dir).unwrap();
+    let doc = json_of(a.call("doc_open", &json!({ "path": "n.pdf" })).unwrap())["doc"].as_u64().unwrap();
+    let listed = json_of(a.call("accessibility_figures", &json!({ "doc": doc })).unwrap());
+    assert_eq!(listed["figures"], json!([{ "figure": 7, "page": null, "alt": null, "rect": null }]), "{listed}");
+    let e = a
+        .call("ai_alt_text_suggest", &json!({ "doc": doc, "figures": [7], "base_url": "http://127.0.0.1:1/v1", "model": "m" }))
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("figure 7 is not drawn on any page"), "{e}");
+}
