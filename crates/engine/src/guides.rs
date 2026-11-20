@@ -107,6 +107,24 @@ impl Guides {
     }
 }
 
+/// `position` on `axis` of page `page` (0-based) of `doc`, rounded to a thousandth of a point
+/// (`-0` becomes `0`): refused for a page the document does not have and for a value that is not
+/// finite or lies off the displayed page (its edges are on it).
+fn position_on_page(doc: &crate::Document, page: usize, axis: GuideAxis, position: f64) -> Result<f64, EditError> {
+    let Some(info) = doc.info.pages.get(page) else {
+        return Err(EditError::Invalid(format!("page {} is out of range: the document has {} pages", page + 1, doc.info.pages.len())));
+    };
+    let limit = f64::from(match axis {
+        GuideAxis::Vertical => info.width,
+        GuideAxis::Horizontal => info.height,
+    });
+    if !position.is_finite() || position < 0.0 || position > limit {
+        return Err(EditError::Invalid(format!("a {} guide must lie on the page, between 0 and {limit} points (got {position})", axis.name())));
+    }
+    // To a thousandth of a point; adding zero turns -0.0 into 0.0.
+    Ok((position * 1000.0).round() / 1000.0 + 0.0)
+}
+
 impl Session {
     /// The guides of a document, in the order they were added; `page` (0-based) limits them to
     /// one page.
@@ -120,18 +138,7 @@ impl Session {
     /// position off the page or not finite, and past [`MAX_GUIDES`].
     pub fn add_guide(&mut self, id: DocId, page: usize, axis: GuideAxis, position: f64) -> Result<(Guide, bool), EditError> {
         let doc = self.doc_mut(id)?;
-        let Some(info) = doc.info.pages.get(page) else {
-            return Err(EditError::Invalid(format!("page {} is out of range: the document has {} pages", page + 1, doc.info.pages.len())));
-        };
-        let limit = f64::from(match axis {
-            GuideAxis::Vertical => info.width,
-            GuideAxis::Horizontal => info.height,
-        });
-        if !position.is_finite() || position < 0.0 || position > limit {
-            return Err(EditError::Invalid(format!("a {} guide must lie on the page, between 0 and {limit} points (got {position})", axis.name())));
-        }
-        // To a thousandth of a point; adding zero turns -0.0 into 0.0.
-        let position = (position * 1000.0).round() / 1000.0 + 0.0;
+        let position = position_on_page(doc, page, axis, position)?;
         if let Some(found) = doc.guides.list.iter().find(|g| g.page == page && g.axis == axis && g.position == position) {
             return Ok((found.clone(), false));
         }
@@ -142,6 +149,41 @@ impl Session {
         let guide = Guide { id: doc.guides.next_id, page, axis, position };
         doc.guides.list.push(guide.clone());
         Ok((guide, true))
+    }
+
+    /// Moves the guide with this id along its axis to `position` (dragging it, in Acrobat), keeping
+    /// its id, page and axis; the bool is `true` when it moved and `false` when it was already
+    /// there. The position is checked as [`Session::add_guide`] checks one and rounded as it is.
+    /// Refused, with nothing changed, for an id no guide has, a guide whose page the document no
+    /// longer has (there is no page to measure the position against), a position off the page or
+    /// not finite, and a position where another guide of that page and axis already lies (two
+    /// guides are never one place; remove one instead).
+    pub fn move_guide(&mut self, id: DocId, guide: u64, position: f64) -> Result<(Guide, bool), EditError> {
+        let doc = self.doc_mut(id)?;
+        let Some(current) = doc.guides.list.iter().find(|g| g.id == guide).cloned() else {
+            return Err(EditError::Invalid(format!("there is no guide {guide} (see doc_guides)")));
+        };
+        if current.page >= doc.info.pages.len() {
+            return Err(EditError::Invalid(format!(
+                "guide {guide} is on page {}, which the document no longer has, so there is nothing to measure its position against; remove it with doc_guide_remove",
+                current.page + 1
+            )));
+        }
+        let position = position_on_page(doc, current.page, current.axis, position)?;
+        if position == current.position {
+            return Ok((current, false));
+        }
+        if let Some(other) = doc.guides.list.iter().find(|g| g.page == current.page && g.axis == current.axis && g.position == position) {
+            return Err(EditError::Invalid(format!(
+                "guide {} is already at {position} points; remove one of the two instead of moving onto it",
+                other.id
+            )));
+        }
+        let Some(slot) = doc.guides.list.iter_mut().find(|g| g.id == guide) else {
+            return Err(EditError::Invalid(format!("there is no guide {guide} (see doc_guides)")));
+        };
+        slot.position = position;
+        Ok((slot.clone(), true))
     }
 
     /// Removes the guide with this id; `false` when there is none.

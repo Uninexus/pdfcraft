@@ -179,6 +179,15 @@ pub fn tools() -> Vec<ToolDef> {
                 }),
                 &["doc", "page", "axis", "position"],
             )),
+        t("doc_guide_move", "Move a guide", "View, Guides: move one guide, by id (from doc_guides), along its axis to position, as dragging it does: a vertical guide to that many points from the page's left edge, a horizontal one from its top edge, on the displayed page (after rotation). Its id, page and axis stay. The position must lie on the page, edges included, and is rounded to a thousandth of a point (-0 becomes 0). Returns the guide with moved: false when it was already at that rounded place. Refused, with nothing changed, for an id no guide has, a guide whose page the document no longer has (the error says so and names doc_guide_remove: there is no page to measure against), a position off the page or not a finite number, and a position where another guide of that page and axis already lies (the error names it): guides are never doubled, so remove one instead. View state only (see doc_guides): not saved into the PDF and not undoable.")
+            .with(schema(
+                json!({
+                    "doc": doc(),
+                    "id": { "type": "integer", "minimum": 1, "description": "A guide id from doc_guides." },
+                    "position": { "type": "number", "minimum": 0, "description": "Points from the left edge (vertical guide) or top edge (horizontal guide) of the displayed page." },
+                }),
+                &["doc", "id", "position"],
+            )),
         t("doc_guide_remove", "Remove guides", "View, Guides: remove one guide by id (from doc_guides), or clear them: all: true removes every guide of the document, or only those of page when it is given. Give id, or all. Returns how many were removed; an id that is not there removes 0. page need not exist any more. Guides do not follow pages that are inserted, deleted or reordered, nor rotation or cropping, so one may name a page the document no longer has: such guides are still listed and can be removed by id or by that page number. View state only, not undoable.")
             .with(schema(
                 json!({
