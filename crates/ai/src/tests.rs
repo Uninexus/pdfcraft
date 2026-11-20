@@ -256,6 +256,26 @@ fn passages_ignore_brackets_around_the_list_and_fold_newlines_and_tabs() {
 }
 
 #[test]
+fn alt_texts_are_read_from_a_wrapped_reply_and_junk_is_dropped() {
+    let reply = "As in [1]: ```json\n[{\"figure\": 7, \"alt\": \"Bar\\n chart\"}, {\"figure\": \"8\", \"alt\": \"x\"}, {\"figure\": 9}, \
+{\"figure\": 9, \"alt\": \"  \"}, {\"figure\": -1, \"alt\": \"x\"}, {\"figure\": 4294967296, \"alt\": \"x\"}, {\"figure\": 5, \"alt\": \"a\\u0007b\"}, \
+7, {\"figure\": 7, \"alt\": \"Again\"}]\n```";
+    assert_eq!(parse_alt_texts(reply), Some(vec![(7, "Bar chart".to_owned()), (7, "Again".to_owned())]));
+    assert_eq!(parse_alt_texts("[]"), Some(vec![]));
+    assert_eq!(parse_alt_texts("no figures"), None);
+    let long = format!("[{{\"figure\": 1, \"alt\": \"{}\"}}]", "x".repeat(MAX_ALT_CHARS + 1));
+    assert_eq!(parse_alt_texts(&long), Some(vec![]));
+    let many = format!("[{}]", (0..MAX_ALT_ENTRIES + 50).map(|i| format!("{{\"figure\": {i}, \"alt\": \"a\"}}")).collect::<Vec<_>>().join(","));
+    assert_eq!(parse_alt_texts(&many).map(|v| v.len()), Some(MAX_ALT_ENTRIES));
+}
+
+#[test]
+fn the_alt_text_question_names_each_figure_and_its_page() {
+    let q = alt_text_question(&[(7, 1), (12, 3)]);
+    assert!(q.contains("figure 7 (page 1), figure 12 (page 3)") && q.contains("cannot see the pictures"), "{q}");
+}
+
+#[test]
 fn document_context_reports_what_was_really_included() {
     let ctx = document_context(&[(1, "short".into()), (2, "é".repeat(MAX_CONTEXT_CHARS + 10)), (3, "never seen".into())]);
     assert!(ctx.cut);
