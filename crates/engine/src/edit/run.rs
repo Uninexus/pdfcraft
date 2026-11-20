@@ -145,6 +145,7 @@ pub(crate) fn check_permission(edit: &Edit, p: &pdfcraft_cos::Permissions) -> Re
         | Edit::SetCalculationOrder { .. }
         | Edit::SetInitialView(_)
         | Edit::SetPrintPresets(_)
+        | Edit::SetBaseUrl(_)
         | Edit::FixHairlines { .. }
         | Edit::AliasInks { .. }
         | Edit::AddAttachment { .. }
@@ -939,6 +940,7 @@ pub(crate) fn run_edit(doc: &mut pdfcraft_cos::Document, edit: &Edit, cx: &mut E
         }
         Edit::SetInitialView(v) => pdfcraft_organize::set_initial_view(doc, v)?,
         Edit::SetPrintPresets(p) => pdfcraft_organize::print_presets::set_print_presets(doc, p)?,
+        Edit::SetBaseUrl(base) => pdfcraft_organize::base_url::set_base_url(doc, base.as_deref())?,
         Edit::AutoTagText => {
             a11y::autotag_text(doc).map_err(|e| EditError::Accessibility(e.to_string()))?;
         }

@@ -15,6 +15,7 @@ use pdfcraft_cos::{Dict, Document, ObjRef, Object, PdfString, XrefEntry};
 
 mod associated;
 mod attachments;
+pub mod base_url;
 mod boxes;
 mod comments;
 mod dedupe;

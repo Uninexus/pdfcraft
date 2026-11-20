@@ -8,6 +8,7 @@ mod attachment_key;
 mod automation;
 mod automation_roots;
 mod backdrop;
+mod base_url;
 mod batch;
 mod batch_failures;
 mod batch_secrets;

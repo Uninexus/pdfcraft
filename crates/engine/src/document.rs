@@ -618,6 +618,12 @@ impl Document {
         self.editor.as_ref().map(|e| pdfcraft_organize::print_presets::read_print_presets(&e.cos)).unwrap_or_default()
     }
 
+    /// The base URL for relative links (`/URI` `/Base`) and what is unreadable (`uri`, `base`),
+    /// from one read of the catalog.
+    pub fn base_url(&self) -> (Option<String>, Vec<&'static str>) {
+        self.editor.as_ref().map(|e| pdfcraft_organize::base_url::read_base_url(&e.cos)).unwrap_or_default()
+    }
+
     /// Signed: at least one signature field holds a signature.
     pub fn is_signed(&self) -> bool {
         self.signatures.iter().any(|s| s.signed)

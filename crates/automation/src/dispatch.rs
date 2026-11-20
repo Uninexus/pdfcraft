@@ -366,6 +366,7 @@ impl Automation {
             "doc_optimize" => self.doc_optimize(&a)?,
             "doc_initial_view" => self.doc_initial_view(&a)?,
             "doc_print_presets" => self.doc_print_presets(&a)?,
+            "doc_base_url" => self.doc_base_url(&a)?,
             "doc_revisions" => self.doc_revisions(&a)?,
             "doc_linearization" => self.doc_linearization(&a)?,
             "text_lines" => {

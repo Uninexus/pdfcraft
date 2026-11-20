@@ -1948,6 +1948,13 @@ pub fn tools() -> Vec<ToolDef> {
             }),
             &["doc"],
         )),
+        t("doc_base_url", "Base URL for relative links", "Read or change the document's base URL (the catalog's /URI dictionary, /Base entry, ISO 32000-2 Table 211), which a relative web address of a link is resolved against. `base` must start with http:// or https:// followed by a letter, a digit or [, in printable ASCII with no space, at most 8192 bytes, such as https://example.com/docs/; an empty string takes the base away. Leave `base` out to only read. The address is not parsed, so some that links cannot be resolved against are accepted (https://a:99999/): `links_use_it` says whether a relative address is resolved against the stored base, as link_list does. Returns `base` (null when there is none), `links_use_it` and `unreadable`: `base` when the stored /Base is there but is not a string of at most 8192 bytes of UTF-8, and `uri` when the catalog's /URI is neither a dictionary (a stream's dictionary counts) nor null, or is behind more than 128 references. A stored base that is unreadable is read as none and is left as it is unless another base is asked for. A stored base sent back as it is is accepted and changes nothing, even one that would be refused as a new value (ftp://...). Other entries of /URI are kept. Nothing is written when a different base is refused, or when /URI is not a dictionary (or is behind more than 128 references). Needs permission to modify the document. One undo step.").with(schema(
+            json!({
+                "doc": doc(),
+                "base": { "type": "string", "maxLength": 8192 },
+            }),
+            &["doc"],
+        )),
         t("doc_audit_space", "Audit space usage", "How many bytes each kind of content takes and its share of the file (PDF Optimizer ▸ Audit space usage): images, content streams, fonts, forms, comments, structure, bookmarks, … and document overhead.")
             .ro()
             .cmd("optimize.advanced")
