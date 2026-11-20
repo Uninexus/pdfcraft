@@ -938,6 +938,7 @@ impl Automation {
             "accessibility_make_accessible" => self.a11y_make_accessible(&a)?,
             "accessibility_figures" => self.accessibility_figures(&a)?,
             "accessibility_set_alt" => self.accessibility_set_alt(&a)?,
+            "accessibility_set_alts" => self.accessibility_set_alts(&a)?,
             "accessibility_tags" => self.accessibility_tags(&a)?,
             "accessibility_reading_order" => self.accessibility_reading_order(&a)?,
             "accessibility_tag_content" => self.accessibility_tag_content(&a)?,

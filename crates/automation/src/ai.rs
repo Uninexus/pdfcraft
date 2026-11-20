@@ -210,7 +210,7 @@ impl Automation {
             "model": sent.reply.model.unwrap_or(sent.model),
             "pages_sent": seen,
             "truncated": sent.cut,
-            "note": "Suggestions only: nothing is changed. The model saw the page text, not the pictures, so check each against the figure, then set the ones you accept with accessibility_set_alt.",
+            "note": "Suggestions only: nothing is changed. The model saw the page text, not the pictures, so check each against the figure, then set the ones you accept with accessibility_set_alts (one undo step) or accessibility_set_alt.",
         }))
     }
 

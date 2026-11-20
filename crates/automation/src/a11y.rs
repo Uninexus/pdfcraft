@@ -6,6 +6,11 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
 
+/// The most figures one `accessibility_set_alts` call names.
+const MAX_ALT_ITEMS: usize = 100;
+/// The longest alternate text, in UTF-8 bytes, `accessibility_set_alts` accepts for one figure.
+const MAX_ALT_BYTES: usize = 4000;
+
 use crate::{Args, Automation, Result, ToolError, child, failed, write_atomic};
 
 mod documents;
@@ -519,6 +524,86 @@ impl Automation {
         let id = self.doc(a)?.id;
         let warnings = self.apply_with_warnings(id, edit)?;
         Ok(with_warnings(self.accessibility_figures(a)?, warnings))
+    }
+
+    /// `accessibility_set_alts`: set, clear or mark decorative the alternate text of several figures
+    /// as one undo step. Every item is checked, against its type and against the document's figures,
+    /// before anything is changed, so a refused call writes nothing. A figure whose text would not
+    /// change is left alone, and a call that changes nothing makes no undo step.
+    pub(crate) fn accessibility_set_alts(&mut self, a: &Args) -> Result<Value> {
+        let items = a.get("figures").and_then(Value::as_array).ok_or_else(|| Args::wrong("figures", "an array of { figure, alt | decorative }"))?;
+        // Before any item is read: the work below is the length of this list.
+        if items.is_empty() || items.len() > MAX_ALT_ITEMS {
+            return Err(Args::wrong("figures", &format!("a list of 1 to {MAX_ALT_ITEMS} figures")));
+        }
+        let mut wanted: Vec<(u32, Option<&str>)> = Vec::with_capacity(items.len());
+        let mut seen = std::collections::HashSet::new();
+        for (i, item) in items.iter().enumerate() {
+            let at = |what: &str| ToolError::InvalidArgs(format!("figures[{i}] {what}"));
+            let map = item.as_object().ok_or_else(|| at("must be an object { figure, alt } or { figure, decorative: true }"))?;
+            if let Some(k) = map.keys().find(|k| !matches!(k.as_str(), "figure" | "alt" | "decorative")) {
+                return Err(at(&format!("has an unknown key {:?}; use figure, alt or decorative", k.chars().take(40).collect::<String>())));
+            }
+            let figure = map
+                .get("figure")
+                .and_then(Value::as_u64)
+                .and_then(|n| u32::try_from(n).ok())
+                .filter(|n| *n >= 1)
+                .ok_or_else(|| at("needs figure: a figure number from accessibility_figures"))?;
+            if !seen.insert(figure) {
+                return Err(at(&format!("repeats figure {figure}; name each figure once")));
+            }
+            let decorative = match map.get("decorative") {
+                None | Some(Value::Null) => false,
+                Some(Value::Bool(b)) => *b,
+                Some(_) => return Err(at("has a decorative that is not true or false")),
+            };
+            let alt = match map.get("alt") {
+                None | Some(Value::Null) => None,
+                Some(Value::String(t)) if t.len() <= MAX_ALT_BYTES => Some(t.as_str()),
+                Some(Value::String(_)) => return Err(at(&format!("has an alt of more than {MAX_ALT_BYTES} bytes"))),
+                Some(_) => return Err(at("has an alt that is not a string")),
+            };
+            match (decorative, alt) {
+                (true, Some(_)) => return Err(at("gives both alt and decorative: true; a decorative figure has no alternate text")),
+                (false, None) => return Err(at("needs alt (a string; empty clears it) or decorative: true")),
+                _ => {}
+            }
+            wanted.push((figure, if decorative { None } else { alt }));
+        }
+        let doc = self.doc(a)?;
+        let id = doc.id;
+        let current: std::collections::HashMap<u32, Option<String>> = doc.figures().into_iter().map(|f| (f.obj.num, f.alt)).collect();
+        if let Some((n, _)) = wanted.iter().find(|(n, _)| !current.contains_key(n)) {
+            return Err(failed(format!("{n} is not a figure of this document (see accessibility_figures); nothing was changed")));
+        }
+        let (mut edits, mut set, mut cleared, mut decorative, mut unchanged) = (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new());
+        for (figure, alt) in &wanted {
+            match alt {
+                None => {
+                    edits.push(pdfcraft_engine::Edit::MarkDecorative { figure: *figure });
+                    decorative.push(*figure);
+                }
+                Some(text) => {
+                    let now = current.get(figure).and_then(|t| t.as_deref()).map(str::trim).unwrap_or("");
+                    let new = text.trim();
+                    if new == now {
+                        unchanged.push(*figure);
+                    } else {
+                        edits.push(pdfcraft_engine::Edit::SetAltText { figure: *figure, alt: Some((*text).to_owned()) });
+                        if new.is_empty() { cleared.push(*figure) } else { set.push(*figure) }
+                    }
+                }
+            }
+        }
+        let changed = edits.len();
+        let warnings = if edits.is_empty() {
+            Vec::new()
+        } else {
+            self.apply_with_warnings(id, pdfcraft_engine::Edit::Batch { label: "Set alternate text".into(), edits })?
+        };
+        let out = json!({ "changed": changed, "set": set, "cleared": cleared, "decorative": decorative, "unchanged": unchanged });
+        Ok(with_warnings(out, warnings))
     }
 
     /// The structure tags, one page at a time (`offset`, `limit`), optionally only some types, pages
