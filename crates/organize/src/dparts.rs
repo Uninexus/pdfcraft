@@ -52,6 +52,12 @@ pub struct DocumentPart {
     /// start page, so the part covers no pages in order. Worked out from `start_page` and
     /// `end_page` alone; a missing `/End` is not inverted.
     pub range_inverted: bool,
+    /// `/Start` or `/End` is given (anything but a direct null; a reference to a missing or null
+    /// object counts, and is flagged) but does not name a page of the document: it is not a
+    /// reference, or the object it points at is not a page the page tree lists (a page past the
+    /// first [`MAX_PAGES_READ`] counts as not listed). Worked out from `start_page` and `end_page` and the
+    /// two keys alone; a missing `/Start` or `/End` is not unresolved.
+    pub range_unresolved: bool,
     /// References read from `/DParts`, including any that were not read as nodes.
     pub children: usize,
     /// `/DPM` entries as `(key, value as short text)`, at most [`MAX_DPM_ENTRIES`].
@@ -77,6 +83,8 @@ pub struct DocumentPartList {
     pub skipped: usize,
     /// How many of the listed nodes have `range_inverted`.
     pub inverted_ranges: usize,
+    /// How many of the listed nodes have `range_unresolved`.
+    pub unresolved_ranges: usize,
     /// More nodes, levels or children exist than were read.
     pub truncated: bool,
 }
@@ -180,6 +188,9 @@ pub fn list_document_parts(doc: &Document) -> DocumentPartList {
         let (start_page, end_page) = (page_of(b"Start"), page_of(b"End"));
         let range_inverted = matches!((start_page, end_page), (Some(s), Some(e)) if e < s);
         out.inverted_ranges = out.inverted_ranges.saturating_add(usize::from(range_inverted));
+        let given = |key: &[u8]| dict.get(key).is_some_and(|o| !matches!(o, Object::Null));
+        let range_unresolved = (given(b"Start") && start_page.is_none()) || (given(b"End") && end_page.is_none());
+        out.unresolved_ranges = out.unresolved_ranges.saturating_add(usize::from(range_unresolved));
         out.parts.push(DocumentPart {
             object: node.num,
             parent,
@@ -187,6 +198,7 @@ pub fn list_document_parts(doc: &Document) -> DocumentPartList {
             start_page,
             end_page,
             range_inverted,
+            range_unresolved,
             children: counted,
             metadata,
             metadata_truncated,

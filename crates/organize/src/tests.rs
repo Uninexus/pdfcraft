@@ -5476,6 +5476,48 @@ fn a_part_whose_end_page_comes_before_its_start_page_is_flagged() {
 }
 
 #[test]
+fn a_part_whose_start_or_end_names_no_page_is_flagged_unresolved() {
+    let mut doc = open(fixture());
+    let pages = pages(&doc).unwrap();
+    let (p1, p2) = (pages[0].obj, pages[1].obj);
+    let top = add_part(&mut doc, None);
+    let good = add_part(&mut doc, Some((p1, p2)));
+    let none = add_part(&mut doc, None);
+    let catalog = doc.root().unwrap();
+    let end_is_catalog = add_part(&mut doc, Some((p1, catalog)));
+    let start_is_direct = add_part(&mut doc, Some((p1, p2)));
+    doc.update_dict(start_is_direct, |d| d.set(b"Start".to_vec(), Object::Int(1))).unwrap();
+    // A null is the same as absent.
+    let nulls = add_part(&mut doc, Some((p1, p2)));
+    doc.update_dict(nulls, |d| {
+        d.set(b"Start".to_vec(), Object::Null);
+        d.set(b"End".to_vec(), Object::Null);
+    })
+    .unwrap();
+    // A reference to an object that was never added is flagged, unlike a direct null.
+    let dangling = add_part(&mut doc, Some((p1, p2)));
+    doc.update_dict(dangling, |d| d.set(b"Start".to_vec(), Object::Ref(ObjRef { num: 99_999, generation: 0 }))).unwrap();
+    set_children(&mut doc, top, &[good, none, end_is_catalog, start_is_direct, nulls, dangling]);
+    set_document_part_root(&mut doc, top);
+
+    let list = list_document_parts(&doc);
+    let flags: Vec<_> = list.parts.iter().map(|p| (p.object, p.range_unresolved)).collect();
+    assert_eq!(
+        flags,
+        [
+            (top.num, false),
+            (good.num, false),
+            (none.num, false),
+            (end_is_catalog.num, true),
+            (start_is_direct.num, true),
+            (nulls.num, false),
+            (dangling.num, true)
+        ]
+    );
+    assert_eq!(list.unresolved_ranges, 3);
+}
+
+#[test]
 fn document_part_listing_is_bounded_by_depth_and_node_count() {
     // A chain deeper than the limit.
     let mut doc = open(fixture());
