@@ -39,6 +39,7 @@ mod page_templates;
 mod partial_output;
 mod portfolio_info;
 mod preferences;
+mod print_presets;
 mod rect_arguments;
 mod redact_after_stray_q_form;
 mod redact_keep;

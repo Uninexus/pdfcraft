@@ -548,6 +548,86 @@ impl Automation {
         Ok(out)
     }
 
+    /// Document Properties ▸ Advanced ▸ Print Dialog Presets: read, and change what is given.
+    pub(crate) fn doc_print_presets(&mut self, a: &Args) -> Result<Value> {
+        use pdfcraft_engine::{Duplex, MAX_PRINT_COPIES, MAX_PRINT_RANGES, MIN_PRINT_COPIES, PrintScaling};
+        let bad = |m: String| ToolError::InvalidArgs(m);
+        let (mut p, unreadable_before) = self.doc(a)?.print_presets();
+        let before = p.clone();
+        if let Some(s) = a.opt_str("scaling")? {
+            p.scaling = match s {
+                "default" => PrintScaling::AppDefault,
+                "none" => PrintScaling::None,
+                o => return Err(bad(format!("unknown scaling {o:?} (default, none)"))),
+            };
+        }
+        if let Some(d) = a.opt_str("duplex")? {
+            p.duplex = match d {
+                "default" => None,
+                "simplex" => Some(Duplex::Simplex),
+                "flip_short_edge" => Some(Duplex::FlipShortEdge),
+                "flip_long_edge" => Some(Duplex::FlipLongEdge),
+                o => return Err(bad(format!("unknown duplex {o:?} (default, simplex, flip_short_edge, flip_long_edge)"))),
+            };
+        }
+        match a.get("pick_tray_by_size") {
+            None => {}
+            Some(Value::Bool(b)) => p.pick_tray_by_size = Some(*b),
+            Some(Value::String(s)) if s == "default" => p.pick_tray_by_size = None,
+            Some(_) => return Err(Args::wrong("pick_tray_by_size", "true, false or \"default\" (no entry)")),
+        }
+        match a.get("copies") {
+            None => {}
+            Some(Value::String(s)) if s == "default" => p.copies = None,
+            Some(v) => {
+                let c = v.as_i64().ok_or_else(|| Args::wrong("copies", "a whole number or \"default\" (no entry)"))?;
+                p.copies = Some(u8::try_from(c).ok().filter(|c| (MIN_PRINT_COPIES..=MAX_PRINT_COPIES).contains(c)).ok_or_else(|| {
+                    bad(format!("copies must be a whole number from {MIN_PRINT_COPIES} to {MAX_PRINT_COPIES} or \"default\", not {c}"))
+                })?);
+            }
+        }
+        if let Some(v) = a.get("page_ranges") {
+            let wrong =
+                || Args::wrong("page_ranges", "an array of [first, last] page pairs, 1-based, such as [[1, 3], [7, 7]], or [] for every page");
+            let list = v.as_array().ok_or_else(wrong)?;
+            if list.len() > MAX_PRINT_RANGES {
+                return Err(bad(format!("page_ranges holds at most {MAX_PRINT_RANGES} ranges, not {}", list.len())));
+            }
+            let mut ranges = Vec::with_capacity(list.len());
+            let whole = |x: &Value| x.as_u64().and_then(|n| usize::try_from(n).ok());
+            for item in list {
+                // A pair is exactly two whole numbers, so both reads below are of a checked length.
+                let (first, last) = match item.as_array().map(Vec::as_slice) {
+                    Some([first, last]) => (whole(first), whole(last)),
+                    _ => return Err(wrong()),
+                };
+                ranges.push((first.ok_or_else(wrong)?, last.ok_or_else(wrong)?));
+            }
+            p.page_ranges = ranges;
+        }
+        let (mut out, now, unreadable) = if p != before {
+            let out = self.apply(a, Edit::SetPrintPresets(Box::new(p.clone())))?;
+            let (now, unreadable) = self.doc(a)?.print_presets();
+            (out, now, unreadable)
+        } else {
+            (json!({}), before, unreadable_before)
+        };
+        out["print_presets"] = json!({
+            "scaling": match now.scaling { PrintScaling::AppDefault => "default", PrintScaling::None => "none" },
+            "duplex": match now.duplex {
+                None => "default",
+                Some(Duplex::Simplex) => "simplex",
+                Some(Duplex::FlipShortEdge) => "flip_short_edge",
+                Some(Duplex::FlipLongEdge) => "flip_long_edge",
+            },
+            "pick_tray_by_size": now.pick_tray_by_size.map_or(json!("default"), Value::Bool),
+            "copies": now.copies.map_or(json!("default"), |c| json!(c)),
+            "page_ranges": now.page_ranges.iter().map(|(f, l)| json!([f, l])).collect::<Vec<_>>(),
+            "unreadable": unreadable,
+        });
+        Ok(out)
+    }
+
     pub(crate) fn doc_optimize(&mut self, a: &Args) -> Result<Value> {
         use pdfcraft_engine::optimize::{Compatibility, Compression, ImageSettings, MonoCompression, Preset};
         const MONO_KEYS: [&str; 4] = ["downsample", "ppi", "above_ppi", "compression"];

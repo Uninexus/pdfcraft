@@ -6348,3 +6348,237 @@ fn an_entry_that_points_at_a_stream_the_catalog_or_a_non_specification_is_refuse
         assert_eq!(set_associated_relationship(&mut doc, index, "Data").unwrap(), None, "entry {index}");
     }
 }
+
+/// The catalog's `/ViewerPreferences` as a dictionary, resolved.
+fn viewer_preferences_of(doc: &Document) -> Option<pdfcraft_cos::Dict> {
+    let c = doc.get(doc.root().unwrap()).as_dict().cloned().unwrap();
+    c.get(b"ViewerPreferences").map(|o| doc.resolve(o)).and_then(|o| o.as_dict().cloned())
+}
+
+fn set_preferences(doc: &mut Document, entries: Vec<(&str, Object)>) {
+    let mut vp = pdfcraft_cos::Dict::new();
+    for (k, v) in entries {
+        vp.set(k.as_bytes().to_vec(), v);
+    }
+    let root = doc.root().unwrap();
+    doc.update_dict(root, |c| c.set(b"ViewerPreferences".to_vec(), Object::Dict(vp))).unwrap();
+}
+
+#[test]
+fn print_presets_round_trip_through_a_save_and_a_default_removes_the_entry() {
+    use crate::print_presets::{Duplex, PrintPresets, PrintScaling, print_presets, set_print_presets, unreadable_print_presets};
+    let mut doc = open(fixture());
+    assert_eq!(print_presets(&doc), PrintPresets::default());
+    assert!(viewer_preferences_of(&doc).is_none());
+    let want = PrintPresets {
+        scaling: PrintScaling::None,
+        duplex: Some(Duplex::FlipShortEdge),
+        pick_tray_by_size: Some(true),
+        page_ranges: vec![(1, 2), (3, 3)],
+        copies: Some(4),
+    };
+    set_print_presets(&mut doc, &want).unwrap();
+    let doc = open(write_full(&doc, &SaveOptions::default()).unwrap());
+    assert_eq!(print_presets(&doc), want);
+    assert!(unreadable_print_presets(&doc).is_empty());
+    let vp = viewer_preferences_of(&doc).unwrap();
+    assert_eq!(vp.name(b"PrintScaling"), Some(&b"None"[..]));
+    assert_eq!(vp.name(b"Duplex"), Some(&b"DuplexFlipShortEdge"[..]));
+    assert_eq!(vp.get(b"PickTrayByPDFSize"), Some(&Object::Bool(true)));
+    assert_eq!(vp.get(b"NumCopies"), Some(&Object::Int(4)));
+    assert_eq!(vp.get(b"PrintPageRange"), Some(&Object::Array(vec![Object::Int(1), Object::Int(2), Object::Int(3), Object::Int(3)])));
+
+    // Each setting back to its default removes its entry, and an empty dictionary goes with them.
+    let mut doc = doc;
+    set_print_presets(&mut doc, &PrintPresets { copies: Some(4), ..PrintPresets::default() }).unwrap();
+    let keys: Vec<Vec<u8>> = viewer_preferences_of(&doc).unwrap().iter().map(|(k, _)| k.clone()).collect();
+    assert_eq!(keys, [b"NumCopies".to_vec()]);
+    set_print_presets(&mut doc, &PrintPresets::default()).unwrap();
+    assert!(viewer_preferences_of(&doc).is_none());
+}
+
+#[test]
+fn print_presets_beside_other_preferences_and_through_indirect_values() {
+    use crate::print_presets::{Duplex, PrintScaling, print_presets, set_print_presets};
+    let mut doc = open(fixture());
+    let copies = doc.add(Object::Int(3));
+    let range = doc.add(Object::Int(2));
+    let mut vp = pdfcraft_cos::Dict::new();
+    vp.set(b"NumCopies".to_vec(), Object::Ref(copies));
+    vp.set(b"PrintPageRange".to_vec(), Object::Array(vec![Object::Int(1), Object::Ref(range)]));
+    vp.set(b"Duplex".to_vec(), Object::name("Simplex"));
+    vp.set(b"FitWindow".to_vec(), Object::Bool(true));
+    let vp_ref = doc.add(Object::Dict(vp));
+    let root = doc.root().unwrap();
+    doc.update_dict(root, |c| c.set(b"ViewerPreferences".to_vec(), Object::Ref(vp_ref))).unwrap();
+    let mut p = print_presets(&doc);
+    assert_eq!((p.copies, p.page_ranges.clone(), p.duplex), (Some(3), vec![(1, 2)], Some(Duplex::Simplex)));
+    p.scaling = PrintScaling::None;
+    set_print_presets(&mut doc, &p).unwrap();
+    let vp = viewer_preferences_of(&doc).unwrap();
+    assert_eq!(vp.get(b"FitWindow"), Some(&Object::Bool(true)), "a preference that is not a print one stays");
+    assert_eq!(vp.name(b"PrintScaling"), Some(&b"None"[..]));
+    assert_eq!(print_presets(&doc), p);
+    // The dictionary behind the reference was changed where it is, not copied into the catalog.
+    let c = doc.get(root).as_dict().cloned().unwrap();
+    assert_eq!(c.get(b"ViewerPreferences"), Some(&Object::Ref(vp_ref)));
+}
+
+#[test]
+fn print_presets_that_cannot_be_read_are_named_kept_and_replaced_only_by_a_real_value() {
+    use crate::print_presets::{Duplex, PrintPresets, print_presets, set_print_presets, unreadable_print_presets};
+    let mut doc = open(fixture());
+    set_preferences(
+        &mut doc,
+        vec![
+            ("PrintScaling", Object::name("Shrink")),
+            ("Duplex", Object::Int(3)),
+            ("PickTrayByPDFSize", Object::name("Yes")),
+            ("NumCopies", Object::Int(9)),
+            ("PrintPageRange", Object::Array(vec![Object::Int(3), Object::Int(1)])),
+        ],
+    );
+    assert_eq!(print_presets(&doc), PrintPresets::default());
+    assert_eq!(unreadable_print_presets(&doc), ["scaling", "duplex", "pick_tray_by_size", "copies", "page_ranges"]);
+    // Asking for what is read, the default, changes nothing: the entries are not removed.
+    let before = write_full(&doc, &SaveOptions::default()).unwrap();
+    set_print_presets(&mut doc, &PrintPresets::default()).unwrap();
+    assert_eq!(write_full(&doc, &SaveOptions::default()).unwrap(), before);
+    // Setting one replaces that one only.
+    set_print_presets(&mut doc, &PrintPresets { duplex: Some(Duplex::FlipLongEdge), ..PrintPresets::default() }).unwrap();
+    assert_eq!(unreadable_print_presets(&doc), ["scaling", "pick_tray_by_size", "copies", "page_ranges"]);
+    let vp = viewer_preferences_of(&doc).unwrap();
+    assert_eq!(vp.get(b"NumCopies"), Some(&Object::Int(9)));
+    assert_eq!(vp.name(b"Duplex"), Some(&b"DuplexFlipLongEdge"[..]));
+    // Other malformed range arrays: odd length, a real number, a zero page, too many pairs.
+    for items in [
+        vec![Object::Int(1)],
+        vec![Object::Real(1.0), Object::Int(2)],
+        vec![Object::Int(0), Object::Int(2)],
+        (0..514).map(|_| Object::Int(1)).collect(),
+    ] {
+        set_preferences(&mut doc, vec![("PrintPageRange", Object::Array(items))]);
+        assert_eq!(unreadable_print_presets(&doc), ["page_ranges"]);
+    }
+    // Table 147 lists 2 through 5, so a stored 1 is not read as a number of copies and stays.
+    set_preferences(&mut doc, vec![("NumCopies", Object::Int(1))]);
+    assert_eq!(unreadable_print_presets(&doc), ["copies"]);
+    assert_eq!(print_presets(&doc).copies, None);
+    let read = print_presets(&doc);
+    set_print_presets(&mut doc, &PrintPresets { copies: None, ..read }).unwrap();
+    assert_eq!(viewer_preferences_of(&doc).unwrap().get(b"NumCopies"), Some(&Object::Int(1)));
+    set_preferences(&mut doc, vec![("PrintPageRange", Object::Array((0..512).map(|_| Object::Int(1)).collect()))]);
+    assert!(unreadable_print_presets(&doc).is_empty());
+    assert_eq!(print_presets(&doc).page_ranges.len(), 256);
+}
+
+#[test]
+fn a_print_preset_that_is_refused_writes_nothing() {
+    use crate::print_presets::{Duplex, PrintPresets, set_print_presets};
+    let mut doc = open(fixture());
+    let before = write_full(&doc, &SaveOptions::default()).unwrap();
+    let base = PrintPresets { duplex: Some(Duplex::Simplex), ..PrintPresets::default() };
+    for (p, message) in [
+        (PrintPresets { copies: Some(0), ..base.clone() }, "copies must be between 2 and 5, not 0"),
+        (PrintPresets { copies: Some(1), ..base.clone() }, "copies must be between 2 and 5, not 1"),
+        (PrintPresets { copies: Some(6), ..base.clone() }, "copies must be between 2 and 5, not 6"),
+        (PrintPresets { page_ranges: vec![(1, 1); 257], ..base.clone() }, "a print page range list holds at most 256 ranges, not 257"),
+        (
+            PrintPresets { page_ranges: vec![(0, 2)], ..base.clone() },
+            "print page range 0-2 must start at page 1 or later and not end before it starts",
+        ),
+        (
+            PrintPresets { page_ranges: vec![(3, 2)], ..base.clone() },
+            "print page range 3-2 must start at page 1 or later and not end before it starts",
+        ),
+        (PrintPresets { page_ranges: vec![(2, 4)], ..base.clone() }, "print page range 2-4 goes past the last page (3)"),
+    ] {
+        assert_eq!(set_print_presets(&mut doc, &p).unwrap_err().to_string(), message);
+        assert_eq!(write_full(&doc, &SaveOptions::default()).unwrap(), before, "{message}");
+    }
+    // A /ViewerPreferences that is not a dictionary is not replaced.
+    let root = doc.root().unwrap();
+    doc.update_dict(root, |c| c.set(b"ViewerPreferences".to_vec(), Object::Int(7))).unwrap();
+    let before = write_full(&doc, &SaveOptions::default()).unwrap();
+    assert_eq!(
+        set_print_presets(&mut doc, &base).unwrap_err().to_string(),
+        "the document's /ViewerPreferences is not a dictionary, so it was left as it is"
+    );
+    assert_eq!(write_full(&doc, &SaveOptions::default()).unwrap(), before);
+}
+
+#[test]
+fn a_stored_page_range_past_the_last_page_does_not_block_another_change() {
+    use crate::print_presets::{Duplex, print_presets, set_print_presets};
+    let mut doc = open(fixture());
+    set_preferences(&mut doc, vec![("PrintPageRange", Object::Array(vec![Object::Int(2), Object::Int(40)]))]);
+    let mut p = print_presets(&doc);
+    assert_eq!(p.page_ranges, [(2, 40)]);
+    p.duplex = Some(Duplex::Simplex);
+    set_print_presets(&mut doc, &p).unwrap();
+    assert_eq!(print_presets(&doc).page_ranges, [(2, 40)]);
+    // Writing a different range is checked.
+    p.page_ranges = vec![(2, 41)];
+    assert_eq!(set_print_presets(&mut doc, &p).unwrap_err().to_string(), "print page range 2-41 goes past the last page (3)");
+}
+
+#[test]
+fn an_explicit_false_and_no_entry_are_different_and_each_is_kept() {
+    use crate::print_presets::{PrintPresets, print_presets, set_print_presets};
+    let mut doc = open(fixture());
+    set_preferences(&mut doc, vec![("PickTrayByPDFSize", Object::Bool(false))]);
+    assert_eq!(print_presets(&doc).pick_tray_by_size, Some(false));
+    // Asking for what is read changes nothing, so the explicit false stays.
+    let before = write_full(&doc, &SaveOptions::default()).unwrap();
+    let read = print_presets(&doc);
+    set_print_presets(&mut doc, &read).unwrap();
+    assert_eq!(write_full(&doc, &SaveOptions::default()).unwrap(), before);
+    // No entry removes it; an explicit false is written as false.
+    set_print_presets(&mut doc, &PrintPresets::default()).unwrap();
+    assert!(viewer_preferences_of(&doc).is_none());
+    set_print_presets(&mut doc, &PrintPresets { pick_tray_by_size: Some(false), ..PrintPresets::default() }).unwrap();
+    assert_eq!(viewer_preferences_of(&doc).unwrap().get(b"PickTrayByPDFSize"), Some(&Object::Bool(false)));
+    assert_eq!(print_presets(&doc).pick_tray_by_size, Some(false));
+}
+
+#[test]
+fn a_null_or_dangling_viewer_preferences_is_absent_and_another_object_is_named() {
+    use crate::print_presets::{Duplex, PrintPresets, print_presets, read_print_presets, set_print_presets};
+    let want = PrintPresets { duplex: Some(Duplex::Simplex), ..PrintPresets::default() };
+    for value in [Object::Null, Object::Ref(pdfcraft_cos::ObjRef::new(999_999, 0))] {
+        let mut doc = open(fixture());
+        let root = doc.root().unwrap();
+        doc.update_dict(root, |c| c.set(b"ViewerPreferences".to_vec(), value.clone())).unwrap();
+        assert_eq!(read_print_presets(&doc), (PrintPresets::default(), vec![]), "{value:?}");
+        set_print_presets(&mut doc, &want).unwrap();
+        assert_eq!(print_presets(&doc), want, "{value:?}");
+        assert!(matches!(doc.get(root).as_dict().unwrap().get(b"ViewerPreferences"), Some(Object::Dict(_))), "{value:?}");
+    }
+    // Anything else is named, read as no entry, and never replaced.
+    for value in [Object::Int(7), Object::name("Yes"), Object::Array(vec![])] {
+        let mut doc = open(fixture());
+        let root = doc.root().unwrap();
+        doc.update_dict(root, |c| c.set(b"ViewerPreferences".to_vec(), value.clone())).unwrap();
+        assert_eq!(read_print_presets(&doc), (PrintPresets::default(), vec!["viewer_preferences"]), "{value:?}");
+        assert!(set_print_presets(&mut doc, &want).is_err(), "{value:?}");
+        assert_eq!(doc.get(root).as_dict().unwrap().get(b"ViewerPreferences"), Some(&value));
+    }
+}
+
+/// A direct `/PrintPageRange` of a million page numbers is read as unreadable from its length alone and
+/// kept through a change to another setting, whose other entries are written beside it.
+#[test]
+fn a_huge_direct_range_array_is_unreadable_from_its_length_and_kept() {
+    use crate::print_presets::{Duplex, PrintPresets, print_presets, read_print_presets, set_print_presets};
+    let mut doc = open(fixture());
+    // Every entry is a usable page number, so only the length makes the array unreadable.
+    let huge: Vec<Object> = (0..1_000_000).map(|_| Object::Int(1)).collect();
+    set_preferences(&mut doc, vec![("PrintPageRange", Object::Array(huge))]);
+    let (p, bad) = read_print_presets(&doc);
+    assert_eq!((p, bad), (PrintPresets::default(), vec!["page_ranges"]));
+    let read = print_presets(&doc);
+    set_print_presets(&mut doc, &PrintPresets { duplex: Some(Duplex::Simplex), ..read }).unwrap();
+    let vp = viewer_preferences_of(&doc).unwrap();
+    assert!(matches!(vp.get(b"PrintPageRange"), Some(Object::Array(a)) if a.len() == 1_000_000));
+    assert_eq!(vp.name(b"Duplex"), Some(&b"Simplex"[..]));
+}

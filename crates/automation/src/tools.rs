@@ -1937,6 +1937,17 @@ pub fn tools() -> Vec<ToolDef> {
             }),
             &["doc"],
         )),
+        t("doc_print_presets", "Print dialog presets", "Read or change what the Print dialog starts with for this document (Document Properties ▸ Advanced ▸ Print Dialog Presets, ISO 32000-2 Table 147, in the catalog's /ViewerPreferences): scaling (default, none), duplex (default, simplex, flip_short_edge, flip_long_edge), pick_tray_by_size (true, false, or \"default\" for no entry: with no entry the viewer decides, which is not the same as false), copies (2 to 5, the values Table 147 lists, or \"default\" for no entry) and page_ranges (1-based [first, last] pairs such as [[1, 3], [7, 7]], at most 256, each inside the document; [] for no entry). Only the given ones change, and \"default\" removes the entry. A page range already stored past the last page is accepted when it is sent back unchanged; a different one must lie inside the document. Returns the presets and `unreadable`, the settings whose stored entry is not a value accepted here (a stored /NumCopies of 1, a name or type the specification does not allow, a range array that is odd, over 256 pairs, with a non-integer, a page below 1 or a first page after its last), or `viewer_preferences` when it is not a dictionary: each is read as no entry and left as it is unless another value is asked for. A null or dangling /ViewerPreferences counts as absent. Nothing is written when a value is refused, or when /ViewerPreferences is not a dictionary. Stores presets only: the app's Print dialog and doc_print do not read them yet. Needs permission to modify the document. One undo step.").with(schema(
+            json!({
+                "doc": doc(),
+                "scaling": { "type": "string", "enum": ["default", "none"] },
+                "duplex": { "type": "string", "enum": ["default", "simplex", "flip_short_edge", "flip_long_edge"] },
+                "pick_tray_by_size": { "oneOf": [{ "type": "boolean" }, { "type": "string", "enum": ["default"] }] },
+                "copies": { "oneOf": [{ "type": "integer", "minimum": 2, "maximum": 5 }, { "type": "string", "enum": ["default"] }] },
+                "page_ranges": { "type": "array", "maxItems": 256, "items": { "type": "array", "items": { "type": "integer", "minimum": 1 }, "minItems": 2, "maxItems": 2 } },
+            }),
+            &["doc"],
+        )),
         t("doc_audit_space", "Audit space usage", "How many bytes each kind of content takes and its share of the file (PDF Optimizer ▸ Audit space usage): images, content streams, fonts, forms, comments, structure, bookmarks, … and document overhead.")
             .ro()
             .cmd("optimize.advanced")

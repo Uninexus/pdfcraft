@@ -25,6 +25,7 @@ mod namespaces;
 mod outline;
 mod outline_io;
 mod pdfx;
+pub mod print_presets;
 mod prune;
 mod templates;
 mod transition;

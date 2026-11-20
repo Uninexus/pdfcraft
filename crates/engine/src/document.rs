@@ -7,9 +7,9 @@ use pdfcraft_render::{DocInfo, RenderConfig, RenderPool};
 
 use crate::history::Editor;
 use crate::{
-    CalculationOrder, CheckStyle, DocId, Edit, EditError, EditableObject, FormFieldKind, Hidden, InitialView, Label, MarkKind, SecuritySummary,
-    SignatureInfo, StatusCaptions, TabOrder, TrustStore, XfaLayout, a11y, form_appearance, guard, js, measure, optimize, renderer_password,
-    signatures_of, unrestricted,
+    CalculationOrder, CheckStyle, DocId, Edit, EditError, EditableObject, FormFieldKind, Hidden, InitialView, Label, MarkKind, PrintPresets,
+    SecuritySummary, SignatureInfo, StatusCaptions, TabOrder, TrustStore, XfaLayout, a11y, form_appearance, guard, js, measure, optimize,
+    renderer_password, signatures_of, unrestricted,
 };
 #[cfg(test)]
 use crate::{record_link_scan, record_marker_scan};
@@ -610,6 +610,12 @@ impl Document {
 
     pub fn initial_view(&self) -> InitialView {
         self.editor.as_ref().map(|e| pdfcraft_organize::initial_view(&e.cos)).unwrap_or_default()
+    }
+
+    /// The print dialog presets stored in `/ViewerPreferences`, and the settings whose entry is
+    /// there but is not a value they accept (read as no entry), from one read of the catalog.
+    pub fn print_presets(&self) -> (PrintPresets, Vec<&'static str>) {
+        self.editor.as_ref().map(|e| pdfcraft_organize::print_presets::read_print_presets(&e.cos)).unwrap_or_default()
     }
 
     /// Signed: at least one signature field holds a signature.

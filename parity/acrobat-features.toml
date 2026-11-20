@@ -3631,11 +3631,11 @@ title = "Print dialog presets in document properties"
 area = "D"
 tier = "P2"
 milestone = "M10"
-status = "planned"
+status = "partial"
 commands = []
-tools = []
-evidence = []
-notes = ""
+tools = ["doc_print_presets"]
+evidence = ["crates/organize/src/tests.rs::print_presets_round_trip_through_a_save_and_a_default_removes_the_entry", "crates/organize/src/tests.rs::print_presets_that_cannot_be_read_are_named_kept_and_replaced_only_by_a_real_value", "crates/organize/src/tests.rs::a_print_preset_that_is_refused_writes_nothing", "crates/organize/src/tests.rs::an_explicit_false_and_no_entry_are_different_and_each_is_kept", "crates/organize/src/tests.rs::a_huge_direct_range_array_is_unreadable_from_its_length_and_kept", "crates/automation/tests/it/print_presets.rs::presets_are_set_read_saved_undone_and_redone", "crates/automation/tests/it/print_presets.rs::a_refused_call_changes_nothing_not_even_the_valid_arguments_beside_it"]
+notes = "Headless only. doc_print_presets reads and sets the five Print Dialog Presets of the catalog's /ViewerPreferences (ISO 32000-2 Table 147): page scaling (/PrintScaling default or none), duplex (/Duplex simplex, flip_short_edge, flip_long_edge or default), paper source by page size (/PickTrayByPDFSize true, false or default), page range (/PrintPageRange, up to 256 [first, last] pairs inside the document) and copies (/NumCopies, 2 to 5, the values Table 147 lists). Only /PrintScaling has a stated default; for the rest no entry means the viewer decides, so `default` removes the entry and an explicit false is kept as false. Only the given settings change, a change is one undo step that needs permission to modify the document (its label, Change print dialog presets, is in the translatable edit labels), and a refused call writes nothing. An entry that is not a value accepted here (a stored /NumCopies of 1 included) is read as no entry, named in `unreadable` and left as it is unless another value is asked for; a /ViewerPreferences that is neither a dictionary nor null is named `viewer_preferences`, refused and not replaced, and a null or dangling one counts as absent. Not yet: the Document Properties window has no Print Dialog Presets fields, and neither the app's Print dialog nor doc_print starts from these settings, so they are stored for other viewers and for the next slice; PrintArea and PrintClip are not read or set"
 
 [[feature]]
 id = "organize.base-url"
