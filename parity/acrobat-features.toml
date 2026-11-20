@@ -370,8 +370,8 @@ milestone = "M11"
 status = "partial"
 commands = []
 tools = ["doc_linearization"]
-evidence = ["crates/engine/src/linearization.rs::bytes_appended_after_it_was_written_invalidate_it", "crates/engine/src/linearization.rs::hostile_dictionaries_are_reported_not_trusted", "crates/automation/tests/it/linearization.rs::a_linearized_file_reads_valid_until_an_incremental_save_appends_to_it"]
-notes = "Read-only: doc_linearization reports the linearization parameter dictionary (ISO 32000-2 Annex F: /Linearized, /L, /H, /O, /E, /N, /T, /P) of the file as last opened or saved and whether it still holds (length, offsets, hint streams inside the file); an incremental save appends bytes after /L and the report then says so. It reads the first 4 KiB only. Not yet: decoding the hint tables, checking the order of the objects, writing a linearized file (a full save writes an ordinary file) and any UI"
+evidence = ["crates/engine/src/linearization.rs::bytes_appended_after_it_was_written_invalidate_it", "crates/engine/src/linearization.rs::hostile_dictionaries_are_reported_not_trusted", "crates/automation/tests/it/linearization.rs::a_linearized_file_reads_valid_until_an_incremental_save_appends_to_it", "crates/engine/src/linearization.rs::a_hint_stream_offset_must_start_an_object", "crates/automation/tests/it/linearization.rs::a_hint_stream_offset_that_starts_no_object_makes_the_file_not_valid"]
+notes = "Read-only: doc_linearization reports the linearization parameter dictionary (ISO 32000-2 Annex F: /Linearized, /L, /H, /O, /E, /N, /T, /P) of the file as last opened or saved and whether it still holds (length, offsets, hint streams inside the file, and that each hint stream offset starts an `N G obj` header, reported as `hint_streams[].object`); an incremental save appends bytes after /L and the report then says so. It reads the first 4 KiB only. Not yet: decoding the hint tables, checking the order of the objects, writing a linearized file (a full save writes an ordinary file) and any UI"
 
 [[feature]]
 id = "core.revision-list"

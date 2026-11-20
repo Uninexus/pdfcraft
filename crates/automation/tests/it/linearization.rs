@@ -15,6 +15,7 @@ fn linearized_pdf() -> Vec<u8> {
             (1, "<< /Type /Catalog /Pages 2 0 R >>".to_string()),
             (2, "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string()),
             (3, "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] >>".to_string()),
+            (6, "<< /Length 0 >>".to_string()),
         ];
         for (num, body) in bodies {
             if let Some(o) = offsets.get_mut(num) {
@@ -41,6 +42,18 @@ fn linearized_pdf() -> Vec<u8> {
     let end = out.len() / 2;
     patch(&mut out, "/E", end);
     patch(&mut out, "/T", end);
+    // The hint stream /H names starts at object 6.
+    let hint = out.windows(7).position(|w| w == b"6 0 obj").unwrap();
+    patch(&mut out, "/H [", hint);
+    out
+}
+
+/// The same file with /H aimed one byte past the start of the hint stream object.
+fn linearized_pdf_with_hint_off_by_one() -> Vec<u8> {
+    let mut out = linearized_pdf();
+    let p = out.windows(5).position(|w| w == b"/H [ ").unwrap() + 5;
+    let at: usize = std::str::from_utf8(&out[p..p + 10]).unwrap().parse().unwrap();
+    out[p..p + 10].copy_from_slice(format!("{:010}", at + 1).as_bytes());
     out
 }
 
@@ -70,6 +83,7 @@ fn a_linearized_file_reads_valid_until_an_incremental_save_appends_to_it() {
         (Some(bytes.len() as u64), Some(bytes.len() as u64), Some(0))
     );
     assert_eq!(r["problems"], json!([]));
+    assert_eq!(r["hint_streams"][0]["object"], 6, "{r}");
 
     // An incremental save appends a revision after /L: the file still opens but is no longer
     // a valid linearized file.
@@ -102,4 +116,18 @@ fn an_ordinary_file_is_not_linearized() {
     assert_eq!((r["linearized"].as_bool(), r["valid"].as_bool()), (Some(false), Some(false)), "{r}");
     assert_eq!(r["problems"], json!([]));
     assert!(r["declared_length"].is_null());
+}
+
+#[test]
+fn a_hint_stream_offset_that_starts_no_object_makes_the_file_not_valid() {
+    let dir = std::env::temp_dir().join(format!("pdfcraft-linearization-hint-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("off.pdf"), linearized_pdf_with_hint_off_by_one()).unwrap();
+    let mut a = Automation::new().with_root(&dir).unwrap();
+    let doc = call(&mut a, "doc_open", json!({ "path": "off.pdf" }))["doc"].as_u64().unwrap();
+    let r = call(&mut a, "doc_linearization", json!({ "doc": doc }));
+    assert_eq!((r["linearized"].as_bool(), r["valid"].as_bool()), (Some(true), Some(false)), "{r}");
+    assert!(r["hint_streams"][0]["object"].is_null(), "{r}");
+    assert!(r["problems"][0].as_str().unwrap().contains("no `N G obj` header"), "{r}");
 }
