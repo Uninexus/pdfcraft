@@ -207,3 +207,19 @@ fn a_null_answers_or_field_id_is_left_out_and_a_wrong_one_is_refused_by_name() {
     assert_eq!(not_refused(&mut a, cases), Vec::<String>::new());
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// `form_set_image` read `field_id` with the raw `get`, so a null was refused as the wrong type.
+#[test]
+fn a_null_field_id_of_form_set_image_is_left_out_and_a_wrong_one_is_refused_by_name() {
+    let (mut a, doc, dir) = open("null-set-image");
+    std::fs::write(dir.join("picture.gif"), pdfcraft_xfa::fixtures::TINY_GIF).unwrap();
+    a.call("form_add_field", &json!({ "doc": doc, "page": 1, "type": "image", "name": "pic", "rect": [10, 10, 60, 30] })).unwrap();
+    a.call("form_set_image", &json!({ "doc": doc, "field": "pic", "field_id": null, "path": "picture.gif" })).unwrap();
+    let wrong = "field_id must be an integer between 0 and 281474976710655".to_string();
+    let cases = vec![
+        ("form_set_image", json!({ "doc": doc, "field": "pic", "field_id": "x", "path": "picture.gif" }), wrong.clone()),
+        ("form_set_image", json!({ "doc": doc, "field": "pic", "field_id": -1, "path": "picture.gif" }), wrong),
+    ];
+    assert_eq!(not_refused(&mut a, cases), Vec::<String>::new());
+    let _ = std::fs::remove_dir_all(&dir);
+}
