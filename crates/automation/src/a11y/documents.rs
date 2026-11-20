@@ -246,11 +246,37 @@ impl Automation {
         pdfcraft_engine::compare::ChangeKinds::parse(&a.strs("kinds")?).map_err(|e| ToolError::InvalidArgs(e.to_string()))
     }
 
+    /// The optional `causes` of visual regions to return (annotation, other); both when it is
+    /// left out. Returns `(annotation, other)`. An empty list or an unknown name is refused,
+    /// listing the names allowed.
+    fn compare_causes(a: &Args) -> Result<(bool, bool)> {
+        if a.get("causes").is_none() {
+            return Ok((true, true));
+        }
+        let names = a.strs("causes")?;
+        if names.is_empty() {
+            return Err(ToolError::InvalidArgs("causes is empty: name at least one of annotation, other".into()));
+        }
+        let (mut annotation, mut other) = (false, false);
+        for n in names {
+            match n.trim().to_lowercase().as_str() {
+                "annotation" => annotation = true,
+                "other" => other = true,
+                _ => {
+                    let shown: String = n.chars().take(40).collect();
+                    return Err(ToolError::InvalidArgs(format!("causes has an unknown name \"{shown}\": the allowed names are annotation, other")));
+                }
+            }
+        }
+        Ok((annotation, other))
+    }
+
     pub(crate) fn doc_compare(&self, a: &Args) -> Result<Value> {
         use pdfcraft_engine::compare::Kind;
         let (old, new) = self.compare_ids(a)?;
         let (old_range, new_range) = (self.compare_range(a, "other", old)?, self.compare_range(a, "doc", new)?);
         let kinds = Self::compare_kinds(a)?;
+        let (want_annotation, want_other) = Self::compare_causes(a)?;
         let options = pdfcraft_engine::compare::WordOptions {
             ignore_case: a.opt_bool("ignore_case")?.unwrap_or(false),
             ignore_punctuation: a.opt_bool("ignore_punctuation")?.unwrap_or(false),
@@ -270,6 +296,7 @@ impl Automation {
             .take(limit)
             .map(|ch| json!({ "kind": ch.kind.label().to_lowercase(), "old": side(&ch.old), "new": side(&ch.new) }))
             .collect();
+        let mut hidden_visual = 0usize;
         let visual: Vec<Value> = if a.opt_bool("visual")?.unwrap_or(false) && kinds.visual {
             // Pages of the ranges are paired by position (old from + k with new from + k).
             let ranged = old_range.is_some() || new_range.is_some();
@@ -277,6 +304,11 @@ impl Automation {
                 .compare_visual_regions_in(old, new, 72.0, old_range, new_range)
                 .map_err(failed)?
                 .iter()
+                .filter(|v| {
+                    let keep = if v.cause.label() == "annotation" { want_annotation } else { want_other };
+                    hidden_visual += usize::from(!keep);
+                    keep
+                })
                 .map(|v| {
                     let (o, p, r, cause) = (v.old_page, v.page, r2(&v.rect), v.cause.label());
                     if ranged {
@@ -293,6 +325,7 @@ impl Automation {
             "visual": visual,
             "kinds": kinds.names(),
             "hidden": hidden_counts,
+            "hidden_visual": hidden_visual,
             "identical": identical,
             "replaced": c.count(Kind::Replaced),
             "inserted": c.count(Kind::Inserted),
