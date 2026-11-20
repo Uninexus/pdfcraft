@@ -255,6 +255,7 @@ impl Automation {
                     "depth": p.depth,
                     "start_page": p.start_page,
                     "end_page": p.end_page,
+                    "range_inverted": p.range_inverted,
                     "children": p.children,
                     "metadata": metadata,
                     "metadata_truncated": p.metadata_truncated,
@@ -267,6 +268,7 @@ impl Automation {
             "parts": rows,
             "count": rows.len(),
             "skipped": list.skipped,
+            "inverted_ranges": list.inverted_ranges,
             "truncated": list.truncated,
             "unsaved_changes": doc.dirty,
         }))
