@@ -294,6 +294,23 @@ fn nearest_line(value: f64, limit: f64, pitch: f64, offset: f64, tolerance: Opti
 }
 
 impl Session {
+    /// Preferences ▸ Units & Guides ▸ Grid as set for this session: the grid a snap to a grid
+    /// uses for what it is not given. `None` until [`Session::set_grid_preference`] stores one;
+    /// it is held by the session only and is not kept between runs.
+    pub fn grid_preference(&self) -> Option<Grid> {
+        self.grid_preference
+    }
+
+    /// Stores `grid` as the grid preference, or forgets it with `None`. A grid that
+    /// [`Grid::check`] refuses is refused, and the preference is then as it was.
+    pub fn set_grid_preference(&mut self, grid: Option<Grid>) -> Result<(), EditError> {
+        if let Some(g) = &grid {
+            g.check()?;
+        }
+        self.grid_preference = grid;
+        Ok(())
+    }
+
     /// Where a point on `page` (0-based) lands when it snaps to `grid`: `x` to the nearest vertical
     /// line and `y` to the nearest horizontal one, each only when a line of the grid that lies on
     /// the page is within `tolerance` points (0 to [`MAX_SNAP_TOLERANCE`]; `None` snaps to the
@@ -383,6 +400,21 @@ mod grid_tests {
         ] {
             assert!(bad.check().is_err(), "{bad:?}");
         }
+    }
+
+    #[test]
+    fn the_grid_preference_is_stored_checked_and_forgotten() {
+        let mut s = Session::new();
+        assert_eq!(s.grid_preference(), None);
+        let g = Grid { spacing: 36.0, subdivisions: 2, offset_x: 3.0, offset_y: -4.0 };
+        s.set_grid_preference(Some(g)).unwrap();
+        assert_eq!(s.grid_preference(), Some(g));
+        // A refused grid leaves the stored one as it was.
+        assert!(s.set_grid_preference(Some(Grid::new(0.0))).is_err());
+        assert!(s.set_grid_preference(Some(Grid { subdivisions: 101, ..g })).is_err());
+        assert_eq!(s.grid_preference(), Some(g));
+        s.set_grid_preference(None).unwrap();
+        assert_eq!(s.grid_preference(), None);
     }
 }
 
