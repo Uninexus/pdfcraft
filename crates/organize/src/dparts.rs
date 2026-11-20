@@ -58,6 +58,15 @@ pub struct DocumentPart {
     /// first [`MAX_PAGES_READ`] counts as not listed). Worked out from `start_page` and `end_page` and the
     /// two keys alone; a missing `/Start` or `/End` is not unresolved.
     pub range_unresolved: bool,
+    /// The node is not the root node and its `/Parent` is not an indirect reference to the node
+    /// it was reached from (ISO 32000-2 Table 411 requires one): the key is missing, or holds a
+    /// direct value (a number, a dictionary, a null), or points at another object. The root node
+    /// is never flagged (its `/Parent` names the `/DPartRoot`, which this does not check). A node
+    /// listed by several parents is judged against the node given as its `parent` (the one it is
+    /// listed under first in document order). References are compared as written (object number
+    /// and generation, no chain followed), so on a file whose cross-reference table was repaired a
+    /// child may be flagged though it names the same object under another accepted generation.
+    pub parent_mismatch: bool,
     /// References read from `/DParts`, including any that were not read as nodes.
     pub children: usize,
     /// `/DPM` entries as `(key, value as short text)`, at most [`MAX_DPM_ENTRIES`].
@@ -85,6 +94,8 @@ pub struct DocumentPartList {
     pub inverted_ranges: usize,
     /// How many of the listed nodes have `range_unresolved`.
     pub unresolved_ranges: usize,
+    /// How many of the listed nodes have `parent_mismatch`.
+    pub parent_mismatches: usize,
     /// More nodes, levels or children exist than were read.
     pub truncated: bool,
 }
@@ -115,8 +126,8 @@ pub fn list_document_parts(doc: &Document) -> DocumentPartList {
     // Set once an entry did not fit; from then on no /DPM is listed or read.
     let mut spent = false;
     let mut seen: HashSet<ObjRef> = HashSet::new();
-    // Preorder: a stack of (node, depth, parent), children pushed last-first.
-    let mut stack = vec![(first, 0usize, None::<u32>)];
+    // Preorder: a stack of (node, depth, the node it was reached from), children pushed last-first.
+    let mut stack = vec![(first, 0usize, None::<ObjRef>)];
     while let Some((node, depth, parent)) = stack.pop() {
         if !seen.insert(node) {
             out.skipped = out.skipped.saturating_add(1);
@@ -191,14 +202,17 @@ pub fn list_document_parts(doc: &Document) -> DocumentPartList {
         let given = |key: &[u8]| dict.get(key).is_some_and(|o| !matches!(o, Object::Null));
         let range_unresolved = (given(b"Start") && start_page.is_none()) || (given(b"End") && end_page.is_none());
         out.unresolved_ranges = out.unresolved_ranges.saturating_add(usize::from(range_unresolved));
+        let parent_mismatch = parent.is_some_and(|p| dict.get(b"Parent").and_then(Object::as_ref) != Some(p));
+        out.parent_mismatches = out.parent_mismatches.saturating_add(usize::from(parent_mismatch));
         out.parts.push(DocumentPart {
             object: node.num,
-            parent,
+            parent: parent.map(|p| p.num),
             depth,
             start_page,
             end_page,
             range_inverted,
             range_unresolved,
+            parent_mismatch,
             children: counted,
             metadata,
             metadata_truncated,
@@ -210,7 +224,7 @@ pub fn list_document_parts(doc: &Document) -> DocumentPartList {
             continue;
         }
         for child in children.into_iter().rev() {
-            stack.push((child, depth + 1, Some(node.num)));
+            stack.push((child, depth + 1, Some(node)));
         }
     }
     out

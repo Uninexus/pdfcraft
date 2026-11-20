@@ -280,6 +280,7 @@ impl Automation {
                     "end_page": p.end_page,
                     "range_inverted": p.range_inverted,
                     "range_unresolved": p.range_unresolved,
+                    "parent_mismatch": p.parent_mismatch,
                     "children": p.children,
                     "metadata": metadata,
                     "metadata_truncated": p.metadata_truncated,
@@ -294,6 +295,7 @@ impl Automation {
             "skipped": list.skipped,
             "inverted_ranges": list.inverted_ranges,
             "unresolved_ranges": list.unresolved_ranges,
+            "parent_mismatches": list.parent_mismatches,
             "truncated": list.truncated,
             "unsaved_changes": doc.dirty,
         }))
