@@ -116,3 +116,28 @@ fn dpart_list_flags_the_nodes_whose_shared_metadata_did_not_fit_the_allowance() 
     assert_eq!(flags, [(0, false), (1, false), (1, false), (1, false), (0, true), (0, true)], "{listed}");
     assert_eq!(parts[1]["metadata"][0]["value"].as_str().map(str::len), Some(200));
 }
+
+#[test]
+fn a_part_whose_pages_run_backwards_is_flagged_through_the_tool() {
+    // Parts 7 and 8 are the ones `pdf_with_parts` lists, one per page; 8 now starts on page 2 and
+    // ends on page 1.
+    let text = String::from_utf8(pdf_with_parts()).unwrap();
+    let edited = text.replace("/Start 4 0 R /End 4 0 R", "/Start 4 0 R /End 3 0 R");
+    assert_ne!(text, edited, "the second part's range was rewritten");
+    // The edit keeps every byte count, so the xref offsets still hold.
+    assert_eq!(text.len(), edited.len());
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("backwards.pdf"), edited).unwrap();
+    let mut a = Automation::new().with_root(dir.path()).unwrap();
+    let doc = call(&mut a, "doc_open", json!({ "path": "backwards.pdf" }))["doc"].as_u64().unwrap();
+    let listed = call(&mut a, "dpart_list", json!({ "doc": doc }));
+    let parts = listed["parts"].as_array().unwrap();
+    let rows: Vec<_> = parts.iter().map(|p| (p["start_page"].as_u64(), p["end_page"].as_u64(), p["range_inverted"].as_bool())).collect();
+    assert_eq!(rows, [(None, None, Some(false)), (Some(1), Some(1), Some(false)), (Some(2), Some(1), Some(true))], "{listed}");
+    assert_eq!(listed["inverted_ranges"], 1);
+
+    // The ordinary file has none.
+    std::fs::write(dir.path().join("parts.pdf"), pdf_with_parts()).unwrap();
+    let plain = call(&mut a, "doc_open", json!({ "path": "parts.pdf" }))["doc"].as_u64().unwrap();
+    assert_eq!(call(&mut a, "dpart_list", json!({ "doc": plain }))["inverted_ranges"], 0);
+}

@@ -5424,6 +5424,27 @@ fn document_parts_are_listed_in_order_with_pages_and_metadata() {
 }
 
 #[test]
+fn a_part_whose_end_page_comes_before_its_start_page_is_flagged() {
+    let mut doc = open(fixture());
+    let pages = pages(&doc).unwrap();
+    let (p1, p2, p3) = (pages[0].obj, pages[1].obj, pages[2].obj);
+    let top = add_part(&mut doc, None);
+    let backwards = add_part(&mut doc, Some((p3, p1)));
+    let single = add_part(&mut doc, Some((p2, p2)));
+    let forwards = add_part(&mut doc, Some((p1, p3)));
+    // An /End that names no page of the document (the catalog) is not inverted.
+    let doc_root = doc.root().unwrap();
+    let unknown_end = add_part(&mut doc, Some((p3, doc_root)));
+    set_children(&mut doc, top, &[backwards, single, forwards, unknown_end]);
+    set_document_part_root(&mut doc, top);
+
+    let list = list_document_parts(&doc);
+    let flags: Vec<_> = list.parts.iter().map(|p| (p.object, p.range_inverted)).collect();
+    assert_eq!(flags, [(top.num, false), (backwards.num, true), (single.num, false), (forwards.num, false), (unknown_end.num, false)]);
+    assert_eq!(list.inverted_ranges, 1);
+}
+
+#[test]
 fn document_part_listing_is_bounded_by_depth_and_node_count() {
     // A chain deeper than the limit.
     let mut doc = open(fixture());

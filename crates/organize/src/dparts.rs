@@ -48,6 +48,10 @@ pub struct DocumentPart {
     pub start_page: Option<usize>,
     /// 1-based page of `/End`, when it names a page of the document.
     pub end_page: Option<usize>,
+    /// Both `/Start` and `/End` name pages of the document and the end page comes before the
+    /// start page, so the part covers no pages in order. Worked out from `start_page` and
+    /// `end_page` alone; a missing `/End` is not inverted.
+    pub range_inverted: bool,
     /// References read from `/DParts`, including any that were not read as nodes.
     pub children: usize,
     /// `/DPM` entries as `(key, value as short text)`, at most [`MAX_DPM_ENTRIES`].
@@ -71,6 +75,8 @@ pub struct DocumentPartList {
     /// References that were not read as nodes: not a dictionary, or a node already read (a cycle
     /// or a node listed twice).
     pub skipped: usize,
+    /// How many of the listed nodes have `range_inverted`.
+    pub inverted_ranges: usize,
     /// More nodes, levels or children exist than were read.
     pub truncated: bool,
 }
@@ -171,12 +177,16 @@ pub fn list_document_parts(doc: &Document) -> DocumentPartList {
             metadata_truncated |= dpm.more;
         }
 
+        let (start_page, end_page) = (page_of(b"Start"), page_of(b"End"));
+        let range_inverted = matches!((start_page, end_page), (Some(s), Some(e)) if e < s);
+        out.inverted_ranges = out.inverted_ranges.saturating_add(usize::from(range_inverted));
         out.parts.push(DocumentPart {
             object: node.num,
             parent,
             depth,
-            start_page: page_of(b"Start"),
-            end_page: page_of(b"End"),
+            start_page,
+            end_page,
+            range_inverted,
             children: counted,
             metadata,
             metadata_truncated,
