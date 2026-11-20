@@ -15,6 +15,7 @@ mod button_caption;
 mod compare_ignore_case;
 mod compare_ignore_punctuation;
 mod compare_visual_causes;
+mod content_update_image;
 mod document_actions;
 mod document_parts;
 mod edit_all_javascripts;
