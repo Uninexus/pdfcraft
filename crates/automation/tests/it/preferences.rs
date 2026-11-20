@@ -145,6 +145,38 @@ fn auto_complete_is_off_until_asked_for_and_remembers_only_plain_text_fields() {
 }
 
 #[test]
+fn a_form_preferences_call_with_a_bad_argument_changes_none_of_the_others() {
+    let (mut a, doc) = setup("forms-atomic");
+    add_field(&mut a, doc, "city", "text");
+    tool(&mut a, "form_preferences", json!({ "auto_complete": "basic" }));
+    tool(&mut a, "form_fill", json!({ "doc": doc, "values": { "city": "Maplewood" } }));
+    // Each bad value sits beside arguments that would change something if they were applied first.
+    let bad = [
+        json!({ "auto_complete": "advanced" }),
+        json!({ "clear_entries": "yes" }),
+        json!({ "list_entries": 1 }),
+        json!({ "suggest": 5 }),
+        json!({ "forget_entry": "nobody" }),
+        json!({ "forget_entry": 7 }),
+    ];
+    for extra in bad {
+        let mut args = json!({ "highlight_fields": true, "clear_entries": true });
+        if extra.get("clear_entries").is_none() {
+            args["auto_complete"] = json!("off");
+        }
+        for (k, v) in extra.as_object().into_iter().flatten() {
+            args[k] = v.clone();
+        }
+        assert!(matches!(a.call("form_preferences", &args), Err(ToolError::InvalidArgs(_))), "{args} is refused");
+        assert!(!a.session().field_highlight(), "{args}: Highlight fields is still off");
+        assert!(a.session().form_autocomplete(), "{args}: Auto-Complete is still on");
+        assert_eq!(a.session().form_entries().len(), 1, "{args}: the remembered entry is still there");
+    }
+    let ok = tool(&mut a, "form_preferences", json!({ "highlight_fields": true, "auto_complete": "off", "clear_entries": true }));
+    assert_eq!((ok["highlight_fields"].clone(), ok["auto_complete"].clone(), ok["entry_count"].clone()), (json!(true), json!("off"), json!(0)));
+}
+
+#[test]
 fn the_login_name_authors_comments_only_when_asked_and_a_refused_call_changes_nothing() {
     let (mut a, doc) = setup("login");
     let note = |a: &mut Automation| {

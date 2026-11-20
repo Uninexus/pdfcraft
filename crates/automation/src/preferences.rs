@@ -37,28 +37,34 @@ impl Automation {
 
     /// `form_preferences`: Highlight fields and Auto-Complete.
     pub(crate) fn form_preferences(&mut self, a: &Args) -> Result<Value> {
-        // Checked before anything changes, so a refused call changes nothing.
+        // Every argument is read and checked before anything changes, so a refused call changes
+        // nothing (a wrong type further down the list must not leave Highlight fields turned on).
         let forget = a.opt_str("forget_entry")?.map(str::trim);
+        let highlight = a.opt_bool("highlight_fields")?;
+        let auto_complete = match a.opt_str("auto_complete")? {
+            None => None,
+            Some("off") => Some(false),
+            Some("basic") => Some(true),
+            Some(other) => return Err(ToolError::InvalidArgs(format!("auto_complete must be \"off\" or \"basic\", not {other:?}"))),
+        };
+        let clear = a.opt_bool("clear_entries")?.unwrap_or(false);
+        let list = a.opt_bool("list_entries")?.unwrap_or(false);
+        let suggest = a.opt_str("suggest")?;
         if let Some(text) = forget
             && !self.session.form_entries().entries().iter().any(|e| e == text)
         {
             return Err(ToolError::InvalidArgs(format!("there is no remembered entry {text:?} to forget (see list_entries)")));
         }
-        if let Some(on) = a.opt_bool("highlight_fields")? {
+        if let Some(on) = highlight {
             self.session.set_field_highlight(on);
         }
-        if let Some(mode) = a.opt_str("auto_complete")? {
-            let on = match mode {
-                "off" => false,
-                "basic" => true,
-                other => return Err(ToolError::InvalidArgs(format!("auto_complete must be \"off\" or \"basic\", not {other:?}"))),
-            };
+        if let Some(on) = auto_complete {
             self.session.set_form_autocomplete(on);
         }
         if let Some(text) = forget {
             self.session.form_entries_mut().remove(text);
         }
-        if a.opt_bool("clear_entries")?.unwrap_or(false) {
+        if clear {
             self.session.clear_form_entries();
         }
         let mut out = json!({
@@ -67,10 +73,10 @@ impl Automation {
             "entry_count": self.session.form_entries().len(),
         });
         // What is remembered is the person's own typing: listed only when asked for.
-        if a.opt_bool("list_entries")?.unwrap_or(false) {
+        if list {
             out["entries"] = json!(self.session.form_entries().entries());
         }
-        if let Some(typed) = a.opt_str("suggest")? {
+        if let Some(typed) = suggest {
             out["suggestions"] = json!(self.session.suggest_form_entries(typed));
         }
         Ok(out)
