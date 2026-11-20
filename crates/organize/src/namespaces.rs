@@ -82,6 +82,9 @@ pub struct NamespaceList {
     /// Listed roles (at most [`MAX_ROLE_ENTRIES`] per namespace) whose pair names a namespace
     /// dictionary that `/Namespaces` does not list (`role_namespace_listed == Some(false)`).
     pub unlisted_role_namespaces: usize,
+    /// Namespaces read whose `/NS` is missing or not a string (`ns == None`), so that they have no
+    /// identifier to be known by. Counted over the namespaces read, at most [`MAX_NAMESPACES`].
+    pub without_ns: usize,
 }
 
 fn short(text: &str) -> String {
@@ -163,6 +166,7 @@ pub fn list_structure_namespaces(doc: &Document) -> NamespaceList {
         });
     }
     out.duplicates = duplicate_namespaces(&out.namespaces);
+    out.without_ns = out.namespaces.iter().filter(|n| n.ns.is_none()).count();
     let listed: HashSet<u32> = out.namespaces.iter().filter_map(|n| n.object).collect();
     let truncated = out.truncated;
     for role in out.namespaces.iter_mut().flat_map(|n| n.roles.iter_mut()) {

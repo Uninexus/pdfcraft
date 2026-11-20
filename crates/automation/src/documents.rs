@@ -296,6 +296,7 @@ impl Automation {
             "namespaces": rows,
             "duplicate_ns": duplicates,
             "unlisted_role_namespaces": list.unlisted_role_namespaces,
+            "without_ns": list.without_ns,
             "count": rows.len(),
             "skipped": list.skipped,
             "truncated": list.truncated,

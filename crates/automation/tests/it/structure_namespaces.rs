@@ -68,6 +68,7 @@ fn structure_namespaces_are_listed_through_the_tool_and_survive_a_save() {
 
     assert_eq!(listed["duplicate_ns"], json!([]), "{listed}");
     assert_eq!(listed["unlisted_role_namespaces"], 0, "{listed}");
+    assert_eq!(listed["without_ns"], 0, "{listed}");
 
     // Reading is not an edit; the namespaces are still there after another edit and a save.
     assert_eq!(listed["unsaved_changes"], false);
@@ -135,5 +136,29 @@ fn role_pairs_naming_an_unlisted_namespace_are_reported_through_the_tool() {
         "{listed}"
     );
     assert_eq!(note["role_namespace"], "http://iso.org/pdf2/ssn", "{listed}");
+    assert_eq!(listed["unsaved_changes"], false);
+}
+
+#[test]
+fn namespaces_without_an_identifier_are_counted_through_the_tool() {
+    let dir = tempfile::tempdir().unwrap();
+    // The first namespace loses its /NS and the second one's becomes a number, so neither has an
+    // identifier. Each replacement has the length of the text it replaces, so the cross-reference
+    // table stays right; the asserts keep it so.
+    let swaps =
+        [("/NS (http://iso.org/pdf2/ssn)", format!("/Pad ({})", "x".repeat(22))), ("/NS (urn:example:tags)", "/NS 123456789012345678".to_string())];
+    let mut bytes = String::from_utf8(pdf_with_namespaces()).unwrap();
+    for (from, to) in &swaps {
+        assert_eq!(from.len(), to.len(), "{from} -> {to}");
+        assert!(bytes.contains(from), "{from}");
+        bytes = bytes.replace(from, to);
+    }
+    std::fs::write(dir.path().join("nameless.pdf"), bytes).unwrap();
+    let mut a = Automation::new().with_root(dir.path()).unwrap();
+    let doc = call(&mut a, "doc_open", json!({ "path": "nameless.pdf" }))["doc"].as_u64().unwrap();
+    let listed = call(&mut a, "ns_list", json!({ "doc": doc }));
+    assert_eq!((listed["count"].as_u64(), listed["without_ns"].as_u64()), (Some(2), Some(2)), "{listed}");
+    assert_eq!(listed["namespaces"][0]["ns"], Value::Null, "{listed}");
+    assert_eq!(listed["namespaces"][1]["ns"], Value::Null, "{listed}");
     assert_eq!(listed["unsaved_changes"], false);
 }
