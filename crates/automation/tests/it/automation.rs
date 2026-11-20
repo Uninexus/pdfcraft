@@ -6441,6 +6441,38 @@ fn redacting_canadian_sin_and_postal_codes_through_tools() {
 }
 
 #[test]
+/// Australian Tax File Numbers are removed from the saved content stream; a number that fails the
+/// checksum and a bare nine-digit order number stay.
+fn redacting_an_australian_tax_file_number_through_tools() {
+    let table = tools();
+    let advertised: Vec<&str> = table.iter().find(|t| t.name == "redact_mark").unwrap().input_schema["properties"]["pattern"]["enum"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+    assert!(advertised.contains(&"tfn"), "{advertised:?}");
+    let dir = workdir("redact-tfn");
+    std::fs::write(dir.join("form.txt"), "TFN 123 456 782 for Ada\nTax file number: 865432102 too\nBad TFN 123 456 783\nOrder 123456782 shipped")
+        .unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_create", json!({ "from": "text", "path": "form.txt" }))["doc"].as_u64().unwrap();
+    assert_eq!(ok(&mut a, "redact_mark", json!({ "doc": doc, "pattern": "tfn" }))["marked"], 2);
+    assert!(page_text(&mut a, doc)[0].contains("123 456 782"), "marks alone remove nothing");
+    assert_eq!(ok(&mut a, "redact_apply", json!({ "doc": doc }))["applied"], 2);
+    ok(&mut a, "doc_save", json!({ "doc": doc, "path": "redacted.pdf" }));
+    let reopened = ok(&mut a, "doc_open", json!({ "path": "redacted.pdf" }))["doc"].as_u64().unwrap();
+    let text = &page_text(&mut a, reopened)[0];
+    for gone in ["123 456 782", "456 782", "865432102", "86543"] {
+        assert!(!text.contains(gone), "{gone} must be removed from the saved page: {text}");
+    }
+    for kept in ["for Ada", "Tax file number:", "Bad TFN 123 456 783", "Order 123456782 shipped"] {
+        assert!(text.contains(kept), "{kept} must remain: {text}");
+    }
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
 /// UK National Insurance numbers are removed from the saved content stream; an unallocated prefix
 /// and a number with a suffix past D stay.
 fn redacting_a_uk_national_insurance_number_through_tools() {
