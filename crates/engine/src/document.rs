@@ -624,6 +624,21 @@ impl Document {
         self.editor.as_ref().map(|e| pdfcraft_organize::base_url::read_base_url(&e.cos)).unwrap_or_default()
     }
 
+    /// The structure tree's role map (`/StructTreeRoot` `/RoleMap`) as stored, from one read.
+    pub fn role_map(&self) -> pdfcraft_organize::role_map::RoleMap {
+        self.editor.as_ref().map(|e| pdfcraft_organize::role_map::read_role_map(&e.cos)).unwrap_or_default()
+    }
+
+    /// Whether mapping `role` to `maps_to` (`None` takes the entry away) would change the role
+    /// map; an error says why a removal of an entry that is not stored is refused (a role that is
+    /// not a name the tool writes).
+    pub fn role_map_changes(&self, role: &str, maps_to: Option<&str>) -> Result<bool, String> {
+        match self.editor.as_ref() {
+            Some(e) => pdfcraft_organize::role_map::role_map_changes(&e.cos, role, maps_to).map_err(|e| e.to_string()),
+            None => Ok(false),
+        }
+    }
+
     /// Signed: at least one signature field holds a signature.
     pub fn is_signed(&self) -> bool {
         self.signatures.iter().any(|s| s.signed)

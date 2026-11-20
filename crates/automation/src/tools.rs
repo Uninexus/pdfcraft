@@ -1955,6 +1955,14 @@ pub fn tools() -> Vec<ToolDef> {
             }),
             &["doc"],
         )),
+        t("role_map", "Structure tree role map", "Read or change one entry of the structure tree's role map (the /RoleMap dictionary of the catalog's /StructTreeRoot, ISO 32000-2 14.7.4.2), which the accessibility tools follow from a structure type a file made up to the type it maps to. Leave `role` and `maps_to` out to only read. Returns `role_map`: has_structure_tree, count (every entry), truncated (more than 256 entries, so only the first 256 are listed), entries (role; maps_to, null when the value is not a name; exact, false when a name is not valid UTF-8 or is over 127 bytes, so it is listed cut and cannot be asked for; loops, true when following the names from maps_to gets back to role within 64 steps) and unreadable (struct_tree_root, when /StructTreeRoot is there but is neither a dictionary (a stream's dictionary counts) nor null, is behind more than 33 references, or is the catalog itself; role_map, the same for /RoleMap, which is also unreadable when it is a stream, whose keys are not roles, or is the catalog or the tree root itself). Give `role` and `maps_to` together to map role to maps_to; an empty maps_to takes the entry away. A name is 1 to 127 bytes with no NUL byte (this tool's limit). The tool does not check that the role is used by the tree, that maps_to is a standard type, or that role is not itself a standard type. Nothing is written when a name is not of that form (for a removal, when role is not stored and is not of that form; a stored key can be taken away whatever it is), when role would map to itself or to a name whose entries lead back to role within 64 steps (this tool's rule, not the file format's; a loop longer than 64 steps is not seen), when the document has no structure tree, or when /StructTreeRoot or /RoleMap is unreadable as above: such a value is never replaced. Asking for what is stored (the same name, or taking away an entry that is not there) changes nothing and adds no undo step, even a stored entry that would be refused as a new one. Other entries are kept and an emptied role map goes. A stored value that is not a name is replaced by a name asked for. Needs permission to modify the document. One undo step.").with(schema(
+            json!({
+                "doc": doc(),
+                "role": { "type": "string", "minLength": 1, "maxLength": 127 },
+                "maps_to": { "type": "string", "maxLength": 127 },
+            }),
+            &["doc"],
+        )),
         t("doc_audit_space", "Audit space usage", "How many bytes each kind of content takes and its share of the file (PDF Optimizer ▸ Audit space usage): images, content streams, fonts, forms, comments, structure, bookmarks, … and document overhead.")
             .ro()
             .cmd("optimize.advanced")

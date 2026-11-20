@@ -6801,3 +6801,396 @@ fn asking_for_the_stored_base_url_changes_no_byte() {
     set_base_url(&mut doc, Some("https://example.com/")).unwrap();
     assert_eq!(write_full(&doc, &SaveOptions::default()).unwrap(), with);
 }
+
+/// A dictionary of names, `(key, value)` each.
+fn names_dict(pairs: &[(&str, &str)]) -> Object {
+    uri_with(pairs.iter().map(|(k, v)| (*k, Object::name(v))).collect())
+}
+
+/// The fixture with a `/StructTreeRoot` (one indirect dictionary) that has `role_map` as its
+/// `/RoleMap` when given; returns the document and the tree root's reference.
+fn tree_doc(role_map: Option<Object>) -> (Document, pdfcraft_cos::ObjRef) {
+    let mut doc = open(fixture());
+    let mut entries = vec![("Type", Object::name("StructTreeRoot"))];
+    if let Some(m) = role_map {
+        entries.push(("RoleMap", m));
+    }
+    let root = doc.add(uri_with(entries));
+    set_catalog_entry(&mut doc, "StructTreeRoot", Object::Ref(root));
+    (doc, root)
+}
+
+/// The role map of `doc` as `(role, maps_to)` rows.
+fn roles(doc: &Document) -> Vec<(String, Option<String>)> {
+    crate::role_map::read_role_map(doc).entries.into_iter().map(|e| (e.role, e.maps_to)).collect()
+}
+
+fn pair(a: &str, b: &str) -> (String, Option<String>) {
+    (a.to_owned(), Some(b.to_owned()))
+}
+
+/// The stored `/RoleMap` dictionary, resolved.
+fn stored_role_map(doc: &Document) -> Option<pdfcraft_cos::Dict> {
+    let c = doc.get(doc.root().unwrap()).as_dict().cloned().unwrap();
+    let root = c.get(b"StructTreeRoot").map(|o| doc.resolve(o))?;
+    root.as_dict()?.get(b"RoleMap").map(|o| doc.resolve(o)).and_then(|o| o.as_dict().cloned())
+}
+
+#[test]
+fn a_role_map_entry_round_trips_through_a_save_and_removing_the_last_takes_the_dictionary() {
+    use crate::role_map::{read_role_map, set_role_map};
+    let (mut doc, _) = tree_doc(None);
+    let none = read_role_map(&doc);
+    assert!(none.has_structure_tree && none.entries.is_empty() && none.count == 0 && !none.truncated && none.unreadable.is_empty());
+    set_role_map(&mut doc, "Chapter", Some("H1")).unwrap();
+    set_role_map(&mut doc, "Photo", Some("Figure")).unwrap();
+    let mut doc = open(write_full(&doc, &SaveOptions::default()).unwrap());
+    assert_eq!(roles(&doc), [pair("Chapter", "H1"), pair("Photo", "Figure")]);
+    assert_eq!(stored_role_map(&doc).unwrap().get(b"Chapter"), Some(&Object::name("H1")), "the file holds a name");
+    // A new target replaces the old one in place; removing one leaves the other.
+    set_role_map(&mut doc, "Chapter", Some("H2")).unwrap();
+    assert_eq!(roles(&doc), [pair("Chapter", "H2"), pair("Photo", "Figure")]);
+    set_role_map(&mut doc, "Chapter", None).unwrap();
+    assert_eq!(roles(&doc), [pair("Photo", "Figure")]);
+    // The last one takes the dictionary with it.
+    set_role_map(&mut doc, "Photo", None).unwrap();
+    assert!(stored_role_map(&doc).is_none());
+    let tree = doc.resolve(doc.get(doc.root().unwrap()).as_dict().unwrap().get(b"StructTreeRoot").unwrap());
+    assert!(tree.as_dict().unwrap().get(b"RoleMap").is_none());
+    assert_eq!(tree.as_dict().unwrap().name(b"Type"), Some(&b"StructTreeRoot"[..]), "the rest of the tree root stays");
+}
+
+#[test]
+fn a_role_map_is_changed_where_it_is_through_references_and_in_a_direct_tree_root() {
+    use crate::role_map::{read_role_map, set_role_map};
+    // /StructTreeRoot behind a chain of two references, /RoleMap behind another, the value of an
+    // entry behind one more.
+    let mut doc = open(fixture());
+    let target = doc.add(Object::name("H1"));
+    let map = doc.add(uri_with(vec![("Chapter", Object::Ref(target)), ("Keep", Object::name("P"))]));
+    let map_hop = doc.add(Object::Ref(map));
+    let root = doc.add(uri_with(vec![("Type", Object::name("StructTreeRoot")), ("RoleMap", Object::Ref(map_hop))]));
+    let root_hop = doc.add(Object::Ref(root));
+    set_catalog_entry(&mut doc, "StructTreeRoot", Object::Ref(root_hop));
+    assert_eq!(roles(&doc), [pair("Chapter", "H1"), pair("Keep", "P")], "a value behind a reference is read");
+    set_role_map(&mut doc, "Chapter", Some("H2")).unwrap();
+    let c = doc.get(doc.root().unwrap()).as_dict().cloned().unwrap();
+    assert_eq!(c.get(b"StructTreeRoot"), Some(&Object::Ref(root_hop)), "the catalog still holds the reference");
+    assert_eq!(doc.get(root).as_dict().unwrap().get(b"RoleMap"), Some(&Object::Ref(map_hop)), "so does the tree root");
+    assert_eq!(doc.get(map).as_dict().unwrap().get(b"Chapter"), Some(&Object::name("H2")), "changed where it is");
+    assert_eq!(roles(&doc), [pair("Chapter", "H2"), pair("Keep", "P")]);
+    // Emptying the indirect dictionary takes it out of the tree root, which stays.
+    set_role_map(&mut doc, "Chapter", None).unwrap();
+    set_role_map(&mut doc, "Keep", None).unwrap();
+    assert!(doc.get(root).as_dict().unwrap().get(b"RoleMap").is_none());
+    assert_eq!(doc.get(root).as_dict().unwrap().name(b"Type"), Some(&b"StructTreeRoot"[..]));
+    // A tree root written in the catalog itself, with a direct and then an indirect map.
+    let mut doc = open(fixture());
+    set_catalog_entry(&mut doc, "StructTreeRoot", uri_with(vec![("Type", Object::name("StructTreeRoot")), ("RoleMap", names_dict(&[("A", "P")]))]));
+    assert_eq!(roles(&doc), [pair("A", "P")]);
+    set_role_map(&mut doc, "B", Some("H1")).unwrap();
+    assert_eq!(roles(&doc), [pair("A", "P"), pair("B", "H1")]);
+    set_role_map(&mut doc, "A", None).unwrap();
+    set_role_map(&mut doc, "B", None).unwrap();
+    assert!(!read_role_map(&doc).entries.iter().any(|_| true) && read_role_map(&doc).has_structure_tree);
+    let map = doc.add(names_dict(&[("A", "P")]));
+    set_catalog_entry(&mut doc, "StructTreeRoot", uri_with(vec![("RoleMap", Object::Ref(map))]));
+    set_role_map(&mut doc, "A", None).unwrap();
+    let c = doc.get(doc.root().unwrap()).as_dict().cloned().unwrap();
+    assert!(matches!(c.get(b"StructTreeRoot"), Some(Object::Dict(d)) if d.is_empty()), "the direct tree root lost its emptied /RoleMap");
+    // A tree root that is a stream counts by its dictionary, as Document::resolve and as_dict do.
+    let mut doc = open(fixture());
+    let mut s = pdfcraft_cos::Stream::from_raw(pdfcraft_cos::Dict::new(), b"x".to_vec());
+    s.dict.set(b"RoleMap".to_vec(), names_dict(&[("A", "P")]));
+    let stream = doc.add(Object::Stream(s));
+    set_catalog_entry(&mut doc, "StructTreeRoot", Object::Ref(stream));
+    assert_eq!(roles(&doc), [pair("A", "P")]);
+    set_role_map(&mut doc, "B", Some("H1")).unwrap();
+    assert_eq!(roles(&doc), [pair("A", "P"), pair("B", "H1")]);
+    assert!(
+        matches!(&*doc.get(stream), Object::Stream(s) if matches!(s.dict.get(b"RoleMap"), Some(Object::Dict(d)) if d.name(b"B") == Some(&b"H1"[..])))
+    );
+}
+
+#[test]
+fn a_role_map_that_is_a_stream_the_catalog_or_the_tree_root_is_unreadable_and_never_written() {
+    use crate::role_map::{read_role_map, set_role_map};
+    let refused = "the structure tree's /StructTreeRoot or /RoleMap cannot be changed (it is not a dictionary, is behind more than 33 references, is a stream role map, or is the catalog or the tree root itself), so it was left as it is";
+    // /RoleMap that is a stream: its keys (/Length, /Filter) are not roles, so none is listed.
+    let mut doc = open(fixture());
+    let mut s = pdfcraft_cos::Stream::from_raw(pdfcraft_cos::Dict::new(), b"x".to_vec());
+    s.dict.set(b"Length".to_vec(), Object::Int(1));
+    s.dict.set(b"A".to_vec(), Object::name("P"));
+    let stream = doc.add(Object::Stream(s));
+    let root = doc.add(uri_with(vec![("RoleMap", Object::Ref(stream))]));
+    set_catalog_entry(&mut doc, "StructTreeRoot", Object::Ref(root));
+    let r = read_role_map(&doc);
+    assert_eq!((r.has_structure_tree, r.entries.len(), r.count, r.unreadable.clone()), (true, 0, 0, vec!["role_map"]));
+    let before = write_full(&doc, &SaveOptions::default()).unwrap();
+    assert_eq!(set_role_map(&mut doc, "B", Some("H1")).unwrap_err().to_string(), refused);
+    set_role_map(&mut doc, "A", None).unwrap();
+    assert_eq!(write_full(&doc, &SaveOptions::default()).unwrap(), before);
+    // /RoleMap that is the tree root, or the catalog: editing it would change /K or /Pages.
+    for target in ["root", "catalog"] {
+        let mut doc = open(fixture());
+        let catalog = doc.root().unwrap();
+        let root = doc.add(uri_with(vec![("Type", Object::name("StructTreeRoot"))]));
+        set_catalog_entry(&mut doc, "StructTreeRoot", Object::Ref(root));
+        let at = if target == "root" { root } else { catalog };
+        doc.update_dict(root, |d| d.set(b"RoleMap".to_vec(), Object::Ref(at))).unwrap();
+        let r = read_role_map(&doc);
+        assert_eq!((r.entries.len(), r.unreadable.clone()), (0, vec!["role_map"]), "{target}");
+        let before = write_full(&doc, &SaveOptions::default()).unwrap();
+        assert_eq!(set_role_map(&mut doc, "B", Some("H1")).unwrap_err().to_string(), refused, "{target}");
+        assert_eq!(write_full(&doc, &SaveOptions::default()).unwrap(), before, "{target}");
+        assert!(doc.get(catalog).as_dict().unwrap().get(b"Pages").is_some());
+    }
+    // A tree root that is the catalog.
+    let mut doc = open(fixture());
+    let catalog = doc.root().unwrap();
+    set_catalog_entry(&mut doc, "StructTreeRoot", Object::Ref(catalog));
+    let r = read_role_map(&doc);
+    assert_eq!((r.has_structure_tree, r.unreadable.clone()), (false, vec!["struct_tree_root"]));
+    let before = write_full(&doc, &SaveOptions::default()).unwrap();
+    assert_eq!(set_role_map(&mut doc, "B", Some("H1")).unwrap_err().to_string(), refused);
+    assert_eq!(write_full(&doc, &SaveOptions::default()).unwrap(), before);
+}
+
+#[test]
+fn taking_away_a_role_that_is_not_stored_needs_a_name_the_tool_writes_but_a_stored_key_goes_whatever_it_is() {
+    use crate::role_map::{read_role_map, role_map_changes, set_role_map};
+    let long = "k".repeat(200);
+    let mut bad = pdfcraft_cos::Dict::new();
+    bad.set(long.as_bytes().to_vec(), Object::name("P"));
+    bad.set(b"Fine".to_vec(), Object::name("P"));
+    let (mut doc, _) = tree_doc(Some(Object::Dict(bad)));
+    let before = write_full(&doc, &SaveOptions::default()).unwrap();
+    for (role, message) in [
+        ("", "a role must be 1 to 127 bytes, not 0 bytes"),
+        ("N\0", "a role must not contain a NUL byte"),
+        (&*"j".repeat(128), "a role must be 1 to 127 bytes, not 128 bytes"),
+    ] {
+        assert_eq!(set_role_map(&mut doc, role, None).unwrap_err().to_string(), message);
+        assert_eq!(role_map_changes(&doc, role, None).unwrap_err().to_string(), message);
+        assert_eq!(write_full(&doc, &SaveOptions::default()).unwrap(), before);
+    }
+    // A good name that is not stored is no change.
+    assert!(!role_map_changes(&doc, "Nothing", None).unwrap());
+    set_role_map(&mut doc, "Nothing", None).unwrap();
+    assert_eq!(write_full(&doc, &SaveOptions::default()).unwrap(), before);
+    // A stored key over 127 bytes (which no tool call can write) is taken away by its exact name.
+    assert!(role_map_changes(&doc, &long, None).unwrap());
+    set_role_map(&mut doc, &long, None).unwrap();
+    assert_eq!(roles(&doc), [pair("Fine", "P")]);
+    // A stored empty key and a stored key with a NUL byte likewise.
+    let mut odd = pdfcraft_cos::Dict::new();
+    odd.set(Vec::<u8>::new(), Object::name("P"));
+    odd.set(vec![b'N', 0], Object::name("P"));
+    let (mut doc, _) = tree_doc(Some(Object::Dict(odd)));
+    assert_eq!(read_role_map(&doc).count, 2);
+    set_role_map(&mut doc, "", None).unwrap();
+    set_role_map(&mut doc, "N\0", None).unwrap();
+    assert_eq!(read_role_map(&doc).count, 0);
+}
+
+#[test]
+fn a_tree_root_or_role_map_that_is_not_a_dictionary_is_named_and_never_replaced() {
+    use crate::role_map::{read_role_map, set_role_map};
+    let refused = "the structure tree's /StructTreeRoot or /RoleMap cannot be changed (it is not a dictionary, is behind more than 33 references, is a stream role map, or is the catalog or the tree root itself), so it was left as it is";
+    for other in [Object::Int(7), Object::name("x"), Object::Array(vec![]), string(b"s")] {
+        let mut doc = open(fixture());
+        set_catalog_entry(&mut doc, "StructTreeRoot", other.clone());
+        let r = read_role_map(&doc);
+        assert_eq!((r.has_structure_tree, r.unreadable.clone()), (false, vec!["struct_tree_root"]), "{other:?}");
+        let before = write_full(&doc, &SaveOptions::default()).unwrap();
+        assert_eq!(set_role_map(&mut doc, "A", Some("P")).unwrap_err().to_string(), refused);
+        // Taking away an entry that is not there is not a change.
+        set_role_map(&mut doc, "A", None).unwrap();
+        assert_eq!(write_full(&doc, &SaveOptions::default()).unwrap(), before, "{other:?}");
+
+        let (mut doc, _) = tree_doc(Some(other.clone()));
+        let r = read_role_map(&doc);
+        assert_eq!((r.has_structure_tree, r.unreadable.clone(), r.entries.len()), (true, vec!["role_map"], 0), "{other:?}");
+        let before = write_full(&doc, &SaveOptions::default()).unwrap();
+        assert_eq!(set_role_map(&mut doc, "A", Some("P")).unwrap_err().to_string(), refused);
+        set_role_map(&mut doc, "A", None).unwrap();
+        assert_eq!(write_full(&doc, &SaveOptions::default()).unwrap(), before, "{other:?}");
+    }
+}
+
+#[test]
+fn a_role_map_change_that_is_refused_writes_nothing() {
+    use crate::role_map::{MAX_ROLE_BYTES, set_role_map};
+    let (mut doc, _) = tree_doc(Some(names_dict(&[("B", "C"), ("C", "D"), ("X", "Y")])));
+    let before = write_full(&doc, &SaveOptions::default()).unwrap();
+    let long = "a".repeat(MAX_ROLE_BYTES + 1);
+    let role_bad = "a role must be 1 to 127 bytes, not ";
+    let to_bad = "what a role maps to must be 1 to 127 bytes, not ";
+    for (role, to, message) in [
+        ("", "P", format!("{role_bad}0 bytes")),
+        (long.as_str(), "P", format!("{role_bad}128 bytes")),
+        ("A\0", "P", "a role must not contain a NUL byte".to_owned()),
+        ("A", long.as_str(), format!("{to_bad}128 bytes")),
+        ("A", "P\0Q", "what a role maps to must not contain a NUL byte".to_owned()),
+        ("A", "A", "the role A cannot map to itself".to_owned()),
+        // B maps to C and C to D, so D to B would be a loop of three, and D to C one of two.
+        ("D", "B", "B already leads back to D, so mapping D to it would make a loop".to_owned()),
+        ("D", "C", "C already leads back to D, so mapping D to it would make a loop".to_owned()),
+        ("Y", "X", "X already leads back to Y, so mapping Y to it would make a loop".to_owned()),
+    ] {
+        assert_eq!(set_role_map(&mut doc, role, Some(to)).unwrap_err().to_string(), message, "{role:?} {to:?}");
+        assert_eq!(write_full(&doc, &SaveOptions::default()).unwrap(), before, "{role:?} {to:?}");
+    }
+    // An empty target is no mapping here: the tool turns it into a removal before it gets here,
+    // and an empty name given as a target is refused.
+    assert_eq!(set_role_map(&mut doc, "A", Some("")).unwrap_err().to_string(), format!("{to_bad}0 bytes"));
+    // A document with no structure tree.
+    let mut plain = open(fixture());
+    let before = write_full(&plain, &SaveOptions::default()).unwrap();
+    assert_eq!(
+        set_role_map(&mut plain, "A", Some("P")).unwrap_err().to_string(),
+        "the document has no structure tree, so there is no role map to change"
+    );
+    set_role_map(&mut plain, "A", None).unwrap();
+    assert_eq!(write_full(&plain, &SaveOptions::default()).unwrap(), before);
+    // A chain N0 -> N1 -> ... -> N65. Mapping N64 to N0 closes a loop that is seen after
+    // MAX_LOOP_STEPS (64) names (N1 to N64) are followed from N0; mapping N65 to N0 needs 65 and
+    // is not seen.
+    let names: Vec<String> = (0..=65).map(|i| format!("N{i}")).collect();
+    let pairs: Vec<(&str, &str)> = names.windows(2).map(|w| (w[0].as_str(), w[1].as_str())).collect();
+    let (mut doc, _) = tree_doc(Some(names_dict(&pairs)));
+    let last = names[64].as_str();
+    let before = write_full(&doc, &SaveOptions::default()).unwrap();
+    set_role_map(&mut doc, &names[65], Some(&names[0])).expect("a loop longer than the steps followed is not seen");
+    assert_ne!(write_full(&doc, &SaveOptions::default()).unwrap(), before);
+    let (mut doc, _) = tree_doc(Some(names_dict(&pairs)));
+    let err = set_role_map(&mut doc, last, Some(&names[0])).unwrap_err().to_string();
+    assert_eq!(err, format!("N0 already leads back to {last}, so mapping {last} to it would make a loop"));
+}
+
+#[test]
+fn a_stored_entry_sent_back_is_no_change_and_a_value_that_is_not_a_name_is_listed_and_replaced() {
+    use crate::role_map::{read_role_map, set_role_map};
+    // A stored loop, and a stored name over 127 bytes, are sent back as they are: no byte changes.
+    let long = "q".repeat(130);
+    let (mut doc, _) = tree_doc(Some(names_dict(&[("A", "B"), ("B", "A"), ("L", long.as_str())])));
+    let before = write_full(&doc, &SaveOptions::default()).unwrap();
+    let r = read_role_map(&doc);
+    assert_eq!(
+        r.entries.iter().map(|e| (e.role.as_str(), e.loops, e.exact)).collect::<Vec<_>>(),
+        [("A", true, true), ("B", true, true), ("L", false, false)]
+    );
+    assert_eq!(r.entries[2].maps_to.as_deref().map(str::len), Some(127), "a long name is listed cut");
+    set_role_map(&mut doc, "A", Some("B")).unwrap();
+    set_role_map(&mut doc, "L", Some(&long)).unwrap();
+    set_role_map(&mut doc, "Nothing", None).unwrap();
+    assert_eq!(write_full(&doc, &SaveOptions::default()).unwrap(), before);
+    // A different target for a stored loop is checked as a new one.
+    assert!(set_role_map(&mut doc, "A", Some("A")).is_err());
+    set_role_map(&mut doc, "A", Some("P")).unwrap();
+    assert_eq!(roles(&doc)[0], pair("A", "P"));
+    assert!(!read_role_map(&doc).entries[0].loops);
+    // A value that is not a name is listed with no target, is not a change to nothing, and is
+    // replaced by a name or removed.
+    let (mut doc, _) = tree_doc(Some(uri_with(vec![("N", Object::Int(5)), ("S", string(b"P")), ("Z", Object::Null)])));
+    assert_eq!(roles(&doc), [("N".to_owned(), None), ("S".to_owned(), None), ("Z".to_owned(), None)]);
+    let r = read_role_map(&doc);
+    assert!(r.entries.iter().all(|e| !e.loops && e.exact));
+    assert!(r.unreadable.is_empty());
+    set_role_map(&mut doc, "N", Some("P")).unwrap();
+    set_role_map(&mut doc, "S", None).unwrap();
+    assert_eq!(roles(&doc), [pair("N", "P"), ("Z".to_owned(), None)]);
+}
+
+#[test]
+fn the_references_followed_are_those_of_document_resolve() {
+    use crate::role_map::{read_role_map, set_role_map};
+    // A chain of n references to a dictionary: n = 33 resolves, n = 34 does not.
+    let chain = |doc: &mut Document, end: Object, hops: usize| {
+        let mut at = doc.add(end);
+        for _ in 1..hops {
+            at = doc.add(Object::Ref(at));
+        }
+        Object::Ref(at)
+    };
+    for (hops, readable) in [(33usize, true), (34, false)] {
+        // /RoleMap at the end of the chain.
+        let (mut doc, root) = tree_doc(None);
+        let start = chain(&mut doc, names_dict(&[("A", "P")]), hops);
+        doc.update_dict(root, |d| d.set(b"RoleMap".to_vec(), start.clone())).unwrap();
+        assert_eq!(doc.resolve(&start).as_dict().is_some(), readable, "Document::resolve at {hops} references");
+        let r = read_role_map(&doc);
+        assert_eq!((r.entries.len(), r.unreadable.clone()), if readable { (1, vec![]) } else { (0, vec!["role_map"]) }, "{hops} references");
+        let before = write_full(&doc, &SaveOptions::default()).unwrap();
+        let result = set_role_map(&mut doc, "B", Some("H1"));
+        if readable {
+            result.unwrap();
+            assert_eq!(roles(&doc), [pair("A", "P"), pair("B", "H1")]);
+        } else {
+            assert!(result.is_err());
+            assert_eq!(write_full(&doc, &SaveOptions::default()).unwrap(), before);
+        }
+        // /StructTreeRoot at the end of one.
+        let mut doc = open(fixture());
+        let start = chain(&mut doc, uri_with(vec![("RoleMap", names_dict(&[("A", "P")]))]), hops);
+        set_catalog_entry(&mut doc, "StructTreeRoot", start.clone());
+        assert_eq!(doc.resolve(&start).as_dict().is_some(), readable);
+        let r = read_role_map(&doc);
+        assert_eq!(
+            (r.has_structure_tree, r.unreadable.clone()),
+            if readable { (true, vec![]) } else { (false, vec!["struct_tree_root"]) },
+            "{hops} references"
+        );
+        // The value of an entry at the end of one: a name at 33, nothing at 34.
+        let (mut doc, _) = tree_doc(None);
+        let value = chain(&mut doc, Object::name("H1"), hops);
+        let map = doc.add(uri_with(vec![("A", value)]));
+        set_catalog_entry(&mut doc, "StructTreeRoot", uri_with(vec![("RoleMap", Object::Ref(map))]));
+        assert_eq!(roles(&doc), [("A".to_owned(), readable.then(|| "H1".to_owned()))], "a value behind {hops} references");
+    }
+}
+
+#[test]
+fn a_null_or_dangling_role_map_is_absent_and_an_entry_starts_a_dictionary() {
+    use crate::role_map::{read_role_map, set_role_map};
+    for absent in [Object::Null, Object::Ref(pdfcraft_cos::ObjRef::new(900, 0))] {
+        let (mut doc, root) = tree_doc(Some(absent));
+        let r = read_role_map(&doc);
+        assert!(r.has_structure_tree && r.entries.is_empty() && r.unreadable.is_empty());
+        set_role_map(&mut doc, "A", Some("P")).unwrap();
+        assert_eq!(roles(&doc), [pair("A", "P")]);
+        assert!(matches!(doc.get(root).as_dict().unwrap().get(b"RoleMap"), Some(Object::Dict(_))));
+    }
+    // A tree root that is null or dangling is no tree.
+    for absent in [Object::Null, Object::Ref(pdfcraft_cos::ObjRef::new(900, 0))] {
+        let mut doc = open(fixture());
+        set_catalog_entry(&mut doc, "StructTreeRoot", absent);
+        let r = read_role_map(&doc);
+        assert!(!r.has_structure_tree && r.unreadable.is_empty());
+        assert!(set_role_map(&mut doc, "A", Some("P")).is_err());
+    }
+}
+
+#[test]
+fn the_listing_is_bounded_names_are_cut_and_not_exact_and_names_that_need_escaping_survive_a_save() {
+    use crate::role_map::{MAX_LISTED_ROLES, read_role_map, set_role_map};
+    let many: Vec<(String, String)> = (0..MAX_LISTED_ROLES + 44).map(|i| (format!("R{i}"), "P".to_owned())).collect();
+    let pairs: Vec<(&str, &str)> = many.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
+    let (doc, _) = tree_doc(Some(names_dict(&pairs)));
+    let r = read_role_map(&doc);
+    assert_eq!((r.count, r.entries.len(), r.truncated), (300, MAX_LISTED_ROLES, true));
+    assert_eq!(r.entries.last().map(|e| e.role.as_str()), Some("R255"));
+    // A key that is not UTF-8 is listed lossily and is not exact.
+    let mut bad = pdfcraft_cos::Dict::new();
+    bad.set(vec![b'A', 0xFF], Object::name("P"));
+    bad.set(b"Fine".to_vec(), Object::name("P"));
+    let (doc, _) = tree_doc(Some(Object::Dict(bad)));
+    let r = read_role_map(&doc);
+    assert_eq!(r.entries.iter().map(|e| e.exact).collect::<Vec<_>>(), [false, true]);
+    assert_eq!(r.entries[0].role, "A\u{FFFD}");
+    // A name with a space, a slash, brackets and a number sign is written as a name and read back.
+    let (mut doc, _) = tree_doc(None);
+    set_role_map(&mut doc, "My Role/(x)#[y]", Some("Sp ace")).unwrap();
+    let doc = open(write_full(&doc, &SaveOptions::default()).unwrap());
+    assert_eq!(roles(&doc), [pair("My Role/(x)#[y]", "Sp ace")]);
+}
