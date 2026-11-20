@@ -165,3 +165,28 @@ fn a_part_whose_start_or_end_names_no_page_is_flagged_unresolved_through_the_too
     let plain = call(&mut a, "doc_open", json!({ "path": "parts.pdf" }))["doc"].as_u64().unwrap();
     assert_eq!(call(&mut a, "dpart_list", json!({ "doc": plain }))["unresolved_ranges"], 0);
 }
+
+#[test]
+fn a_part_whose_parent_is_not_the_node_listing_it_is_flagged_through_the_tool() {
+    // The first part's /Parent becomes the other part, and the second's a number; each
+    // replacement is as long as what it replaces, so the xref offsets still hold.
+    let text = String::from_utf8(pdf_with_parts()).unwrap();
+    let edited =
+        text.replace("/Parent 6 0 R /Start 3 0 R", "/Parent 8 0 R /Start 3 0 R").replace("/Parent 6 0 R /Start 4 0 R", "/Parent   6   /Start 4 0 R");
+    assert_eq!(text.len(), edited.len());
+    assert_ne!(text, edited);
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("parents.pdf"), edited).unwrap();
+    let mut a = Automation::new().with_root(dir.path()).unwrap();
+    let doc = call(&mut a, "doc_open", json!({ "path": "parents.pdf" }))["doc"].as_u64().unwrap();
+    let listed = call(&mut a, "dpart_list", json!({ "doc": doc }));
+    let parts = listed["parts"].as_array().unwrap();
+    let rows: Vec<_> = parts.iter().map(|p| (p["object"].as_u64(), p["parent_mismatch"].as_bool())).collect();
+    assert_eq!(rows, [(Some(6), Some(false)), (Some(7), Some(true)), (Some(8), Some(true))], "{listed}");
+    assert_eq!(listed["parent_mismatches"], 2);
+
+    // The ordinary file has none.
+    std::fs::write(dir.path().join("parts.pdf"), pdf_with_parts()).unwrap();
+    let plain = call(&mut a, "doc_open", json!({ "path": "parts.pdf" }))["doc"].as_u64().unwrap();
+    assert_eq!(call(&mut a, "dpart_list", json!({ "doc": plain }))["parent_mismatches"], 0);
+}

@@ -5518,6 +5518,59 @@ fn a_part_whose_start_or_end_names_no_page_is_flagged_unresolved() {
 }
 
 #[test]
+fn a_part_whose_parent_is_not_the_node_listing_it_is_flagged() {
+    let mut doc = open(fixture());
+    let top = add_part(&mut doc, None);
+    let mid = add_part(&mut doc, None);
+    let set_parent = |doc: &mut Document, node: ObjRef, value: Object| {
+        doc.update_dict(node, |d| d.set(b"Parent".to_vec(), value)).unwrap();
+    };
+    // The root node's /Parent names the /DPartRoot (here, the catalog will do); it is not checked.
+    let catalog = doc.root().unwrap();
+    set_parent(&mut doc, top, Object::Ref(catalog));
+    set_parent(&mut doc, mid, Object::Ref(top));
+    let good = add_part(&mut doc, None);
+    set_parent(&mut doc, good, Object::Ref(mid));
+    let missing = add_part(&mut doc, None);
+    let sibling = add_part(&mut doc, None);
+    set_parent(&mut doc, sibling, Object::Ref(good));
+    let direct = add_part(&mut doc, None);
+    set_parent(&mut doc, direct, Object::Int(i64::from(mid.num)));
+    let null = add_part(&mut doc, None);
+    set_parent(&mut doc, null, Object::Null);
+    let other_generation = add_part(&mut doc, None);
+    set_parent(&mut doc, other_generation, Object::Ref(ObjRef { num: mid.num, generation: 1 }));
+    // Listed by two parents, it is judged against the node given as its `parent` (`good`, which
+    // lists it before `top`'s second entry does), and it names `mid`.
+    let twice = add_part(&mut doc, None);
+    set_parent(&mut doc, twice, Object::Ref(mid));
+    set_children(&mut doc, mid, &[good, missing, sibling, direct, null, other_generation]);
+    set_children(&mut doc, top, &[mid, twice]);
+    doc.update_dict(good, |d| d.set(b"DParts".to_vec(), Object::Array(vec![Object::Array(vec![Object::Ref(twice)])]))).unwrap();
+    set_document_part_root(&mut doc, top);
+
+    let list = list_document_parts(&doc);
+    let flags: Vec<_> = list.parts.iter().map(|p| (p.object, p.parent, p.parent_mismatch)).collect();
+    // The root's /Parent is not checked; it is never flagged.
+    assert_eq!(
+        flags,
+        [
+            (top.num, None, false),
+            (mid.num, Some(top.num), false),
+            (good.num, Some(mid.num), false),
+            (twice.num, Some(good.num), true),
+            (missing.num, Some(mid.num), true),
+            (sibling.num, Some(mid.num), true),
+            (direct.num, Some(mid.num), true),
+            (null.num, Some(mid.num), true),
+            (other_generation.num, Some(mid.num), true),
+        ]
+    );
+    assert_eq!(list.parent_mismatches, 6);
+    assert_eq!(list.skipped, 1, "twice, listed again by top");
+}
+
+#[test]
 fn document_part_listing_is_bounded_by_depth_and_node_count() {
     // A chain deeper than the limit.
     let mut doc = open(fixture());
