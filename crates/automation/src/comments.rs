@@ -123,6 +123,9 @@ impl Args<'_> {
         let Some(v) = self.get(key) else { return Ok(None) };
         let wrong = || Self::wrong(key, &format!("an array of {N} numbers"));
         let arr = v.as_array().ok_or_else(wrong)?;
+        if arr.len() != N {
+            return Err(wrong());
+        }
         let nums: Vec<f64> = arr.iter().map(|x| x.as_f64().filter(|f| f.is_finite())).collect::<Option<_>>().ok_or_else(wrong)?;
         <[f64; N]>::try_from(nums).map(Some).map_err(|_| wrong())
     }

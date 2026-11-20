@@ -22,12 +22,7 @@ fn to_view(r: [f64; 4], ph: f64) -> [f64; 4] {
 }
 
 pub(crate) fn rect_arg(a: &Args, key: &str) -> Result<Option<[f64; 4]>> {
-    a.get(key)
-        .map(|v| {
-            let r: Vec<f64> = v.as_array().map(|x| x.iter().filter_map(Value::as_f64).collect()).unwrap_or_default();
-            <[f64; 4]>::try_from(r).map_err(|_| bad(format!("{key} must be 4 numbers")))
-        })
-        .transpose()
+    a.nums::<4>(key)
 }
 
 const INK_ARGS: &str = "give one of color (#RRGGBB or a name), gray (0 black to 1 white) and cmyk ([c, m, y, k], each 0 to 1)";
@@ -169,9 +164,8 @@ impl Automation {
         let ph = self.doc(a)?.info.pages[page].height as f64;
         let rect = match (rect_arg(a, "rect")?, a.get("at")) {
             (Some(r), _) => to_display(r, ph),
-            (None, Some(v)) => {
-                let p: Vec<f64> = v.as_array().map(|x| x.iter().filter_map(Value::as_f64).collect()).unwrap_or_default();
-                let [x, y]: [f64; 2] = p.try_into().map_err(|_| bad("at must be [x, y]"))?;
+            (None, Some(_)) => {
+                let [x, y] = a.nums::<2>("at")?.ok_or_else(|| bad("at must be [x, y]"))?;
                 let w = a.opt_num("width")?.unwrap_or(200.0);
                 [x, ph - y - 20.0, x + w, ph - y]
             }

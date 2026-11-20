@@ -826,9 +826,8 @@ impl Automation {
                     }
                 };
                 hf.color = color("color", hf.color)?;
-                if let Some(m) = a.get("margins").and_then(Value::as_array) {
-                    let m: Vec<f64> = m.iter().filter_map(Value::as_f64).collect();
-                    hf.margins = <[f64; 4]>::try_from(m).map_err(|_| ToolError::InvalidArgs("margins must be 4 numbers".into()))?;
+                if let Some(m) = a.nums::<4>("margins")? {
+                    hf.margins = m;
                 }
                 if let Some(s) = a.opt_int("start_number")? {
                     hf.start_number = s.clamp(1, u32::MAX as i64) as u32;

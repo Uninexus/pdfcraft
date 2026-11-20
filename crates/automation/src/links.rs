@@ -37,9 +37,7 @@ fn bad(m: impl Into<String>) -> ToolError {
 
 impl Automation {
     fn view_rect(&self, a: &Args, page: usize) -> Result<Option<[f64; 4]>> {
-        let Some(v) = a.get("rect") else { return Ok(None) };
-        let r: Vec<f64> = v.as_array().map(|x| x.iter().filter_map(Value::as_f64).collect()).unwrap_or_default();
-        let r = <[f64; 4]>::try_from(r).map_err(|_| bad("rect must be 4 numbers"))?;
+        let Some(r) = a.nums::<4>("rect")? else { return Ok(None) };
         let p = &self.doc(a)?.info.pages[page];
         let (u0, u1) = (p.view_to_user(r[0] as f32, r[1] as f32), p.view_to_user(r[2] as f32, r[3] as f32));
         Ok(Some([u0[0].min(u1[0]) as f64, u0[1].min(u1[1]) as f64, u0[0].max(u1[0]) as f64, u0[1].max(u1[1]) as f64]))

@@ -449,9 +449,7 @@ impl Automation {
                     use pdfcraft_engine::ImageEdit;
                     let change = match a.str("action")? {
                         "move" => {
-                            let r: Vec<f64> =
-                                a.get("rect").and_then(Value::as_array).map(|x| x.iter().filter_map(Value::as_f64).collect()).unwrap_or_default();
-                            let r = <[f64; 4]>::try_from(r).map_err(|_| ToolError::InvalidArgs("move needs rect: 4 numbers".into()))?;
+                            let r = a.nums::<4>("rect")?.ok_or_else(|| ToolError::InvalidArgs("move needs rect: 4 numbers".into()))?;
                             // Top-left-origin points → user space.
                             let info = &self.doc(&a)?.info.pages[page];
                             let (u0, u1) = (info.view_to_user(r[0] as f32, r[1] as f32), info.view_to_user(r[2] as f32, r[3] as f32));
@@ -474,10 +472,8 @@ impl Automation {
                         ),
                         "rotate" => ImageEdit::Rotate(a.opt_int("quarters")?.unwrap_or(1) as i32),
                         "crop" => {
-                            let r: Vec<f64> =
-                                a.get("rect").and_then(Value::as_array).map(|x| x.iter().filter_map(Value::as_f64).collect()).unwrap_or_default();
                             let r =
-                                <[f64; 4]>::try_from(r).map_err(|_| ToolError::InvalidArgs("crop needs rect: 4 numbers, the part to keep".into()))?;
+                                a.nums::<4>("rect")?.ok_or_else(|| ToolError::InvalidArgs("crop needs rect: 4 numbers, the part to keep".into()))?;
                             let info = &self.doc(&a)?.info.pages[page];
                             let (u0, u1) = (info.view_to_user(r[0] as f32, r[1] as f32), info.view_to_user(r[2] as f32, r[3] as f32));
                             ImageEdit::Crop([u0[0].min(u1[0]) as f64, u0[1].min(u1[1]) as f64, u0[0].max(u1[0]) as f64, u0[1].max(u1[1]) as f64])
