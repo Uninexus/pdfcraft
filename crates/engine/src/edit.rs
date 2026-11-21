@@ -411,6 +411,12 @@ pub enum Edit {
         link: pdfcraft_cos::ObjRef,
         target: Option<pdfcraft_organize::thread_action::ThreadTarget>,
     },
+    /// A link's menu-item action: set it to this named action, or take a named action out
+    /// (`None`).
+    SetLinkNamedAction {
+        link: pdfcraft_cos::ObjRef,
+        target: Option<pdfcraft_organize::named_action::NamedTarget>,
+    },
     /// Reference XObjects: take the `/Ref` away from the one listed at this position.
     RemoveReferenceXObject(usize),
     /// Named destinations (the `/Dests` name tree and the catalog's `/Dests` dictionary): take the

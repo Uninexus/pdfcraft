@@ -2,8 +2,8 @@
 //! all links. Rectangles are points from the top-left of the displayed page.
 
 use pdfcraft_engine::{
-    Edit, LinkAction, LinkHighlight, LinkStyle, LinkZoom, MAX_ACTION_BEADS, MAX_ACTION_THREADS, ThreadActionChange, ThreadTarget,
-    read_remote_document, remote_document_path_is_absolute, resolve_remote_document_path,
+    Edit, LinkAction, LinkHighlight, LinkStyle, LinkZoom, MAX_ACTION_BEADS, MAX_ACTION_THREADS, NamedActionChange, NamedTarget, ThreadActionChange,
+    ThreadTarget, read_remote_document, remote_document_path_is_absolute, resolve_remote_document_path,
 };
 use pdfcraft_render::{DestView, LinkTarget, RemoteDestination};
 use serde_json::{Value, json};
@@ -346,6 +346,63 @@ impl Automation {
             "has_next": read.has_next,
             "thread": read.thread.map(|t| t + 1),
             "bead": read.bead.map(|b| b + 1),
+            "destination": read.has_dest,
+            "settable": read.settable,
+            "capped": read.capped,
+        });
+        Ok(out)
+    }
+
+    /// A link's menu-item (named) action: read, set (`name`) or taken out (`remove`).
+    pub(crate) fn link_named_action(&mut self, a: &Args) -> Result<Value> {
+        let remove = a.opt_bool("remove")?.unwrap_or(false);
+        let name = a.opt_str("name")?;
+        let target = match (name, remove) {
+            (Some(_), true) => return Err(bad("remove cannot be combined with name")),
+            (Some(n), false) => Some(NamedTarget::new(n).map_err(|e| bad(e.to_string()))?),
+            (None, _) => None,
+        };
+        let (page, index) = (self.page(a)?, a.int("index")?);
+        let (link, before) = {
+            let doc = self.doc(a)?;
+            let found = doc.links().iter().find(|l| l.page == page && l.index as i64 + 1 == index);
+            let found = found.ok_or_else(|| failed(format!("page {} has no link {index} (see link_list)", page + 1)))?;
+            let link = found.obj.ok_or_else(|| failed("an inline link has no object to edit"))?;
+            (link, target.is_some().then(|| doc.link_named_action(link)))
+        };
+        let writes = target.is_some() || remove;
+        let mut out = json!({});
+        let mut changed = false;
+        if writes {
+            match self.doc(a)?.link_named_action_change(link, target.as_ref()) {
+                NamedActionChange::Refused(why) => return Err(failed(why)),
+                NamedActionChange::NoChange => {}
+                NamedActionChange::Yes => {
+                    out = self.apply(a, Edit::SetLinkNamedAction { link, target })?;
+                    changed = true;
+                }
+            }
+        }
+        let read = self.doc(a)?.link_named_action(link);
+        out["page"] = json!(page + 1);
+        out["index"] = json!(index);
+        if writes {
+            out["changed"] = json!(changed);
+            if let (true, Some(before)) = (changed, &before) {
+                // What a set took the place of.
+                out["replaced"] =
+                    json!({ "action": before.action, "has_entry": before.has_entry, "destination": before.has_dest, "next": before.has_next });
+            }
+        }
+        out["named_action"] = json!({
+            "has_entry": read.has_entry,
+            "present": read.present,
+            "action": read.action,
+            "exact": read.exact,
+            "is_named": read.is_named,
+            "name": read.name,
+            "safe": read.safe,
+            "has_next": read.has_next,
             "destination": read.has_dest,
             "settable": read.settable,
             "capped": read.capped,

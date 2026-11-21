@@ -729,6 +729,24 @@ impl Document {
         }
     }
 
+    /// The menu-item action of the link annotation with this object, as stored.
+    pub fn link_named_action(&self, link: pdfcraft_cos::ObjRef) -> pdfcraft_organize::named_action::NamedAction {
+        self.editor.as_ref().map(|e| pdfcraft_organize::named_action::read_named_action(&e.cos, link)).unwrap_or_default()
+    }
+
+    /// What setting `target` (a removal when `None`) as the menu-item action of the link with this
+    /// object would do.
+    pub fn link_named_action_change(
+        &self,
+        link: pdfcraft_cos::ObjRef,
+        target: Option<&pdfcraft_organize::named_action::NamedTarget>,
+    ) -> pdfcraft_organize::named_action::Change {
+        match self.editor.as_ref() {
+            Some(e) => pdfcraft_organize::named_action::named_action_change(&e.cos, link, target),
+            None => pdfcraft_organize::named_action::Change::Refused("the document cannot be edited"),
+        }
+    }
+
     /// Signed: at least one signature field holds a signature.
     pub fn is_signed(&self) -> bool {
         self.signatures.iter().any(|s| s.signed)
