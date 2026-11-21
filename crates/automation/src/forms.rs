@@ -3,7 +3,8 @@
 
 use pdfcraft_engine::form_scripts::{CalcOp, Calculate, Format, NOTATION_NOT_STORABLE, Validate, notation_storable};
 use pdfcraft_engine::{
-    CalculationIssue, Edit, FieldProps, FieldValue, FormField, FormFieldKind, LockAction, LockChange, LockSpec, NewField, field_flags,
+    CalculationIssue, Edit, FieldProps, FieldValue, FormField, FormFieldKind, LockAction, LockChange, LockSpec, NewField, SeedChange, SeedEntry,
+    SeedSpec, field_flags,
 };
 use serde_json::{Value, json};
 
@@ -1004,6 +1005,98 @@ impl Automation {
             "count": read.count,
             "truncated": read.truncated,
             "not_names": read.not_names,
+            "exact": read.exact,
+            "signed": read.signed,
+            "settable": read.settable,
+            "capped": read.capped,
+        });
+        Ok(out)
+    }
+
+    /// A signature field's `/SV`: read, set (`reasons`, `sub_filters`, `digest_methods`,
+    /// `add_rev_info`, `required`) or taken out (`remove`).
+    pub(crate) fn signature_seed_values(&mut self, a: &Args) -> Result<Value> {
+        let name = a.str("field")?.to_owned();
+        let remove = a.opt_bool("remove")?.unwrap_or(false);
+        let list = |key: &str| -> Result<Option<Vec<String>>> {
+            Ok(match a.get(key) {
+                None => None,
+                Some(_) => Some(a.strs(key)?.into_iter().map(str::to_owned).collect()),
+            })
+        };
+        let (reasons, sub_filters, digest_methods, required) = (list("reasons")?, list("sub_filters")?, list("digest_methods")?, list("required")?);
+        for (key, l) in [("reasons", &reasons), ("sub_filters", &sub_filters), ("digest_methods", &digest_methods), ("required", &required)] {
+            if l.as_ref().is_some_and(Vec::is_empty) {
+                return Err(bad(format!("{key} is empty: leave it out, or use remove to take the seed values out")));
+            }
+        }
+        let add_rev_info = a.opt_bool("add_rev_info")?;
+        let sets = reasons.is_some() || sub_filters.is_some() || digest_methods.is_some() || add_rev_info.is_some() || required.is_some();
+        if remove && sets {
+            return Err(bad("remove cannot be combined with seed values"));
+        }
+        let spec = if sets {
+            let mut entries = Vec::new();
+            for r in required.unwrap_or_default() {
+                entries.push(
+                    SeedEntry::parse(&r)
+                        .ok_or_else(|| bad(format!("unknown entry {r:?} to require (sub_filter, reasons, add_rev_info, digest_method)")))?,
+                );
+            }
+            Some(
+                SeedSpec::new(
+                    reasons.unwrap_or_default(),
+                    sub_filters.unwrap_or_default(),
+                    digest_methods.unwrap_or_default(),
+                    add_rev_info,
+                    entries,
+                )
+                .map_err(|e| bad(e.to_string()))?,
+            )
+        } else {
+            None
+        };
+        let field = {
+            let doc = self.doc(a)?;
+            let mut named = doc.form.iter().filter(|f| f.name == name);
+            let field = named.next().ok_or_else(|| failed(format!("there is no field named {name:?} (see form_fields)")))?;
+            if named.next().is_some() {
+                return Err(failed(format!("{name:?} names more than one field")));
+            }
+            if field.kind != FormFieldKind::Signature {
+                return Err(failed(format!("{name:?} is not a signature field")));
+            }
+            field.obj
+        };
+        let writes = spec.is_some() || remove;
+        let mut out = json!({});
+        let mut changed = false;
+        if writes {
+            match self.doc(a)?.signature_seed_change(field, spec.as_ref()) {
+                SeedChange::Refused(why) => return Err(failed(why)),
+                SeedChange::NoChange => {}
+                SeedChange::Yes => {
+                    out = self.apply(a, Edit::SetSignatureSeed { field, seed: spec })?;
+                    changed = true;
+                }
+            }
+        }
+        let read = self.doc(a)?.signature_seed(field);
+        let list = |l: &pdfcraft_engine::SeedList| json!({ "items": l.items, "count": l.count, "truncated": l.truncated, "skipped": l.skipped });
+        out["field"] = json!(name);
+        if writes {
+            out["changed"] = json!(changed);
+        }
+        out["seed_values"] = json!({
+            "has_entry": read.has_entry,
+            "present": read.present,
+            "flags": read.flags,
+            "required": read.required.iter().map(|e| e.name()).collect::<Vec<_>>(),
+            "reasons": list(&read.reasons),
+            "sub_filters": list(&read.sub_filters),
+            "digest_methods": list(&read.digest_methods),
+            "add_rev_info": read.add_rev_info,
+            "other_entries": read.other_entries,
             "exact": read.exact,
             "signed": read.signed,
             "settable": read.settable,

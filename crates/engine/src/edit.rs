@@ -405,6 +405,11 @@ pub enum Edit {
         field: pdfcraft_cos::ObjRef,
         lock: Option<pdfcraft_organize::signature_lock::LockSpec>,
     },
+    /// A signature field's `/SV` (seed values): set it to these, or take it out (`None`).
+    SetSignatureSeed {
+        field: pdfcraft_cos::ObjRef,
+        seed: Option<pdfcraft_organize::signature_seed::SeedSpec>,
+    },
     /// A link's article action: set it to this thread (and bead), or take a thread action out
     /// (`None`).
     SetLinkThreadAction {

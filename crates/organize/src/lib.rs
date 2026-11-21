@@ -40,6 +40,7 @@ pub mod reference_xobjects;
 pub mod role_map;
 pub mod screen_action;
 pub mod signature_lock;
+pub mod signature_seed;
 mod templates;
 pub mod thread_action;
 mod transition;
