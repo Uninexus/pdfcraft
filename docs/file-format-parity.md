@@ -1,6 +1,6 @@
 # File format parity
 
-> **Last reviewed:** 2026-10-12 · **Last updated:** 2026-10-22 · **Change:** minor (Word, Excel, PowerPoint, OpenDocument and RTF open through an installed LibreOffice; `.p7b`/`.p7c` bundles read for trust import) · **Target:** Adobe Acrobat Pro (Acrobat DC, continuous track 26.002.21931, macOS)
+> **Last reviewed:** 2026-11-21 · **Last updated:** 2026-11-21 · **Change:** minor (portfolio row names `organize.portfolio-view`, which has a view, and the headless `portfolio_collection`; Word, Excel, PowerPoint, OpenDocument and RTF open through an installed LibreOffice; `.p7b`/`.p7c` bundles read for trust import) · **Target:** Adobe Acrobat Pro (Acrobat DC, continuous track 26.002.21931, macOS)
 
 Every format Acrobat Pro reads or writes, and PdfCraft's support for it. Acrobat's list comes from
 its bundle's `Info.plist` `CFBundleDocumentTypes` (what it opens) and its public documentation
@@ -28,7 +28,7 @@ features total).
 | Damaged PDF | R (repair) | R (repair, logged) | high | `core.repair-broken-files`, nightly fuzzing |
 | PDF/A-1, 2, 3, 4 | R W, verify | R; verify/convert 2b and 3b (partial) | basic | `optimize.pdfa-*`; veraPDF not yet used as oracle |
 | PDF/X, PDF/UA, PDF/E, PDF/VT | R W, verify | R only | none | [pdf-spec-parity.md](pdf-spec-parity.md) |
-| PDF Portfolio (collection) | R W | R as a PDF with attachments; no portfolio view | none | `organize.portfolio-*` planned |
+| PDF Portfolio (collection) | R W | R as a PDF with attachments, its initial document opened and its files listed in the Attachments panel; its `/Collection` read and removable headless | none | `organize.portfolio-view` partial, `organize.portfolio-create` planned |
 | XFA forms (in PDF) | R W (fill) | R, lay out dynamic forms, fill, save datasets (partial) | basic | `form.xfa-*` partial; `crates/xfa` tests |
 
 ## Data and interchange formats

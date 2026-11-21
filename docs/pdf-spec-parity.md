@@ -29,7 +29,7 @@ are borrowed; PDF 2.0 additions and most subset standards are missing. **150–2
 | §7.6.5 | Public-key security handler | full | none | `core.open-public-key`, `protect.certificate-encryption` planned |
 | §7.6.2 | Unencrypted signature `/Contents` | yes | yes | signing encrypted documents (#753) |
 | §7.9.2 | Text strings incl. PDF 2.0 UTF-8 | full | PDFDocEncoding and UTF-16; UTF-8 none | `core.pdf20-utf8-strings` planned |
-| §7.11 | File specifications, embedded files | full | read and save attachments; no add/delete/describe | `organize.attachments-*` planned |
+| §7.11 | File specifications, embedded files | full | read, save, add, delete and describe attachments; the `/Collection` of a portfolio read and removable headless | `organize.attachments-add`, `-delete`, `-description` shipped, `organize.portfolio-view` partial |
 | §7.12 | Extensions dictionary | yes | preserved | |
 | §8 | Graphics: paths, colour spaces, patterns, shadings, images, XObjects | full | **borrowed** renderer; own content parser and serializer (`crates/content`) for editing and redaction | rendering P0s partial; `optimize.pdfx5-reference-xobjects` partial (headless: lists reference XObjects and removes a `/Ref`; no target page is drawn) |
 | §8.6 | ICC-based colour, output intents, colour management | full | ICC preserved; sRGB output intent for PDF/A; no colour management settings or soft proofing | `print.color-management` planned |
