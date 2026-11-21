@@ -9304,3 +9304,322 @@ fn a_signature_lock_lists_256_names_cuts_long_ones_and_checks_what_it_writes() {
     assert!(LockSpec::new(LockAction::Include, vec![whole]).is_ok());
     assert!(LockSpec::new(LockAction::Include, vec![long]).is_err());
 }
+
+/// A document whose catalog lists two threads: the first with two beads, the second with one.
+/// Returns the document, the two threads and the three beads (two of the first, one of the second).
+fn threaded() -> (Document, [pdfcraft_cos::ObjRef; 2], [pdfcraft_cos::ObjRef; 3]) {
+    let mut doc = open(fixture());
+    let (t0, b0) = article_thread(&mut doc, Some(string(b"A")), 2, true);
+    let (t1, b1) = article_thread(&mut doc, Some(string(b"B")), 1, true);
+    set_catalog_entry(&mut doc, "Threads", Object::Array(vec![Object::Ref(t0), Object::Ref(t1)]));
+    (doc, [t0, t1], [b0[0], b0[1], b1[0]])
+}
+
+fn thread_action(entries: Vec<(&str, Object)>) -> Object {
+    let mut all = vec![("S", Object::name("Thread"))];
+    all.extend(entries);
+    uri_with(all)
+}
+
+/// A link annotation with `extra` entries beside its subtype and rectangle.
+fn link_with(doc: &mut Document, extra: Vec<(&str, Object)>) -> pdfcraft_cos::ObjRef {
+    let mut entries = vec![("Type", Object::name("Annot")), ("Subtype", Object::name("Link")), ("Rect", Object::Array(vec![Object::Int(0); 4]))];
+    entries.extend(extra);
+    doc.add(uri_with(entries))
+}
+
+fn ref_of(n: u32) -> pdfcraft_cos::ObjRef {
+    pdfcraft_cos::ObjRef { num: n, generation: 0 }
+}
+
+#[test]
+fn a_thread_action_is_read_with_its_thread_and_bead() {
+    use crate::thread_action::read_thread_action;
+    let (mut doc, [t0, t1], [_, b01, b1]) = threaded();
+    let read = |doc: &Document, l| {
+        let r = read_thread_action(doc, l);
+        (r.is_link, r.is_thread, r.thread, r.bead)
+    };
+    let l = link_with(&mut doc, vec![("A", thread_action(vec![("D", Object::Ref(t1))]))]);
+    assert_eq!(read(&doc, l), (true, true, Some(1), None));
+    let l = link_with(&mut doc, vec![("A", thread_action(vec![("D", Object::Ref(t0)), ("B", Object::Ref(b01))]))]);
+    assert_eq!(read(&doc, l), (true, true, Some(0), Some(1)));
+    // Positions as integers, in range or not.
+    let l = link_with(&mut doc, vec![("A", thread_action(vec![("D", Object::Int(1)), ("B", Object::Int(0))]))]);
+    assert_eq!(read(&doc, l), (true, true, Some(1), Some(0)));
+    let l = link_with(&mut doc, vec![("A", thread_action(vec![("D", Object::Int(0)), ("B", Object::Int(2))]))]);
+    assert_eq!(read(&doc, l), (true, true, Some(0), None), "the first thread has two beads");
+    for named in [Object::Int(2), Object::Int(-1), Object::Ref(b1), Object::name("x")] {
+        let l = link_with(&mut doc, vec![("A", thread_action(vec![("D", named.clone()), ("B", Object::Int(0))]))]);
+        assert_eq!(read(&doc, l), (true, true, None, None), "{named:?} names no thread, so no bead either");
+    }
+    // A bead of another thread is not a bead of this one.
+    let l = link_with(&mut doc, vec![("A", thread_action(vec![("D", Object::Ref(t0)), ("B", Object::Ref(b1))]))]);
+    assert_eq!(read(&doc, l), (true, true, Some(0), None));
+    // No `/D`; an action of another kind; none; a null; the action behind a reference; a `/Dest`.
+    let l = link_with(&mut doc, vec![("A", thread_action(vec![]))]);
+    assert_eq!(read(&doc, l), (true, true, None, None));
+    let uri = link_with(&mut doc, vec![("A", uri_with(vec![("S", Object::name("URI")), ("D", Object::Ref(t0))]))]);
+    let r = read_thread_action(&doc, uri);
+    assert!(r.has_entry && r.present && !r.is_thread && r.thread.is_none() && r.action.as_deref() == Some("URI") && r.exact);
+    let none = link_with(&mut doc, vec![("Dest", Object::Array(vec![]))]);
+    let r = read_thread_action(&doc, none);
+    assert!(r.is_link && !r.has_entry && !r.present && r.action.is_none() && r.has_dest && r.settable);
+    let null = link_with(&mut doc, vec![("A", Object::Null), ("Dest", Object::Null)]);
+    let r = read_thread_action(&doc, null);
+    assert!(!r.has_entry && !r.has_dest);
+    let action = doc.add(thread_action(vec![("D", Object::Ref(t1))]));
+    let behind = link_with(&mut doc, vec![("A", Object::Ref(action))]);
+    assert_eq!(read(&doc, behind), (true, true, Some(1), None));
+    // A thread entry that is not a reference cannot be named by one.
+    set_catalog_entry(&mut doc, "Threads", Object::Array(vec![uri_with(vec![]), Object::Ref(t1)]));
+    let l = link_with(&mut doc, vec![("A", thread_action(vec![("D", Object::Ref(t1))]))]);
+    assert_eq!(read(&doc, l), (true, true, Some(1), None));
+    // Not a link: a widget, a number, a missing object.
+    let widget = doc.add(uri_with(vec![("Subtype", Object::name("Widget")), ("A", thread_action(vec![]))]));
+    let number = doc.add(Object::Int(4));
+    for o in [widget, number, ref_of(9999)] {
+        let r = read_thread_action(&doc, o);
+        assert!(!r.is_link && !r.settable && !r.is_thread && r.thread.is_none(), "{o:?}");
+    }
+}
+
+#[test]
+fn a_thread_action_is_set_replaced_removed_and_survives_a_save() {
+    use crate::thread_action::{Change, ThreadTarget, read_thread_action, set_thread_action, thread_action_change};
+    let (mut doc, [_, t1], [_, b01, _]) = threaded();
+    let old = doc.add(uri_with(vec![("S", Object::name("URI")), ("URI", string(b"http://x.test"))]));
+    let link = link_with(&mut doc, vec![("A", Object::Ref(old)), ("Dest", Object::Array(vec![Object::Int(0)]))]);
+    set_catalog_entry(&mut doc, "Probe", Object::Ref(link));
+    let target = ThreadTarget::new(0, Some(1)).unwrap();
+    assert_eq!(thread_action_change(&doc, link, Some(&target)), Change::Yes);
+    set_thread_action(&mut doc, link, Some(&target)).unwrap();
+    let stored = doc.get(link);
+    let d = stored.as_dict().unwrap();
+    assert!(!d.contains(b"Dest"), "a link with an action has no /Dest");
+    let a = d.get(b"A").and_then(Object::as_dict).expect("a direct action dictionary");
+    assert_eq!((a.name(b"Type"), a.name(b"S")), (Some(b"Action".as_slice()), Some(b"Thread".as_slice())));
+    assert_eq!(a.reference(b"B"), Some(b01));
+    assert!(doc.get(old).as_dict().is_some_and(|o| o.name(b"S") == Some(b"URI".as_slice())), "the old action object is left as it was");
+    assert_eq!(d.name(b"Subtype"), Some(b"Link".as_slice()), "the rest of the link is kept");
+
+    let mut doc = open(write_full(&doc, &SaveOptions::default()).unwrap());
+    let link = doc.get(doc.root().unwrap()).as_dict().and_then(|c| c.reference(b"Probe")).unwrap();
+    let r = read_thread_action(&doc, link);
+    assert_eq!((r.is_thread, r.thread, r.bead, r.has_dest), (true, Some(0), Some(1), false));
+
+    // A new target without a bead drops the old `/B`; the thread is written as the object.
+    let second = ThreadTarget::new(1, None).unwrap();
+    set_thread_action(&mut doc, link, Some(&second)).unwrap();
+    let r = read_thread_action(&doc, link);
+    assert_eq!((r.thread, r.bead), (Some(1), None));
+    let held = doc.get(link);
+    let a = held.as_dict().unwrap().get(b"A").and_then(Object::as_dict).unwrap();
+    assert!(!a.contains(b"B"));
+    assert!(a.reference(b"D").is_some(), "{t1:?} is named as an object");
+
+    // A removal takes `/A` out of a thread action, and writes nothing twice.
+    assert_eq!(thread_action_change(&doc, link, None), Change::Yes);
+    set_thread_action(&mut doc, link, None).unwrap();
+    assert!(!doc.get(link).as_dict().unwrap().contains(b"A"));
+    assert_eq!(doc.get(link).as_dict().unwrap().name(b"Subtype"), Some(b"Link".as_slice()));
+    assert_eq!(thread_action_change(&doc, link, None), Change::NoChange);
+    let options = || SaveOptions { mod_date: Some("D:20240101000000Z".into()), ..SaveOptions::default() };
+    let before = write_full(&doc, &options()).unwrap();
+    set_thread_action(&mut doc, link, None).unwrap();
+    assert_eq!(write_full(&doc, &options()).unwrap(), before);
+
+    // Another kind of action is not a thread action to remove, and is left alone.
+    let uri = link_with(&mut doc, vec![("A", uri_with(vec![("S", Object::name("URI"))]))]);
+    assert_eq!(thread_action_change(&doc, uri, None), Change::NoChange);
+    set_thread_action(&mut doc, uri, None).unwrap();
+    assert_eq!(read_thread_action(&doc, uri).action.as_deref(), Some("URI"));
+}
+
+#[test]
+fn a_thread_action_is_refused_on_what_is_not_a_link_and_for_a_target_that_is_not_there() {
+    use crate::thread_action::{Change, ThreadTarget, read_thread_action, set_thread_action, thread_action_change};
+    let (mut doc, _, _) = threaded();
+    let target = ThreadTarget::new(0, None).unwrap();
+    let widget = doc.add(uri_with(vec![("Subtype", Object::name("Widget"))]));
+    let number = doc.add(Object::Int(5));
+    // The catalog (1), the /Pages node (2), an inner node (3), a page (4), a widget, a number and
+    // an object that does not exist.
+    let objects = [doc.root().unwrap(), ref_of(2), ref_of(3), ref_of(4), widget, number, ref_of(9999)];
+    let options = || SaveOptions { mod_date: Some("D:20240101000000Z".into()), ..SaveOptions::default() };
+    for o in objects {
+        assert!(!read_thread_action(&doc, o).settable, "{o:?}");
+        assert!(matches!(thread_action_change(&doc, o, Some(&target)), Change::Refused(_)), "{o:?}");
+        assert!(matches!(thread_action_change(&doc, o, None), Change::Refused(_)), "{o:?} a removal too");
+        let before = write_full(&doc, &options()).unwrap();
+        assert!(set_thread_action(&mut doc, o, Some(&target)).is_err() && set_thread_action(&mut doc, o, None).is_err(), "{o:?}");
+        assert_eq!(write_full(&doc, &options()).unwrap(), before, "{o:?} is left as it was");
+    }
+    // A page that is also marked as a link is still a page.
+    doc.update_dict(ref_of(4), |d| d.set(b"Subtype".to_vec(), Object::name("Link"))).unwrap();
+    assert!(read_thread_action(&doc, ref_of(4)).is_link && !read_thread_action(&doc, ref_of(4)).settable);
+    assert!(matches!(thread_action_change(&doc, ref_of(4), Some(&target)), Change::Refused(why) if why.contains("page")));
+
+    // A target that is not there: no thread at the position, an entry that is not an object, no
+    // bead there, a thread with no beads.
+    let link = link_with(&mut doc, vec![]);
+    let (empty, _) = article_thread(&mut doc, None, 0, false);
+    set_catalog_entry(&mut doc, "Threads", Object::Array(vec![Object::Ref(ref_of(10)), uri_with(vec![]), Object::Ref(empty), Object::Ref(number)]));
+    for (thread, bead) in [(5, None), (1, None), (0, Some(2)), (2, Some(0)), (3, None), (3, Some(0))] {
+        let t = ThreadTarget::new(thread, bead).unwrap();
+        let before = write_full(&doc, &options()).unwrap();
+        // Entry 0 is a font dictionary, which is an object: it can be named, and it has no beads.
+        let change = thread_action_change(&doc, link, Some(&t));
+        assert!(matches!(change, Change::Refused(_)), "{thread} {bead:?}: {change:?}");
+        assert!(set_thread_action(&mut doc, link, Some(&t)).is_err());
+        assert_eq!(write_full(&doc, &options()).unwrap(), before);
+    }
+    assert_eq!(thread_action_change(&doc, link, Some(&ThreadTarget::new(0, None).unwrap())), Change::Yes);
+    // No `/Threads` at all.
+    let mut bare = open(fixture());
+    let link = link_with(&mut bare, vec![]);
+    assert!(matches!(thread_action_change(&bare, link, Some(&target)), Change::Refused(_)));
+}
+
+#[test]
+fn what_a_thread_target_accepts() {
+    use crate::thread_action::{MAX_BEADS, MAX_THREADS, ThreadTarget};
+    assert!(ThreadTarget::new(MAX_THREADS - 1, Some(MAX_BEADS - 1)).is_ok());
+    assert!(ThreadTarget::new(MAX_THREADS, None).is_err());
+    assert!(ThreadTarget::new(0, Some(MAX_BEADS)).is_err());
+    assert_eq!((ThreadTarget::new(3, Some(4)).unwrap().thread(), ThreadTarget::new(3, Some(4)).unwrap().bead()), (3, Some(4)));
+}
+
+/// Reads: the link, the catalog, the thread, and each bead walked; a reference chain is paid for
+/// one read for each object.
+#[test]
+fn every_read_a_thread_action_makes_is_paid_for_before_it_is_made() {
+    use crate::thread_action::{Change, ThreadTarget, change_with, read_with};
+    let (mut doc, [t0, _], [_, b01, _]) = threaded();
+    let link = link_with(&mut doc, vec![("A", thread_action(vec![("D", Object::Ref(t0)), ("B", Object::Ref(b01))]))]);
+    // The link, the catalog, the thread, and the two beads (the second one's `/N` leads back to the first, which is not read again).
+    let whole = read_with(&doc, link, 5);
+    assert!(!whole.capped && whole.thread == Some(0) && whole.bead == Some(1));
+    let short = read_with(&doc, link, 4);
+    assert!(short.capped && short.thread == Some(0) && short.bead.is_none(), "the second bead was not paid for");
+    assert!(!short.settable, "a read cut short is not settable");
+    let short = read_with(&doc, link, 3);
+    assert!(short.capped && short.thread == Some(0) && short.bead.is_none(), "the first bead was not paid for");
+    let short = read_with(&doc, link, 2);
+    assert!(short.capped && short.thread == Some(0) && short.bead.is_none(), "the thread's dictionary was not paid for");
+    let one = read_with(&doc, link, 1);
+    assert!(one.capped && one.is_thread && one.thread.is_none(), "the catalog was not paid for");
+    let none = read_with(&doc, link, 0);
+    assert!(none.capped && !none.is_link, "not even the link was paid for");
+
+    // A chain of 32 reference objects is followed to the action, as `Document::resolve` follows
+    // it, and is paid for with 33 reads after the link's own; a chain of 33 is not followed.
+    for (hops, followed) in [(32usize, true), (33, false)] {
+        let mut at = doc.add(thread_action(vec![("D", Object::Int(0))]));
+        for _ in 0..hops {
+            at = doc.add(Object::Ref(at));
+        }
+        let chained = link_with(&mut doc, vec![("A", Object::Ref(at))]);
+        let entry = doc.get(chained).as_dict().and_then(|d| d.get(b"A").cloned()).unwrap();
+        assert_eq!(doc.resolve(&entry).as_dict().is_some(), followed);
+        // The link, the chain, then (when followed) the catalog.
+        let r = read_with(&doc, chained, 1 + 33 + 1);
+        assert_eq!((r.is_thread, r.thread, r.capped), (followed, followed.then_some(0), false), "{hops}");
+        assert!(read_with(&doc, chained, 1 + 32).capped, "{hops}");
+    }
+
+    // One allowance covers a change check: the link read, then the thread and its beads.
+    let plain = link_with(&mut doc, vec![("A", uri_with(vec![("S", Object::name("URI"))]))]);
+    let target = ThreadTarget::new(0, Some(1)).unwrap();
+    // The link (1); the catalog (1), the thread (1) and two beads (2).
+    assert_eq!(change_with(&doc, plain, Some(&target), 5), Change::Yes);
+    assert!(matches!(change_with(&doc, plain, Some(&target), 4), Change::Refused(why) if why.contains("thread could not be read")));
+    assert!(matches!(change_with(&doc, plain, Some(&target), 1), Change::Refused(why) if why.contains("thread could not be read")));
+    assert!(matches!(change_with(&doc, plain, Some(&target), 0), Change::Refused(why) if why.contains("link could not be read")));
+    // A removal needs only the read of the link.
+    assert_eq!(change_with(&doc, plain, None, 1), Change::NoChange);
+}
+
+#[test]
+fn a_ring_of_beads_with_a_loop_and_a_long_one_are_walked_once_and_at_most_256_beads() {
+    use crate::thread_action::{MAX_BEADS, ThreadTarget, read_thread_action, set_thread_action};
+    let mut doc = open(fixture());
+    // Beads 1 -> 2 -> 3 -> 2: a loop that does not come back to the first; each is listed once.
+    let b: Vec<_> = (0..3).map(|_| doc.add(uri_with(vec![]))).collect();
+    for (from, to) in [(0, 1), (1, 2), (2, 1)] {
+        doc.update_dict(b[from], |d| d.set(b"N".to_vec(), Object::Ref(b[to]))).unwrap();
+    }
+    let looped = doc.add(uri_with(vec![("F", Object::Ref(b[0]))]));
+    // A ring of 300 beads.
+    let (long, beads) = article_thread(&mut doc, None, MAX_BEADS + 44, true);
+    set_catalog_entry(&mut doc, "Threads", Object::Array(vec![Object::Ref(looped), Object::Ref(long)]));
+    let named = |doc: &Document, thread: usize, bead: usize| {
+        let mut doc = doc.clone();
+        let link = link_with(&mut doc, vec![]);
+        (doc, link, ThreadTarget::new(thread, Some(bead)).unwrap())
+    };
+    let (mut d, link, t) = named(&doc, 0, 2);
+    assert!(set_thread_action(&mut d, link, Some(&t)).is_ok(), "the third bead is reached");
+    assert_eq!(read_thread_action(&d, link).bead, Some(2));
+    let (mut d, link, t) = named(&doc, 0, 3);
+    assert!(set_thread_action(&mut d, link, Some(&t)).is_err(), "the loop has three beads, not four");
+    let (mut d, link, t) = named(&doc, 1, MAX_BEADS - 1);
+    set_thread_action(&mut d, link, Some(&t)).unwrap();
+    let r = read_thread_action(&d, link);
+    assert_eq!(r.bead, Some(MAX_BEADS - 1));
+    let held = d.get(link);
+    let written = held.as_dict().and_then(|l| l.get(b"A")).and_then(Object::as_dict).and_then(|a| a.reference(b"B"));
+    assert_eq!(written, Some(beads[MAX_BEADS - 1]));
+    // A thread past the 256th entry of `/Threads` is not looked at, by reference or by position.
+    let mut many = vec![Object::Int(0); crate::thread_action::MAX_THREADS];
+    many.push(Object::Ref(long));
+    set_catalog_entry(&mut doc, "Threads", Object::Array(many));
+    for named in [Object::Ref(long), Object::Int(crate::thread_action::MAX_THREADS as i64)] {
+        let link = link_with(&mut doc, vec![("A", thread_action(vec![("D", named)]))]);
+        assert_eq!(read_thread_action(&doc, link).thread, None);
+    }
+    let first = link_with(&mut doc, vec![("A", thread_action(vec![("D", Object::Int(255))]))]);
+    assert_eq!(read_thread_action(&doc, first).thread, Some(255), "the 256th entry is looked at");
+    set_catalog_entry(&mut doc, "Threads", Object::Array(vec![Object::Ref(looped), Object::Ref(long)]));
+    // A bead past the 256th is named by a file, and not found by a read.
+    let late = doc.add(thread_action(vec![("D", Object::Int(1)), ("B", Object::Ref(beads[MAX_BEADS]))]));
+    let link = link_with(&mut doc, vec![("A", Object::Ref(late))]);
+    let r = read_thread_action(&doc, link);
+    assert_eq!((r.thread, r.bead), (Some(1), None));
+}
+
+#[test]
+fn a_remote_or_title_named_thread_action_is_reported_and_not_resolved() {
+    use crate::thread_action::{MAX_TITLE_CHARS, read_thread_action, read_with};
+    let (mut doc, [t0, _], [_, b01, _]) = threaded();
+    // `/F` names a file: the thread is not one of this document's, whatever `/D` and `/B` say.
+    let remote = link_with(&mut doc, vec![("A", thread_action(vec![("F", string(b"other.pdf")), ("D", Object::Int(0)), ("B", Object::Int(0))]))]);
+    let r = read_thread_action(&doc, remote);
+    assert!(r.is_thread && r.remote && r.thread.is_none() && r.bead.is_none() && r.title.is_none());
+    // A null `/F` is no file.
+    let local = link_with(&mut doc, vec![("A", thread_action(vec![("F", Object::Null), ("D", Object::Int(0))]))]);
+    let r = read_thread_action(&doc, local);
+    assert!(!r.remote && r.thread == Some(0));
+    // A `/D` that is a string is a title, reported and not matched, even the title of a thread.
+    let named = link_with(&mut doc, vec![("A", thread_action(vec![("D", string(b"A")), ("B", Object::Ref(b01))]))]);
+    let r = read_thread_action(&doc, named);
+    assert!(r.is_thread && !r.remote && r.title.as_deref() == Some("A") && r.thread.is_none() && r.bead.is_none() && r.exact);
+    let long = "t".repeat(MAX_TITLE_CHARS + 1);
+    let cut = link_with(&mut doc, vec![("A", thread_action(vec![("D", string(long.as_bytes()))]))]);
+    let r = read_thread_action(&doc, cut);
+    assert_eq!((r.title.map(|t| t.chars().count()), r.exact), (Some(MAX_TITLE_CHARS), false));
+    // A `/D` that is a direct dictionary names no thread.
+    let direct = link_with(&mut doc, vec![("A", thread_action(vec![("D", uri_with(vec![]))]))]);
+    let r = read_thread_action(&doc, direct);
+    assert!(r.is_thread && r.thread.is_none() && r.title.is_none());
+    // `/Next` is reported for any kind of action, and not for a null one.
+    let chained = link_with(&mut doc, vec![("A", thread_action(vec![("D", Object::Ref(t0)), ("Next", uri_with(vec![]))]))]);
+    assert!(read_thread_action(&doc, chained).has_next);
+    let web = link_with(&mut doc, vec![("A", uri_with(vec![("S", Object::name("URI")), ("Next", uri_with(vec![]))]))]);
+    assert!(read_thread_action(&doc, web).has_next);
+    let none = link_with(&mut doc, vec![("A", thread_action(vec![("Next", Object::Null)]))]);
+    assert!(!read_thread_action(&doc, none).has_next);
+    // A read that was cut short is not settable, whatever it found.
+    let short = read_with(&doc, chained, 1);
+    assert!(short.capped && !short.settable);
+}

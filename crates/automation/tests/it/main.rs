@@ -31,6 +31,7 @@ mod hostile_args;
 mod lenient_arguments;
 mod linearization;
 mod link_javascript;
+mod link_thread_action;
 mod list_selection;
 mod model_3d;
 mod model_render;

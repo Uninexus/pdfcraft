@@ -2,7 +2,8 @@
 //! all links. Rectangles are points from the top-left of the displayed page.
 
 use pdfcraft_engine::{
-    Edit, LinkAction, LinkHighlight, LinkStyle, LinkZoom, read_remote_document, remote_document_path_is_absolute, resolve_remote_document_path,
+    Edit, LinkAction, LinkHighlight, LinkStyle, LinkZoom, MAX_ACTION_BEADS, MAX_ACTION_THREADS, ThreadActionChange, ThreadTarget,
+    read_remote_document, remote_document_path_is_absolute, resolve_remote_document_path,
 };
 use pdfcraft_render::{DestView, LinkTarget, RemoteDestination};
 use serde_json::{Value, json};
@@ -284,6 +285,72 @@ impl Automation {
         let action = self.link_action(a, Some(&current))?;
         let new_style = self.link_style(a, style)?;
         self.apply(a, Edit::SetLink { page, index, rect, action, style: (new_style != style).then_some(new_style) })
+    }
+
+    /// A link's article (thread) action: read, set (`thread`, `bead`) or taken out (`remove`).
+    pub(crate) fn link_thread_action(&mut self, a: &Args) -> Result<Value> {
+        let remove = a.opt_bool("remove")?.unwrap_or(false);
+        let (thread, bead) = (a.opt_int("thread")?, a.opt_int("bead")?);
+        let position = |name: &str, v: i64, most: usize| -> Result<usize> {
+            v.checked_sub(1).and_then(|p| usize::try_from(p).ok()).filter(|p| *p < most).ok_or_else(|| bad(format!("{name} must be 1 to {most}")))
+        };
+        let target = match (thread, bead, remove) {
+            (_, _, true) if thread.is_some() || bead.is_some() => return Err(bad("remove cannot be combined with thread or bead")),
+            (None, Some(_), _) => return Err(bad("bead needs a thread")),
+            (Some(t), b, _) => {
+                let bead = b.map(|b| position("bead", b, MAX_ACTION_BEADS)).transpose()?;
+                Some(ThreadTarget::new(position("thread", t, MAX_ACTION_THREADS)?, bead).map_err(|e| bad(e.to_string()))?)
+            }
+            (None, None, _) => None,
+        };
+        let (page, index) = (self.page(a)?, a.int("index")?);
+        let (link, before) = {
+            let doc = self.doc(a)?;
+            let found = doc.links().iter().find(|l| l.page == page && l.index as i64 + 1 == index);
+            let found = found.ok_or_else(|| failed(format!("page {} has no link {index} (see link_list)", page + 1)))?;
+            let link = found.obj.ok_or_else(|| failed("an inline link has no object to edit"))?;
+            (link, target.is_some().then(|| doc.link_thread_action(link)))
+        };
+        let writes = target.is_some() || remove;
+        let mut out = json!({});
+        let mut changed = false;
+        if writes {
+            match self.doc(a)?.link_thread_action_change(link, target.as_ref()) {
+                ThreadActionChange::Refused(why) => return Err(failed(why)),
+                ThreadActionChange::NoChange => {}
+                ThreadActionChange::Yes => {
+                    out = self.apply(a, Edit::SetLinkThreadAction { link, target })?;
+                    changed = true;
+                }
+            }
+        }
+        let read = self.doc(a)?.link_thread_action(link);
+        out["page"] = json!(page + 1);
+        out["index"] = json!(index);
+        if writes {
+            out["changed"] = json!(changed);
+            if let (true, Some(before)) = (changed, &before) {
+                // What a set took the place of.
+                out["replaced"] =
+                    json!({ "action": before.action, "has_entry": before.has_entry, "destination": before.has_dest, "next": before.has_next });
+            }
+        }
+        out["thread_action"] = json!({
+            "has_entry": read.has_entry,
+            "present": read.present,
+            "action": read.action,
+            "exact": read.exact,
+            "is_thread": read.is_thread,
+            "remote": read.remote,
+            "title": read.title,
+            "has_next": read.has_next,
+            "thread": read.thread.map(|t| t + 1),
+            "bead": read.bead.map(|b| b + 1),
+            "destination": read.has_dest,
+            "settable": read.settable,
+            "capped": read.capped,
+        });
+        Ok(out)
     }
 
     pub(crate) fn link_delete(&mut self, a: &Args) -> Result<Value> {
