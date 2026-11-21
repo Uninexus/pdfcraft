@@ -64,8 +64,8 @@ deterministic; the engine supplies them.
 - Sticky notes and file attachments are not counterrotated: they carry the NoRotate flag and
   their icon is drawn in an unturned 20 × 20 box. A viewer keeps them upright on a turned page,
   about the upper-left corner of `/Rect` (ISO 32000-2 §12.5.3). PdfCraft's renderer does so
-  (vendored hayro-interpret patch 37), and `Summary::no_rotate` tells the UI where the icon is
-  drawn.
+  (a `hayro-interpret` patch carried in storytold/craft-libs), and `Summary::no_rotate` tells
+  the UI where the icon is drawn.
 
 ## Rich text and remaining limits
 

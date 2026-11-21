@@ -30,7 +30,7 @@ standalone and publishable.
 | L0 foundation | `geom`, `filters`, `crypt` | Geometry; stream filters (Flate, LZW, predictors, ASCII85, ASCIIHex, RunLength); standard security handler R2–R6 (RC4, AES-128/256, SASLprep) |
 | L1 objects | `cos` | Lazy, tolerant parser with xref repair; copy-on-write object graph; incremental and full writers with object streams; decryption on load and re-encryption on save |
 | L2 core model | `content`, `model`, `fonts` | Content-stream operators with source spans and a serializer; typed page tree with inherited attributes and display geometry (`/UserUnit`, `/Rotate`); font metrics and encodings for generated appearances |
-| L3 core services | `render`, `annot`, `forms`, `js`, `xfa` | Rendering and inspection (bootstrap: vendored `hayro`, `lopdf`); annotation builders and appearance streams; AcroForm model, filling, appearances; sandboxed JavaScript (boa) and FormCalc; XFA template layout and data |
+| L3 core services | `render`, `annot`, `forms`, `js`, `xfa` | Rendering and inspection (bootstrap: `hayro` from storytold/craft-libs, `lopdf`); annotation builders and appearance streams; AcroForm model, filling, appearances; sandboxed JavaScript (boa) and FormCalc; XFA template layout and data |
 | L4 features | `edit`, `organize`, `redact`, `xfdf`, `sign`, `ocr`, `create`, `export`, `optimize`, `preflight`, `a11y`, `compare`, `measure`, `print` | One crate per Acrobat tool family |
 | L6 façade | `engine` | Session, open documents, edit history, the command registry and tool catalogue. Frontends never reach past it |
 | L7 platform and frontends | `platform`, `ui-egui`, `automation` | OS services; the egui shell (desktop and web); headless JSON-Schema tools, CLI and MCP |
@@ -56,9 +56,9 @@ The PDF object graph *is* the model (`crates/engine/README.md` §The editing mod
 
 ## Rendering and text
 
-- Pages are rasterized on the CPU by the vendored `hayro` family (`hayro`, `hayro-interpret`,
-  `hayro-syntax`, `hayro-jbig2`), with local patches for appearance states, layers, resource
-  limits, cancellation, tiles and `/UserUnit` (`vendor/README.md`). A render pool renders visible
+- Pages are rasterized on the CPU by the `hayro` family (`hayro`, `hayro-interpret`,
+  `hayro-syntax`, `hayro-jbig2`), which comes from git dependencies on storytold/craft-libs
+  pinned in `Cargo.toml`, not from `vendor/`. A render pool renders visible
   pages first, then neighbours and thumbnails; tiles keep deep zoom sharp; a watchdog skips
   pathological pages.
 - The raster is uploaded to the GPU as a texture; egui draws the interface through wgpu (OpenGL

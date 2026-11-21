@@ -9,7 +9,7 @@ what Acrobat Pro implements. This is PdfCraft's equivalent of a "geometry" or "c
 the parts of the format users never see named but always feel. Feature-level detail is in
 `parity/acrobat-features.toml`; the gaps are ranked in [gaps.md](gaps.md).
 
-Legend: **own** (our code), **borrowed** (the vendored `hayro` bootstrap or `lopdf`), **partial**,
+Legend: **own** (our code), **borrowed** (the `hayro` bootstrap, a storytold/craft-libs git dependency, or `lopdf`), **partial**,
 **none**. "Evidence" names tests or checklist ids.
 
 **PDF specification and standards ≈ 60% ready** (estimated): syntax, encryption, annotations,
