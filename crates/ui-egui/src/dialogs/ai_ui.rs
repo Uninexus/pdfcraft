@@ -110,8 +110,10 @@ pub(crate) fn body(ui: &mut egui::Ui, app: &mut PdfCraftApp) -> bool {
         ui.add_space(4.0);
         ui.label(tl!("The AI assistant is not set up yet. Choose a server and a model, or sign in with ChatGPT, in Preferences."));
         if widgets::pill_button(ui, tl!("Open Preferences"), true).clicked() {
+            // Close this dialog and open Preferences. Returning `false` kept this dialog open, and
+            // the dialog code then put it back over the Preferences that was just asked for.
             app.dialog = Some(Dialog::Preferences);
-            return false;
+            return true;
         }
         ui.add_space(8.0);
     } else {
