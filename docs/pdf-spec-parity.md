@@ -74,7 +74,7 @@ are borrowed; PDF 2.0 additions and most subset standards are missing. **150–2
 | Redact | create, apply | create, apply | own |
 | Widget | create, edit | create, edit | AcroForm |
 | Watermark | create | page-content watermarks (as Acrobat writes them); `/Watermark` annotations preserved | |
-| Screen, Movie, RichMedia, 3D | create, play | preserved | P3 |
+| Screen, Movie, RichMedia, 3D | create, play | preserved; a screen annotation's sound, movie, rendition or rich-media action can be read and removed headlessly (`screen_actions`); nothing creates or plays them | P3 |
 | PrinterMark, TrapNet | create (print production) | preserved | |
 | Projection | create (PDF 2.0) | preserved | |
 
@@ -88,7 +88,7 @@ are borrowed; PDF 2.0 additions and most subset standards are missing. **150–2
 | Launch | yes (restricted) | partial: the render crate reads a link's launch of a `.pdf` file without `/Win` as a link to that file and no other launch; `link_launch_action` (headless) reads, sets and removes the action (any file is reported; a set accepts only a relative path to a `.pdf` file of letters, digits, `.`, `_`, `-`, space and `/`, with `/NewWindow` when given; `/Win`, `/Mac` and `/Unix` are reported when their value is not null (the render crate also counts a `/Win` key with a null value) and dropped by a set, never written; PDF/A does not allow it and a set does not check); no UI (`edit.action-launch` partial) |
 | Thread | yes | partial: `link_thread_action` (headless) reads, sets and removes a link's thread action (`/D`, `/B`; a title-named or remote `/D` is only reported); no viewer goes to the thread and there is no UI (`edit.action-thread` partial) |
 | URI | yes | yes |
-| Sound, Movie, Rendition, RichMediaExecute | yes | partial: `link_media_action` (headless) reads and removes a link's action of these four kinds (a movie's `/Operation`, a rendition's `/OP`, whether a `/JS` script or a target is stored; a removal takes `/A` out with its `/Next` chain); it never writes one and nothing plays them; PDF/A does not allow sound, movie or rendition actions and a removal does not check for it (`edit.action-media` partial) |
+| Sound, Movie, Rendition, RichMediaExecute | yes | partial: `link_media_action` (headless) reads and removes a link's action of these four kinds (a movie's `/Operation`, a rendition's `/OP`, whether a `/JS` script or a target is stored; a removal takes `/A` out with its `/Next` chain); it never writes one and nothing plays them; PDF/A does not allow sound, movie or rendition actions and a removal does not check for it; `screen_actions` (headless) reads and removes the same four kinds in a screen annotation's `/A` (`edit.action-media` partial, `misc.legacy-multimedia` partial) |
 | GoTo3DView | yes | none (P3) |
 | Hide | yes | yes |
 | Named | yes | safe list (print, page navigation) for a form button; for a link, partial: `link_named_action` (headless) reads, sets and removes the action (`/N` one of NextPage, PrevPage, FirstPage, LastPage, Print; any other `/N` is only reported, and `SaveAs`, which form buttons also run, is not offered); the viewer does not follow a link's named action and there is no UI (`edit.action-named` partial) |

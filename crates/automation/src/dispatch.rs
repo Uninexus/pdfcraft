@@ -374,6 +374,7 @@ impl Automation {
             "portfolio_collection" => self.portfolio_collection(&a)?,
             "signature_field_lock" => self.signature_field_lock(&a)?,
             "reference_xobjects" => self.reference_xobjects(&a)?,
+            "screen_actions" => self.screen_actions(&a)?,
             "named_destinations" => self.named_destinations(&a)?,
             "doc_revisions" => self.doc_revisions(&a)?,
             "doc_linearization" => self.doc_linearization(&a)?,

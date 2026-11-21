@@ -58,6 +58,7 @@ mod reference_xobjects;
 mod render_warnings;
 mod role_map;
 mod save_flatten_failure;
+mod screen_actions;
 mod shared_name_arrays;
 mod signature_field_lock;
 mod structure_namespaces;

@@ -888,6 +888,52 @@ impl Automation {
         Ok(out)
     }
 
+    /// The screen annotations and what their `/A` holds: read, and take a sound, movie, rendition
+    /// or rich-media action out of the one at position `remove` when it is given. There is no set.
+    pub(crate) fn screen_actions(&mut self, a: &Args) -> Result<Value> {
+        use pdfcraft_engine::ScreenActionChange as Change;
+        let remove = match a.opt_int("remove")? {
+            Some(i) => Some(usize::try_from(i).map_err(|_| ToolError::InvalidArgs("remove must be 0 or more".into()))?),
+            None => None,
+        };
+        let mut out = json!({});
+        if let Some(index) = remove {
+            // What the removal takes out, as read before it.
+            let before = self.doc(a)?.screen_actions().items.into_iter().find(|s| s.index == index);
+            match self.doc(a)?.screen_action_change(index) {
+                Change::Refused(why) => return Err(ToolError::Failed(why.into())),
+                Change::Yes => {
+                    out = self.apply(a, Edit::RemoveScreenAction(index))?;
+                    out["changed"] = json!(true);
+                    out["removed"] = json!(before.map(|s| json!({ "action": s.action, "kind": s.kind, "next": s.has_next })));
+                }
+                Change::NoChange | Change::NoEntry => out["changed"] = json!(false),
+            }
+        }
+        let read = self.doc(a)?.screen_actions();
+        let items: Vec<Value> = read
+            .items
+            .iter()
+            .map(|s| {
+                json!({
+                    "index": s.index,
+                    "object": format!("{} {}", s.object.num, s.object.generation),
+                    "has_entry": s.has_entry,
+                    "present": s.present,
+                    "action": s.action,
+                    "exact": s.exact,
+                    "kind": s.kind,
+                    "has_script": s.has_script,
+                    "has_next": s.has_next,
+                    "has_additional_actions": s.has_additional,
+                    "removable": s.removable,
+                })
+            })
+            .collect();
+        out["screen_actions"] = json!({ "count": read.count, "truncated": read.truncated, "capped": read.capped, "items": items });
+        Ok(out)
+    }
+
     pub(crate) fn doc_optimize(&mut self, a: &Args) -> Result<Value> {
         use pdfcraft_engine::optimize::{Compatibility, Compression, ImageSettings, MonoCompression, Preset};
         const MONO_KEYS: [&str; 4] = ["downsample", "ppi", "above_ppi", "compression"];

@@ -684,6 +684,19 @@ impl Document {
         self.editor.as_ref().map_or(Removal::NoEntry, |e| pdfcraft_organize::reference_xobjects::reference_xobject_removal(&e.cos, index))
     }
 
+    /// The screen annotations of the file and what their `/A` holds, from one scan.
+    pub fn screen_actions(&self) -> pdfcraft_organize::screen_action::ScreenActions {
+        self.editor.as_ref().map(|e| pdfcraft_organize::screen_action::read_screen_actions(&e.cos)).unwrap_or_default()
+    }
+
+    /// What taking the media action out of the screen annotation listed at `index` would do.
+    pub fn screen_action_change(&self, index: usize) -> pdfcraft_organize::screen_action::Change {
+        use pdfcraft_organize::screen_action::Change;
+        self.editor
+            .as_ref()
+            .map_or(Change::Refused("the document cannot be edited"), |e| pdfcraft_organize::screen_action::screen_action_change(&e.cos, index))
+    }
+
     /// The portfolio collection (the catalog's `/Collection`) as stored.
     pub fn collection(&self) -> pdfcraft_organize::collection::Collection {
         self.editor.as_ref().map(|e| pdfcraft_organize::collection::read_collection(&e.cos)).unwrap_or_default()
