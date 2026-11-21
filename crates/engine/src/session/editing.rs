@@ -860,7 +860,7 @@ fn substitute_notice(cx: &EditCtx) -> Option<EditNotice> {
     Some(EditNotice::SubstituteFont { fonts, missing })
 }
 
-/// What `edit`, taking `prev` to `next`, wants said: never silent (AGENTS.md §4).
+/// What `edit`, taking `prev` to `next`, wants said: never silent (app-agents.md rule 13).
 fn edit_notices(edit: &Edit, prev: &pdfcraft_cos::Document, next: &pdfcraft_cos::Document) -> Vec<EditNotice> {
     // What it drew with `?` (a value or comment text its font can't draw, stored as typed).
     let mut notices: Vec<EditNotice> = if matches!(scope_of(edit), Scope::Form | Scope::Comments | Scope::Full) {
