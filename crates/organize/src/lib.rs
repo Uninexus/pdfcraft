@@ -21,6 +21,7 @@ mod boxes;
 pub mod class_map;
 mod comments;
 mod dedupe;
+pub mod destinations;
 mod dparts;
 mod import;
 mod labels;

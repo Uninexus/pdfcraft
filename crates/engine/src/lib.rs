@@ -102,6 +102,7 @@ pub use pdfcraft_organize::articles::{MAX_BEADS_WALKED, MAX_LISTED_THREADS, MAX_
 pub use pdfcraft_organize::base_url::{MAX_BASE_URL_BYTES, check_base_url};
 pub use pdfcraft_organize::check_custom_key;
 pub use pdfcraft_organize::class_map::{MAX_CLASS_NAME_BYTES, MAX_LISTED_CLASSES, MAX_LISTED_OWNERS};
+pub use pdfcraft_organize::destinations::{MAX_ITEMS_SCANNED, MAX_LISTED_DESTINATIONS, MAX_NAME_CHARS, MAX_TREE_DEPTH, MAX_TREE_NODES};
 pub use pdfcraft_organize::print_presets::{Duplex, MAX_PRINT_COPIES, MAX_PRINT_RANGES, MIN_PRINT_COPIES, PrintPresets, PrintScaling};
 pub use pdfcraft_organize::role_map::{MAX_LISTED_ROLES, MAX_LOOP_STEPS, MAX_ROLE_BYTES};
 pub use pdfcraft_organize::view::{InitialView, Layout as InitialLayout, Magnification, Navigation};

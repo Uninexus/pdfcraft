@@ -8004,3 +8004,418 @@ fn the_thread_listing_and_the_bead_walk_are_bounded() {
         [(MAX_BEADS_WALKED, false, true), (MAX_BEADS_WALKED, false, false), (MAX_BEADS_WALKED, true, false), (MAX_BEADS_WALKED, true, false)]
     );
 }
+
+fn dest_array(page: Object, view: &str) -> Object {
+    Object::Array(vec![page, Object::name(view)])
+}
+
+fn page_ref(doc: &Document, i: usize) -> Object {
+    Object::Ref(crate::pages(doc).unwrap()[i].obj)
+}
+
+/// A listed name as (index, source, name, page, view, removable).
+type DestRow = (usize, crate::destinations::Source, String, Option<usize>, Option<String>, bool);
+
+fn dests_of(doc: &Document) -> Vec<DestRow> {
+    let r = crate::destinations::read_destinations(doc);
+    r.destinations.into_iter().map(|d| (d.index, d.source, d.name, d.page, d.view, d.removable)).collect()
+}
+
+fn names_of(doc: &Document) -> Vec<String> {
+    dests_of(doc).into_iter().map(|d| d.2).collect()
+}
+
+/// Names in a leaf: `(name, destination)` pairs as a `/Names` array.
+fn name_pairs(pairs: Vec<(&[u8], Object)>) -> Object {
+    Object::Array(pairs.into_iter().flat_map(|(k, v)| [string(k), v]).collect())
+}
+
+fn set_names_root(doc: &mut Document, root: Object) {
+    set_catalog_entry(doc, "Names", uri_with(vec![("Dests", root)]));
+}
+
+#[test]
+fn named_destinations_are_listed_from_the_tree_and_the_dictionary_with_their_page_and_view() {
+    use crate::destinations::{Source, read_destinations};
+    let none = read_destinations(&open(fixture()));
+    assert!(none.destinations.is_empty() && !none.truncated && !none.tree_capped && none.unreadable.is_empty());
+
+    let mut doc = open(fixture());
+    let (p0, p1, p2) = (page_ref(&doc, 0), page_ref(&doc, 1), page_ref(&doc, 2));
+    let leaf = doc.add(uri_with(vec![
+        (
+            "Names",
+            name_pairs(vec![
+                (b"alpha", Object::Array(vec![p0.clone(), Object::name("XYZ"), Object::Int(0), Object::Int(100), Object::Null])),
+                (b"beta", uri_with(vec![("D", dest_array(p1.clone(), "Fit"))])),
+                (&[0xFE, 0xFF, 0x00, 0xE9], dest_array(p0.clone(), "Fit")),
+                (b"remote", dest_array(Object::Int(3), "Fit")),
+                (b"number", Object::Int(5)),
+                (b"long view", Object::Array(vec![p2.clone(), Object::name("AVeryLongViewNameIndeed")])),
+            ]),
+        ),
+        ("Limits", Object::Array(vec![string(b"alpha"), string(b"remote")])),
+    ]));
+    // A key that is not a string is skipped, and a leaf written directly is read.
+    let direct = uri_with(vec![(
+        "Names",
+        Object::Array(vec![Object::Int(7), dest_array(p0.clone(), "Fit"), string(b"direct"), dest_array(p1.clone(), "Fit")]),
+    )]);
+    let root = doc.add(uri_with(vec![(
+        "Kids",
+        Object::Array(vec![Object::Ref(leaf), direct, Object::Int(4), Object::Ref(pdfcraft_cos::ObjRef::new(900, 0))]),
+    )]));
+    set_names_root(&mut doc, Object::Ref(root));
+    let mut old = pdfcraft_cos::Dict::new();
+    old.set(b"old".to_vec(), dest_array(p1.clone(), "FitH"));
+    old.set(b"caf\xE9".to_vec(), dest_array(p2.clone(), "Fit"));
+    set_catalog_entry(&mut doc, "Dests", Object::Dict(old));
+    let doc = open(write_full(&doc, &SaveOptions::default()).unwrap());
+
+    let r = read_destinations(&doc);
+    assert!(!r.truncated && !r.tree_capped && r.unreadable.is_empty());
+    assert!(r.destinations.iter().all(|d| d.name_exact));
+    let t = Source::Names;
+    let d = Source::Dests;
+    let some = |s: &str| Some(s.to_string());
+    let mut listed = dests_of(&doc);
+    // The dictionary's order is the file's, so compare the two dictionary names in sorted order.
+    let dict_part = listed.split_off(7);
+    assert_eq!(
+        listed,
+        [
+            (0, t, "alpha".to_string(), Some(1), some("XYZ"), true),
+            (1, t, "beta".to_string(), Some(2), some("Fit"), true),
+            (2, t, "\u{e9}".to_string(), Some(1), some("Fit"), true),
+            (3, t, "remote".to_string(), None, some("Fit"), true),
+            (4, t, "number".to_string(), None, None, true),
+            (5, t, "long view".to_string(), Some(3), None, true),
+            (6, t, "direct".to_string(), Some(2), some("Fit"), false),
+        ]
+    );
+    let mut dict_part = dict_part;
+    assert_eq!(dict_part.len(), 2);
+    dict_part.sort_by(|a, b| a.2.cmp(&b.2));
+    assert_eq!(
+        dict_part.iter().map(|x| (x.1, x.2.clone(), x.3, x.4.clone(), x.5)).collect::<Vec<_>>(),
+        [(d, "caf\u{e9}".to_string(), Some(3), some("Fit"), true), (d, "old".to_string(), Some(2), some("FitH"), true),]
+    );
+    assert!(dict_part.iter().all(|x| x.0 >= 7));
+    // Reading changes nothing.
+    let before = write_full(&doc, &SaveOptions::default()).unwrap();
+    let _ = read_destinations(&doc);
+    assert_eq!(write_full(&doc, &SaveOptions::default()).unwrap(), before);
+}
+
+#[test]
+fn a_destinations_entry_that_is_not_a_dictionary_is_named_and_not_listed() {
+    use crate::destinations::{Removal, destination_removal, read_destinations};
+    let cases: [(&str, Object, &[&str]); 5] = [
+        ("Names", Object::Int(3), &["names"]),
+        ("Names", uri_with(vec![("Dests", Object::Name(b"x".to_vec()))]), &["names"]),
+        ("Dests", Object::Array(vec![]), &["dests"]),
+        ("Dests", Object::Null, &[]),
+        ("Names", uri_with(vec![("Dests", Object::Null)]), &[]),
+    ];
+    for (key, value, expect) in cases {
+        let mut doc = open(fixture());
+        set_catalog_entry(&mut doc, key, value);
+        let doc = open(write_full(&doc, &SaveOptions::default()).unwrap());
+        let r = read_destinations(&doc);
+        assert!(r.destinations.is_empty(), "{key}");
+        assert_eq!(r.unreadable, expect, "{key}");
+        assert_eq!(destination_removal(&doc, 0), Removal::NoEntry);
+    }
+}
+
+#[test]
+fn removing_a_named_destination_keeps_the_others_in_order_and_everything_else() {
+    use crate::destinations::{Removal, destination_removal, remove_destination};
+    let mut doc = open(fixture());
+    let p0 = page_ref(&doc, 0);
+    let limits = Object::Array(vec![string(b"a"), string(b"c")]);
+    let leaf = doc.add(uri_with(vec![
+        (
+            "Names",
+            name_pairs(vec![(b"a", dest_array(p0.clone(), "Fit")), (b"b", dest_array(p0.clone(), "Fit")), (b"c", dest_array(p0.clone(), "Fit"))]),
+        ),
+        ("Limits", limits.clone()),
+    ]));
+    let direct = uri_with(vec![("Names", name_pairs(vec![(b"d", dest_array(p0.clone(), "Fit"))]))]);
+    let held_names = doc.add(name_pairs(vec![(b"e", dest_array(p0.clone(), "Fit"))]));
+    let indirect_names = Object::Ref(doc.add(uri_with(vec![("Names", Object::Ref(held_names))])));
+    let root = doc.add(uri_with(vec![("Kids", Object::Array(vec![Object::Ref(leaf), direct, indirect_names]))]));
+    set_names_root(&mut doc, Object::Ref(root));
+    let mut dict = pdfcraft_cos::Dict::new();
+    dict.set(b"x".to_vec(), dest_array(p0.clone(), "Fit"));
+    dict.set(b"y".to_vec(), dest_array(p0.clone(), "Fit"));
+    set_catalog_entry(&mut doc, "Dests", Object::Dict(dict));
+    assert_eq!(names_of(&doc), ["a", "b", "c", "d", "e", "x", "y"]);
+
+    // A position with no entry is not offered and changes no byte.
+    let before = write_full(&doc, &SaveOptions::default()).unwrap();
+    assert_eq!((destination_removal(&doc, 7), destination_removal(&doc, usize::MAX)), (Removal::NoEntry, Removal::NoEntry));
+    remove_destination(&mut doc, 7).unwrap();
+    assert_eq!(write_full(&doc, &SaveOptions::default()).unwrap(), before);
+    // A name in a direct node or in a /Names array of its own is named and not changed.
+    for i in [3, 4] {
+        assert_eq!(destination_removal(&doc, i), Removal::Unsupported);
+        assert!(remove_destination(&mut doc, i).is_err());
+        assert_eq!(write_full(&doc, &SaveOptions::default()).unwrap(), before);
+    }
+    assert_eq!(dests_of(&doc).iter().map(|d| d.5).collect::<Vec<_>>(), [true, true, true, false, false, true, true]);
+
+    // The middle name of a leaf: the others stay in order, /Limits stays as written, and the
+    // page is untouched, in both saves.
+    assert_eq!(destination_removal(&doc, 1), Removal::Yes);
+    remove_destination(&mut doc, 1).unwrap();
+    for saved in [write_incremental(&doc, &SaveOptions::default()).unwrap(), write_full(&doc, &SaveOptions::default()).unwrap()] {
+        let d = open(saved);
+        assert_eq!(names_of(&d), ["a", "c", "d", "e", "x", "y"]);
+        assert_eq!(crate::pages(&d).unwrap().len(), 3);
+    }
+    assert_eq!(doc.get(leaf).as_dict().and_then(|l| l.get(b"Limits")), Some(&limits));
+    // A name of the catalog's dictionary written in the catalog.
+    remove_destination(&mut doc, 4).unwrap();
+    assert_eq!(names_of(&doc), ["a", "c", "d", "e", "y"]);
+    // Taking the last name of a leaf leaves the leaf, and the one of the dictionary the
+    // dictionary.
+    remove_destination(&mut doc, 0).unwrap();
+    remove_destination(&mut doc, 0).unwrap();
+    assert_eq!(names_of(&doc), ["d", "e", "y"]);
+    assert_eq!(doc.get(leaf).as_dict().and_then(|l| l.get(b"Names")), Some(&Object::Array(vec![])));
+    remove_destination(&mut doc, 2).unwrap();
+    let catalog = doc.get(doc.root().unwrap());
+    assert_eq!(catalog.as_dict().and_then(|c| c.get(b"Dests")), Some(&uri_with(vec![])));
+}
+
+#[test]
+fn a_destination_dictionary_held_as_an_object_has_its_name_removed_where_it_is() {
+    use crate::destinations::remove_destination;
+    let mut doc = open(fixture());
+    let p0 = page_ref(&doc, 0);
+    let mut dict = pdfcraft_cos::Dict::new();
+    dict.set(b"x".to_vec(), dest_array(p0.clone(), "Fit"));
+    dict.set(b"y".to_vec(), dest_array(p0, "Fit"));
+    let held = doc.add(Object::Dict(dict));
+    set_catalog_entry(&mut doc, "Dests", Object::Ref(held));
+    let mut names = names_of(&doc);
+    names.sort();
+    assert_eq!(names, ["x", "y"]);
+    let first = names_of(&doc)[0].clone();
+    remove_destination(&mut doc, 0).unwrap();
+    let left = names_of(&doc);
+    assert!(left.len() == 1 && left[0] != first);
+    // The catalog still holds the reference.
+    let catalog = doc.get(doc.root().unwrap());
+    assert_eq!(catalog.as_dict().and_then(|c| c.get(b"Dests")), Some(&Object::Ref(held)));
+}
+
+#[test]
+fn the_destination_listing_and_the_name_tree_walk_are_bounded() {
+    use crate::destinations::{MAX_LISTED_DESTINATIONS, MAX_NAME_CHARS, MAX_TREE_DEPTH, MAX_TREE_NODES, read_destinations, remove_destination};
+    let mut doc = open(fixture());
+    let p0 = page_ref(&doc, 0);
+    let dest = |p: &Object| dest_array(p.clone(), "Fit");
+    let named = |n: usize| -> Vec<(Vec<u8>, Object)> { (0..n).map(|i| (format!("n{i:04}").into_bytes(), dest(&p0))).collect() };
+    let leaf_of = |doc: &mut Document, n: usize| {
+        let pairs = named(n);
+        doc.add(uri_with(vec![("Names", name_pairs(pairs.iter().map(|(k, v)| (k.as_slice(), v.clone())).collect()))]))
+    };
+
+    // 300 names: 256 listed and truncated; a name past the 256th is still removed by position.
+    let big = leaf_of(&mut doc, 300);
+    set_names_root(&mut doc, Object::Ref(big));
+    let r = read_destinations(&doc);
+    assert!(r.destinations.len() == MAX_LISTED_DESTINATIONS && r.truncated);
+    remove_destination(&mut doc, 280).unwrap();
+    let after = doc.get(big);
+    let Some(Object::Array(items)) = after.as_dict().and_then(|d| d.get(b"Names")) else { panic!("names") };
+    assert_eq!(items.len(), 598);
+    assert!(!items.iter().any(|o| matches!(o, Object::String(s) if s.bytes == b"n0280")));
+    // Exactly 256 are not truncated.
+    let exact = leaf_of(&mut doc, MAX_LISTED_DESTINATIONS);
+    set_names_root(&mut doc, Object::Ref(exact));
+    let r = read_destinations(&doc);
+    assert!(r.destinations.len() == MAX_LISTED_DESTINATIONS && !r.truncated);
+
+    // A name of 128 characters is cut at 127 and not exact; one of 127 is whole.
+    let long = "\u{e9}".repeat(MAX_NAME_CHARS + 1);
+    let mut utf16 = vec![0xFE, 0xFF];
+    utf16.extend(long.encode_utf16().flat_map(u16::to_be_bytes));
+    let whole = &utf16[..utf16.len() - 2];
+    let leaf = doc.add(uri_with(vec![("Names", name_pairs(vec![(&utf16, dest(&p0)), (whole, dest(&p0))]))]));
+    set_names_root(&mut doc, Object::Ref(leaf));
+    let r = read_destinations(&doc);
+    assert_eq!(r.destinations[0].name.chars().count(), MAX_NAME_CHARS);
+    assert!(!r.destinations[0].name_exact && r.destinations[1].name_exact);
+    assert_eq!(r.destinations[1].name.chars().count(), MAX_NAME_CHARS);
+
+    // The tree: the root and up to 1023 kids are entered, so a name in the 1023rd kid is listed
+    // and one in the 1024th is not, with the cut reported.
+    let tree_of = |doc: &mut Document, kids: usize| {
+        let named_leaf = leaf_of(doc, 1);
+        let mut list: Vec<Object> = (1..kids).map(|_| Object::Ref(doc.add(uri_with(vec![("Names", Object::Array(vec![]))])))).collect();
+        list.push(Object::Ref(named_leaf));
+        doc.add(uri_with(vec![("Kids", Object::Array(list))]))
+    };
+    let t = tree_of(&mut doc, MAX_TREE_NODES - 1);
+    set_names_root(&mut doc, Object::Ref(t));
+    let r = read_destinations(&doc);
+    assert!(r.destinations.len() == 1 && !r.tree_capped);
+    let t = tree_of(&mut doc, MAX_TREE_NODES);
+    set_names_root(&mut doc, Object::Ref(t));
+    let r = read_destinations(&doc);
+    assert!(r.destinations.is_empty() && r.tree_capped);
+
+    // Levels: a name at level 16 is listed, one at level 17 is not.
+    let chain = |doc: &mut Document, levels: usize| {
+        let mut at = leaf_of(doc, 1);
+        for _ in 1..levels {
+            at = doc.add(uri_with(vec![("Kids", Object::Array(vec![Object::Ref(at)]))]));
+        }
+        at
+    };
+    let c = chain(&mut doc, MAX_TREE_DEPTH + 1);
+    set_names_root(&mut doc, Object::Ref(c));
+    let r = read_destinations(&doc);
+    assert!(r.destinations.len() == 1 && !r.tree_capped);
+    // An empty /Kids at level 16 has nothing to cut.
+    let c = chain(&mut doc, MAX_TREE_DEPTH + 1);
+    let mut deepest = c;
+    for _ in 0..MAX_TREE_DEPTH {
+        deepest = doc
+            .get(deepest)
+            .as_dict()
+            .and_then(|d| d.reference(b"Kids").or_else(|| d.get(b"Kids").and_then(|k| k.as_array()?.first()?.as_ref())))
+            .unwrap_or(deepest);
+    }
+    doc.update_dict(deepest, |d| d.set(b"Kids".to_vec(), Object::Array(vec![]))).unwrap();
+    set_names_root(&mut doc, Object::Ref(c));
+    let r = read_destinations(&doc);
+    assert!(r.destinations.len() == 1 && !r.tree_capped);
+    let c = chain(&mut doc, MAX_TREE_DEPTH + 2);
+    set_names_root(&mut doc, Object::Ref(c));
+    let r = read_destinations(&doc);
+    assert!(r.destinations.is_empty() && r.tree_capped);
+
+    // A node that is its own kid, or named by two parents, is read once.
+    let looped = leaf_of(&mut doc, 1);
+    doc.update_dict(looped, |d| d.set(b"Kids".to_vec(), Object::Array(vec![Object::Ref(looped)]))).unwrap();
+    set_names_root(&mut doc, Object::Ref(looped));
+    let r = read_destinations(&doc);
+    assert!(r.destinations.len() == 1 && !r.tree_capped);
+    let small = |doc: &mut Document, n: &[u8]| doc.add(uri_with(vec![("Names", name_pairs(vec![(n, dest(&p0))]))]));
+    let (s, t) = (small(&mut doc, b"s"), small(&mut doc, b"t"));
+    let twice = doc.add(uri_with(vec![("Kids", Object::Array(vec![Object::Ref(s), Object::Ref(s), Object::Ref(t)]))]));
+    set_names_root(&mut doc, Object::Ref(twice));
+    assert_eq!(names_of(&doc), ["s", "t"]);
+    let (pa, pb) = (
+        doc.add(uri_with(vec![("Kids", Object::Array(vec![Object::Ref(s)]))])),
+        doc.add(uri_with(vec![("Kids", Object::Array(vec![Object::Ref(s), Object::Ref(t)]))])),
+    );
+    let two_parents = doc.add(uri_with(vec![("Kids", Object::Array(vec![Object::Ref(pa), Object::Ref(pb)]))]));
+    set_names_root(&mut doc, Object::Ref(two_parents));
+    assert_eq!(names_of(&doc), ["s", "t"]);
+    // One `/Names` array shared by two leaves is read once.
+    let shared = doc.add(name_pairs(vec![(b"s", dest(&p0))]));
+    let two = |doc: &mut Document| doc.add(uri_with(vec![("Names", Object::Ref(shared))]));
+    let (l1, l2) = (two(&mut doc), two(&mut doc));
+    let root = doc.add(uri_with(vec![("Kids", Object::Array(vec![Object::Ref(l1), Object::Ref(l2)]))]));
+    set_names_root(&mut doc, Object::Ref(root));
+    assert_eq!(names_of(&doc), ["s"]);
+}
+
+#[test]
+fn the_destination_walk_scans_a_huge_array_only_as_far_as_the_allowance() {
+    use crate::destinations::{MAX_ITEMS_SCANNED, MAX_TREE_NODES, destination_removal, read_destinations};
+    let mut doc = open(fixture());
+    // Kids that are not nodes cost a scan each and are never listed.
+    let kids = doc.add(uri_with(vec![("Kids", Object::Array(vec![Object::Int(1); MAX_ITEMS_SCANNED * 3]))]));
+    set_names_root(&mut doc, Object::Ref(kids));
+    take_work();
+    let r = read_destinations(&doc);
+    assert!(r.tree_capped && r.destinations.is_empty());
+    assert_eq!(take_work(), MAX_ITEMS_SCANNED);
+    // So do pairs whose key is not a string, however far a removal asks to look.
+    let pairs = doc.add(uri_with(vec![("Names", Object::Array(vec![Object::Int(1); MAX_ITEMS_SCANNED * 6]))]));
+    set_names_root(&mut doc, Object::Ref(pairs));
+    take_work();
+    assert_eq!(destination_removal(&doc, usize::MAX), crate::destinations::Removal::NoEntry);
+    assert_eq!(take_work(), MAX_ITEMS_SCANNED);
+    // Once the allowance is spent no later kid is looked at: a name behind the cut is not found.
+    let named = doc.add(uri_with(vec![("Names", name_pairs(vec![(b"late", dest_array(Object::Int(1), "Fit"))]))]));
+    let mut list = vec![Object::Int(1); MAX_ITEMS_SCANNED];
+    list.push(Object::Ref(named));
+    let root = doc.add(uri_with(vec![("Kids", Object::Array(list))]));
+    set_names_root(&mut doc, Object::Ref(root));
+    let r = read_destinations(&doc);
+    assert!(r.tree_capped && r.destinations.is_empty());
+    // Entries of the catalog's dictionary are scanned against an allowance of their own.
+    let mut big = pdfcraft_cos::Dict::new();
+    for i in 0..=MAX_ITEMS_SCANNED {
+        big.set(format!("k{i}").into_bytes(), Object::Int(1));
+    }
+    set_catalog_entry(&mut doc, "Names", Object::Null);
+    set_catalog_entry(&mut doc, "Dests", Object::Dict(big));
+    take_work();
+    assert_eq!(destination_removal(&doc, usize::MAX), crate::destinations::Removal::NoEntry);
+    assert_eq!(take_work(), MAX_ITEMS_SCANNED);
+    assert!(read_destinations(&doc).truncated);
+    // After a tree cut by the allowance the dictionary still has its own whole allowance.
+    set_catalog_entry(&mut doc, "Names", uri_with(vec![("Dests", Object::Ref(kids))]));
+    take_work();
+    assert_eq!(destination_removal(&doc, usize::MAX), crate::destinations::Removal::NoEntry);
+    assert_eq!(take_work(), MAX_ITEMS_SCANNED * 2);
+    // The dictionary of a file written for PDF 1.1 is read after a tree cut by the allowance
+    // and after one cut by the node limit.
+    set_catalog_entry(&mut doc, "Dests", uri_with(vec![("old", dest_array(Object::Int(1), "Fit"))]));
+    let r = read_destinations(&doc);
+    assert!(r.tree_capped && names_of(&doc) == ["old"]);
+    let empties: Vec<Object> = (0..MAX_TREE_NODES + 500).map(|_| Object::Ref(doc.add(uri_with(vec![("Names", Object::Array(vec![]))])))).collect();
+    let wide = doc.add(uri_with(vec![("Kids", Object::Array(empties))]));
+    set_names_root(&mut doc, Object::Ref(wide));
+    take_work();
+    let r = read_destinations(&doc);
+    // Once the node limit is reached no later kid is scanned.
+    assert_eq!(take_work(), MAX_TREE_NODES + 1);
+    assert!(r.tree_capped && names_of(&doc) == ["old"]);
+}
+
+#[test]
+fn a_structural_dictionary_is_never_read_as_the_destinations_or_written() {
+    use crate::destinations::{Removal, destination_removal, read_destinations, remove_destination};
+    let doc = open(fixture());
+    let root = doc.root().unwrap();
+    let pages_node = doc.get(root).as_dict().and_then(|c| c.reference(b"Pages")).unwrap();
+    let page = crate::pages(&doc).unwrap()[0].obj;
+    let inner = pdfcraft_cos::ObjRef::new(3, 0);
+    for target in [root, pages_node, inner, page] {
+        for (key, expect) in [("Dests", "dests"), ("Names", "names")] {
+            let mut doc = open(fixture());
+            if key == "Dests" {
+                set_catalog_entry(&mut doc, "Dests", Object::Ref(target));
+            } else {
+                set_names_root(&mut doc, Object::Ref(target));
+            }
+            let before = write_full(&doc, &SaveOptions::default()).unwrap();
+            let r = read_destinations(&doc);
+            assert!(r.destinations.is_empty() && r.unreadable == [expect], "{key} {target:?} {:?}", r.unreadable);
+            assert_eq!(destination_removal(&doc, 0), Removal::NoEntry);
+            remove_destination(&mut doc, 0).unwrap();
+            assert_eq!(write_full(&doc, &SaveOptions::default()).unwrap(), before);
+        }
+    }
+    // The catalog's /Names dictionary, as an object of its own, is not a /Dests dictionary.
+    let mut doc = open(fixture());
+    let dict = doc.add(uri_with(vec![("Dests", Object::Null)]));
+    set_catalog_entry(&mut doc, "Names", Object::Ref(dict));
+    set_catalog_entry(&mut doc, "Dests", Object::Ref(dict));
+    let r = read_destinations(&doc);
+    assert!(r.destinations.is_empty() && r.unreadable == ["dests"]);
+    // An ordinary dictionary object is still read.
+    let mut doc = open(fixture());
+    let ordinary = doc.add(uri_with(vec![("a", dest_array(Object::Int(1), "Fit"))]));
+    set_catalog_entry(&mut doc, "Dests", Object::Ref(ordinary));
+    assert_eq!(names_of(&doc), ["a"]);
+}

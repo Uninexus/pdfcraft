@@ -36,7 +36,7 @@ are borrowed; PDF 2.0 additions and most subset standards are missing. **150–2
 | §9 | Text and fonts: Type 1, TrueType, OpenType/CFF, Type 3, CID-keyed, CMaps, ToUnicode | full | **borrowed** rendering; own text extraction (word-F1 0.98); standard-14 metrics for generated appearances; embedded fonts reused for editing, else Helvetica | `view.render-type3`, `view.render-cid-fonts` partial; no own font engine; no font embedding/subsetting for arbitrary new text beyond craft-fonts Japanese |
 | §10 | Rendering: transfer functions, halftones, overprint, smoothness | full | borrowed; no overprint preview | `print.overprint-preview` planned |
 | §11 | Transparency: blend modes, soft masks, groups, knockout | full | borrowed (knockout shipped) | `view.render-transparency` partial |
-| §12.1–12.3 | Viewer preferences, page layout, page labels, outlines, destinations | full | **own**: initial view, page labels, bookmarks edit and from structure, named destinations rewired on copy | named-destination editing panel planned |
+| §12.1–12.3 | Viewer preferences, page layout, page labels, outlines, destinations | full | **own**: initial view, page labels, bookmarks edit and from structure, named destinations rewired on copy | `view.destinations-panel` partial: `named_destinations` lists names and removes one, no panel and no adding |
 | §12.4 | Page transitions, thumbnails, articles, presentations | full | `/Trans` and `/Dur` read and listed by `doc_info`, not played; thumbnails discarded or kept | `organize.page-transitions` partial, `view.articles-panel` partial |
 | §12.5 | Annotations | 28 types | see table below | |
 | §12.6 | Actions | 19 types | see table below | |

@@ -661,6 +661,18 @@ impl Document {
         self.editor.as_ref().is_some_and(|e| pdfcraft_organize::articles::article_thread_removes(&e.cos, index))
     }
 
+    /// The named destinations as stored, from one read.
+    pub fn named_destinations(&self) -> pdfcraft_organize::destinations::Destinations {
+        self.editor.as_ref().map(|e| pdfcraft_organize::destinations::read_destinations(&e.cos)).unwrap_or_default()
+    }
+
+    /// What taking the named destination at `index` of the listing away would do.
+    pub fn destination_removal(&self, index: usize) -> pdfcraft_organize::destinations::Removal {
+        self.editor
+            .as_ref()
+            .map_or(pdfcraft_organize::destinations::Removal::NoEntry, |e| pdfcraft_organize::destinations::destination_removal(&e.cos, index))
+    }
+
     /// Signed: at least one signature field holds a signature.
     pub fn is_signed(&self) -> bool {
         self.signatures.iter().any(|s| s.signed)
