@@ -34,6 +34,7 @@ pub mod print_presets;
 mod prune;
 pub mod reference_xobjects;
 pub mod role_map;
+pub mod signature_lock;
 mod templates;
 mod transition;
 pub mod view;

@@ -372,6 +372,7 @@ impl Automation {
             "class_map" => self.class_map(&a)?,
             "article_threads" => self.article_threads(&a)?,
             "portfolio_collection" => self.portfolio_collection(&a)?,
+            "signature_field_lock" => self.signature_field_lock(&a)?,
             "reference_xobjects" => self.reference_xobjects(&a)?,
             "named_destinations" => self.named_destinations(&a)?,
             "doc_revisions" => self.doc_revisions(&a)?,

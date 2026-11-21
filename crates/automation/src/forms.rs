@@ -2,7 +2,9 @@
 //! prepare a form (add fields one at a time or as a table, change and delete them).
 
 use pdfcraft_engine::form_scripts::{CalcOp, Calculate, Format, NOTATION_NOT_STORABLE, Validate, notation_storable};
-use pdfcraft_engine::{CalculationIssue, Edit, FieldProps, FieldValue, FormField, FormFieldKind, NewField, field_flags};
+use pdfcraft_engine::{
+    CalculationIssue, Edit, FieldProps, FieldValue, FormField, FormFieldKind, LockAction, LockChange, LockSpec, NewField, field_flags,
+};
 use serde_json::{Value, json};
 
 use crate::{Args, Automation, Result, ToolError, failed};
@@ -929,6 +931,85 @@ impl Automation {
             .filter(|w| *w < count)
             .ok_or_else(|| bad(format!("widget must be 1 to {count}: {name} has {count} widgets")))?;
         self.apply(a, Edit::DeleteWidget { name, widget })
+    }
+
+    /// A signature field's `/Lock`: read, set (`action`, `fields`) or taken out (`remove`).
+    pub(crate) fn signature_field_lock(&mut self, a: &Args) -> Result<Value> {
+        let name = a.str("field")?.to_owned();
+        let action = a.opt_str("action")?;
+        let remove = a.opt_bool("remove")?.unwrap_or(false);
+        let names = match a.get("fields") {
+            None => None,
+            Some(_) => Some(a.strs("fields")?.into_iter().map(str::to_owned).collect::<Vec<_>>()),
+        };
+        let spec = match (action, remove) {
+            (Some(_), true) => return Err(bad("remove cannot be combined with action")),
+            (None, true) if names.is_some() => return Err(bad("remove cannot be combined with fields")),
+            (None, _) if names.is_some() => return Err(bad("fields needs an action (include or exclude)")),
+            (None, _) => None,
+            (Some(act), _) => {
+                let act = match act {
+                    "all" => LockAction::All,
+                    "include" => LockAction::Include,
+                    "exclude" => LockAction::Exclude,
+                    other => return Err(bad(format!("unknown action {other:?} (all, include, exclude)"))),
+                };
+                Some(LockSpec::new(act, names.unwrap_or_default()).map_err(|e| bad(e.to_string()))?)
+            }
+        };
+        let field = {
+            let doc = self.doc(a)?;
+            let mut named = doc.form.iter().filter(|f| f.name == name);
+            let field = named.next().ok_or_else(|| failed(format!("there is no field named {name:?} (see form_fields)")))?;
+            if named.next().is_some() {
+                return Err(failed(format!("{name:?} names more than one field")));
+            }
+            if field.kind != FormFieldKind::Signature {
+                return Err(failed(format!("{name:?} is not a signature field")));
+            }
+            if let Some(spec) = &spec {
+                // A name is a field's fully qualified name, or one above it (it covers the fields below).
+                for n in spec.names() {
+                    let below = format!("{n}.");
+                    if !doc.form.iter().any(|f| f.name == *n || f.name.starts_with(&below)) {
+                        return Err(failed(format!("there is no field named {n:?} to lock (see form_fields)")));
+                    }
+                }
+            }
+            field.obj
+        };
+        let writes = spec.is_some() || remove;
+        let mut out = json!({});
+        let mut changed = false;
+        if writes {
+            match self.doc(a)?.signature_lock_change(field, spec.as_ref()) {
+                LockChange::Refused(why) => return Err(failed(why)),
+                LockChange::NoChange => {}
+                LockChange::Yes => {
+                    out = self.apply(a, Edit::SetSignatureLock { field, lock: spec })?;
+                    changed = true;
+                }
+            }
+        }
+        let read = self.doc(a)?.signature_lock(field);
+        out["field"] = json!(name);
+        if writes {
+            out["changed"] = json!(changed);
+        }
+        out["lock"] = json!({
+            "has_entry": read.has_entry,
+            "present": read.present,
+            "action": read.action,
+            "fields": read.names,
+            "count": read.count,
+            "truncated": read.truncated,
+            "not_names": read.not_names,
+            "exact": read.exact,
+            "signed": read.signed,
+            "settable": read.settable,
+            "capped": read.capped,
+        });
+        Ok(out)
     }
 
     pub(crate) fn doc_export_data(&mut self, a: &Args) -> Result<Value> {

@@ -9057,3 +9057,250 @@ fn a_collection_text_is_cut_at_127_characters() {
     let r = read_collection(&raw);
     assert!(r.fields.len() == 1 && !r.fields[0].exact && r.fields[0].name.as_deref() == Some("n"));
 }
+
+fn lock_dict(action: Object, fields: Option<Object>) -> Object {
+    let mut entries = vec![("Type", Object::name("SigFieldLock")), ("Action", action)];
+    if let Some(f) = fields {
+        entries.push(("Fields", f));
+    }
+    uri_with(entries)
+}
+
+/// A signature field (an object of its own) with `extra` entries beside its `/FT`.
+fn signature_field(doc: &mut Document, extra: Vec<(&str, Object)>) -> pdfcraft_cos::ObjRef {
+    let mut entries = vec![("FT", Object::name("Sig")), ("T", string(b"Sig1"))];
+    entries.extend(extra);
+    doc.add(uri_with(entries))
+}
+
+fn names(list: &[&str]) -> Object {
+    Object::Array(list.iter().map(|n| string(n.as_bytes())).collect())
+}
+
+fn lock_spec(action: crate::signature_lock::LockAction, list: &[&str]) -> crate::signature_lock::LockSpec {
+    crate::signature_lock::LockSpec::new(action, list.iter().map(|n| (*n).to_string()).collect()).unwrap()
+}
+
+#[test]
+fn a_signature_lock_is_read_with_its_action_and_names() {
+    use crate::signature_lock::read_signature_lock;
+    let mut doc = open(fixture());
+    let plain = signature_field(&mut doc, vec![]);
+    let none = read_signature_lock(&doc, plain);
+    assert!(!none.has_entry && !none.present && none.action.is_none() && none.names.is_empty() && none.settable && !none.signed && !none.capped);
+    let null = signature_field(&mut doc, vec![("Lock", Object::Null)]);
+    assert!(!read_signature_lock(&doc, null).has_entry, "a null is no entry");
+    let number = signature_field(&mut doc, vec![("Lock", Object::Int(3))]);
+    let r = read_signature_lock(&doc, number);
+    assert!(r.has_entry && !r.present, "a number is an entry and no lock");
+
+    // A lock and its names behind references: a string, a string behind a reference, a number.
+    let deep = doc.add(string(b"b.c"));
+    let list = doc.add(Object::Array(vec![string(b"a"), Object::Ref(deep), Object::Int(7)]));
+    let lock = doc.add(lock_dict(Object::name("Include"), Some(Object::Ref(list))));
+    let field = signature_field(&mut doc, vec![("Lock", Object::Ref(lock))]);
+    let r = read_signature_lock(&doc, field);
+    assert!(r.has_entry && r.present && r.settable && r.exact && !r.capped && !r.truncated);
+    assert_eq!(
+        (r.action.as_deref(), r.names.as_slice(), r.count, r.not_names),
+        (Some("Include"), ["a".to_string(), "b.c".to_string()].as_slice(), 3, 1)
+    );
+
+    // `All` lists nothing; an action that is not a name is not reported.
+    let all = signature_field(&mut doc, vec![("Lock", lock_dict(Object::name("All"), None))]);
+    let r = read_signature_lock(&doc, all);
+    assert_eq!((r.action.as_deref(), r.names.len(), r.count), (Some("All"), 0, 0));
+    let odd = signature_field(&mut doc, vec![("Lock", lock_dict(string(b"All"), None))]);
+    let r = read_signature_lock(&doc, odd);
+    assert!(r.present && r.action.is_none());
+
+    // A field with a value is signed, whether the value is a dictionary or a reference.
+    let value = doc.add(uri_with(vec![("Type", Object::name("Sig"))]));
+    let signed = signature_field(&mut doc, vec![("V", Object::Ref(value))]);
+    let r = read_signature_lock(&doc, signed);
+    assert!(r.signed && !r.settable);
+    let unsigned_null = signature_field(&mut doc, vec![("V", Object::Null)]);
+    assert!(!read_signature_lock(&doc, unsigned_null).signed);
+}
+
+#[test]
+fn a_signature_lock_is_set_replaced_removed_and_survives_a_save() {
+    use crate::signature_lock::{Change, LockAction, read_signature_lock, set_signature_lock, signature_lock_change};
+    let mut doc = open(fixture());
+    let old = doc.add(lock_dict(Object::name("All"), None));
+    let field = signature_field(&mut doc, vec![("Lock", Object::Ref(old))]);
+    // Reachable from the catalog, so that a save keeps it.
+    set_catalog_entry(&mut doc, "Probe", Object::Ref(field));
+    let include = lock_spec(LockAction::Include, &["name", "address.city", "caf\u{e9}"]);
+    assert_eq!(signature_lock_change(&doc, field, Some(&include)), Change::Yes);
+    set_signature_lock(&mut doc, field, Some(&include)).unwrap();
+    let stored = doc.get(field);
+    let lock = stored.as_dict().unwrap().get(b"Lock").unwrap();
+    assert!(matches!(lock, Object::Dict(_)), "the new lock is written in the field, not through the old object");
+    assert_eq!(lock.as_dict().unwrap().name(b"Type"), Some(b"SigFieldLock".as_slice()));
+    assert!(doc.get(old).as_dict().is_some_and(|d| d.name(b"Action") == Some(b"All".as_slice())), "the old dictionary is left as it was");
+    let mut doc = open(write_full(&doc, &SaveOptions::default()).unwrap());
+    let field = doc.get(doc.root().unwrap()).as_dict().and_then(|c| c.reference(b"Probe")).unwrap();
+    let r = read_signature_lock(&doc, field);
+    assert_eq!(
+        (r.action.as_deref(), r.names.as_slice()),
+        (Some("Include"), ["name".to_string(), "address.city".to_string(), "caf\u{e9}".to_string()].as_slice())
+    );
+    assert!(r.exact);
+
+    // Replacing with `All` drops the names; the old dictionary is not touched.
+    set_signature_lock(&mut doc, field, Some(&lock_spec(LockAction::All, &[]))).unwrap();
+    let r = read_signature_lock(&doc, field);
+    assert_eq!((r.action.as_deref(), r.count), (Some("All"), 0));
+    assert!(doc.get(field).as_dict().unwrap().get(b"Lock").and_then(Object::as_dict).is_some_and(|d| !d.contains(b"Fields")));
+
+    // A removal takes the entry out; a second one changes nothing and writes nothing.
+    assert_eq!(signature_lock_change(&doc, field, None), Change::Yes);
+    set_signature_lock(&mut doc, field, None).unwrap();
+    assert!(!doc.get(field).as_dict().unwrap().contains(b"Lock"));
+    assert_eq!(doc.get(field).as_dict().unwrap().name(b"FT"), Some(b"Sig".as_slice()), "the rest of the field is kept");
+    assert_eq!(signature_lock_change(&doc, field, None), Change::NoChange);
+    let before = write_full(&doc, &SaveOptions { mod_date: Some("D:20240101000000Z".into()), ..SaveOptions::default() }).unwrap();
+    set_signature_lock(&mut doc, field, None).unwrap();
+    let after = write_full(&doc, &SaveOptions { mod_date: Some("D:20240101000000Z".into()), ..SaveOptions::default() }).unwrap();
+    assert_eq!(before, after);
+}
+
+#[test]
+fn a_signature_lock_is_refused_on_a_signed_field_and_on_structural_objects() {
+    use crate::signature_lock::{Change, LockAction, read_signature_lock, set_signature_lock, signature_lock_change};
+    let mut doc = open(fixture());
+    let value = doc.add(uri_with(vec![("Type", Object::name("Sig"))]));
+    let signed = signature_field(&mut doc, vec![("V", Object::Ref(value)), ("Lock", lock_dict(Object::name("All"), None))]);
+    let number = doc.add(Object::Int(5));
+    let spec = lock_spec(LockAction::All, &[]);
+    // The catalog (1), the /Pages node (2), an inner node (3), a page (4), a signed field, an
+    // object that is no dictionary and one that does not exist.
+    let targets = [
+        doc.root().unwrap(),
+        pdfcraft_cos::ObjRef { num: 2, generation: 0 },
+        pdfcraft_cos::ObjRef { num: 3, generation: 0 },
+        pdfcraft_cos::ObjRef { num: 4, generation: 0 },
+        signed,
+        number,
+        pdfcraft_cos::ObjRef { num: 9999, generation: 0 },
+    ];
+    for t in targets {
+        assert!(!read_signature_lock(&doc, t).settable, "{t:?}");
+        assert!(matches!(signature_lock_change(&doc, t, Some(&spec)), Change::Refused(_)), "{t:?}");
+        assert!(matches!(signature_lock_change(&doc, t, None), Change::Refused(_)), "{t:?} a removal too");
+        if t == signed {
+            assert!(matches!(signature_lock_change(&doc, t, None), Change::Refused(why) if why.contains("signature")), "a signed field says why");
+        }
+        let bytes = write_full(&doc, &SaveOptions { mod_date: Some("D:20240101000000Z".into()), ..SaveOptions::default() }).unwrap();
+        assert!(set_signature_lock(&mut doc, t, Some(&spec)).is_err() && set_signature_lock(&mut doc, t, None).is_err(), "{t:?}");
+        let again = write_full(&doc, &SaveOptions { mod_date: Some("D:20240101000000Z".into()), ..SaveOptions::default() }).unwrap();
+        assert_eq!(bytes, again, "{t:?} is left as it was");
+    }
+    assert!(read_signature_lock(&doc, signed).has_entry, "the signed field's lock is still read");
+}
+
+/// Reads: one for the field, one for each hop of a reference followed, and one more for each
+/// entry of `/Fields` looked at.
+#[test]
+fn every_read_a_signature_lock_makes_is_paid_for_before_it_is_made() {
+    use crate::signature_lock::read_with;
+    let mut doc = open(fixture());
+    let deep = doc.add(string(b"deep"));
+    let list = doc.add(Object::Array(vec![string(b"a"), Object::Ref(deep)]));
+    let lock = doc.add(lock_dict(Object::name("Include"), Some(Object::Ref(list))));
+    let field = signature_field(&mut doc, vec![("Lock", Object::Ref(lock))]);
+    // The field, the lock, the list, "a" (1), "deep" (1 and 1 for the reference).
+    let reads = 1 + 1 + 1 + 1 + 2;
+    let whole = read_with(&doc, field, reads);
+    assert!(!whole.capped && whole.names == ["a", "deep"] && whole.settable);
+    let short = read_with(&doc, field, reads - 1);
+    assert!(short.capped && short.names == ["a"] && !short.settable, "the reference to `deep` was not paid for");
+    let short = read_with(&doc, field, 4);
+    assert!(short.capped && short.names == ["a"], "the second entry is the fifth read");
+    let three = read_with(&doc, field, 3);
+    assert!(
+        three.capped && three.names.is_empty() && three.count == 2 && three.action.as_deref() == Some("Include"),
+        "the first entry is the fourth"
+    );
+    let two = read_with(&doc, field, 2);
+    assert!(two.capped && two.present && two.count == 0, "the list read was not paid for");
+    let one = read_with(&doc, field, 1);
+    assert!(one.capped && one.has_entry && !one.present, "the lock read was not paid for");
+    let nothing = read_with(&doc, field, 0);
+    assert!(nothing.capped && !nothing.has_entry && !nothing.settable, "the field read was not paid for");
+
+    // A lock behind a chain of 32 reference objects is followed, as `Document::resolve` follows it
+    // (33 reads and the field's): a chain of 33 is not.
+    for (hops, followed) in [(32usize, true), (33, false)] {
+        let mut chain = open(fixture());
+        let mut at = chain.add(lock_dict(Object::name("All"), None));
+        for _ in 0..hops {
+            at = chain.add(Object::Ref(at));
+        }
+        let field = signature_field(&mut chain, vec![("Lock", Object::Ref(at))]);
+        let r = read_with(&chain, field, 34);
+        assert_eq!((r.present, r.capped), (followed, false), "{hops}");
+        assert!(read_with(&chain, field, 33).capped, "{hops}");
+    }
+}
+
+#[test]
+fn a_read_that_spent_its_allowance_is_refused_with_its_own_reason() {
+    use crate::signature_lock::{Change, LockAction, change_with};
+    let mut doc = open(fixture());
+    let lock = doc.add(lock_dict(Object::name("All"), None));
+    let field = signature_field(&mut doc, vec![("Lock", Object::Ref(lock))]);
+    let spec = lock_spec(LockAction::All, &[]);
+    assert_eq!(change_with(&doc, field, Some(&spec), 2), Change::Yes);
+    for gets in [0, 1] {
+        assert!(matches!(change_with(&doc, field, Some(&spec), gets), Change::Refused(why) if why.contains("allowance")), "{gets}");
+        assert!(matches!(change_with(&doc, field, None, gets), Change::Refused(why) if why.contains("allowance")), "{gets}");
+    }
+}
+
+#[test]
+fn a_signature_lock_action_is_cut_and_the_default_read_is_exact() {
+    use crate::signature_lock::{SignatureLock, read_signature_lock};
+    assert!(SignatureLock::default().exact, "nothing listed is nothing cut");
+    let mut doc = open(fixture());
+    let long = "A".repeat(200);
+    let field = signature_field(&mut doc, vec![("Lock", lock_dict(Object::name(&long), None))]);
+    let r = read_signature_lock(&doc, field);
+    assert!(r.action.as_deref().is_some_and(|a| a.len() == 127) && !r.exact, "a cut action is not exact");
+}
+
+#[test]
+fn a_signature_lock_lists_256_names_cuts_long_ones_and_checks_what_it_writes() {
+    use crate::signature_lock::{LockAction, LockSpec, MAX_LOCK_NAMES, MAX_NAME_CHARS, read_signature_lock};
+    let mut doc = open(fixture());
+    let many = |n: usize| Object::Array((0..n).map(|i| string(format!("f{i}").as_bytes())).collect());
+    let exact = signature_field(&mut doc, vec![("Lock", lock_dict(Object::name("Include"), Some(many(MAX_LOCK_NAMES))))]);
+    let r = read_signature_lock(&doc, exact);
+    assert_eq!((r.names.len(), r.count, r.truncated), (MAX_LOCK_NAMES, MAX_LOCK_NAMES, false));
+    let more = signature_field(&mut doc, vec![("Lock", lock_dict(Object::name("Include"), Some(many(MAX_LOCK_NAMES + 3))))]);
+    let r = read_signature_lock(&doc, more);
+    assert_eq!((r.names.len(), r.count, r.truncated), (MAX_LOCK_NAMES, MAX_LOCK_NAMES + 3, true));
+    assert_eq!(r.names.last().map(String::as_str), Some("f255"), "the 256th in file order");
+
+    let whole = "n".repeat(MAX_NAME_CHARS);
+    let long = "n".repeat(MAX_NAME_CHARS + 1);
+    let field = signature_field(&mut doc, vec![("Lock", lock_dict(Object::name("Exclude"), Some(names(&[&whole]))))]);
+    assert!(read_signature_lock(&doc, field).exact);
+    let field = signature_field(&mut doc, vec![("Lock", lock_dict(Object::name("Exclude"), Some(names(&[&whole, &long]))))]);
+    let r = read_signature_lock(&doc, field);
+    assert!(!r.exact && r.names[1] == whole, "a long name is cut at {MAX_NAME_CHARS} and not exact");
+
+    // What a write accepts.
+    let list = |n: usize| (0..n).map(|i| format!("f{i}")).collect::<Vec<_>>();
+    assert!(LockSpec::new(LockAction::Include, list(MAX_LOCK_NAMES)).is_ok());
+    assert!(LockSpec::new(LockAction::Include, list(MAX_LOCK_NAMES + 1)).is_err());
+    assert!(LockSpec::new(LockAction::Exclude, vec![]).is_err(), "an Exclude with no names would lock everything");
+    assert!(LockSpec::new(LockAction::Include, vec![]).is_err(), "an Include with no names would lock nothing");
+    assert!(LockSpec::new(LockAction::All, vec!["a".into()]).is_err());
+    assert!(LockSpec::new(LockAction::All, vec![]).is_ok());
+    assert!(LockSpec::new(LockAction::Include, vec!["a".into(), "a".into()]).is_err());
+    assert!(LockSpec::new(LockAction::Include, vec![String::new()]).is_err());
+    assert!(LockSpec::new(LockAction::Include, vec![whole]).is_ok());
+    assert!(LockSpec::new(LockAction::Include, vec![long]).is_err());
+}
