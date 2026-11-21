@@ -639,6 +639,17 @@ impl Document {
         }
     }
 
+    /// The structure tree's class map (`/StructTreeRoot` `/ClassMap`) as stored, from one read.
+    pub fn class_map(&self) -> pdfcraft_organize::class_map::ClassMap {
+        self.editor.as_ref().map(|e| pdfcraft_organize::class_map::read_class_map(&e.cos)).unwrap_or_default()
+    }
+
+    /// Whether taking the class map's entry `class` away would change the class map: whether the
+    /// entry is stored.
+    pub fn class_map_removes(&self, class: &str) -> bool {
+        self.editor.as_ref().is_some_and(|e| pdfcraft_organize::class_map::class_map_removes(&e.cos, class))
+    }
+
     /// Signed: at least one signature field holds a signature.
     pub fn is_signed(&self) -> bool {
         self.signatures.iter().any(|s| s.signed)

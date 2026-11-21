@@ -17,6 +17,10 @@
 //!
 //! The refusal of a role that maps to itself or leads back to itself within [`MAX_LOOP_STEPS`]
 //! steps is this module's own rule, not the file format's.
+//!
+//! No guard refuses a `/RoleMap` that is another live dictionary (the `/Pages` node, a page, the
+//! `/ClassMap` dictionary): it is read and changed as a role map, so changing `Kids` in one that is
+//! the `/Pages` node would break the page tree.
 
 use pdfcraft_cos::{Dict, Document, ObjRef, Object};
 
@@ -68,7 +72,7 @@ pub struct RoleMap {
 
 /// What an entry of a dictionary is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Where {
+pub(crate) enum Where {
     /// No entry, a null, or a reference that ends in nothing.
     Absent,
     /// A dictionary written in place.
@@ -80,7 +84,7 @@ enum Where {
     Other,
 }
 
-fn locate(doc: &Document, entry: Option<&Object>, streams: bool) -> Where {
+pub(crate) fn locate(doc: &Document, entry: Option<&Object>, streams: bool) -> Where {
     let mut at = match entry {
         None | Some(Object::Null) => return Where::Absent,
         Some(Object::Dict(_)) => return Where::Direct,
@@ -100,8 +104,9 @@ fn locate(doc: &Document, entry: Option<&Object>, streams: bool) -> Where {
     Where::Other
 }
 
-/// Runs `f` with where the tree root and the role map are, and the role map's dictionary.
-fn with_map<R>(doc: &Document, f: impl FnOnce(Where, Where, Option<&Dict>) -> R) -> R {
+/// Runs `f` with where the tree root and the map `/<map_key>` of the tree root (`RoleMap`,
+/// `ClassMap`) are, and that map's dictionary.
+pub(crate) fn with_map<R>(doc: &Document, map_key: &[u8], f: impl FnOnce(Where, Where, Option<&Dict>) -> R) -> R {
     let Some(catalog) = doc.root().map(|r| doc.get(r)) else { return f(Where::Absent, Where::Absent, None) };
     let Some(catalog) = catalog.as_dict() else { return f(Where::Absent, Where::Absent, None) };
     let entry = catalog.get(b"StructTreeRoot");
@@ -116,7 +121,7 @@ fn with_map<R>(doc: &Document, f: impl FnOnce(Where, Where, Option<&Dict>) -> R)
         _ => None,
     };
     let root_dict = root.as_deref().and_then(Object::as_dict);
-    let entry = root_dict.and_then(|d| d.get(b"RoleMap"));
+    let entry = root_dict.and_then(|d| d.get(map_key));
     let mut map = if root_dict.is_some() { locate(doc, entry, false) } else { Where::Absent };
     // A role map that is the catalog or the tree root itself would be edited as one.
     if matches!(map, Where::Indirect(r) if Some(r) == catalog_ref || tree == Where::Indirect(r)) {
@@ -157,14 +162,14 @@ fn leads_back(doc: &Document, map: &Dict, role: &[u8], first: &[u8]) -> bool {
 
 /// A name as text: cut at [`MAX_ROLE_BYTES`] bytes before it is copied, and whether it is shown
 /// whole.
-fn shown(name: &[u8]) -> (String, bool) {
+pub(crate) fn shown(name: &[u8]) -> (String, bool) {
     let cut = name.get(..MAX_ROLE_BYTES).unwrap_or(name);
     (String::from_utf8_lossy(cut).into_owned(), name.len() <= MAX_ROLE_BYTES && std::str::from_utf8(name).is_ok())
 }
 
 /// The role map as stored. One read of the catalog, the tree root and the role map.
 pub fn read_role_map(doc: &Document) -> RoleMap {
-    with_map(doc, |tree, map, dict| {
+    with_map(doc, b"RoleMap", |tree, map, dict| {
         let mut out = RoleMap { has_structure_tree: matches!(tree, Where::Direct | Where::Indirect(_)), ..RoleMap::default() };
         match (tree, map) {
             (Where::Other, _) => out.unreadable.push("struct_tree_root"),
@@ -214,7 +219,7 @@ fn check_name(what: &str, name: &str) -> Result<(), String> {
 /// away an entry that is not stored is refused when `role` is not a name this module writes, and is
 /// no change otherwise.
 pub fn role_map_changes(doc: &Document, role: &str, maps_to: Option<&str>) -> Result<bool, OrganizeError> {
-    let (stored, name_matches) = with_map(doc, |_, _, dict| {
+    let (stored, name_matches) = with_map(doc, b"RoleMap", |_, _, dict| {
         let stored = dict.and_then(|d| value(doc, d, role.as_bytes()));
         let matches = match (stored.as_deref(), maps_to) {
             (Some(o), Some(m)) => o.as_name() == Some(m.as_bytes()),
@@ -251,7 +256,7 @@ pub fn set_role_map(doc: &mut Document, role: &str, maps_to: Option<&str>) -> Re
         }
     }
     let catalog_ref = doc.root().ok_or(OrganizeError::NoPageTree)?;
-    let (tree, map, loops) = with_map(doc, |tree, map, dict| {
+    let (tree, map, loops) = with_map(doc, b"RoleMap", |tree, map, dict| {
         let loops = match (maps_to, dict) {
             (Some(t), Some(d)) => leads_back(doc, d, role.as_bytes(), t.as_bytes()),
             _ => false,
@@ -285,6 +290,21 @@ pub fn set_role_map(doc: &mut Document, role: &str, maps_to: Option<&str>) -> Re
             d.remove(&key);
         }
     };
+    apply_to_map(doc, catalog_ref, tree, map, b"RoleMap", &apply)
+}
+
+/// Applies `apply` to the map `/<map_key>` of the tree root where it is stored: in place when it
+/// is a dictionary (behind references or not), or in a new direct dictionary when it is absent.
+/// A map that `apply` leaves empty is taken out of the tree root (an indirect one is left
+/// unreferenced). `tree` and `map` are what [`with_map`] found, and neither is unreadable.
+pub(crate) fn apply_to_map(
+    doc: &mut Document,
+    catalog_ref: ObjRef,
+    tree: Where,
+    map: Where,
+    map_key: &[u8],
+    apply: &dyn Fn(&mut Dict),
+) -> Result<(), OrganizeError> {
     let root_ref = match tree {
         Where::Indirect(r) => Some(r),
         _ => None,
@@ -305,12 +325,12 @@ pub fn set_role_map(doc: &mut Document, role: &str, maps_to: Option<&str>) -> Re
             doc.update_dict(r, apply)?;
             if matches!(&*doc.get(r), Object::Dict(d) if d.is_empty()) {
                 change_root(doc, &|d| {
-                    d.remove(b"RoleMap");
+                    d.remove(map_key);
                 })?;
             }
         }
         _ => change_root(doc, &|root| {
-            let emptied = match root.get_mut(b"RoleMap") {
+            let emptied = match root.get_mut(map_key) {
                 Some(Object::Dict(d)) => {
                     apply(d);
                     d.is_empty()
@@ -319,13 +339,13 @@ pub fn set_role_map(doc: &mut Document, role: &str, maps_to: Option<&str>) -> Re
                     let mut d = Dict::new();
                     apply(&mut d);
                     if !d.is_empty() {
-                        root.set(b"RoleMap".to_vec(), Object::Dict(d));
+                        root.set(map_key.to_vec(), Object::Dict(d));
                     }
                     false
                 }
             };
             if emptied {
-                root.remove(b"RoleMap");
+                root.remove(map_key);
             }
         })?,
     }

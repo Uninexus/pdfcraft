@@ -17,6 +17,7 @@ mod associated;
 mod attachments;
 pub mod base_url;
 mod boxes;
+pub mod class_map;
 mod comments;
 mod dedupe;
 mod dparts;

@@ -3503,7 +3503,7 @@ status = "planned"
 commands = []
 tools = []
 evidence = []
-notes = ""
+notes = "Duplicate of core.pdf20-associated-files, which tracks this feature (af_list, af_add, af_remove, af_set_relationship are credited there, with what is missing). This entry is left planned with no tool or evidence of its own so that it adds nothing to the shares; merging or deleting it is left to the owner."
 
 [[feature]]
 id = "organize.portfolio-view"
@@ -9298,11 +9298,11 @@ title = "Class map editor"
 area = "M"
 tier = "P3"
 milestone = "M12"
-status = "planned"
+status = "partial"
 commands = []
-tools = []
-evidence = []
-notes = ""
+tools = ["class_map"]
+evidence = ["crates/organize/src/tests.rs::a_class_map_is_listed_with_what_each_entry_maps_to", "crates/organize/src/tests.rs::removing_a_class_map_entry_keeps_the_rest_and_the_last_takes_the_dictionary", "crates/organize/src/tests.rs::a_class_map_is_changed_where_it_is_through_references_and_in_a_direct_tree_root", "crates/organize/src/tests.rs::a_class_map_that_is_a_stream_the_catalog_or_the_tree_root_is_unreadable_and_never_written", "crates/organize/src/tests.rs::a_tree_root_or_class_map_that_is_not_a_dictionary_is_named_and_never_replaced", "crates/organize/src/tests.rs::a_stored_class_goes_by_its_exact_name_whatever_it_is_and_one_that_is_not_stored_is_no_change", "crates/organize/src/tests.rs::the_references_followed_are_those_of_document_resolve_for_the_class_map", "crates/organize/src/tests.rs::the_class_listing_is_bounded_names_are_cut_and_an_array_lists_only_its_first_owners", "crates/automation/tests/it/class_map.rs::the_class_map_is_read_an_entry_is_removed_saved_undone_and_redone", "crates/automation/tests/it/class_map.rs::a_call_that_changes_nothing_writes_nothing_and_a_bad_argument_is_named", "crates/automation/tests/it/class_map.rs::an_unreadable_class_map_is_named_and_left_and_a_modify_restriction_holds"]
+notes = "Headless, read and remove only. class_map reads the structure tree's class map (the /ClassMap of the catalog's /StructTreeRoot, ISO 32000-2 14.7.5.4): each class name with what its value is after references (dictionary, stream, array, or other), how many attribute objects it holds, and the /O owner name of the first 16 of them; and, given remove, takes one entry away by its exact class name (the attribute objects it pointed at stay, an emptied class map goes, one undo step, needs permission to modify). Nothing is added or changed: no class, no attribute object, no check of the /C of structure elements. A class that is not stored, or a class map that is absent or unreadable (not a dictionary, behind more than 33 references, a stream, or the catalog or the tree root itself), is no change and is never replaced. Not yet: adding or changing an entry, editing the attributes, any UI"
 
 [[feature]]
 id = "a11y.order-panel"

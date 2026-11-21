@@ -396,6 +396,9 @@ pub enum Edit {
         role: String,
         maps_to: Option<String>,
     },
+    /// Structure tree class map (`/StructTreeRoot` `/ClassMap`): take the entry named `class`
+    /// away.
+    RemoveClassMapEntry(String),
     /// Print production ▸ Add printer marks: trim and bleed marks, registration targets, colour
     /// bars and page information outside the trim box, as a page mark; the page may be widened
     /// to make room (`settings.make_room`), so the page geometry is read again.
