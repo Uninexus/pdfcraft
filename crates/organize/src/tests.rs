@@ -6915,7 +6915,7 @@ fn a_role_map_is_changed_where_it_is_through_references_and_in_a_direct_tree_roo
 #[test]
 fn a_role_map_that_is_a_stream_the_catalog_or_the_tree_root_is_unreadable_and_never_written() {
     use crate::role_map::{read_role_map, set_role_map};
-    let refused = "the structure tree's /StructTreeRoot or /RoleMap cannot be changed (it is not a dictionary, is behind more than 33 references, is a stream role map, or is the catalog or the tree root itself), so it was left as it is";
+    let refused = "the structure tree's /StructTreeRoot or /RoleMap cannot be changed (it is not a dictionary, is behind more than 33 references, is a stream role map, or is the same object as the catalog, the /Pages node, a page or inner /Pages node, or (for a map) the tree root or its other map, or the page tree has over 1000000 nodes or 2000000 /Kids entries and could not be checked), so it was left as it is";
     // /RoleMap that is a stream: its keys (/Length, /Filter) are not roles, so none is listed.
     let mut doc = open(fixture());
     let mut s = pdfcraft_cos::Stream::from_raw(pdfcraft_cos::Dict::new(), b"x".to_vec());
@@ -6996,7 +6996,7 @@ fn taking_away_a_role_that_is_not_stored_needs_a_name_the_tool_writes_but_a_stor
 #[test]
 fn a_tree_root_or_role_map_that_is_not_a_dictionary_is_named_and_never_replaced() {
     use crate::role_map::{read_role_map, set_role_map};
-    let refused = "the structure tree's /StructTreeRoot or /RoleMap cannot be changed (it is not a dictionary, is behind more than 33 references, is a stream role map, or is the catalog or the tree root itself), so it was left as it is";
+    let refused = "the structure tree's /StructTreeRoot or /RoleMap cannot be changed (it is not a dictionary, is behind more than 33 references, is a stream role map, or is the same object as the catalog, the /Pages node, a page or inner /Pages node, or (for a map) the tree root or its other map, or the page tree has over 1000000 nodes or 2000000 /Kids entries and could not be checked), so it was left as it is";
     for other in [Object::Int(7), Object::name("x"), Object::Array(vec![]), string(b"s")] {
         let mut doc = open(fixture());
         set_catalog_entry(&mut doc, "StructTreeRoot", other.clone());
@@ -7594,4 +7594,177 @@ fn the_class_listing_is_bounded_names_are_cut_and_an_array_lists_only_its_first_
     let (doc, _) = class_tree(Some(uri_with(vec![("A b/(c)#", attrs("Layout"))])));
     let doc = open(write_full(&doc, &SaveOptions::default()).unwrap());
     assert_eq!(classes(&doc), [row("A b/(c)#", "dictionary", 1, &[Some("Layout")])]);
+}
+
+/// The fixture with a tree root holding the given `(key, object)` entries; returns the document.
+fn tree_with(entries: &[(&str, pdfcraft_cos::ObjRef)]) -> Document {
+    let mut doc = open(fixture());
+    let mut all = vec![("Type", Object::name("StructTreeRoot"))];
+    all.extend(entries.iter().map(|(k, r)| (*k, Object::Ref(*r))));
+    let root = doc.add(uri_with(all));
+    set_catalog_entry(&mut doc, "StructTreeRoot", Object::Ref(root));
+    doc
+}
+
+const MAP_REFUSED: &str = "the structure tree's /StructTreeRoot or /RoleMap cannot be changed (it is not a dictionary, is behind more than 33 references, is a stream role map, or is the same object as the catalog, the /Pages node, a page or inner /Pages node, or (for a map) the tree root or its other map, or the page tree has over 1000000 nodes or 2000000 /Kids entries and could not be checked), so it was left as it is";
+
+/// A role map or class map that is one object with the `/Pages` node, an inner `/Pages` node or a
+/// page would be changed as a map, and `Kids` or `Parent` in it would break the page tree: it is
+/// unreadable and nothing is written. The fixture's objects: 2 the `/Pages` node, 3 an inner
+/// `/Pages` node, 4 and 6 pages.
+#[test]
+fn a_map_that_is_the_pages_node_an_inner_node_or_a_page_is_unreadable_and_never_written() {
+    use crate::class_map::{class_map_removes, read_class_map, remove_class_map_entry};
+    use crate::role_map::{read_role_map, role_map_changes, set_role_map};
+    for (what, at) in [("the /Pages node", 2), ("an inner /Pages node", 3), ("a page", 4), ("a page under the root", 6)] {
+        let at = pdfcraft_cos::ObjRef::new(at, 0);
+        // The object is the tree root's /RoleMap alone, and then its /ClassMap alone, so that the
+        // other map is not what makes it unreadable.
+        for map_key in ["RoleMap", "ClassMap"] {
+            let mut doc = tree_with(&[(map_key, at)]);
+            let before = write_full(&doc, &SaveOptions::default()).unwrap();
+            let held = doc.get(at).clone();
+            let (r, c) = (read_role_map(&doc), read_class_map(&doc));
+            let (own, other) =
+                if map_key == "RoleMap" { (r.unreadable.clone(), c.unreadable.clone()) } else { (c.unreadable.clone(), r.unreadable.clone()) };
+            assert_eq!((own, other), (vec![if map_key == "RoleMap" { "role_map" } else { "class_map" }], vec![]), "{what} {map_key}");
+            assert_eq!((r.has_structure_tree, r.count, r.entries.len(), c.count, c.entries.len()), (true, 0, 0, 0, 0), "{what} {map_key}");
+            for key in ["Kids", "Parent", "Type"] {
+                if map_key == "RoleMap" {
+                    assert_eq!(set_role_map(&mut doc, key, Some("H1")).unwrap_err().to_string(), MAP_REFUSED, "{what} {key}");
+                    assert!(!role_map_changes(&doc, key, None).unwrap(), "{what} {key}");
+                    set_role_map(&mut doc, key, None).unwrap();
+                } else {
+                    assert!(!class_map_removes(&doc, key), "{what} {key}");
+                    remove_class_map_entry(&mut doc, key).unwrap();
+                }
+            }
+            assert_eq!(*doc.get(at), *held, "{what} {map_key}: the object is as it was");
+            assert_eq!(write_full(&doc, &SaveOptions::default()).unwrap(), before, "{what} {map_key}");
+        }
+    }
+    // The tree root that is one of them: unreadable as the tree root, and the node is not given a /RoleMap.
+    for at in [2, 3, 4] {
+        let at = pdfcraft_cos::ObjRef::new(at, 0);
+        let mut doc = open(fixture());
+        set_catalog_entry(&mut doc, "StructTreeRoot", Object::Ref(at));
+        let before = write_full(&doc, &SaveOptions::default()).unwrap();
+        let r = read_role_map(&doc);
+        assert_eq!((r.has_structure_tree, r.unreadable.clone()), (false, vec!["struct_tree_root"]), "tree root {at:?}");
+        let c = read_class_map(&doc);
+        assert_eq!((c.has_structure_tree, c.unreadable.clone()), (false, vec!["struct_tree_root"]), "tree root {at:?}");
+        assert_eq!(set_role_map(&mut doc, "A", Some("H1")).unwrap_err().to_string(), MAP_REFUSED, "tree root {at:?}");
+        remove_class_map_entry(&mut doc, "A").unwrap();
+        assert_eq!(write_full(&doc, &SaveOptions::default()).unwrap(), before, "tree root {at:?}");
+        assert!(!doc.get(at).as_dict().unwrap().contains(b"RoleMap"));
+    }
+}
+
+/// The tree root's `/RoleMap` and `/ClassMap` that are one object are each unreadable and
+/// unchanged; kept apart they are read and changed as before.
+#[test]
+fn a_role_map_and_a_class_map_that_are_one_object_are_unreadable_and_apart_they_are_not() {
+    use crate::class_map::{read_class_map, remove_class_map_entry};
+    use crate::role_map::{read_role_map, set_role_map};
+    let mut shared = pdfcraft_cos::Dict::new();
+    shared.set(b"Chapter".to_vec(), Object::name("H1"));
+    let mut doc = open(fixture());
+    let both = doc.add(Object::Dict(shared.clone()));
+    let root = doc.add(uri_with(vec![("RoleMap", Object::Ref(both)), ("ClassMap", Object::Ref(both))]));
+    set_catalog_entry(&mut doc, "StructTreeRoot", Object::Ref(root));
+    let before = write_full(&doc, &SaveOptions::default()).unwrap();
+    let (r, c) = (read_role_map(&doc), read_class_map(&doc));
+    assert_eq!((r.entries.len(), r.unreadable.clone()), (0, vec!["role_map"]));
+    assert_eq!((c.entries.len(), c.unreadable.clone()), (0, vec!["class_map"]));
+    set_role_map(&mut doc, "Chapter", None).unwrap();
+    assert_eq!(set_role_map(&mut doc, "Other", Some("P")).unwrap_err().to_string(), MAP_REFUSED);
+    remove_class_map_entry(&mut doc, "Chapter").unwrap();
+    assert_eq!(write_full(&doc, &SaveOptions::default()).unwrap(), before);
+    assert_eq!(*doc.get(both), Object::Dict(shared.clone()));
+    // Two objects: each reads and changes as a map.
+    let mut doc = open(fixture());
+    let (a, b) = (doc.add(Object::Dict(shared.clone())), doc.add(Object::Dict(shared)));
+    let root = doc.add(uri_with(vec![("RoleMap", Object::Ref(a)), ("ClassMap", Object::Ref(b))]));
+    set_catalog_entry(&mut doc, "StructTreeRoot", Object::Ref(root));
+    assert_eq!((read_role_map(&doc).entries.len(), read_class_map(&doc).entries.len()), (1, 1));
+    set_role_map(&mut doc, "Chapter", Some("H2")).unwrap();
+    remove_class_map_entry(&mut doc, "Chapter").unwrap();
+    assert_eq!(roles(&doc), [pair("Chapter", "H2")]);
+    assert_eq!(read_class_map(&doc).entries.len(), 0);
+}
+
+/// The walk behind the guard visits each node once, ends on a cycle, and gives up (answering
+/// "could not show it is not one") at its cap.
+#[test]
+fn the_page_tree_walk_ends_on_a_cycle_and_at_its_cap() {
+    use crate::role_map::reaches_page_tree_node;
+    let r = |n| pdfcraft_cos::ObjRef::new(n, 0);
+    let mut doc = open(fixture());
+    // The fixture: 2 -> 3 -> (4, 5), 2 -> 6. Not in the tree: 7 (a stream), 10, 11.
+    for n in [2, 3, 4, 5, 6] {
+        assert!(reaches_page_tree_node(&doc, r(n), 1000, 1000), "{n}");
+    }
+    for n in [1, 7, 10, 11, 999] {
+        assert!(!reaches_page_tree_node(&doc, r(n), 1000, 1000), "{n}");
+    }
+    // A cycle (the inner node lists the root) and a list that repeats a kid end.
+    doc.update_dict(r(3), |d| {
+        d.set(b"Kids".to_vec(), Object::Array(vec![Object::Ref(r(2)), Object::Ref(r(4)), Object::Ref(r(4)), Object::Ref(r(3))]))
+    })
+    .unwrap();
+    assert!(reaches_page_tree_node(&doc, r(4), 1000, 1000));
+    assert!(!reaches_page_tree_node(&doc, r(11), 1000, 1000));
+    // /Kids behind a reference is followed.
+    let kids = doc.add(Object::Array(vec![Object::Ref(r(5))]));
+    doc.update_dict(r(3), |d| d.set(b"Kids".to_vec(), Object::Ref(kids))).unwrap();
+    assert!(reaches_page_tree_node(&doc, r(5), 1000, 1000));
+    assert!(!reaches_page_tree_node(&doc, r(4), 1000, 1000), "no longer a kid of the inner node");
+    // The cap: with room for two nodes, the walk visits 2 and 6 or 3 and gives up before the rest.
+    let doc = open(fixture());
+    assert!(reaches_page_tree_node(&doc, r(11), 2, 1000), "gave up, so it could not show 11 is not a node");
+    assert!(!reaches_page_tree_node(&doc, r(11), 5, 1000), "all five nodes visited");
+    assert!(reaches_page_tree_node(&doc, r(11), 4, 1000));
+    // No /Pages node.
+    let mut doc = open(fixture());
+    doc.update_dict(doc.root().unwrap(), |c| {
+        c.remove(b"Pages");
+    })
+    .unwrap();
+    assert!(!reaches_page_tree_node(&doc, r(4), 1000, 1000));
+}
+
+/// A hostile page tree: one `/Kids` array shared by the `/Pages` node and by each of its `k`
+/// kids. A walk that pushes every entry it scans would hold about k * k / 2 entries on its stack
+/// and scan k * k; this one puts each node on the stack once and counts every entry it scans.
+#[test]
+fn a_shared_kids_array_cannot_make_the_page_tree_walk_hold_or_scan_a_square() {
+    use crate::role_map::{reaches_page_tree_node, walk_page_tree};
+    let k: u32 = 1000;
+    let mut doc = open(fixture());
+    let nodes: Vec<_> = (0..k).map(|_| doc.add(uri_with(vec![]))).collect();
+    let top = doc.add(uri_with(vec![]));
+    let shared = doc.add(Object::Array(nodes.iter().map(|n| Object::Ref(*n)).collect()));
+    for n in nodes.iter().chain([&top]) {
+        doc.update_dict(*n, |d| d.set(b"Kids".to_vec(), Object::Ref(shared))).unwrap();
+    }
+    set_catalog_entry(&mut doc, "Pages", Object::Ref(top));
+    let outside = pdfcraft_cos::ObjRef::new(11, 0);
+    // With room for everything (k * (k + 1) entries are scanned), the answer is by what was found,
+    // and the stack never held more than the k kids.
+    let (answer, peak) = walk_page_tree(&doc, outside, 10_000, 10_000_000);
+    assert!(!answer);
+    assert!(peak <= k as usize, "the stack held {peak} entries");
+    assert!(walk_page_tree(&doc, nodes[999], 10_000, 10_000_000).0);
+    // A scan cap below k * (k + 1) gives up, which refuses.
+    assert!(reaches_page_tree_node(&doc, outside, 10_000, 500_000));
+    assert!(reaches_page_tree_node(&doc, outside, 10_000, k as usize * (k as usize + 1) - 1));
+    assert!(!reaches_page_tree_node(&doc, outside, 10_000, k as usize * (k as usize + 1)));
+    // A node cap below the k + 1 nodes gives up too.
+    assert!(reaches_page_tree_node(&doc, outside, k as usize, 10_000_000));
+    assert!(!reaches_page_tree_node(&doc, outside, k as usize + 1, 10_000_000));
+    // Entries that are not references are scanned and counted too.
+    let mut doc = open(fixture());
+    doc.update_dict(pdfcraft_cos::ObjRef::new(2, 0), |d| d.set(b"Kids".to_vec(), Object::Array(vec![Object::Int(1); 10]))).unwrap();
+    assert!(reaches_page_tree_node(&doc, outside, 1000, 9));
+    assert!(!reaches_page_tree_node(&doc, outside, 1000, 10));
 }
