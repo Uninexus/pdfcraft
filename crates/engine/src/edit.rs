@@ -405,6 +405,12 @@ pub enum Edit {
         field: pdfcraft_cos::ObjRef,
         lock: Option<pdfcraft_organize::signature_lock::LockSpec>,
     },
+    /// A link's article action: set it to this thread (and bead), or take a thread action out
+    /// (`None`).
+    SetLinkThreadAction {
+        link: pdfcraft_cos::ObjRef,
+        target: Option<pdfcraft_organize::thread_action::ThreadTarget>,
+    },
     /// Reference XObjects: take the `/Ref` away from the one listed at this position.
     RemoveReferenceXObject(usize),
     /// Named destinations (the `/Dests` name tree and the catalog's `/Dests` dictionary): take the

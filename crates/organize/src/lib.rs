@@ -36,6 +36,7 @@ pub mod reference_xobjects;
 pub mod role_map;
 pub mod signature_lock;
 mod templates;
+pub mod thread_action;
 mod transition;
 pub mod view;
 mod xmp;

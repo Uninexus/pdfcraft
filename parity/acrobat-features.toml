@@ -2438,11 +2438,11 @@ title = "Read-an-article action"
 area = "C"
 tier = "P3"
 milestone = "M12"
-status = "planned"
+status = "partial"
 commands = []
-tools = []
-evidence = []
-notes = ""
+tools = ["link_thread_action"]
+evidence = ["crates/organize/src/tests.rs::a_thread_action_is_read_with_its_thread_and_bead", "crates/organize/src/tests.rs::a_thread_action_is_set_replaced_removed_and_survives_a_save", "crates/organize/src/tests.rs::a_thread_action_is_refused_on_what_is_not_a_link_and_for_a_target_that_is_not_there", "crates/organize/src/tests.rs::every_read_a_thread_action_makes_is_paid_for_before_it_is_made", "crates/automation/tests/it/link_thread_action.rs::a_thread_action_is_read_set_saved_removed_undone_and_redone", "crates/automation/tests/it/link_thread_action.rs::a_call_that_cannot_be_applied_is_named_and_changes_nothing"]
+notes = "Headless only: the link_thread_action tool reads, sets and removes the article action of a link (an /A action /S /Thread naming a thread of the catalog's /Threads and optionally one of its beads, ISO 32000-2 12.6.4.7; a title-named or remote /D is reported, not resolved), one undo step. Not yet: running the action (no viewer here goes to the thread or bead), the Link Properties dialog and the UI, creating threads or beads (article_threads lists and removes threads only), the action on bookmarks, buttons and other triggers, and /Next chains (a set drops the old action's)"
 
 [[feature]]
 id = "edit.action-goto-embedded"

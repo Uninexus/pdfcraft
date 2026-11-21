@@ -777,6 +777,7 @@ impl Automation {
             "link_open" => self.link_open(&a)?,
             "link_add" => self.link_add(&a)?,
             "link_edit" => self.link_edit(&a)?,
+            "link_thread_action" => self.link_thread_action(&a)?,
             "link_delete" => self.link_delete(&a)?,
             "link_run_javascript" => self.link_run_javascript(&a)?,
             "links_from_urls" => self.links_from_urls(&a)?,

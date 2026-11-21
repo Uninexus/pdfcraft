@@ -711,6 +711,24 @@ impl Document {
         }
     }
 
+    /// The article action of the link annotation with this object, as stored.
+    pub fn link_thread_action(&self, link: pdfcraft_cos::ObjRef) -> pdfcraft_organize::thread_action::ThreadAction {
+        self.editor.as_ref().map(|e| pdfcraft_organize::thread_action::read_thread_action(&e.cos, link)).unwrap_or_default()
+    }
+
+    /// What setting `target` (a removal when `None`) as the article action of the link with this
+    /// object would do.
+    pub fn link_thread_action_change(
+        &self,
+        link: pdfcraft_cos::ObjRef,
+        target: Option<&pdfcraft_organize::thread_action::ThreadTarget>,
+    ) -> pdfcraft_organize::thread_action::Change {
+        match self.editor.as_ref() {
+            Some(e) => pdfcraft_organize::thread_action::thread_action_change(&e.cos, link, target),
+            None => pdfcraft_organize::thread_action::Change::Refused("the document cannot be edited"),
+        }
+    }
+
     /// Signed: at least one signature field holds a signature.
     pub fn is_signed(&self) -> bool {
         self.signatures.iter().any(|s| s.signed)

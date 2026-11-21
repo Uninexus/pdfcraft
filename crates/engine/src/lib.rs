@@ -109,6 +109,9 @@ pub use pdfcraft_organize::role_map::{MAX_LISTED_ROLES, MAX_LOOP_STEPS, MAX_ROLE
 pub use pdfcraft_organize::signature_lock::{
     Change as LockChange, LockAction, LockSpec, MAX_GETS as MAX_LOCK_GETS, MAX_LOCK_NAMES, MAX_NAME_CHARS as MAX_LOCK_NAME_CHARS,
 };
+pub use pdfcraft_organize::thread_action::{
+    Change as ThreadActionChange, MAX_BEADS as MAX_ACTION_BEADS, MAX_THREADS as MAX_ACTION_THREADS, ThreadTarget,
+};
 pub use pdfcraft_organize::view::{InitialView, Layout as InitialLayout, Magnification, Navigation};
 
 pub use pdfcraft_cos::{Algorithm, civil_from_days};
