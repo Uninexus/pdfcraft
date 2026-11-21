@@ -8841,3 +8841,219 @@ fn a_reference_xobjects_file_name_and_page_label_are_cut_at_127_characters() {
     assert!(!items[2].exact && items[2].file.as_deref() == Some("ok.pdf") && items[2].page_label.as_deref() == Some(whole.as_str()));
     assert!(items[3].file == items[4].file && items[3].file.as_deref() == Some("shared.pdf"));
 }
+
+/// A collection dictionary object with a `/Schema` of `columns` (key, value) entries, set as the
+/// catalog's `/Collection` (as a reference when `indirect`).
+fn collection_with(doc: &mut Document, view: Object, initial: Object, columns: Vec<(String, Object)>, indirect: bool) {
+    let mut schema = pdfcraft_cos::Dict::new();
+    schema.set(b"Type".to_vec(), Object::name("CollectionSchema"));
+    for (k, v) in columns {
+        schema.set(k.into_bytes(), v);
+    }
+    let schema = doc.add(Object::Dict(schema));
+    let collection = uri_with(vec![("Type", Object::name("Collection")), ("View", view), ("D", initial), ("Schema", Object::Ref(schema))]);
+    let value = if indirect { Object::Ref(doc.add(collection)) } else { collection };
+    set_catalog_entry(doc, "Collection", value);
+}
+
+fn column(subtype: &str, name: Object, order: Option<i64>, visible: Option<bool>, editable: Option<bool>) -> Object {
+    let mut entries = vec![("Type", Object::name("CollectionField")), ("Subtype", Object::name(subtype)), ("N", name)];
+    if let Some(o) = order {
+        entries.push(("O", Object::Int(o)));
+    }
+    if let Some(v) = visible {
+        entries.push(("V", Object::Bool(v)));
+    }
+    if let Some(e) = editable {
+        entries.push(("E", Object::Bool(e)));
+    }
+    uri_with(entries)
+}
+
+#[test]
+fn a_collection_is_read_with_its_view_first_file_and_columns() {
+    use crate::collection::{collection_removes, read_collection};
+    let none = read_collection(&open(fixture()));
+    assert!(!none.has_entry && !none.present && none.fields.is_empty() && none.count == 0 && !none.truncated && !none.capped);
+    assert!(none.view.is_none() && none.initial_document.is_none());
+
+    let mut doc = open(fixture());
+    let size_name = doc.add(string(b"Size"));
+    let size_field = doc.add(column("Size", Object::Ref(size_name), Some(3), Some(false), Some(true)));
+    collection_with(
+        &mut doc,
+        Object::name("T"),
+        string(b"first.txt"),
+        vec![
+            ("Name".into(), column("S", string(b"Name"), Some(1), None, None)),
+            ("Size".into(), Object::Ref(size_field)),
+            ("Number".into(), Object::Int(4)),
+            // `/N` that is a number is no name; `/V` and `/E` that are not booleans are no value.
+            ("Odd".into(), uri_with(vec![("N", Object::Int(1)), ("V", Object::Int(0)), ("E", Object::Int(1)), ("O", string(b"x"))])),
+        ],
+        true,
+    );
+    let doc = open(write_full(&doc, &SaveOptions::default()).unwrap());
+    let r = read_collection(&doc);
+    assert!(r.has_entry && r.present && !r.truncated && !r.capped);
+    assert_eq!((r.view.as_deref(), r.initial_document.as_deref(), r.count), (Some("T"), Some("first.txt"), 4));
+    let rows: Vec<_> =
+        r.fields.iter().map(|f| (f.key.as_str(), f.is_field, f.name.as_deref(), f.subtype.as_deref(), f.order, f.visible, f.editable)).collect();
+    assert_eq!(
+        rows,
+        [
+            ("Name", true, Some("Name"), Some("S"), Some(1), true, false),
+            ("Size", true, Some("Size"), Some("Size"), Some(3), false, true),
+            ("Number", false, None, None, None, true, false),
+            ("Odd", true, None, None, None, true, false),
+        ]
+    );
+    assert!(r.fields.iter().all(|f| f.exact));
+    assert!(collection_removes(&doc));
+
+    // `/View` and `/D` behind a reference are not read; a `/Collection` that is no dictionary is an
+    // entry and no portfolio; a null is no entry.
+    let mut behind = open(fixture());
+    let view = behind.add(Object::name("D"));
+    let initial = behind.add(string(b"x"));
+    collection_with(&mut behind, Object::Ref(view), Object::Ref(initial), vec![], false);
+    let r = read_collection(&behind);
+    assert!(r.present && r.view.is_none() && r.initial_document.is_none() && r.count == 0);
+    for (value, entry, present) in
+        [(Object::Int(1), true, false), (Object::Null, false, false), (Object::Ref(pdfcraft_cos::ObjRef::new(900, 0)), true, false)]
+    {
+        let mut doc = open(fixture());
+        set_catalog_entry(&mut doc, "Collection", value);
+        let r = read_collection(&doc);
+        assert_eq!((r.has_entry, r.present), (entry, present));
+        assert_eq!(collection_removes(&doc), entry);
+    }
+}
+
+#[test]
+fn removing_the_collection_takes_only_the_catalog_entry() {
+    use crate::collection::{collection_removes, read_collection, remove_collection};
+    let mut doc = open(fixture());
+    let before = write_full(&doc, &SaveOptions::default()).unwrap();
+    remove_collection(&mut doc).unwrap();
+    assert_eq!(write_full(&doc, &SaveOptions::default()).unwrap(), before, "no entry: no change");
+
+    collection_with(&mut doc, Object::name("D"), string(b"a"), vec![("Name".into(), column("S", string(b"Name"), None, None, None))], true);
+    assert!(collection_removes(&doc));
+    let pages_before = pages(&doc).unwrap().len();
+    remove_collection(&mut doc).unwrap();
+    assert!(!collection_removes(&doc) && !read_collection(&doc).has_entry);
+    assert_eq!(pages(&doc).unwrap().len(), pages_before);
+    let saved = open(write_full(&doc, &SaveOptions::default()).unwrap());
+    assert!(!read_collection(&saved).present);
+    // The incremental save carries the removal too.
+    let mut again = open(fixture());
+    collection_with(&mut again, Object::name("D"), string(b"a"), vec![], false);
+    let mut with = open(write_full(&again, &SaveOptions::default()).unwrap());
+    remove_collection(&mut with).unwrap();
+    assert!(!read_collection(&open(write_incremental(&with, &SaveOptions::default()).unwrap())).has_entry);
+
+    // A `/Collection` that is the `/Pages` node: the catalog's entry goes and the node stays.
+    let mut node = open(fixture());
+    let tree = node.root().and_then(|r| node.get(r).as_dict().and_then(|c| c.reference(b"Pages"))).unwrap();
+    set_catalog_entry(&mut node, "Collection", Object::Ref(tree));
+    assert!(read_collection(&node).present);
+    remove_collection(&mut node).unwrap();
+    assert!(node.get(tree).as_dict().is_some_and(|d| d.contains(b"Kids")));
+    assert_eq!(pages(&node).unwrap().len(), pages_before);
+}
+
+#[test]
+fn the_collection_listing_is_bounded_and_counts_what_it_does_not_list() {
+    use crate::collection::{MAX_LISTED_FIELDS, read_collection};
+    for (columns, listed, truncated) in [(MAX_LISTED_FIELDS, MAX_LISTED_FIELDS, false), (MAX_LISTED_FIELDS + 44, MAX_LISTED_FIELDS, true)] {
+        let mut doc = open(fixture());
+        let all = (0..columns).map(|i| (format!("c{i}"), column("S", string(b"n"), Some(i as i64), None, None))).collect();
+        collection_with(&mut doc, Object::name("D"), Object::Null, all, true);
+        let r = read_collection(&doc);
+        assert_eq!((r.fields.len(), r.count, r.truncated, r.capped), (listed, columns, truncated, false));
+        // The listed ones are the first, in file order.
+        assert_eq!(r.fields.last().map(|f| f.order), Some(Some(listed as i64 - 1)));
+    }
+}
+
+/// The reads of a collection: the `/Collection` reference (1), the `/Schema` reference (1) and,
+/// for each column looked at, one for the entry, one for a column behind a reference and one for
+/// a `/N` behind a reference.
+#[test]
+fn every_read_a_collection_makes_is_paid_for_before_it_is_made() {
+    use crate::collection::read_with;
+    let mut doc = open(fixture());
+    let n = doc.add(string(b"deep"));
+    let field = doc.add(column("S", Object::Ref(n), None, None, None));
+    let plain = column("S", string(b"p"), None, None, None);
+    collection_with(&mut doc, Object::Null, Object::Null, vec![("A".into(), plain.clone()), ("B".into(), Object::Ref(field))], true);
+    // 2 for the collection and the schema, 1 for A, 3 for B.
+    let reads = 2 + 1 + 3;
+    let whole = read_with(&doc, reads);
+    assert!(!whole.capped && whole.fields.len() == 2 && whole.fields[1].name.as_deref() == Some("deep"));
+    let short = read_with(&doc, reads - 1);
+    assert!(short.capped && short.fields.len() == 1, "the `/N` read was not paid for");
+    assert!(short.has_entry && short.present);
+    let short = read_with(&doc, 3);
+    assert!(short.capped && short.fields.len() == 1, "B's entry is the fourth read after the two");
+    let two = read_with(&doc, 2);
+    assert!(two.capped && two.fields.is_empty() && two.count == 2, "A's entry is the third read");
+    let one = read_with(&doc, 1);
+    assert!(one.capped && one.has_entry && one.present && one.count == 0, "the schema read was not paid for");
+    let nothing = read_with(&doc, 0);
+    assert!(nothing.capped && nothing.has_entry && !nothing.present, "the collection read was not paid for");
+
+    // A chain of 32 reference objects is followed to the dictionary, as `Document::resolve`
+    // follows it, and is paid for with 33 reads; a chain of 33 is not followed.
+    for (hops, followed) in [(32usize, true), (33, false)] {
+        let mut chain = open(fixture());
+        let mut at = chain.add(uri_with(vec![("View", Object::name("H"))]));
+        for _ in 0..hops {
+            at = chain.add(Object::Ref(at));
+        }
+        set_catalog_entry(&mut chain, "Collection", Object::Ref(at));
+        let entry = chain.root().map(|r| chain.get(r)).and_then(|c| c.as_dict().and_then(|d| d.get(b"Collection").cloned())).unwrap();
+        assert_eq!(chain.resolve(&entry).as_dict().is_some(), followed);
+        let r = read_with(&chain, 33);
+        assert_eq!((r.present, r.view.as_deref(), r.capped), (followed, followed.then_some("H"), false), "{hops}");
+        assert!(read_with(&chain, 32).capped, "{hops}");
+    }
+}
+
+#[test]
+fn a_collection_text_is_cut_at_127_characters() {
+    use crate::collection::{MAX_TEXT_CHARS, read_collection};
+    let whole = "n".repeat(MAX_TEXT_CHARS);
+    let long = "n".repeat(MAX_TEXT_CHARS + 1);
+    let mut doc = open(fixture());
+    collection_with(
+        &mut doc,
+        Object::name("D"),
+        string(long.as_bytes()),
+        vec![
+            ("a".into(), column("S", string(whole.as_bytes()), None, None, None)),
+            ("b".into(), column("S", string(long.as_bytes()), None, None, None)),
+            (long.clone(), column("S", string(b"k"), None, None, None)),
+        ],
+        false,
+    );
+    let r = read_collection(&doc);
+    assert_eq!(r.initial_document.as_deref(), Some(whole.as_str()));
+    assert!(r.initial_document_cut);
+    assert!(r.fields[0].exact && r.fields[0].name.as_deref() == Some(whole.as_str()));
+    assert!(!r.fields[1].exact && r.fields[1].name.as_deref() == Some(whole.as_str()));
+    assert!(!r.fields[2].exact && r.fields[2].key == whole && r.fields[2].name.as_deref() == Some("k"));
+    // A `/D` of 127 characters is whole.
+    let mut exact = open(fixture());
+    collection_with(&mut exact, Object::name("D"), string(whole.as_bytes()), vec![], false);
+    assert!(!read_collection(&exact).initial_document_cut);
+    // A key that is not valid UTF-8 is shown lossily and is not `exact`.
+    let mut raw = open(fixture());
+    let mut schema = pdfcraft_cos::Dict::new();
+    schema.set(vec![0xFF, b'k'], column("S", string(b"n"), None, None, None));
+    let schema = raw.add(Object::Dict(schema));
+    set_catalog_entry(&mut raw, "Collection", uri_with(vec![("Schema", Object::Ref(schema))]));
+    let r = read_collection(&raw);
+    assert!(r.fields.len() == 1 && !r.fields[0].exact && r.fields[0].name.as_deref() == Some("n"));
+}

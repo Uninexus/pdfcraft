@@ -807,6 +807,40 @@ impl Automation {
         Ok(out)
     }
 
+    /// The portfolio collection (the catalog's `/Collection`): read, and take it away when
+    /// `remove` is true.
+    pub(crate) fn portfolio_collection(&mut self, a: &Args) -> Result<Value> {
+        let mut out = match a.opt_bool("remove")? {
+            Some(true) if self.doc(a)?.collection_removes() => {
+                let mut out = self.apply(a, Edit::RemoveCollection)?;
+                out["removed"] = json!(true);
+                out
+            }
+            Some(true) => json!({ "removed": false }),
+            _ => json!({}),
+        };
+        let read = self.doc(a)?.collection();
+        let fields: Vec<Value> = read
+            .fields
+            .iter()
+            .map(|f| {
+                json!({ "key": f.key, "is_field": f.is_field, "name": f.name, "subtype": f.subtype, "order": f.order, "visible": f.visible, "editable": f.editable, "exact": f.exact })
+            })
+            .collect();
+        out["collection"] = json!({
+            "present": read.present,
+            "has_entry": read.has_entry,
+            "view": read.view,
+            "initial_document": read.initial_document,
+            "initial_document_cut": read.initial_document_cut,
+            "count": read.count,
+            "truncated": read.truncated,
+            "capped": read.capped,
+            "fields": fields,
+        });
+        Ok(out)
+    }
+
     /// The reference XObjects (forms with a `/Ref`): read, and take the `/Ref` away from the one
     /// at position `remove` when it is given.
     pub(crate) fn reference_xobjects(&mut self, a: &Args) -> Result<Value> {

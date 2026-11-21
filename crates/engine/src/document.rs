@@ -684,6 +684,16 @@ impl Document {
         self.editor.as_ref().map_or(Removal::NoEntry, |e| pdfcraft_organize::reference_xobjects::reference_xobject_removal(&e.cos, index))
     }
 
+    /// The portfolio collection (the catalog's `/Collection`) as stored.
+    pub fn collection(&self) -> pdfcraft_organize::collection::Collection {
+        self.editor.as_ref().map(|e| pdfcraft_organize::collection::read_collection(&e.cos)).unwrap_or_default()
+    }
+
+    /// Whether taking the collection away would change the catalog.
+    pub fn collection_removes(&self) -> bool {
+        self.editor.as_ref().is_some_and(|e| pdfcraft_organize::collection::collection_removes(&e.cos))
+    }
+
     /// Signed: at least one signature field holds a signature.
     pub fn is_signed(&self) -> bool {
         self.signatures.iter().any(|s| s.signed)
