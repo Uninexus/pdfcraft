@@ -104,6 +104,7 @@ pub use pdfcraft_organize::check_custom_key;
 pub use pdfcraft_organize::class_map::{MAX_CLASS_NAME_BYTES, MAX_LISTED_CLASSES, MAX_LISTED_OWNERS};
 pub use pdfcraft_organize::collection::{MAX_GETS as MAX_COLLECTION_GETS, MAX_LISTED_FIELDS, MAX_TEXT_CHARS as MAX_COLLECTION_TEXT_CHARS};
 pub use pdfcraft_organize::destinations::{MAX_ITEMS_SCANNED, MAX_LISTED_DESTINATIONS, MAX_NAME_CHARS, MAX_TREE_DEPTH, MAX_TREE_NODES};
+pub use pdfcraft_organize::launch_action::{Change as LaunchActionChange, LaunchTarget, MAX_FILE_BYTES as MAX_LAUNCH_FILE_BYTES};
 pub use pdfcraft_organize::named_action::{Change as NamedActionChange, NamedTarget};
 pub use pdfcraft_organize::print_presets::{Duplex, MAX_PRINT_COPIES, MAX_PRINT_RANGES, MIN_PRINT_COPIES, PrintPresets, PrintScaling};
 pub use pdfcraft_organize::role_map::{MAX_LISTED_ROLES, MAX_LOOP_STEPS, MAX_ROLE_BYTES};

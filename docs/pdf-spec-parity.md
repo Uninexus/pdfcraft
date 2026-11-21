@@ -85,7 +85,7 @@ are borrowed; PDF 2.0 additions and most subset standards are missing. **150–2
 | GoTo | yes | yes (page with Fit; named destinations and zoom partial) |
 | GoToR | yes | partial: local PDF paths open in a PdfCraft tab; `/F` strings and file-spec dictionaries (`/UF`, then `/F`), source-relative paths, and explicit numeric-page destinations are supported. Automation uses the same resolver and `--root` confinement. Named destinations open at the target's default view with a warning; `/NewWindow` is a tab hint. Network/URL file systems are refused. |
 | GoToE | yes | none (preserved; the Optimizer can remove invalid ones) |
-| Launch | yes (restricted) | none |
+| Launch | yes (restricted) | partial: the render crate reads a link's launch of a `.pdf` file without `/Win` as a link to that file and no other launch; `link_launch_action` (headless) reads, sets and removes the action (any file is reported; a set accepts only a relative path to a `.pdf` file of letters, digits, `.`, `_`, `-`, space and `/`, with `/NewWindow` when given; `/Win`, `/Mac` and `/Unix` are reported when their value is not null (the render crate also counts a `/Win` key with a null value) and dropped by a set, never written; PDF/A does not allow it and a set does not check); no UI (`edit.action-launch` partial) |
 | Thread | yes | partial: `link_thread_action` (headless) reads, sets and removes a link's thread action (`/D`, `/B`; a title-named or remote `/D` is only reported); no viewer goes to the thread and there is no UI (`edit.action-thread` partial) |
 | URI | yes | yes |
 | Sound, Movie, Rendition, GoTo3DView, RichMediaExecute | yes | none (P3) |

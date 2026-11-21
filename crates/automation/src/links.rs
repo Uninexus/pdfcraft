@@ -2,8 +2,8 @@
 //! all links. Rectangles are points from the top-left of the displayed page.
 
 use pdfcraft_engine::{
-    Edit, LinkAction, LinkHighlight, LinkStyle, LinkZoom, MAX_ACTION_BEADS, MAX_ACTION_THREADS, NamedActionChange, NamedTarget, ThreadActionChange,
-    ThreadTarget, read_remote_document, remote_document_path_is_absolute, resolve_remote_document_path,
+    Edit, LaunchActionChange, LaunchTarget, LinkAction, LinkHighlight, LinkStyle, LinkZoom, MAX_ACTION_BEADS, MAX_ACTION_THREADS, NamedActionChange,
+    NamedTarget, ThreadActionChange, ThreadTarget, read_remote_document, remote_document_path_is_absolute, resolve_remote_document_path,
 };
 use pdfcraft_render::{DestView, LinkTarget, RemoteDestination};
 use serde_json::{Value, json};
@@ -403,6 +403,72 @@ impl Automation {
             "name": read.name,
             "safe": read.safe,
             "has_next": read.has_next,
+            "destination": read.has_dest,
+            "settable": read.settable,
+            "capped": read.capped,
+        });
+        Ok(out)
+    }
+
+    /// A link's open-a-file (launch) action: read, set (`file`, with `new_window`) or taken out
+    /// (`remove`).
+    pub(crate) fn link_launch_action(&mut self, a: &Args) -> Result<Value> {
+        let remove = a.opt_bool("remove")?.unwrap_or(false);
+        let file = a.opt_str("file")?;
+        let new_window = a.opt_bool("new_window")?;
+        let target = match (file, remove) {
+            (Some(_), true) => return Err(bad("remove cannot be combined with file")),
+            (None, _) if new_window.is_some() && !remove => return Err(bad("new_window needs a file")),
+            (None, true) if new_window.is_some() => return Err(bad("remove cannot be combined with new_window")),
+            (Some(f), false) => Some(LaunchTarget::new(f, new_window).map_err(|e| bad(e.to_string()))?),
+            (None, _) => None,
+        };
+        let (page, index) = (self.page(a)?, a.int("index")?);
+        let (link, before) = {
+            let doc = self.doc(a)?;
+            let found = doc.links().iter().find(|l| l.page == page && l.index as i64 + 1 == index);
+            let found = found.ok_or_else(|| failed(format!("page {} has no link {index} (see link_list)", page + 1)))?;
+            let link = found.obj.ok_or_else(|| failed("an inline link has no object to edit"))?;
+            (link, target.is_some().then(|| doc.link_launch_action(link)))
+        };
+        let writes = target.is_some() || remove;
+        let mut out = json!({});
+        let mut changed = false;
+        if writes {
+            match self.doc(a)?.link_launch_action_change(link, target.as_ref()) {
+                LaunchActionChange::Refused(why) => return Err(failed(why)),
+                LaunchActionChange::NoChange => {}
+                LaunchActionChange::Yes => {
+                    out = self.apply(a, Edit::SetLinkLaunchAction { link, target })?;
+                    changed = true;
+                }
+            }
+        }
+        let read = self.doc(a)?.link_launch_action(link);
+        out["page"] = json!(page + 1);
+        out["index"] = json!(index);
+        if writes {
+            out["changed"] = json!(changed);
+            if let (true, Some(before)) = (changed, &before) {
+                // What a set took the place of.
+                out["replaced"] = json!({
+                    "action": before.action, "has_entry": before.has_entry, "destination": before.has_dest,
+                    "next": before.has_next, "platform": before.has_platform,
+                });
+            }
+        }
+        out["launch_action"] = json!({
+            "has_entry": read.has_entry,
+            "present": read.present,
+            "action": read.action,
+            "exact": read.exact,
+            "is_launch": read.is_launch,
+            "file": read.file,
+            "file_kind": read.file_kind,
+            "url": read.url,
+            "new_window": read.new_window,
+            "has_next": read.has_next,
+            "platform": read.has_platform,
             "destination": read.has_dest,
             "settable": read.settable,
             "capped": read.capped,
