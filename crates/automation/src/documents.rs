@@ -736,6 +736,34 @@ impl Automation {
         Ok(out)
     }
 
+    /// The article threads (the catalog's `/Threads`): read, and take the one at position
+    /// `remove` away when it is given.
+    pub(crate) fn article_threads(&mut self, a: &Args) -> Result<Value> {
+        let remove = match a.opt_int("remove")? {
+            Some(i) => Some(usize::try_from(i).map_err(|_| ToolError::InvalidArgs("remove must be 0 or more".into()))?),
+            None => None,
+        };
+        let mut out = match remove {
+            Some(index) if self.doc(a)?.article_thread_removes(index) => {
+                let mut out = self.apply(a, Edit::RemoveArticleThread(index))?;
+                out["removed"] = json!(true);
+                out
+            }
+            Some(_) => json!({ "removed": false }),
+            None => json!({}),
+        };
+        let read = self.doc(a)?.article_threads();
+        let threads: Vec<Value> = read
+            .threads
+            .iter()
+            .map(|t| {
+                json!({ "index": t.index, "title": t.title, "title_exact": t.title_exact, "beads": t.beads, "beads_capped": t.beads_capped, "closed": t.closed })
+            })
+            .collect();
+        out["article_threads"] = json!({ "count": read.count, "truncated": read.truncated, "threads": threads, "unreadable": read.unreadable });
+        Ok(out)
+    }
+
     pub(crate) fn doc_optimize(&mut self, a: &Args) -> Result<Value> {
         use pdfcraft_engine::optimize::{Compatibility, Compression, ImageSettings, MonoCompression, Preset};
         const MONO_KEYS: [&str; 4] = ["downsample", "ppi", "above_ppi", "compression"];

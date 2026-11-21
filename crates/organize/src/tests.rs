@@ -7768,3 +7768,239 @@ fn a_shared_kids_array_cannot_make_the_page_tree_walk_hold_or_scan_a_square() {
     assert!(reaches_page_tree_node(&doc, outside, 1000, 9));
     assert!(!reaches_page_tree_node(&doc, outside, 1000, 10));
 }
+
+/// A thread of `beads` beads linked through `/N`: the last one leads back to the first when
+/// `closed`, and has no `/N` otherwise. Returns the thread object and the beads.
+fn article_thread(doc: &mut Document, title: Option<Object>, beads: usize, closed: bool) -> (pdfcraft_cos::ObjRef, Vec<pdfcraft_cos::ObjRef>) {
+    let refs: Vec<_> = (0..beads).map(|_| doc.add(uri_with(vec![]))).collect();
+    for (i, r) in refs.iter().enumerate() {
+        let next = refs.get(i + 1).or(if closed { refs.first() } else { None }).copied();
+        doc.update_dict(*r, |d| {
+            if let Some(n) = next {
+                d.set(b"N".to_vec(), Object::Ref(n));
+            }
+        })
+        .unwrap();
+    }
+    let mut entries = vec![];
+    if let Some(first) = refs.first() {
+        entries.push(("F", Object::Ref(*first)));
+    }
+    if let Some(t) = title {
+        entries.push(("I", uri_with(vec![("Title", t)])));
+    }
+    (doc.add(uri_with(entries)), refs)
+}
+
+fn threads_of(doc: &Document) -> Vec<(usize, Option<String>, usize, bool)> {
+    crate::articles::read_article_threads(doc).threads.iter().map(|t| (t.index, t.title.clone(), t.beads, t.closed)).collect()
+}
+
+fn thread_entry(doc: &Document) -> Option<Object> {
+    doc.get(doc.root().unwrap()).as_dict().and_then(|c| c.get(b"Threads").cloned())
+}
+
+#[test]
+fn article_threads_are_listed_with_their_title_and_how_many_beads_they_reach() {
+    use crate::articles::read_article_threads;
+    let none = read_article_threads(&open(fixture()));
+    assert!(none.threads.is_empty() && none.count == 0 && !none.truncated && none.unreadable.is_empty());
+
+    let mut doc = open(fixture());
+    let (three, _) = article_thread(&mut doc, Some(string(b"Front page")), 3, true);
+    let (open_ring, _) = article_thread(&mut doc, None, 2, false);
+    let (utf16, _) = article_thread(&mut doc, Some(string(&[0xFE, 0xFF, 0x00, 0xE9, 0x00, 0x41])), 1, true);
+    let (no_beads, _) = article_thread(&mut doc, Some(Object::Int(7)), 0, false);
+    let number = doc.add(Object::Int(5));
+    let loose = doc.add(uri_with(vec![("F", Object::Ref(number))]));
+    // A bead given as a direct dictionary is not a bead.
+    let direct = doc.add(uri_with(vec![("F", uri_with(vec![]))]));
+    set_catalog_entry(
+        &mut doc,
+        "Threads",
+        Object::Array(vec![
+            Object::Ref(three),
+            Object::Ref(open_ring),
+            Object::Ref(utf16),
+            Object::Ref(no_beads),
+            Object::Int(3),
+            Object::Ref(loose),
+            Object::Ref(direct),
+            Object::Ref(pdfcraft_cos::ObjRef::new(900, 0)),
+        ]),
+    );
+    let doc = open(write_full(&doc, &SaveOptions::default()).unwrap());
+    let r = read_article_threads(&doc);
+    assert!(r.count == 8 && !r.truncated && r.unreadable.is_empty());
+    assert!(r.threads.iter().all(|t| t.title_exact && !t.beads_capped));
+    assert_eq!(
+        threads_of(&doc),
+        [
+            (0, Some("Front page".to_string()), 3, true),
+            (1, None, 2, false),
+            (2, Some("\u{e9}A".to_string()), 1, true),
+            (3, None, 0, false),
+            (4, None, 0, false),
+            (5, None, 0, false),
+            (6, None, 0, false),
+            (7, None, 0, false),
+        ]
+    );
+    // Reading changes nothing.
+    let before = write_full(&doc, &SaveOptions::default()).unwrap();
+    let _ = read_article_threads(&doc);
+    assert_eq!(write_full(&doc, &SaveOptions::default()).unwrap(), before);
+}
+
+#[test]
+fn removing_an_article_thread_keeps_the_others_in_order_and_leaves_the_beads() {
+    use crate::articles::{article_thread_removes, remove_article_thread};
+    let mut doc = open(fixture());
+    let (a, a_beads) = article_thread(&mut doc, Some(string(b"A")), 2, true);
+    let (b, _) = article_thread(&mut doc, Some(string(b"B")), 1, true);
+    let (c, _) = article_thread(&mut doc, Some(string(b"C")), 1, true);
+    set_catalog_entry(&mut doc, "Threads", Object::Array(vec![Object::Ref(a), Object::Ref(b), Object::Ref(c)]));
+    let titles = |d: &Document| threads_of(d).into_iter().map(|t| t.1.unwrap()).collect::<Vec<_>>();
+
+    // A position with no entry is not offered and changes no byte.
+    let before = write_full(&doc, &SaveOptions::default()).unwrap();
+    assert!(!article_thread_removes(&doc, 3) && !article_thread_removes(&doc, usize::MAX));
+    remove_article_thread(&mut doc, 3).unwrap();
+    assert_eq!(write_full(&doc, &SaveOptions::default()).unwrap(), before);
+
+    assert!(article_thread_removes(&doc, 1));
+    remove_article_thread(&mut doc, 1).unwrap();
+    assert_eq!(titles(&doc), ["A", "C"]);
+    for saved in [write_incremental(&doc, &SaveOptions::default()).unwrap(), write_full(&doc, &SaveOptions::default()).unwrap()] {
+        assert_eq!(titles(&open(saved)), ["A", "C"]);
+    }
+    // The thread dictionary and its beads stay where they were.
+    assert!(doc.get(a).as_dict().is_some() && doc.get(b).as_dict().is_some());
+    assert!(a_beads.iter().all(|r| doc.get(*r).as_dict().is_some_and(|d| d.get(b"N").is_some())));
+    remove_article_thread(&mut doc, 0).unwrap();
+    assert_eq!(titles(&doc), ["C"]);
+    // The last one takes `/Threads` with it.
+    remove_article_thread(&mut doc, 0).unwrap();
+    assert!(thread_entry(&doc).is_none() && read_article_threads_count(&doc) == 0);
+    assert!(thread_entry(&open(write_full(&doc, &SaveOptions::default()).unwrap())).is_none());
+}
+
+fn read_article_threads_count(doc: &Document) -> usize {
+    crate::articles::read_article_threads(doc).count
+}
+
+#[test]
+fn an_article_thread_array_behind_references_is_changed_where_it_is() {
+    use crate::articles::remove_article_thread;
+    let mut doc = open(fixture());
+    let (a, _) = article_thread(&mut doc, Some(string(b"A")), 1, true);
+    let (b, _) = article_thread(&mut doc, Some(string(b"B")), 1, true);
+    let array = doc.add(Object::Array(vec![Object::Ref(a), Object::Ref(b)]));
+    let via = doc.add(Object::Ref(array));
+    set_catalog_entry(&mut doc, "Threads", Object::Ref(via));
+    assert_eq!(threads_of(&doc).len(), 2);
+    remove_article_thread(&mut doc, 0).unwrap();
+    // The catalog and the reference between keep what they were; the array object changed.
+    assert!(matches!(thread_entry(&doc), Some(Object::Ref(r)) if r == via));
+    assert!(matches!(&*doc.get(via), Object::Ref(r) if *r == array));
+    assert_eq!(doc.get(array).as_array().map(Vec::len), Some(1));
+    assert_eq!(threads_of(&doc)[0].1.as_deref(), Some("B"));
+    // The last entry takes the catalog's entry; the array object is left in the file.
+    remove_article_thread(&mut doc, 0).unwrap();
+    assert!(thread_entry(&doc).is_none());
+    assert_eq!(doc.get(array).as_array().map(Vec::len), Some(1));
+}
+
+#[test]
+fn an_article_threads_entry_that_is_not_an_array_is_named_and_never_replaced() {
+    use crate::articles::{article_thread_removes, read_article_threads, remove_article_thread};
+    let mut chain33 = open(fixture());
+    let array = chain33.add(Object::Array(vec![Object::Int(1)]));
+    let mut at = array;
+    let mut chain34 = chain33.clone();
+    for _ in 0..32 {
+        at = chain33.add(Object::Ref(at));
+    }
+    set_catalog_entry(&mut chain33, "Threads", Object::Ref(at));
+    // A chain of 32 reference objects is followed to the array (33 gets) and one of 33 is not, as with
+    // `Document::resolve`.
+    let resolves = |d: &Document| d.resolve(&thread_entry(d).unwrap()).as_array().is_some();
+    assert!(resolves(&chain33));
+    assert_eq!(read_article_threads(&chain33).count, 1);
+    assert!(read_article_threads(&chain33).unreadable.is_empty());
+    let array = chain34.add(Object::Array(vec![Object::Int(1)]));
+    let mut at = array;
+    for _ in 0..33 {
+        at = chain34.add(Object::Ref(at));
+    }
+    set_catalog_entry(&mut chain34, "Threads", Object::Ref(at));
+    assert_eq!(read_article_threads(&chain34).unreadable, ["threads"]);
+    assert!(!resolves(&chain34));
+
+    for (name, value) in [("number", Object::Int(5)), ("string", string(b"x")), ("dict", uri_with(vec![])), ("name", Object::name("T"))] {
+        let mut doc = open(fixture());
+        set_catalog_entry(&mut doc, "Threads", value);
+        let doc = open(write_full(&doc, &SaveOptions::default()).unwrap());
+        let r = read_article_threads(&doc);
+        assert!(r.unreadable == ["threads"] && r.threads.is_empty() && r.count == 0, "{name}");
+        assert!(!article_thread_removes(&doc, 0), "{name}");
+        let mut doc = doc;
+        let before = write_full(&doc, &SaveOptions::default()).unwrap();
+        remove_article_thread(&mut doc, 0).unwrap();
+        assert_eq!(write_full(&doc, &SaveOptions::default()).unwrap(), before, "{name}");
+    }
+    for value in [Object::Null, Object::Ref(pdfcraft_cos::ObjRef::new(900, 0)), Object::Array(vec![])] {
+        let mut doc = open(fixture());
+        set_catalog_entry(&mut doc, "Threads", value);
+        let r = read_article_threads(&doc);
+        assert!(r.unreadable.is_empty() && r.count == 0);
+        assert!(!article_thread_removes(&doc, 0));
+    }
+}
+
+#[test]
+fn the_thread_listing_and_the_bead_walk_are_bounded() {
+    use crate::articles::{MAX_BEADS_WALKED, MAX_LISTED_THREADS, MAX_TITLE_CHARS, read_article_threads, remove_article_thread};
+    let mut doc = open(fixture());
+    let entries: Vec<Object> =
+        (0..MAX_LISTED_THREADS + 44).map(|i| Object::Ref(article_thread(&mut doc, Some(string(format!("t{i}").as_bytes())), 1, true).0)).collect();
+    set_catalog_entry(&mut doc, "Threads", Object::Array(entries));
+    let r = read_article_threads(&doc);
+    assert!(r.count == MAX_LISTED_THREADS + 44 && r.threads.len() == MAX_LISTED_THREADS && r.truncated);
+    // An entry past the listed ones is still removed by its position.
+    remove_article_thread(&mut doc, MAX_LISTED_THREADS + 43).unwrap();
+    assert_eq!(read_article_threads(&doc).count, MAX_LISTED_THREADS + 43);
+    // Exactly the listed number is not truncated.
+    for _ in 0..43 {
+        remove_article_thread(&mut doc, MAX_LISTED_THREADS).unwrap();
+    }
+    let r = read_article_threads(&doc);
+    assert!(r.count == MAX_LISTED_THREADS && !r.truncated);
+
+    // Titles are cut by characters, not bytes.
+    let mut doc = open(fixture());
+    let long = "\u{e9}".repeat(MAX_TITLE_CHARS + 1);
+    let whole = "\u{e9}".repeat(MAX_TITLE_CHARS);
+    let (cut, _) = article_thread(&mut doc, Some(string(long.as_bytes())), 1, true);
+    let (fits, _) = article_thread(&mut doc, Some(string(whole.as_bytes())), 1, true);
+    set_catalog_entry(&mut doc, "Threads", Object::Array(vec![Object::Ref(cut), Object::Ref(fits)]));
+    let r = read_article_threads(&doc);
+    assert!(!r.threads[0].title_exact && r.threads[0].title.as_deref() == Some(whole.as_str()));
+    assert!(r.threads[1].title_exact && r.threads[1].title.as_deref() == Some(whole.as_str()));
+
+    // Beads: a ring of exactly the cap is counted whole and closed, one more is cut.
+    let mut doc = open(fixture());
+    let (ring, _) = article_thread(&mut doc, None, MAX_BEADS_WALKED, true);
+    let (chain, _) = article_thread(&mut doc, None, MAX_BEADS_WALKED, false);
+    let (over, _) = article_thread(&mut doc, None, MAX_BEADS_WALKED + 1, true);
+    // A loop that does not pass through the first bead ends at the cap too.
+    let (spun, beads) = article_thread(&mut doc, None, 3, false);
+    doc.update_dict(beads[2], |d| d.set(b"N".to_vec(), Object::Ref(beads[1]))).unwrap();
+    set_catalog_entry(&mut doc, "Threads", Object::Array([ring, chain, over, spun].map(Object::Ref).to_vec()));
+    let r = read_article_threads(&doc);
+    let shape: Vec<_> = r.threads.iter().map(|t| (t.beads, t.beads_capped, t.closed)).collect();
+    assert_eq!(
+        shape,
+        [(MAX_BEADS_WALKED, false, true), (MAX_BEADS_WALKED, false, false), (MAX_BEADS_WALKED, true, false), (MAX_BEADS_WALKED, true, false)]
+    );
+}
