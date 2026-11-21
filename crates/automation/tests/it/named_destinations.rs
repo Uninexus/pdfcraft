@@ -21,7 +21,8 @@ fn setup() -> (tempfile::TempDir, Automation) {
     let bytes = session.create_blank(300.0, 400.0, 2).unwrap();
     let id = session.open("a.pdf", None, bytes, None).unwrap();
     std::fs::write(dir.path().join("a.pdf"), session.save_bytes(id).unwrap().as_slice()).unwrap();
-    let auto = Automation::new().with_root(dir.path()).unwrap();
+    // Saves stamp /ModDate from the clock: pin it, or two saves a second apart differ.
+    let auto = Automation::new().with_root(dir.path()).unwrap().with_clock(|| 1_700_000_000);
     (dir, auto)
 }
 
