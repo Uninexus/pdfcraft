@@ -2462,11 +2462,11 @@ title = "Play sound / media / rich-media actions"
 area = "C"
 tier = "P3"
 milestone = "M12"
-status = "planned"
+status = "partial"
 commands = []
-tools = []
-evidence = []
-notes = ""
+tools = ["link_media_action"]
+evidence = ["crates/organize/src/tests.rs::a_media_action_is_read_with_its_kind_and_entries", "crates/organize/src/tests.rs::a_media_action_is_removed_with_its_chain_and_survives_a_save", "crates/organize/src/tests.rs::a_media_action_is_refused_on_what_is_not_a_link", "crates/organize/src/tests.rs::every_read_a_media_action_makes_is_paid_for_before_it_is_made", "crates/automation/tests/it/link_media_action.rs::a_media_action_is_read_removed_saved_undone_and_redone", "crates/automation/tests/it/link_media_action.rs::there_is_no_way_to_set_a_media_action", "crates/automation/tests/it/link_media_action.rs::a_call_that_cannot_be_applied_is_named_and_changes_nothing", "crates/automation/tests/it/link_media_action.rs::a_modify_restriction_refuses_a_removal_and_still_reads"]
+notes = "Headless, read and remove only: the link_media_action tool reads and removes the sound, movie, rendition and rich-media actions of a link (an /A action whose /S is Sound, Movie, Rendition or RichMediaExecute, compared byte for byte; a read reports the kind, a movie's /Operation, a rendition's /OP, whether a rendition has a /JS script stored (not read) and whether the action names a target (not followed); a removal takes /A out with any /Next chain, only for those four, one undo step). It never writes one: there is no set, so nothing creates a media action, a clip or a script. Nothing plays: no viewer here follows these actions, and there is no UI. The title (play) is not met. PDF/A does not allow sound, movie or rendition actions; a removal does not check for PDF/A. link_list reports a link with one as other (its /S name) unless the link also has a /Dest. Not yet: playing, creating or editing the actions, the screen, movie, sound and rich-media annotations, the actions on bookmarks, buttons and other triggers, GoTo3DView, and a media action reached only through another action's /Next (read as that action, left in place)"
 
 [[feature]]
 id = "edit.header-footer-add"

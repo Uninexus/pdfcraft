@@ -783,6 +783,20 @@ impl Document {
         }
     }
 
+    /// The sound, movie, rendition or rich-media action of the link annotation with this object, as
+    /// stored.
+    pub fn link_media_action(&self, link: pdfcraft_cos::ObjRef) -> pdfcraft_organize::media_action::MediaAction {
+        self.editor.as_ref().map(|e| pdfcraft_organize::media_action::read_media_action(&e.cos, link)).unwrap_or_default()
+    }
+
+    /// What taking the media action out of the link with this object would do.
+    pub fn link_media_action_change(&self, link: pdfcraft_cos::ObjRef) -> pdfcraft_organize::media_action::Change {
+        match self.editor.as_ref() {
+            Some(e) => pdfcraft_organize::media_action::media_action_change(&e.cos, link),
+            None => pdfcraft_organize::media_action::Change::Refused("the document cannot be edited"),
+        }
+    }
+
     /// Signed: at least one signature field holds a signature.
     pub fn is_signed(&self) -> bool {
         self.signatures.iter().any(|s| s.signed)

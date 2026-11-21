@@ -33,6 +33,7 @@ mod linearization;
 mod link_embedded_action;
 mod link_javascript;
 mod link_launch_action;
+mod link_media_action;
 mod link_named_action;
 mod link_thread_action;
 mod list_selection;

@@ -28,6 +28,7 @@ pub mod embedded_action;
 mod import;
 mod labels;
 pub mod launch_action;
+pub mod media_action;
 pub mod named_action;
 mod namespaces;
 mod outline;
