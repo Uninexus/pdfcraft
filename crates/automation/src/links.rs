@@ -2,8 +2,9 @@
 //! all links. Rectangles are points from the top-left of the displayed page.
 
 use pdfcraft_engine::{
-    Edit, LaunchActionChange, LaunchTarget, LinkAction, LinkHighlight, LinkStyle, LinkZoom, MAX_ACTION_BEADS, MAX_ACTION_THREADS, NamedActionChange,
-    NamedTarget, ThreadActionChange, ThreadTarget, read_remote_document, remote_document_path_is_absolute, resolve_remote_document_path,
+    Edit, EmbeddedActionChange, EmbeddedTarget, LaunchActionChange, LaunchTarget, LinkAction, LinkHighlight, LinkStyle, LinkZoom, MAX_ACTION_BEADS,
+    MAX_ACTION_THREADS, NamedActionChange, NamedTarget, ThreadActionChange, ThreadTarget, read_remote_document, remote_document_path_is_absolute,
+    resolve_remote_document_path,
 };
 use pdfcraft_render::{DestView, LinkTarget, RemoteDestination};
 use serde_json::{Value, json};
@@ -469,6 +470,82 @@ impl Automation {
             "new_window": read.new_window,
             "has_next": read.has_next,
             "platform": read.has_platform,
+            "destination": read.has_dest,
+            "settable": read.settable,
+            "capped": read.capped,
+        });
+        Ok(out)
+    }
+
+    /// A link's go-to-an-embedded-file action: read, set (`embedded_file`, `target_page`, with
+    /// `new_window`) or taken out (`remove`).
+    pub(crate) fn link_embedded_action(&mut self, a: &Args) -> Result<Value> {
+        let remove = a.opt_bool("remove")?.unwrap_or(false);
+        let file = a.opt_str("embedded_file")?;
+        let page_arg = a.opt_int("target_page")?;
+        let new_window = a.opt_bool("new_window")?;
+        let target = match (file, page_arg, remove) {
+            (Some(_), _, true) | (_, Some(_), true) => return Err(bad("remove cannot be combined with embedded_file or target_page")),
+            (None, None, true) if new_window.is_some() => return Err(bad("remove cannot be combined with new_window")),
+            (Some(_), None, false) => return Err(bad("embedded_file needs target_page")),
+            (None, Some(_), false) => return Err(bad("target_page needs embedded_file")),
+            (None, None, false) if new_window.is_some() => return Err(bad("new_window needs embedded_file and target_page")),
+            (Some(f), Some(p), false) => {
+                let p = u32::try_from(p).map_err(|_| bad("target_page is out of range"))?;
+                Some(EmbeddedTarget::new(f, p, new_window).map_err(|e| bad(e.to_string()))?)
+            }
+            (None, None, _) => None,
+        };
+        let (page, index) = (self.page(a)?, a.int("index")?);
+        let (link, before) = {
+            let doc = self.doc(a)?;
+            let found = doc.links().iter().find(|l| l.page == page && l.index as i64 + 1 == index);
+            let found = found.ok_or_else(|| failed(format!("page {} has no link {index} (see link_list)", page + 1)))?;
+            let link = found.obj.ok_or_else(|| failed("an inline link has no object to edit"))?;
+            (link, target.is_some().then(|| doc.link_embedded_action(link)))
+        };
+        let writes = target.is_some() || remove;
+        let mut out = json!({});
+        let mut changed = false;
+        if writes {
+            match self.doc(a)?.link_embedded_action_change(link, target.as_ref()) {
+                EmbeddedActionChange::Refused(why) => return Err(failed(why)),
+                EmbeddedActionChange::NoChange => {}
+                EmbeddedActionChange::Yes => {
+                    out = self.apply(a, Edit::SetLinkEmbeddedAction { link, target })?;
+                    changed = true;
+                }
+            }
+        }
+        let read = self.doc(a)?.link_embedded_action(link);
+        out["page"] = json!(page + 1);
+        out["index"] = json!(index);
+        if writes {
+            out["changed"] = json!(changed);
+            if let (true, Some(before)) = (changed, &before) {
+                // What a set took the place of.
+                out["replaced"] = json!({
+                    "action": before.action, "has_entry": before.has_entry, "destination": before.has_dest, "next": before.has_next,
+                });
+            }
+        }
+        out["embedded_action"] = json!({
+            "has_entry": read.has_entry,
+            "present": read.present,
+            "action": read.action,
+            "exact": read.exact,
+            "is_goto_embedded": read.is_goto_embedded,
+            "file": read.file,
+            "file_kind": read.file_kind,
+            "destination_kind": read.destination_kind,
+            "destination_page": read.destination_page,
+            "new_window": read.new_window,
+            "has_target": read.has_target,
+            "relationship": read.relationship,
+            "embedded_file": read.embedded_file,
+            "has_annotation_target": read.has_annotation_target,
+            "has_nested_target": read.has_nested_target,
+            "has_next": read.has_next,
             "destination": read.has_dest,
             "settable": read.settable,
             "capped": read.capped,

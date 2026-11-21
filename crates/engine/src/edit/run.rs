@@ -155,6 +155,7 @@ pub(crate) fn check_permission(edit: &Edit, p: &pdfcraft_cos::Permissions) -> Re
         | Edit::SetLinkThreadAction { .. }
         | Edit::SetLinkNamedAction { .. }
         | Edit::SetLinkLaunchAction { .. }
+        | Edit::SetLinkEmbeddedAction { .. }
         | Edit::RemoveNamedDestination(_)
         | Edit::FixHairlines { .. }
         | Edit::AliasInks { .. }
@@ -955,6 +956,7 @@ pub(crate) fn run_edit(doc: &mut pdfcraft_cos::Document, edit: &Edit, cx: &mut E
         Edit::RemoveNamedDestination(index) => pdfcraft_organize::destinations::remove_destination(doc, *index)?,
         Edit::RemoveCollection => pdfcraft_organize::collection::remove_collection(doc)?,
         Edit::SetSignatureLock { field, lock } => pdfcraft_organize::signature_lock::set_signature_lock(doc, *field, lock.as_ref())?,
+        Edit::SetLinkEmbeddedAction { link, target } => pdfcraft_organize::embedded_action::set_embedded_action(doc, *link, target.as_ref())?,
         Edit::SetLinkLaunchAction { link, target } => pdfcraft_organize::launch_action::set_launch_action(doc, *link, target.as_ref())?,
         Edit::SetLinkNamedAction { link, target } => pdfcraft_organize::named_action::set_named_action(doc, *link, target.as_ref())?,
         Edit::SetLinkThreadAction { link, target } => pdfcraft_organize::thread_action::set_thread_action(doc, *link, target.as_ref())?,

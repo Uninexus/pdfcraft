@@ -24,6 +24,7 @@ mod comments;
 mod dedupe;
 pub mod destinations;
 mod dparts;
+pub mod embedded_action;
 mod import;
 mod labels;
 pub mod launch_action;

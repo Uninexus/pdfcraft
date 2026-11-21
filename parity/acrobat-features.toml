@@ -2450,11 +2450,11 @@ title = "Go to a target in an embedded file (GoToE)"
 area = "C"
 tier = "P3"
 milestone = "M12"
-status = "planned"
+status = "partial"
 commands = []
-tools = []
-evidence = []
-notes = ""
+tools = ["link_embedded_action"]
+evidence = ["crates/organize/src/tests.rs::a_go_to_embedded_action_is_read_with_its_target_and_destination", "crates/organize/src/tests.rs::a_go_to_embedded_action_is_set_replaced_removed_and_survives_a_save", "crates/organize/src/tests.rs::an_embedded_target_is_a_plain_name_and_a_page", "crates/organize/src/tests.rs::a_go_to_embedded_set_names_an_attachment_by_its_raw_key_and_takes_the_name_of_a_second_file", "crates/organize/src/tests.rs::a_go_to_embedded_action_is_refused_on_what_is_not_a_link", "crates/organize/src/tests.rs::every_read_a_go_to_embedded_action_makes_is_paid_for_before_it_is_made", "crates/organize/src/tests.rs::a_chain_of_references_behind_a_go_to_embedded_action_is_paid_for_hop_by_hop", "crates/automation/tests/it/link_embedded_action.rs::a_go_to_embedded_action_is_read_set_saved_removed_undone_and_redone", "crates/automation/tests/it/link_embedded_action.rs::a_removal_leaves_another_kind_of_action_and_a_set_needs_its_attachment", "crates/automation/tests/it/link_embedded_action.rs::a_call_that_cannot_be_applied_is_named_and_changes_nothing", "crates/automation/tests/it/link_embedded_action.rs::a_modify_restriction_refuses_a_write_and_still_reads"]
+notes = "Headless only: the link_embedded_action tool reads, sets and removes the go-to-an-embedded-file action of a link (an /A action /S /GoToE with a /T target dictionary and a /D destination, ISO 32000-2, go-to-embedded actions; a read reports the target's /R and /N, the /D kind and its integer page, /F and /NewWindow, and whether a /P, /A or nested /T is stored; a set writes only /T << /R /C /N (name) >> and /D [page-1 /Fit] (a zero-based page index) for a page of a file attached to this document, the name being one of its attachments and made of letters, digits, . _ - ( ) and space and compared byte for byte with the stored key, so no /F, /P, /A, nested /T, named destination or parent target is ever written), one undo step. A set does not check that the attachment is a PDF file or has that many pages. link_list reports a link with this action as other GoToE (tested here); the optimizer can already remove these actions (crates/optimize). No viewer here follows the action, so nothing opens the attached file. A set does not check for PDF/A. Not yet: running the action, a target in a parent document, a file attachment annotation or a nested target (read, never written), a /F file specification (read, never written), named destinations as /D, the Link Properties dialog and the UI, the action on bookmarks, buttons and other triggers, and /Next chains (a set or a removal drops the old action's)"
 
 [[feature]]
 id = "edit.action-media"

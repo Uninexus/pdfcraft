@@ -30,6 +30,7 @@ mod guides;
 mod hostile_args;
 mod lenient_arguments;
 mod linearization;
+mod link_embedded_action;
 mod link_javascript;
 mod link_launch_action;
 mod link_named_action;
