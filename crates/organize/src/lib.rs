@@ -31,6 +31,7 @@ mod outline_io;
 mod pdfx;
 pub mod print_presets;
 mod prune;
+pub mod reference_xobjects;
 pub mod role_map;
 mod templates;
 mod transition;

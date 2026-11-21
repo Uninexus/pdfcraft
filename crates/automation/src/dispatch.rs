@@ -371,6 +371,7 @@ impl Automation {
             "role_map" => self.role_map(&a)?,
             "class_map" => self.class_map(&a)?,
             "article_threads" => self.article_threads(&a)?,
+            "reference_xobjects" => self.reference_xobjects(&a)?,
             "named_destinations" => self.named_destinations(&a)?,
             "doc_revisions" => self.doc_revisions(&a)?,
             "doc_linearization" => self.doc_linearization(&a)?,

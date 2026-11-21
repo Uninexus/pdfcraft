@@ -673,6 +673,17 @@ impl Document {
             .map_or(pdfcraft_organize::destinations::Removal::NoEntry, |e| pdfcraft_organize::destinations::destination_removal(&e.cos, index))
     }
 
+    /// The reference XObjects (form XObjects with a `/Ref`) as stored, from one scan.
+    pub fn reference_xobjects(&self) -> pdfcraft_organize::reference_xobjects::ReferenceXObjects {
+        self.editor.as_ref().map(|e| pdfcraft_organize::reference_xobjects::read_reference_xobjects(&e.cos)).unwrap_or_default()
+    }
+
+    /// What taking the `/Ref` away from the reference XObject listed at `index` would do.
+    pub fn reference_xobject_removal(&self, index: usize) -> pdfcraft_organize::reference_xobjects::Removal {
+        use pdfcraft_organize::reference_xobjects::Removal;
+        self.editor.as_ref().map_or(Removal::NoEntry, |e| pdfcraft_organize::reference_xobjects::reference_xobject_removal(&e.cos, index))
+    }
+
     /// Signed: at least one signature field holds a signature.
     pub fn is_signed(&self) -> bool {
         self.signatures.iter().any(|s| s.signed)
