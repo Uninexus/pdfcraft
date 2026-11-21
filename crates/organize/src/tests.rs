@@ -10810,3 +10810,229 @@ fn every_read_a_media_action_makes_is_paid_for_before_it_is_made() {
     assert_eq!(change_with(&doc, link, 2), Change::Yes);
     assert!(matches!(change_with(&doc, link, 1), Change::Refused(why) if why.contains("allowance")));
 }
+
+fn screen_with(doc: &mut Document, extra: Vec<(&str, Object)>) -> pdfcraft_cos::ObjRef {
+    let mut entries = vec![("Type", Object::name("Annot")), ("Subtype", Object::name("Screen")), ("Rect", Object::Array(vec![Object::Int(0); 4]))];
+    entries.extend(extra);
+    doc.add(uri_with(entries))
+}
+
+#[test]
+fn screen_annotations_are_listed_with_what_their_action_holds() {
+    use crate::screen_action::read_screen_actions;
+    let mut doc = open(fixture());
+    assert_eq!(read_screen_actions(&doc), Default::default(), "a file with no screen annotation lists none");
+    for (name, kind) in [("Sound", "sound"), ("Movie", "movie"), ("Rendition", "rendition"), ("RichMediaExecute", "rich_media_execute")] {
+        screen_with(&mut doc, vec![("A", media_action(name, vec![]))]);
+        let found = read_screen_actions(&doc);
+        let last = found.items.last().unwrap();
+        assert_eq!(
+            (last.kind, last.action.as_deref(), last.present, last.has_entry, last.exact, last.removable),
+            (Some(kind), Some(name), true, true, true, true)
+        );
+        assert_eq!((last.has_next, last.has_script, last.has_additional), (false, false, false));
+    }
+    // Entries are noticed where they are written: /Next, a rendition's /JS (not a movie's) and /AA.
+    screen_with(&mut doc, vec![("A", media_action("Rendition", vec![("JS", string(b"x")), ("Next", uri_with(vec![]))])), ("AA", uri_with(vec![]))]);
+    screen_with(&mut doc, vec![("A", media_action("Movie", vec![("JS", string(b"x"))]))]);
+    screen_with(&mut doc, vec![("A", media_action("Rendition", vec![("JS", Object::Null), ("Next", Object::Null)])), ("AA", Object::Null)]);
+    let found = read_screen_actions(&doc);
+    let tail: Vec<_> = found.items[4..].iter().map(|s| (s.has_script, s.has_next, s.has_additional)).collect();
+    assert_eq!(tail, [(true, true, true), (false, false, false), (false, false, false)]);
+    // Other actions are listed and are not media; names are compared byte for byte.
+    let before = found.count;
+    for other in ["URI", "JavaScript", "ImportData", "sound", "Sounds", "GoTo3DView"] {
+        screen_with(&mut doc, vec![("A", media_action(other, vec![]))]);
+    }
+    let found = read_screen_actions(&doc);
+    assert_eq!(found.count, before + 6);
+    for s in &found.items[before..] {
+        assert!(s.kind.is_none() && s.present && s.action.is_some(), "{s:?}");
+    }
+    // The action behind a reference; an /S behind one is not followed; no action, a null one and
+    // one that is not a dictionary.
+    let behind = doc.add(media_action("Sound", vec![]));
+    let name = doc.add(Object::name("Sound"));
+    screen_with(&mut doc, vec![("A", Object::Ref(behind))]);
+    screen_with(&mut doc, vec![("A", uri_with(vec![("S", Object::Ref(name))]))]);
+    screen_with(&mut doc, vec![]);
+    screen_with(&mut doc, vec![("A", Object::Null)]);
+    screen_with(&mut doc, vec![("A", Object::Int(3))]);
+    let found = read_screen_actions(&doc);
+    let tail: Vec<_> = found.items[before + 6..].iter().map(|s| (s.has_entry, s.present, s.action.clone(), s.kind)).collect();
+    assert_eq!(
+        tail,
+        [
+            (true, true, Some("Sound".to_string()), Some("sound")),
+            (true, true, None, None),
+            (false, false, None, None),
+            (false, false, None, None),
+            (true, false, None, None),
+        ]
+    );
+    // A /S cut at 127 bytes, and one that is not valid UTF-8, are not exact.
+    screen_with(&mut doc, vec![("A", media_action(&"S".repeat(300), vec![]))]);
+    screen_with(&mut doc, vec![("A", uri_with(vec![("S", Object::Name(vec![b'S', 0xFF]))]))]);
+    let found = read_screen_actions(&doc);
+    let n = found.items.len();
+    assert_eq!((found.items[n - 2].action.as_ref().map(String::len), found.items[n - 2].exact), (Some(127), false));
+    assert!(!found.items[n - 1].exact);
+    // What is not a screen annotation is not listed: a link, a widget, a stream, a /Subtype
+    // behind a reference and a /Subtype that is a string. Positions count from 0.
+    let count = found.count;
+    link_with(&mut doc, vec![("A", media_action("Sound", vec![]))]);
+    doc.add(uri_with(vec![("Subtype", Object::name("Widget")), ("A", media_action("Sound", vec![]))]));
+    let subtype = doc.add(Object::name("Screen"));
+    doc.add(uri_with(vec![("Subtype", Object::Ref(subtype)), ("A", media_action("Sound", vec![]))]));
+    doc.add(uri_with(vec![("Subtype", string(b"Screen")), ("A", media_action("Sound", vec![]))]));
+    let mut stream = pdfcraft_cos::Dict::new();
+    stream.set(b"Subtype".to_vec(), Object::name("Screen"));
+    doc.add(Object::Stream(pdfcraft_cos::Stream::from_raw(stream, b"x".to_vec())));
+    let found = read_screen_actions(&doc);
+    assert_eq!(found.count, count);
+    assert!(found.items.iter().enumerate().all(|(i, s)| s.index == i));
+    assert!(found.items.windows(2).all(|w| w[0].object.num < w[1].object.num), "in object-number order");
+}
+
+#[test]
+fn a_screen_annotations_media_action_is_removed_with_its_chain_and_survives_a_save() {
+    use crate::screen_action::{Change, read_screen_actions, remove_screen_action, screen_action_change};
+    let mut doc = open(fixture());
+    let old = doc.add(media_action("Rendition", vec![("OP", Object::Int(0)), ("JS", string(b"x"))]));
+    let first = screen_with(&mut doc, vec![("A", Object::Ref(old)), ("AA", uri_with(vec![])), ("T", string(b"clip"))]);
+    let second = screen_with(&mut doc, vec![("A", media_action("Sound", vec![("Next", media_action("URI", vec![]))]))]);
+    let third = screen_with(&mut doc, vec![("A", media_action("Movie", vec![]))]);
+    set_catalog_entry(&mut doc, "Probe", Object::Array([first, second, third].iter().map(|r| Object::Ref(*r)).collect()));
+    let options = || SaveOptions { mod_date: Some("D:20240101000000Z".into()), ..SaveOptions::default() };
+    assert_eq!(read_screen_actions(&doc).items.iter().map(|s| s.object).collect::<Vec<_>>(), [first, second, third]);
+    assert_eq!(screen_action_change(&doc, 0), Change::Yes);
+    remove_screen_action(&mut doc, 0).unwrap();
+    let stored = doc.get(first);
+    let d = stored.as_dict().unwrap();
+    assert!(!d.contains(b"A"), "the action is out of the annotation");
+    assert!(d.contains(b"AA") && d.contains(b"T") && d.contains(b"Rect") && d.name(b"Subtype") == Some(b"Screen".as_slice()), "the rest is kept");
+    assert!(doc.get(old).as_dict().is_some_and(|o| o.name(b"S") == Some(b"Rendition".as_slice())), "the old action object is left as it was");
+    // The others keep their positions and their actions.
+    let found = read_screen_actions(&doc);
+    let kinds: Vec<_> = found.items.iter().map(|s| (s.index, s.object, s.kind)).collect();
+    assert_eq!(kinds, [(0, first, None), (1, second, Some("sound")), (2, third, Some("movie"))]);
+    let saved = write_full(&doc, &options()).unwrap();
+    let again = open(saved.clone());
+    let reopened = read_screen_actions(&again);
+    assert_eq!(reopened.items.iter().map(|s| s.kind).collect::<Vec<_>>(), [None, Some("sound"), Some("movie")], "the removal is in the saved file");
+
+    // A second removal of the same one is no change: nothing is written.
+    assert_eq!(screen_action_change(&doc, 0), Change::NoChange);
+    remove_screen_action(&mut doc, 0).unwrap();
+    assert_eq!(write_full(&doc, &options()).unwrap(), saved);
+
+    // The /Next chain goes with the action.
+    assert!(read_screen_actions(&doc).items[1].has_next);
+    remove_screen_action(&mut doc, 1).unwrap();
+    let r = &read_screen_actions(&doc).items[1];
+    assert_eq!((r.has_entry, r.has_next, r.kind), (false, false, None));
+
+    // Another kind of action, an /S that is not direct, a null action, no action, a position with
+    // nothing listed (also 256 or more) change nothing.
+    let name = doc.add(Object::name("Sound"));
+    let others = [
+        screen_with(&mut doc, vec![("A", media_action("JavaScript", vec![("JS", string(b"x"))]))]),
+        screen_with(&mut doc, vec![("A", media_action("URI", vec![("Next", media_action("Sound", vec![]))]))]),
+        screen_with(&mut doc, vec![("A", uri_with(vec![("S", Object::Ref(name))]))]),
+        screen_with(&mut doc, vec![("A", Object::Null)]),
+        screen_with(&mut doc, vec![]),
+    ];
+    set_catalog_entry(&mut doc, "Others", Object::Array(others.iter().map(|l| Object::Ref(*l)).collect()));
+    let before = write_full(&doc, &options()).unwrap();
+    for index in 3..8 {
+        assert_eq!(screen_action_change(&doc, index), Change::NoChange, "{index}");
+        remove_screen_action(&mut doc, index).unwrap();
+    }
+    for index in [8, 255, 256, 1000, usize::MAX] {
+        assert_eq!(screen_action_change(&doc, index), Change::NoEntry, "{index}");
+        remove_screen_action(&mut doc, index).unwrap();
+    }
+    assert_eq!(write_full(&doc, &options()).unwrap(), before, "a removal that finds no media action writes nothing");
+    assert!(doc.get(others[1]).as_dict().is_some_and(|d| d.contains(b"A")), "a media action behind another action's /Next stays");
+}
+
+#[test]
+fn a_screen_annotation_that_is_a_structural_object_is_refused() {
+    use crate::screen_action::{Change, read_screen_actions, remove_screen_action, screen_action_change};
+    let options = || SaveOptions { mod_date: Some("D:20240101000000Z".into()), ..SaveOptions::default() };
+    // The catalog (1), the /Pages node (2), an inner node (3) and a page (4), each marked as a
+    // screen annotation that carries a media action, are listed, are not removable, and stay as
+    // they are.
+    for object in [1u32, 2, 3, 4] {
+        let mut doc = open(fixture());
+        doc.update_dict(ref_of(object), |d| {
+            d.set(b"Subtype".to_vec(), Object::name("Screen"));
+            d.set(b"A".to_vec(), media_action("Sound", vec![]));
+        })
+        .unwrap();
+        let found = read_screen_actions(&doc);
+        assert_eq!((found.count, found.items[0].object, found.items[0].kind, found.items[0].removable), (1, ref_of(object), Some("sound"), false));
+        assert!(matches!(screen_action_change(&doc, 0), Change::Refused(why) if why.contains("page tree")), "{object}");
+        let before = write_full(&doc, &options()).unwrap();
+        assert!(remove_screen_action(&mut doc, 0).is_err(), "{object}");
+        assert_eq!(write_full(&doc, &options()).unwrap(), before, "{object} is left as it was");
+        assert!(doc.get(ref_of(object)).as_dict().is_some_and(|d| d.contains(b"A")));
+    }
+    // An ordinary screen annotation next to one is removable.
+    let mut doc = open(fixture());
+    let plain = screen_with(&mut doc, vec![("A", media_action("Sound", vec![]))]);
+    assert!(read_screen_actions(&doc).items[0].removable);
+    set_catalog_entry(&mut doc, "Probe", Object::Ref(plain));
+    assert_eq!(screen_action_change(&doc, 0), Change::Yes);
+}
+
+#[test]
+fn the_screen_annotation_listing_stops_at_256_and_every_read_is_paid_for_first() {
+    use crate::screen_action::{Change, MAX_LISTED, change_with, read_with};
+    let mut doc = open(fixture());
+    for _ in 0..MAX_LISTED + 1 {
+        screen_with(&mut doc, vec![("A", media_action("Sound", vec![]))]);
+    }
+    let found = read_with(&doc, usize::MAX);
+    assert_eq!((found.count, found.items.len(), found.truncated, found.capped), (MAX_LISTED + 1, MAX_LISTED, true, false));
+    // The last one found is not listed, so a removal of its position finds nothing.
+    assert_eq!(change_with(&doc, MAX_LISTED, usize::MAX), Change::NoEntry);
+    assert_eq!(change_with(&doc, MAX_LISTED - 1, usize::MAX), Change::Yes);
+
+    let mut doc = open(fixture());
+    // The scan pays one read for each object before it is scanned: the screen annotation is the
+    // last object, so with one read less it is never reached.
+    let direct = screen_with(&mut doc, vec![("A", media_action("Movie", vec![]))]);
+    let objects = doc.scan_objects().count();
+    let r = read_with(&doc, objects);
+    assert_eq!((r.capped, r.count, r.items[0].kind), (false, 1, Some("movie")));
+    let r = read_with(&doc, objects - 1);
+    assert!(r.capped && r.count == 0 && r.items.is_empty());
+    assert_eq!(change_with(&doc, 0, objects), Change::Yes);
+    assert!(matches!(change_with(&doc, 0, objects - 1), Change::Refused(why) if why.contains("allowance")));
+    assert_eq!(doc.get(direct).as_dict().map(|d| d.contains(b"A")), Some(true));
+    // The action behind a reference costs one more read, and is not listed when it is not paid for.
+    let action = doc.add(media_action("Sound", vec![]));
+    let behind = screen_with(&mut doc, vec![("A", Object::Ref(action))]);
+    let objects = doc.scan_objects().count();
+    let r = read_with(&doc, objects + 1);
+    assert!(!r.capped && r.count == 2 && r.items[1].object == behind && r.items[1].kind == Some("sound"));
+    let r = read_with(&doc, objects);
+    assert!(r.capped && r.count == 1, "the action behind the reference was not paid for: {r:?}");
+
+    // A chain of 32 reference objects is followed, as `Document::resolve` follows it, and is paid
+    // for with 33 reads; a chain of 33 is not followed.
+    for (hops, followed) in [(32usize, true), (33, false)] {
+        let mut doc = open(fixture());
+        let mut at = doc.add(media_action("Sound", vec![]));
+        for _ in 0..hops {
+            at = doc.add(Object::Ref(at));
+        }
+        screen_with(&mut doc, vec![("A", Object::Ref(at))]);
+        let objects = doc.scan_objects().count();
+        let r = read_with(&doc, objects + 33);
+        assert_eq!((r.capped, r.items[0].present, r.items[0].kind.is_some()), (false, followed, followed), "{hops}");
+        let r = read_with(&doc, objects + 32);
+        assert!(r.capped && r.items.is_empty(), "{hops}");
+    }
+}

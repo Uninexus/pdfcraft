@@ -432,6 +432,9 @@ pub enum Edit {
     RemoveLinkMediaAction {
         link: pdfcraft_cos::ObjRef,
     },
+    /// A screen annotation's sound, movie, rendition or rich-media action: take it out of the one
+    /// listed at this position (there is no set).
+    RemoveScreenAction(usize),
     /// Reference XObjects: take the `/Ref` away from the one listed at this position.
     RemoveReferenceXObject(usize),
     /// Named destinations (the `/Dests` name tree and the catalog's `/Dests` dictionary): take the

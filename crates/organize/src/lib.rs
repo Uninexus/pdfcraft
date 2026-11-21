@@ -38,6 +38,7 @@ pub mod print_presets;
 mod prune;
 pub mod reference_xobjects;
 pub mod role_map;
+pub mod screen_action;
 pub mod signature_lock;
 mod templates;
 pub mod thread_action;

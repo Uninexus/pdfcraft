@@ -112,6 +112,7 @@ pub use pdfcraft_organize::media_action::Change as MediaActionChange;
 pub use pdfcraft_organize::named_action::{Change as NamedActionChange, NamedTarget};
 pub use pdfcraft_organize::print_presets::{Duplex, MAX_PRINT_COPIES, MAX_PRINT_RANGES, MIN_PRINT_COPIES, PrintPresets, PrintScaling};
 pub use pdfcraft_organize::role_map::{MAX_LISTED_ROLES, MAX_LOOP_STEPS, MAX_ROLE_BYTES};
+pub use pdfcraft_organize::screen_action::Change as ScreenActionChange;
 pub use pdfcraft_organize::signature_lock::{
     Change as LockChange, LockAction, LockSpec, MAX_GETS as MAX_LOCK_GETS, MAX_LOCK_NAMES, MAX_NAME_CHARS as MAX_LOCK_NAME_CHARS,
 };
