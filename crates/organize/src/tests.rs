@@ -10152,3 +10152,424 @@ fn every_read_a_launch_action_makes_is_paid_for_before_it_is_made() {
     assert!(matches!(change_with(&doc, plain, Some(&target), 0), Change::Refused(why) if why.contains("allowance")));
     assert!(matches!(change_with(&doc, behind, None, 2), Change::Refused(why) if why.contains("allowance")));
 }
+
+fn embedded_action(entries: Vec<(&str, Object)>) -> Object {
+    let mut all = vec![("S", Object::name("GoToE"))];
+    all.extend(entries);
+    uri_with(all)
+}
+
+fn embedded_target(entries: Vec<(&str, Object)>) -> Object {
+    uri_with(entries)
+}
+
+#[test]
+fn a_go_to_embedded_action_is_read_with_its_target_and_destination() {
+    use crate::embedded_action::read_embedded_action;
+    let mut doc = open(fixture());
+    let full = embedded_action(vec![
+        ("F", string(b"outer.pdf")),
+        ("D", Object::Array(vec![Object::Int(2), Object::name("Fit")])),
+        ("NewWindow", Object::Bool(true)),
+        ("T", embedded_target(vec![("R", Object::name("C")), ("N", string(b"inner.pdf"))])),
+        ("Next", embedded_action(vec![])),
+    ]);
+    let l = link_with(&mut doc, vec![("A", full)]);
+    let r = read_embedded_action(&doc, l);
+    assert!(r.is_link && r.is_goto_embedded && r.present && r.settable && !r.capped && r.exact);
+    assert_eq!((r.file_kind, r.file.as_deref(), r.new_window, r.has_next), (Some("string"), Some("outer.pdf"), Some(true), true));
+    assert_eq!((r.destination_kind, r.destination_page), (Some("array"), Some(3)));
+    assert_eq!((r.has_target, r.relationship.as_deref(), r.embedded_file.as_deref()), (true, Some("C"), Some("inner.pdf")));
+    assert!(!r.has_annotation_target && !r.has_nested_target);
+
+    // A target of the parent, with an annotation and a nested target stored (not followed), and a
+    // destination that is a name, then a string.
+    let t = embedded_target(vec![("R", Object::name("P")), ("P", Object::Int(0)), ("A", Object::Int(1)), ("T", embedded_target(vec![]))]);
+    let l = link_with(&mut doc, vec![("A", embedded_action(vec![("D", Object::name("Chapter")), ("T", t)]))]);
+    let r = read_embedded_action(&doc, l);
+    assert_eq!((r.destination_kind, r.destination_page, r.relationship.as_deref(), r.embedded_file), (Some("name"), None, Some("P"), None));
+    assert!(r.has_annotation_target && r.has_nested_target && r.file_kind.is_none());
+    let l = link_with(&mut doc, vec![("A", embedded_action(vec![("D", string(b"Chapter"))]))]);
+    let r = read_embedded_action(&doc, l);
+    assert_eq!((r.destination_kind, r.has_target), (Some("string"), false));
+    // Only /A, only /P, and null values for /P, /A and /T count as none.
+    let only = |key: &str, value: Object| {
+        let mut doc = open(fixture());
+        let l = link_with(&mut doc, vec![("A", embedded_action(vec![("T", embedded_target(vec![(key, value)]))]))]);
+        read_embedded_action(&doc, l)
+    };
+    assert!(only("A", string(b"nm")).has_annotation_target && only("P", Object::Int(0)).has_annotation_target);
+    assert!(
+        !only("P", Object::Null).has_annotation_target
+            && !only("A", Object::Null).has_annotation_target
+            && !only("T", Object::Null).has_nested_target
+    );
+
+    // A first item that is not an integer, or is below zero, gives no page; the page object form too.
+    for first in [Object::Ref(ref_of(4)), Object::Int(-1), Object::Int(i64::MIN), Object::name("x")] {
+        let l = link_with(&mut doc, vec![("A", embedded_action(vec![("D", Object::Array(vec![first.clone()]))]))]);
+        let r = read_embedded_action(&doc, l);
+        assert_eq!((r.destination_kind, r.destination_page), (Some("array"), None), "{first:?}");
+    }
+    let l = link_with(&mut doc, vec![("A", embedded_action(vec![("D", Object::Array(vec![]))]))]);
+    assert_eq!(read_embedded_action(&doc, l).destination_page, None);
+    let l = link_with(&mut doc, vec![("A", embedded_action(vec![("D", Object::Array(vec![Object::Int(i64::MAX)]))]))]);
+    assert_eq!(read_embedded_action(&doc, l).destination_page, None, "no overflow");
+
+    // A file specification dictionary is reported as one, not read; a number is not a file; a
+    // relationship that is not a name, a name that is not a string, and a target that is not a
+    // dictionary read as none.
+    let l = link_with(
+        &mut doc,
+        vec![(
+            "A",
+            embedded_action(vec![
+                ("F", uri_with(vec![("F", string(b"x"))])),
+                ("T", embedded_target(vec![("R", Object::Int(1)), ("N", Object::Int(2))])),
+            ]),
+        )],
+    );
+    let r = read_embedded_action(&doc, l);
+    assert_eq!((r.file_kind, r.file, r.has_target, r.relationship, r.embedded_file), (Some("dictionary"), None, true, None, None));
+    let l = link_with(&mut doc, vec![("A", embedded_action(vec![("F", Object::Int(3)), ("T", Object::Int(4)), ("NewWindow", string(b"yes"))]))]);
+    let r = read_embedded_action(&doc, l);
+    assert_eq!((r.is_goto_embedded, r.file_kind, r.has_target, r.new_window), (true, None, false, None));
+
+    // The file, the destination, the target, the relationship and the name behind references.
+    let (file, dest, rel, name) =
+        (doc.add(string(b"f.pdf")), doc.add(Object::Array(vec![Object::Int(0)])), doc.add(Object::name("C")), doc.add(string(b"n.pdf")));
+    let target = doc.add(embedded_target(vec![("R", Object::Ref(rel)), ("N", Object::Ref(name))]));
+    let l = link_with(&mut doc, vec![("A", embedded_action(vec![("F", Object::Ref(file)), ("D", Object::Ref(dest)), ("T", Object::Ref(target))]))]);
+    let r = read_embedded_action(&doc, l);
+    assert_eq!(
+        (r.file.as_deref(), r.destination_page, r.relationship.as_deref(), r.embedded_file.as_deref()),
+        (Some("f.pdf"), Some(1), Some("C"), Some("n.pdf"))
+    );
+
+    // A 300-byte name is cut at 255 characters and not exact.
+    let long = "n".repeat(300);
+    let l = link_with(&mut doc, vec![("A", embedded_action(vec![("T", embedded_target(vec![("N", string(long.as_bytes()))]))]))]);
+    let r = read_embedded_action(&doc, l);
+    assert_eq!((r.embedded_file.map(|n| n.len()), r.exact), (Some(255), false));
+
+    // Another kind of action reads its name and no target; no action, a destination and null
+    // values read as none; a widget, a number and a missing object are not links.
+    for other in ["GoToR", "GoToEx", "GoTo", "Launch"] {
+        let l = link_with(&mut doc, vec![("A", uri_with(vec![("S", Object::name(other)), ("T", embedded_target(vec![("N", string(b"x"))]))]))]);
+        let r = read_embedded_action(&doc, l);
+        assert_eq!((r.is_goto_embedded, r.action.as_deref(), r.has_target, r.embedded_file), (false, Some(other), false, None), "{other}");
+    }
+    let l = link_with(&mut doc, vec![("Dest", Object::Array(vec![Object::Int(0)]))]);
+    let r = read_embedded_action(&doc, l);
+    assert!(r.has_dest && !r.has_entry && !r.present && r.settable);
+    let l = link_with(&mut doc, vec![("A", Object::Null), ("Dest", Object::Null)]);
+    let r = read_embedded_action(&doc, l);
+    assert!(!r.has_dest && !r.has_entry && !r.present);
+    let widget = doc.add(uri_with(vec![("Subtype", Object::name("Widget")), ("A", embedded_action(vec![]))]));
+    for o in [widget, doc.add(Object::Int(5)), ref_of(9999)] {
+        let r = read_embedded_action(&doc, o);
+        assert!(!r.is_link && !r.is_goto_embedded && !r.settable, "{o:?}");
+    }
+}
+
+#[test]
+fn a_go_to_embedded_action_is_set_replaced_removed_and_survives_a_save() {
+    use crate::attachments::add_attachment;
+    use crate::embedded_action::{Change, EmbeddedTarget, embedded_action_change, read_embedded_action, set_embedded_action};
+    let mut doc = open(fixture());
+    add_attachment(&mut doc, "inner.pdf", b"%PDF-1.4", None, None, None).unwrap();
+    let old = doc.add(uri_with(vec![("S", Object::name("URI")), ("URI", string(b"http://x.test"))]));
+    let link = link_with(&mut doc, vec![("A", Object::Ref(old)), ("Dest", Object::Array(vec![Object::Int(0)]))]);
+    set_catalog_entry(&mut doc, "Probe", Object::Ref(link));
+    let target = EmbeddedTarget::new("inner.pdf", 3, Some(true)).unwrap();
+    assert_eq!(embedded_action_change(&doc, link, Some(&target)), Change::Yes);
+    set_embedded_action(&mut doc, link, Some(&target)).unwrap();
+    let stored = doc.get(link);
+    let d = stored.as_dict().unwrap();
+    assert!(!d.contains(b"Dest"), "a link with an action has no /Dest");
+    let a = d.get(b"A").and_then(Object::as_dict).expect("a direct action dictionary");
+    assert_eq!((a.name(b"Type"), a.name(b"S")), (Some(b"Action".as_slice()), Some(b"GoToE".as_slice())));
+    assert_eq!(a.get(b"D"), Some(&Object::Array(vec![Object::Int(2), Object::name("Fit")])), "a zero-based page index");
+    assert_eq!(a.get(b"NewWindow"), Some(&Object::Bool(true)));
+    assert!(!a.contains(b"F") && !a.contains(b"Next"), "the file is this one");
+    let t = a.get(b"T").and_then(Object::as_dict).expect("a direct target");
+    assert_eq!((t.name(b"R"), t.get(b"N")), (Some(b"C".as_slice()), Some(&string(b"inner.pdf"))));
+    assert_eq!(t.len(), 2, "no /P, /A or nested /T");
+    assert!(doc.get(old).as_dict().is_some_and(|o| o.name(b"S") == Some(b"URI".as_slice())), "the old action object is left as it was");
+    assert_eq!(d.name(b"Subtype"), Some(b"Link".as_slice()), "the rest of the link is kept");
+
+    let mut doc = open(write_full(&doc, &SaveOptions::default()).unwrap());
+    let link = doc.get(doc.root().unwrap()).as_dict().and_then(|c| c.reference(b"Probe")).unwrap();
+    let r = read_embedded_action(&doc, link);
+    assert_eq!(
+        (r.is_goto_embedded, r.embedded_file.as_deref(), r.relationship.as_deref(), r.destination_page, r.new_window, r.has_dest),
+        (true, Some("inner.pdf"), Some("C"), Some(3), Some(true), false)
+    );
+
+    // Without /NewWindow none is written; a set drops the old /Next, /F, /P and the window.
+    doc.update_dict(link, |d| {
+        d.set(
+            b"A".to_vec(),
+            embedded_action(vec![
+                ("F", string(b"x.pdf")),
+                ("NewWindow", Object::Bool(true)),
+                ("T", embedded_target(vec![("P", Object::Int(0))])),
+                ("Next", embedded_action(vec![])),
+            ]),
+        );
+    })
+    .unwrap();
+    let plain = EmbeddedTarget::new("inner.pdf", 1, None).unwrap();
+    set_embedded_action(&mut doc, link, Some(&plain)).unwrap();
+    let r = read_embedded_action(&doc, link);
+    assert_eq!((r.file_kind, r.new_window, r.has_next, r.has_annotation_target, r.destination_page), (None, None, false, false, Some(1)));
+    assert!(!doc.get(link).as_dict().and_then(|d| d.get(b"A").and_then(Object::as_dict).map(|a| a.contains(b"NewWindow"))).unwrap());
+
+    // A removal takes `/A` out of a go-to-embedded action, and writes nothing twice.
+    assert_eq!(embedded_action_change(&doc, link, None), Change::Yes);
+    set_embedded_action(&mut doc, link, None).unwrap();
+    assert!(!doc.get(link).as_dict().unwrap().contains(b"A"));
+    assert_eq!(doc.get(link).as_dict().unwrap().name(b"Subtype"), Some(b"Link".as_slice()));
+    assert_eq!(embedded_action_change(&doc, link, None), Change::NoChange);
+    let options = || SaveOptions { mod_date: Some("D:20240101000000Z".into()), ..SaveOptions::default() };
+    let before = write_full(&doc, &options()).unwrap();
+    set_embedded_action(&mut doc, link, None).unwrap();
+    assert_eq!(write_full(&doc, &options()).unwrap(), before);
+
+    // Another kind of action, a launch included, is left alone by a removal.
+    for kind in ["URI", "GoToR", "Launch"] {
+        let other = link_with(&mut doc, vec![("A", uri_with(vec![("S", Object::name(kind))]))]);
+        assert_eq!(embedded_action_change(&doc, other, None), Change::NoChange, "{kind}");
+        set_embedded_action(&mut doc, other, None).unwrap();
+        assert_eq!(read_embedded_action(&doc, other).action.as_deref(), Some(kind));
+    }
+    // A set needs the attachment: with none of that name it is refused and nothing is written.
+    let missing = EmbeddedTarget::new("gone.pdf", 1, None).unwrap();
+    let before = write_full(&doc, &options()).unwrap();
+    assert!(matches!(embedded_action_change(&doc, link, Some(&missing)), Change::Refused(why) if why.contains("attachment")));
+    assert!(set_embedded_action(&mut doc, link, Some(&missing)).is_err());
+    assert_eq!(write_full(&doc, &options()).unwrap(), before);
+}
+
+#[test]
+fn an_embedded_target_is_a_plain_name_and_a_page() {
+    use crate::embedded_action::{EmbeddedTarget, MAX_PAGE};
+    for good in ["a.pdf", "a", "A b-c_d.PDF", "1", "x.y", "a-", "a  b", "dup.pdf (2)", "(a)", &"n".repeat(255)] {
+        assert!(EmbeddedTarget::new(good, 1, None).is_ok(), "{good:?}");
+    }
+    for bad in [
+        "",
+        " a",
+        "a ",
+        "-a.pdf",
+        ".",
+        "..",
+        " . ",
+        "-",
+        "a/b.pdf",
+        "a\\b.pdf",
+        "a:b",
+        "a;b",
+        "a`b",
+        "$(a)",
+        "a|b",
+        "a&b",
+        "a'b",
+        "a\"b",
+        "a*b",
+        "a?b",
+        "<a>",
+        "a%b",
+        "~a",
+        "a\u{e9}",
+        "a\nb",
+        "a\0b",
+        "a\\(b",
+        &"n".repeat(256),
+    ] {
+        assert!(EmbeddedTarget::new(bad, 1, None).is_err(), "{bad:?}");
+    }
+    assert!(
+        EmbeddedTarget::new("a", 0, None).is_err()
+            && EmbeddedTarget::new("a", MAX_PAGE + 1, None).is_err()
+            && EmbeddedTarget::new("a", u32::MAX, None).is_err()
+    );
+    let t = EmbeddedTarget::new("a", MAX_PAGE, Some(false)).unwrap();
+    assert_eq!((t.name(), t.page(), t.new_window()), ("a", MAX_PAGE, Some(false)));
+}
+
+#[test]
+fn a_go_to_embedded_set_names_an_attachment_by_its_raw_key_and_takes_the_name_of_a_second_file() {
+    use crate::attachments::{add_attachment, attachment_keys};
+    use crate::embedded_action::{Change, EmbeddedTarget, embedded_action_change, read_embedded_action, set_embedded_action};
+    let mut doc = open(fixture());
+    add_attachment(&mut doc, "dup.pdf", b"%PDF-1.4", None, None, None).unwrap();
+    add_attachment(&mut doc, "dup.pdf", b"%PDF-1.4", None, None, None).unwrap();
+    let link = link_with(&mut doc, vec![]);
+    // The name add_attachment gives a second file of one name has parentheses and is accepted,
+    // written escaped and read back whole.
+    let second = EmbeddedTarget::new("dup.pdf (2)", 2, None).unwrap();
+    assert_eq!(embedded_action_change(&doc, link, Some(&second)), Change::Yes);
+    set_embedded_action(&mut doc, link, Some(&second)).unwrap();
+    set_catalog_entry(&mut doc, "Probe", Object::Ref(link));
+    let doc = open(write_full(&doc, &SaveOptions::default()).unwrap());
+    let link = doc.get(doc.root().unwrap()).as_dict().and_then(|c| c.reference(b"Probe")).unwrap();
+    assert_eq!(read_embedded_action(&doc, link).embedded_file.as_deref(), Some("dup.pdf (2)"));
+
+    // A key stored as UTF-16 reads as the same text, but a viewer compares the bytes of the key
+    // with the /N written, which would match nothing: the set is refused.
+    let mut doc = open(fixture());
+    add_attachment(&mut doc, "inner.pdf", b"%PDF-1.4", None, None, None).unwrap();
+    let mut entries = crate::attachments::entries(&doc).0;
+    let mut utf16 = vec![0xFE, 0xFF];
+    for u in "inner.pdf".encode_utf16() {
+        utf16.extend(u.to_be_bytes());
+    }
+    entries[0].0 = utf16;
+    crate::import::set_attachments_exact(&mut doc, entries).unwrap();
+    assert_eq!(attachment_keys(&doc), ["inner.pdf"], "the listing decodes the key");
+    let link = link_with(&mut doc, vec![]);
+    let target = EmbeddedTarget::new("inner.pdf", 1, None).unwrap();
+    assert!(matches!(embedded_action_change(&doc, link, Some(&target)), Change::Refused(why) if why.contains("attachment")));
+    assert!(set_embedded_action(&mut doc, link, Some(&target)).is_err());
+}
+
+#[test]
+fn a_go_to_embedded_action_is_refused_on_what_is_not_a_link() {
+    use crate::attachments::add_attachment;
+    use crate::embedded_action::{Change, EmbeddedTarget, embedded_action_change, read_embedded_action, set_embedded_action};
+    let mut doc = open(fixture());
+    add_attachment(&mut doc, "a.pdf", b"%PDF-1.4", None, None, None).unwrap();
+    let target = EmbeddedTarget::new("a.pdf", 1, None).unwrap();
+    let widget = doc.add(uri_with(vec![("Subtype", Object::name("Widget"))]));
+    let number = doc.add(Object::Int(5));
+    // The catalog (1), the /Pages node (2), an inner node (3), a page (4), a widget, a number and
+    // an object that does not exist.
+    let objects = [doc.root().unwrap(), ref_of(2), ref_of(3), ref_of(4), widget, number, ref_of(9999)];
+    let options = || SaveOptions { mod_date: Some("D:20240101000000Z".into()), ..SaveOptions::default() };
+    for o in objects {
+        assert!(!read_embedded_action(&doc, o).settable, "{o:?}");
+        assert!(matches!(embedded_action_change(&doc, o, Some(&target)), Change::Refused(_)), "{o:?}");
+        assert!(matches!(embedded_action_change(&doc, o, None), Change::Refused(_)), "{o:?} a removal too");
+        let before = write_full(&doc, &options()).unwrap();
+        assert!(set_embedded_action(&mut doc, o, Some(&target)).is_err() && set_embedded_action(&mut doc, o, None).is_err(), "{o:?}");
+        assert_eq!(write_full(&doc, &options()).unwrap(), before, "{o:?} is left as it was");
+    }
+    // A page that is also marked as a link is still a page.
+    doc.update_dict(ref_of(4), |d| d.set(b"Subtype".to_vec(), Object::name("Link"))).unwrap();
+    assert!(read_embedded_action(&doc, ref_of(4)).is_link && !read_embedded_action(&doc, ref_of(4)).settable);
+    assert!(matches!(embedded_action_change(&doc, ref_of(4), Some(&target)), Change::Refused(why) if why.contains("page")));
+}
+
+#[test]
+fn every_read_a_go_to_embedded_action_makes_is_paid_for_before_it_is_made() {
+    use crate::attachments::add_attachment;
+    use crate::embedded_action::read_with;
+    let mut doc = open(fixture());
+    add_attachment(&mut doc, "a.pdf", b"%PDF-1.4", None, None, None).unwrap();
+    // Direct action, window, file, destination and target: the link is the only read.
+    let direct = link_with(
+        &mut doc,
+        vec![(
+            "A",
+            embedded_action(vec![
+                ("NewWindow", Object::Bool(true)),
+                ("F", string(b"f.pdf")),
+                ("D", Object::Array(vec![Object::Int(1)])),
+                ("T", embedded_target(vec![("R", Object::name("C")), ("N", string(b"a.pdf"))])),
+            ]),
+        )],
+    );
+    let r = read_with(&doc, direct, 1);
+    assert!(!r.capped && r.settable && r.new_window == Some(true) && r.file.is_some() && r.destination_page == Some(2) && r.embedded_file.is_some());
+    let r = read_with(&doc, direct, 0);
+    assert!(r.capped && !r.is_link && !r.settable, "not even the link was paid for");
+
+    // Each field behind a reference costs one more, in the order the code reads them: the action,
+    // the window, the file, the destination and its first item, the target, its relationship and
+    // its name. With one fewer, the last of them is not read.
+    let (window, file, first) = (doc.add(Object::Bool(true)), doc.add(string(b"f.pdf")), doc.add(Object::Int(1)));
+    let (dest, rel, name) = (doc.add(Object::Array(vec![Object::Ref(first)])), doc.add(Object::name("C")), doc.add(string(b"a.pdf")));
+    let target = doc.add(embedded_target(vec![("R", Object::Ref(rel)), ("N", Object::Ref(name))]));
+    let action = doc.add(embedded_action(vec![
+        ("NewWindow", Object::Ref(window)),
+        ("F", Object::Ref(file)),
+        ("D", Object::Ref(dest)),
+        ("T", Object::Ref(target)),
+    ]));
+    let behind = link_with(&mut doc, vec![("A", Object::Ref(action))]);
+    // link 1, action 1, window 1, file 1, dest 1, first 1, target 1, relationship 1, name 1.
+    let r = read_with(&doc, behind, 9);
+    assert!(
+        !r.capped
+            && r.settable
+            && r.embedded_file.as_deref() == Some("a.pdf")
+            && r.relationship.as_deref() == Some("C")
+            && r.destination_page == Some(2)
+    );
+    let r = read_with(&doc, behind, 8);
+    assert!(r.capped && r.relationship.as_deref() == Some("C") && r.embedded_file.is_none() && !r.settable, "the name was not paid for");
+    let r = read_with(&doc, behind, 7);
+    assert!(r.capped && r.has_target && r.relationship.is_none(), "the relationship was not paid for");
+    let r = read_with(&doc, behind, 6);
+    assert!(r.capped && r.destination_page == Some(2) && !r.has_target, "the target was not paid for");
+    let r = read_with(&doc, behind, 5);
+    assert!(r.capped && r.destination_kind == Some("array") && r.destination_page.is_none(), "the first item was not paid for");
+    let r = read_with(&doc, behind, 4);
+    assert!(r.capped && r.file.is_some() && r.destination_kind.is_none(), "the destination was not paid for");
+    let r = read_with(&doc, behind, 3);
+    assert!(r.capped && r.new_window == Some(true) && r.file.is_none(), "the file was not paid for");
+    let r = read_with(&doc, behind, 2);
+    assert!(r.capped && r.is_goto_embedded && r.new_window.is_none(), "the window was not paid for");
+    let r = read_with(&doc, behind, 1);
+    assert!(r.capped && r.has_entry && !r.present && !r.settable, "the action was not paid for");
+}
+
+#[test]
+fn a_chain_of_references_behind_a_go_to_embedded_action_is_paid_for_hop_by_hop() {
+    use crate::attachments::add_attachment;
+    use crate::embedded_action::{Change, EmbeddedTarget, change_with, read_with};
+    let mut doc = open(fixture());
+    add_attachment(&mut doc, "a.pdf", b"%PDF-1.4", None, None, None).unwrap();
+    // A chain of 32 reference objects is followed, as `Document::resolve` follows it, and is paid
+    // for with 33 reads after the link's own; a chain of 33 is not followed.
+    for (hops, followed) in [(32usize, true), (33, false)] {
+        let mut at = doc.add(embedded_action(vec![]));
+        for _ in 0..hops {
+            at = doc.add(Object::Ref(at));
+        }
+        let chained = link_with(&mut doc, vec![("A", Object::Ref(at))]);
+        let entry = doc.get(chained).as_dict().and_then(|d| d.get(b"A").cloned()).unwrap();
+        assert_eq!(doc.resolve(&entry).as_dict().is_some(), followed);
+        let r = read_with(&doc, chained, 1 + 33);
+        assert_eq!((r.is_goto_embedded, r.capped), (followed, false), "{hops}");
+        assert!(read_with(&doc, chained, 1 + 32).capped, "{hops}");
+    }
+    // The same for the target's name and for the destination's first item.
+    let mut at = doc.add(string(b"a.pdf"));
+    for _ in 0..32 {
+        at = doc.add(Object::Ref(at));
+    }
+    let chained = link_with(&mut doc, vec![("A", embedded_action(vec![("T", embedded_target(vec![("N", Object::Ref(at))]))]))]);
+    assert_eq!(read_with(&doc, chained, 1 + 33).embedded_file.as_deref(), Some("a.pdf"));
+    assert!(read_with(&doc, chained, 1 + 32).capped);
+    let mut at = doc.add(Object::Int(4));
+    for _ in 0..32 {
+        at = doc.add(Object::Ref(at));
+    }
+    let chained = link_with(&mut doc, vec![("A", embedded_action(vec![("D", Object::Array(vec![Object::Ref(at)]))]))]);
+    assert_eq!(read_with(&doc, chained, 1 + 33).destination_page, Some(5));
+    assert!(read_with(&doc, chained, 1 + 32).capped);
+
+    // A change check uses the same allowance: it is refused when the link cannot be read, and a
+    // removal and a set need nothing more than that read.
+    let target = EmbeddedTarget::new("a.pdf", 1, None).unwrap();
+    let plain = link_with(&mut doc, vec![("A", embedded_action(vec![]))]);
+    assert_eq!(change_with(&doc, plain, Some(&target), 1), Change::Yes);
+    assert_eq!(change_with(&doc, plain, None, 1), Change::Yes);
+    assert!(matches!(change_with(&doc, plain, Some(&target), 0), Change::Refused(why) if why.contains("allowance")));
+    let action = doc.add(embedded_action(vec![]));
+    let behind = link_with(&mut doc, vec![("A", Object::Ref(action))]);
+    assert_eq!(change_with(&doc, behind, None, 2), Change::Yes);
+    assert!(matches!(change_with(&doc, behind, None, 1), Change::Refused(why) if why.contains("allowance")));
+}

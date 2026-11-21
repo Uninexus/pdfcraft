@@ -423,6 +423,11 @@ pub enum Edit {
         link: pdfcraft_cos::ObjRef,
         target: Option<pdfcraft_organize::launch_action::LaunchTarget>,
     },
+    /// A link's go-to-embedded-file action: set it to this action, or take one out (`None`).
+    SetLinkEmbeddedAction {
+        link: pdfcraft_cos::ObjRef,
+        target: Option<pdfcraft_organize::embedded_action::EmbeddedTarget>,
+    },
     /// Reference XObjects: take the `/Ref` away from the one listed at this position.
     RemoveReferenceXObject(usize),
     /// Named destinations (the `/Dests` name tree and the catalog's `/Dests` dictionary): take the
