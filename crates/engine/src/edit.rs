@@ -417,6 +417,12 @@ pub enum Edit {
         link: pdfcraft_cos::ObjRef,
         target: Option<pdfcraft_organize::named_action::NamedTarget>,
     },
+    /// A link's open-a-file action: set it to this launch action, or take a launch action out
+    /// (`None`).
+    SetLinkLaunchAction {
+        link: pdfcraft_cos::ObjRef,
+        target: Option<pdfcraft_organize::launch_action::LaunchTarget>,
+    },
     /// Reference XObjects: take the `/Ref` away from the one listed at this position.
     RemoveReferenceXObject(usize),
     /// Named destinations (the `/Dests` name tree and the catalog's `/Dests` dictionary): take the

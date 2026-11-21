@@ -2378,11 +2378,11 @@ title = "Open-a-file action"
 area = "C"
 tier = "P2"
 milestone = "M7"
-status = "planned"
+status = "partial"
 commands = []
-tools = []
-evidence = []
-notes = ""
+tools = ["link_launch_action"]
+evidence = ["crates/organize/src/tests.rs::a_launch_action_is_read_with_its_file_and_window", "crates/organize/src/tests.rs::a_launch_action_is_set_replaced_removed_and_survives_a_save", "crates/organize/src/tests.rs::a_launch_target_is_a_relative_path_to_a_pdf_file_and_nothing_else", "crates/organize/src/tests.rs::a_launch_action_is_refused_on_what_is_not_a_link", "crates/organize/src/tests.rs::every_read_a_launch_action_makes_is_paid_for_before_it_is_made", "crates/automation/tests/it/link_launch_action.rs::a_launch_action_is_read_set_saved_removed_undone_and_redone", "crates/automation/tests/it/link_launch_action.rs::a_call_that_cannot_be_applied_is_named_and_changes_nothing", "crates/automation/tests/it/link_launch_action.rs::a_modify_restriction_refuses_a_write_and_still_reads"]
+notes = "Headless only: the link_launch_action tool reads, sets and removes the open-a-file action of a link (an /A action /S /Launch whose /F is a file specification, with /NewWindow, ISO 32000-2 12.6.4.6; any file is reported, but a set accepts only a relative path to a .pdf file made of letters, digits, . _ - space and /, with no part that is empty, only dots or spaces, or starts with -, so it writes nothing that names a program, an absolute path, a .. path, a URL or a shell character), one undo step. The render crate already reads a launch of a .pdf file without /Win as a link to that file and no other launch (the existing render test launch_actions_that_name_a_pdf_open_it_like_a_remote_link, not run for this entry), while link_list reports a link with a launch action as other Launch (tested here); the tool changes neither. Launch actions are not allowed in PDF/A files and a set does not check for that. Not yet: launching any other file or application, the deprecated /Win, /Mac and /Unix entries (reported when their value is not null, never written; a set drops them), file specification dictionaries and embedded files as the target (read, never written), the Link Properties dialog and the UI, the action on bookmarks, buttons and other triggers, and /Next chains (a set drops the old action's)"
 
 [[feature]]
 id = "edit.action-named"

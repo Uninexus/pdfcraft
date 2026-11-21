@@ -26,6 +26,7 @@ pub mod destinations;
 mod dparts;
 mod import;
 mod labels;
+pub mod launch_action;
 pub mod named_action;
 mod namespaces;
 mod outline;

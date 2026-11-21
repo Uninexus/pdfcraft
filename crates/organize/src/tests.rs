@@ -9834,3 +9834,321 @@ fn every_read_a_named_action_makes_is_paid_for_before_it_is_made() {
     assert!(matches!(change_with(&doc, direct, Some(&target), 0), Change::Refused(why) if why.contains("allowance")));
     assert!(matches!(change_with(&doc, behind, None, 2), Change::Refused(why) if why.contains("allowance")));
 }
+
+fn launch_action(entries: Vec<(&str, Object)>) -> Object {
+    let mut all = vec![("S", Object::name("Launch"))];
+    all.extend(entries);
+    uri_with(all)
+}
+
+#[test]
+fn a_launch_action_is_read_with_its_file_and_window() {
+    use crate::launch_action::read_launch_action;
+    let mut doc = open(fixture());
+    // A string, with and without /NewWindow, and with the deprecated platform entry and a /Next.
+    let l = link_with(&mut doc, vec![("A", launch_action(vec![("F", string(b"docs/two.pdf")), ("NewWindow", Object::Bool(true))]))]);
+    let r = read_launch_action(&doc, l);
+    assert_eq!(
+        (r.is_link, r.is_launch, r.file.as_deref(), r.file_kind, r.new_window),
+        (true, true, Some("docs/two.pdf"), Some("string"), Some(true))
+    );
+    assert_eq!((r.url, r.has_platform, r.has_next, r.exact, r.settable, r.capped), (false, false, false, true, true, false));
+    let l = link_with(
+        &mut doc,
+        vec![("A", launch_action(vec![("F", string(b"a.pdf")), ("Win", uri_with(vec![("F", string(b"a.exe"))])), ("Next", launch_action(vec![]))]))],
+    );
+    let r = read_launch_action(&doc, l);
+    assert_eq!((r.new_window, r.has_platform, r.has_next), (None, true, true));
+    // Only a /Unix entry, and only a /Mac entry, each with a value that is not null.
+    for key in ["Unix", "Mac", "Win"] {
+        let l = link_with(&mut doc, vec![("A", launch_action(vec![("F", string(b"a.pdf")), (key, string(b"x"))]))]);
+        assert!(read_launch_action(&doc, l).has_platform, "{key}");
+    }
+    // Null platform entries (a null /Win included) and a null /Next are none; a /NewWindow that is not a boolean is none.
+    let l = link_with(
+        &mut doc,
+        vec![(
+            "A",
+            launch_action(vec![
+                ("Win", Object::Null),
+                ("Mac", Object::Null),
+                ("Unix", Object::Null),
+                ("Next", Object::Null),
+                ("NewWindow", Object::Int(1)),
+            ]),
+        )],
+    );
+    let r = read_launch_action(&doc, l);
+    assert_eq!((r.is_launch, r.file_kind, r.file, r.new_window, r.has_platform, r.has_next), (true, None, None, None, false, false));
+    // A file specification dictionary: /UF is preferred to /F; /F alone is read; none is none.
+    let spec = |entries: Vec<(&str, Object)>| uri_with([vec![("Type", Object::name("Filespec"))], entries].concat());
+    let l = link_with(&mut doc, vec![("A", launch_action(vec![("F", spec(vec![("F", string(b"old.pdf")), ("UF", string(b"new.pdf"))]))]))]);
+    let r = read_launch_action(&doc, l);
+    assert_eq!((r.file_kind, r.file.as_deref(), r.url), (Some("dictionary"), Some("new.pdf"), false));
+    let l = link_with(&mut doc, vec![("A", launch_action(vec![("F", spec(vec![("F", string(b"only.pdf"))]))]))]);
+    assert_eq!(read_launch_action(&doc, l).file.as_deref(), Some("only.pdf"));
+    let l = link_with(&mut doc, vec![("A", launch_action(vec![("F", spec(vec![]))]))]);
+    let r = read_launch_action(&doc, l);
+    assert_eq!((r.file_kind, r.file), (Some("dictionary"), None));
+    let l =
+        link_with(&mut doc, vec![("A", launch_action(vec![("F", spec(vec![("FS", Object::name("URL")), ("F", string(b"http://x.test/a.pdf"))]))]))]);
+    let r = read_launch_action(&doc, l);
+    assert_eq!((r.url, r.file.as_deref()), (true, Some("http://x.test/a.pdf")));
+    // /F that is neither: not read.
+    let l = link_with(&mut doc, vec![("A", launch_action(vec![("F", Object::Int(3))]))]);
+    assert_eq!((read_launch_action(&doc, l).file_kind, read_launch_action(&doc, l).file), (None, None));
+    // Everything behind references.
+    let file = doc.add(string(b"far.pdf"));
+    let window = doc.add(Object::Bool(false));
+    let action = doc.add(launch_action(vec![("F", Object::Ref(file)), ("NewWindow", Object::Ref(window))]));
+    let l = link_with(&mut doc, vec![("A", Object::Ref(action))]);
+    let r = read_launch_action(&doc, l);
+    assert_eq!((r.file.as_deref(), r.new_window), (Some("far.pdf"), Some(false)));
+    // A path over the limit is cut, and not whole.
+    let long = "p".repeat(300);
+    let l = link_with(&mut doc, vec![("A", launch_action(vec![("F", string(long.as_bytes()))]))]);
+    let r = read_launch_action(&doc, l);
+    assert_eq!((r.file.as_deref().map(str::len), r.exact), (Some(255), false));
+    // Another kind of action reads its name and no file; /Dest only; nothing; null.
+    let uri = link_with(&mut doc, vec![("A", uri_with(vec![("S", Object::name("URI")), ("F", string(b"a.pdf"))]))]);
+    let r = read_launch_action(&doc, uri);
+    assert_eq!((r.is_launch, r.action.as_deref(), r.file), (false, Some("URI"), None));
+    let none = link_with(&mut doc, vec![("Dest", Object::Array(vec![Object::Int(0)]))]);
+    let r = read_launch_action(&doc, none);
+    assert_eq!((r.has_entry, r.present, r.has_dest, r.settable), (false, false, true, true));
+    let null = link_with(&mut doc, vec![("A", Object::Null), ("Dest", Object::Null)]);
+    let r = read_launch_action(&doc, null);
+    assert!(!r.has_entry && !r.has_dest);
+    // Names that only start like Launch are other actions.
+    for other in ["Launc", "Launchx"] {
+        let l = link_with(&mut doc, vec![("A", uri_with(vec![("S", Object::name(other)), ("F", string(b"a.pdf"))]))]);
+        let r = read_launch_action(&doc, l);
+        assert_eq!((r.is_launch, r.file), (false, None), "{other}");
+    }
+    // A widget, a number and a missing object are not links.
+    let widget = doc.add(uri_with(vec![("Subtype", Object::name("Widget")), ("A", launch_action(vec![("F", string(b"a.pdf"))]))]));
+    let number = doc.add(Object::Int(5));
+    for o in [widget, number, ref_of(9999)] {
+        let r = read_launch_action(&doc, o);
+        assert!(!r.is_link && !r.is_launch && !r.settable && r.file.is_none(), "{o:?}");
+    }
+}
+
+#[test]
+fn a_launch_action_is_set_replaced_removed_and_survives_a_save() {
+    use crate::launch_action::{Change, LaunchTarget, launch_action_change, read_launch_action, set_launch_action};
+    let mut doc = open(fixture());
+    let old = doc.add(uri_with(vec![("S", Object::name("URI")), ("URI", string(b"http://x.test"))]));
+    let link = link_with(&mut doc, vec![("A", Object::Ref(old)), ("Dest", Object::Array(vec![Object::Int(0)]))]);
+    set_catalog_entry(&mut doc, "Probe", Object::Ref(link));
+    let target = LaunchTarget::new("docs/two.pdf", Some(true)).unwrap();
+    assert_eq!(launch_action_change(&doc, link, Some(&target)), Change::Yes);
+    set_launch_action(&mut doc, link, Some(&target)).unwrap();
+    let stored = doc.get(link);
+    let d = stored.as_dict().unwrap();
+    assert!(!d.contains(b"Dest"), "a link with an action has no /Dest");
+    let a = d.get(b"A").and_then(Object::as_dict).expect("a direct action dictionary");
+    assert_eq!((a.name(b"Type"), a.name(b"S")), (Some(b"Action".as_slice()), Some(b"Launch".as_slice())));
+    assert_eq!((a.get(b"F"), a.get(b"NewWindow")), (Some(&string(b"docs/two.pdf")), Some(&Object::Bool(true))));
+    assert!(doc.get(old).as_dict().is_some_and(|o| o.name(b"S") == Some(b"URI".as_slice())), "the old action object is left as it was");
+    assert_eq!(d.name(b"Subtype"), Some(b"Link".as_slice()), "the rest of the link is kept");
+
+    let mut doc = open(write_full(&doc, &SaveOptions::default()).unwrap());
+    let link = doc.get(doc.root().unwrap()).as_dict().and_then(|c| c.reference(b"Probe")).unwrap();
+    let r = read_launch_action(&doc, link);
+    assert_eq!((r.is_launch, r.file.as_deref(), r.new_window, r.has_dest), (true, Some("docs/two.pdf"), Some(true), false));
+
+    // Without /NewWindow none is written; a set drops the old /Next, platform entry and window.
+    doc.update_dict(link, |d| {
+        d.set(
+            b"A".to_vec(),
+            launch_action(vec![
+                ("F", string(b"x.pdf")),
+                ("NewWindow", Object::Bool(true)),
+                ("Win", uri_with(vec![])),
+                ("Next", launch_action(vec![])),
+            ]),
+        );
+    })
+    .unwrap();
+    let plain = LaunchTarget::new("one.pdf", None).unwrap();
+    set_launch_action(&mut doc, link, Some(&plain)).unwrap();
+    let r = read_launch_action(&doc, link);
+    assert_eq!((r.file.as_deref(), r.new_window, r.has_next, r.has_platform), (Some("one.pdf"), None, false, false));
+    assert!(!doc.get(link).as_dict().and_then(|d| d.get(b"A").and_then(Object::as_dict).map(|a| a.contains(b"NewWindow"))).unwrap());
+
+    // A removal takes `/A` out of a launch action, and writes nothing twice.
+    assert_eq!(launch_action_change(&doc, link, None), Change::Yes);
+    set_launch_action(&mut doc, link, None).unwrap();
+    assert!(!doc.get(link).as_dict().unwrap().contains(b"A"));
+    assert_eq!(doc.get(link).as_dict().unwrap().name(b"Subtype"), Some(b"Link".as_slice()));
+    assert_eq!(launch_action_change(&doc, link, None), Change::NoChange);
+    let options = || SaveOptions { mod_date: Some("D:20240101000000Z".into()), ..SaveOptions::default() };
+    let before = write_full(&doc, &options()).unwrap();
+    set_launch_action(&mut doc, link, None).unwrap();
+    assert_eq!(write_full(&doc, &options()).unwrap(), before);
+
+    // A launch of anything is removed, including a program; another kind of action is left alone.
+    let odd = link_with(&mut doc, vec![("A", launch_action(vec![("F", string(b"run.exe"))]))]);
+    assert_eq!(launch_action_change(&doc, odd, None), Change::Yes);
+    set_launch_action(&mut doc, odd, None).unwrap();
+    assert!(!read_launch_action(&doc, odd).has_entry);
+    let uri = link_with(&mut doc, vec![("A", uri_with(vec![("S", Object::name("URI"))]))]);
+    assert_eq!(launch_action_change(&doc, uri, None), Change::NoChange);
+    set_launch_action(&mut doc, uri, None).unwrap();
+    assert_eq!(read_launch_action(&doc, uri).action.as_deref(), Some("URI"));
+}
+
+#[test]
+fn a_launch_target_is_a_relative_path_to_a_pdf_file_and_nothing_else() {
+    use crate::launch_action::LaunchTarget;
+    for good in ["a.pdf", "docs/two.PDF", "a b/c.pdf", "a..b/c.pdf", "x.y.pdf", "a_b-c/d-e.pdf", "A1/B2.pdf", &format!("{}.pdf", "p".repeat(251))] {
+        assert!(LaunchTarget::new(good, None).is_ok(), "{good:?}");
+    }
+    let too_long = format!("{}.pdf", "p".repeat(252));
+    for bad in [
+        "",
+        ".pdf",
+        "a.txt",
+        "run.exe",
+        "a.pdf.exe",
+        "/etc/a.pdf",
+        "C:/a.pdf",
+        "C:a.pdf",
+        "http://x.test/a.pdf",
+        "file:a.pdf",
+        "..\\a.pdf",
+        "dir\\a.pdf",
+        "../a.pdf",
+        "a/../b.pdf",
+        "a/..",
+        " a.pdf",
+        "a.pdf ",
+        "a/",
+        "./a.pdf",
+        "a//b.pdf",
+        "a/ /b.pdf",
+        "a/.../b.pdf",
+        "-x.pdf",
+        "a/-x.pdf",
+        "a`b`.pdf",
+        "$(x).pdf",
+        "a;b.pdf",
+        "a|b.pdf",
+        "a&b.pdf",
+        "a'b.pdf",
+        "a\"b.pdf",
+        "a*.pdf",
+        "a?.pdf",
+        "<a>.pdf",
+        "a%20b.pdf",
+        "~/a.pdf",
+        "a\u{e9}.pdf",
+        "a\n.pdf",
+        "a\0.pdf",
+        &too_long,
+    ] {
+        assert!(LaunchTarget::new(bad, None).is_err(), "{bad:?}");
+    }
+    let t = LaunchTarget::new("a.pdf", Some(false)).unwrap();
+    assert_eq!((t.file(), t.new_window()), ("a.pdf", Some(false)));
+}
+
+#[test]
+fn a_launch_action_is_refused_on_what_is_not_a_link() {
+    use crate::launch_action::{Change, LaunchTarget, launch_action_change, read_launch_action, set_launch_action};
+    let mut doc = open(fixture());
+    let target = LaunchTarget::new("a.pdf", None).unwrap();
+    let widget = doc.add(uri_with(vec![("Subtype", Object::name("Widget"))]));
+    let number = doc.add(Object::Int(5));
+    // The catalog (1), the /Pages node (2), an inner node (3), a page (4), a widget, a number and
+    // an object that does not exist.
+    let objects = [doc.root().unwrap(), ref_of(2), ref_of(3), ref_of(4), widget, number, ref_of(9999)];
+    let options = || SaveOptions { mod_date: Some("D:20240101000000Z".into()), ..SaveOptions::default() };
+    for o in objects {
+        assert!(!read_launch_action(&doc, o).settable, "{o:?}");
+        assert!(matches!(launch_action_change(&doc, o, Some(&target)), Change::Refused(_)), "{o:?}");
+        assert!(matches!(launch_action_change(&doc, o, None), Change::Refused(_)), "{o:?} a removal too");
+        let before = write_full(&doc, &options()).unwrap();
+        assert!(set_launch_action(&mut doc, o, Some(&target)).is_err() && set_launch_action(&mut doc, o, None).is_err(), "{o:?}");
+        assert_eq!(write_full(&doc, &options()).unwrap(), before, "{o:?} is left as it was");
+    }
+    // A page that is also marked as a link is still a page.
+    doc.update_dict(ref_of(4), |d| d.set(b"Subtype".to_vec(), Object::name("Link"))).unwrap();
+    assert!(read_launch_action(&doc, ref_of(4)).is_link && !read_launch_action(&doc, ref_of(4)).settable);
+    assert!(matches!(launch_action_change(&doc, ref_of(4), Some(&target)), Change::Refused(why) if why.contains("page")));
+}
+
+#[test]
+fn every_read_a_launch_action_makes_is_paid_for_before_it_is_made() {
+    use crate::launch_action::{Change, LaunchTarget, change_with, read_with};
+    let mut doc = open(fixture());
+    // Direct action, window and file: the link is the only read.
+    let direct = link_with(&mut doc, vec![("A", launch_action(vec![("F", string(b"a.pdf")), ("NewWindow", Object::Bool(true))]))]);
+    let r = read_with(&doc, direct, 1);
+    assert!(!r.capped && r.file.as_deref() == Some("a.pdf") && r.new_window == Some(true) && r.settable);
+    let r = read_with(&doc, direct, 0);
+    assert!(r.capped && !r.is_link && !r.settable, "not even the link was paid for");
+    // The action behind a reference costs one more; a window and a file behind references one each.
+    let file = doc.add(string(b"a.pdf"));
+    let window = doc.add(Object::Bool(true));
+    let action = doc.add(launch_action(vec![("NewWindow", Object::Ref(window)), ("F", Object::Ref(file))]));
+    let behind = link_with(&mut doc, vec![("A", Object::Ref(action))]);
+    let r = read_with(&doc, behind, 4);
+    assert!(!r.capped && r.file.as_deref() == Some("a.pdf") && r.new_window == Some(true));
+    let r = read_with(&doc, behind, 3);
+    assert!(r.capped && r.new_window == Some(true) && r.file.is_none() && !r.settable, "the file was not paid for");
+    let r = read_with(&doc, behind, 2);
+    assert!(r.capped && r.is_launch && r.new_window.is_none(), "the window was not paid for");
+    let r = read_with(&doc, behind, 1);
+    assert!(r.capped && r.has_entry && !r.present && !r.settable, "the action was not paid for");
+
+    // A file specification dictionary costs its /UF and its /FS, each behind a reference (the /F
+    // is not read when there is a /UF).
+    let (uf, f, fs) = (doc.add(string(b"u.pdf")), doc.add(string(b"f.pdf")), doc.add(Object::name("URL")));
+    let spec = uri_with(vec![("UF", Object::Ref(uf)), ("F", Object::Ref(f)), ("FS", Object::Ref(fs))]);
+    let dict = link_with(&mut doc, vec![("A", launch_action(vec![("F", spec)]))]);
+    let r = read_with(&doc, dict, 1 + 2);
+    assert!(!r.capped && r.file.as_deref() == Some("u.pdf") && r.url);
+    let r = read_with(&doc, dict, 1 + 1);
+    assert!(r.capped && r.file.as_deref() == Some("u.pdf") && !r.url, "the /FS was not paid for");
+    let r = read_with(&doc, dict, 1);
+    assert!(r.capped && r.file_kind == Some("dictionary") && r.file.is_none(), "the /UF was not paid for");
+    // With no /UF, the /F is the one read (and paid for after the missing /UF costs nothing).
+    let nouf = uri_with(vec![("F", Object::Ref(f))]);
+    let dict = link_with(&mut doc, vec![("A", launch_action(vec![("F", nouf)]))]);
+    assert_eq!(read_with(&doc, dict, 1 + 1).file.as_deref(), Some("f.pdf"));
+    assert!(read_with(&doc, dict, 1).capped);
+
+    // A chain of 32 reference objects is followed, as `Document::resolve` follows it, and is paid
+    // for with 33 reads after the link's own; a chain of 33 is not followed.
+    for (hops, followed) in [(32usize, true), (33, false)] {
+        let mut at = doc.add(launch_action(vec![("F", string(b"a.pdf"))]));
+        for _ in 0..hops {
+            at = doc.add(Object::Ref(at));
+        }
+        let chained = link_with(&mut doc, vec![("A", Object::Ref(at))]);
+        let entry = doc.get(chained).as_dict().and_then(|d| d.get(b"A").cloned()).unwrap();
+        assert_eq!(doc.resolve(&entry).as_dict().is_some(), followed);
+        let r = read_with(&doc, chained, 1 + 33);
+        assert_eq!((r.is_launch, r.capped), (followed, false), "{hops}");
+        assert!(read_with(&doc, chained, 1 + 32).capped, "{hops}");
+    }
+    // The same for the file.
+    let mut at = doc.add(string(b"a.pdf"));
+    for _ in 0..32 {
+        at = doc.add(Object::Ref(at));
+    }
+    let chained = link_with(&mut doc, vec![("A", launch_action(vec![("F", Object::Ref(at))]))]);
+    assert_eq!(read_with(&doc, chained, 1 + 33).file.as_deref(), Some("a.pdf"));
+    assert!(read_with(&doc, chained, 1 + 32).capped);
+
+    // A change check uses the same allowance: it is refused when the link cannot be read, and a
+    // removal and a set need nothing more than that read.
+    let target = LaunchTarget::new("b.pdf", None).unwrap();
+    let plain = link_with(&mut doc, vec![("A", launch_action(vec![]))]);
+    assert_eq!(change_with(&doc, plain, Some(&target), 1), Change::Yes);
+    assert_eq!(change_with(&doc, plain, None, 1), Change::Yes);
+    assert!(matches!(change_with(&doc, plain, Some(&target), 0), Change::Refused(why) if why.contains("allowance")));
+    assert!(matches!(change_with(&doc, behind, None, 2), Change::Refused(why) if why.contains("allowance")));
+}
