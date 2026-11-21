@@ -98,6 +98,7 @@ pub use pdfcraft_organize::{
 
 pub use pdfcraft_organize::LabelStyle;
 pub use pdfcraft_organize::Standard;
+pub use pdfcraft_organize::articles::{MAX_BEADS_WALKED, MAX_LISTED_THREADS, MAX_TITLE_CHARS};
 pub use pdfcraft_organize::base_url::{MAX_BASE_URL_BYTES, check_base_url};
 pub use pdfcraft_organize::check_custom_key;
 pub use pdfcraft_organize::class_map::{MAX_CLASS_NAME_BYTES, MAX_LISTED_CLASSES, MAX_LISTED_OWNERS};

@@ -396,6 +396,8 @@ pub enum Edit {
         role: String,
         maps_to: Option<String>,
     },
+    /// Article threads (the catalog's `/Threads`): take the entry at this position away.
+    RemoveArticleThread(usize),
     /// Structure tree class map (`/StructTreeRoot` `/ClassMap`): take the entry named `class`
     /// away.
     RemoveClassMapEntry(String),

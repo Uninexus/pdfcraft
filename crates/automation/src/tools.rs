@@ -1977,6 +1977,13 @@ pub fn tools() -> Vec<ToolDef> {
             }),
             &["doc"],
         )),
+        t("article_threads", "Article threads", "Read the document's article threads (the catalog's /Threads array, ISO 32000-2 12.4.3), and take one away by its position. Leave `remove` out to only read. Returns `article_threads`: count (every entry), truncated (more than 256 entries, so only the first 256 are listed), threads (index, the position from 0 that `remove` takes; title, the /Title string of the thread's /I dictionary cut at 127 characters, null when there is none; title_exact, false when it was cut; beads, how many beads are reached from the thread's /F along /N, at most 4096, 0 when /F is not a reference to a dictionary or the entry is not a dictionary; beads_capped, true when the walk stopped at 4096; closed, true when the last bead's /N leads back to /F) and unreadable (`threads` when /Threads is there but is neither an array nor null, or is behind more than 33 references; then nothing is listed and nothing is written). A bead's page and rectangle are not read. With `remove` the result also has `removed`: true when there was an entry at that position and it is gone, false when there was none or /Threads is absent or unreadable, which changes nothing, writes nothing and adds no undo step. A removal takes the entry out of /Threads only and keeps the other entries in order, and an emptied /Threads goes (an indirect one is taken out of the catalog and its object is left in the file). The thread's dictionary, its beads and the /B arrays of the pages that list the beads are not changed, and an array that is also used by another object is changed for that object too. This tool does not add a thread or a bead or change a title. Needs permission to modify the document. One undo step.").with(schema(
+            json!({
+                "doc": doc(),
+                "remove": { "type": "integer", "minimum": 0 },
+            }),
+            &["doc"],
+        )),
         t("doc_audit_space", "Audit space usage", "How many bytes each kind of content takes and its share of the file (PDF Optimizer ▸ Audit space usage): images, content streams, fonts, forms, comments, structure, bookmarks, … and document overhead.")
             .ro()
             .cmd("optimize.advanced")

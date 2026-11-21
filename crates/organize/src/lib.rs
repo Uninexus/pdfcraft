@@ -13,6 +13,7 @@
 
 use pdfcraft_cos::{Dict, Document, ObjRef, Object, PdfString, XrefEntry};
 
+pub mod articles;
 mod associated;
 mod attachments;
 pub mod base_url;

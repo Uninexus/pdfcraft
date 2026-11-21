@@ -650,6 +650,17 @@ impl Document {
         self.editor.as_ref().is_some_and(|e| pdfcraft_organize::class_map::class_map_removes(&e.cos, class))
     }
 
+    /// The article threads (the catalog's `/Threads`) as stored, from one read.
+    pub fn article_threads(&self) -> pdfcraft_organize::articles::Threads {
+        self.editor.as_ref().map(|e| pdfcraft_organize::articles::read_article_threads(&e.cos)).unwrap_or_default()
+    }
+
+    /// Whether taking the article thread at `index` away would change `/Threads`: whether there
+    /// is a readable `/Threads` array with an entry there.
+    pub fn article_thread_removes(&self, index: usize) -> bool {
+        self.editor.as_ref().is_some_and(|e| pdfcraft_organize::articles::article_thread_removes(&e.cos, index))
+    }
+
     /// Signed: at least one signature field holds a signature.
     pub fn is_signed(&self) -> bool {
         self.signatures.iter().any(|s| s.signed)
