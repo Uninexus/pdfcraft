@@ -48,6 +48,7 @@ mod rect_arguments;
 mod redact_after_stray_q_form;
 mod redact_keep;
 mod redact_text_after_q;
+mod reference_xobjects;
 mod render_warnings;
 mod role_map;
 mod save_flatten_failure;

@@ -31,7 +31,7 @@ are borrowed; PDF 2.0 additions and most subset standards are missing. **150–2
 | §7.9.2 | Text strings incl. PDF 2.0 UTF-8 | full | PDFDocEncoding and UTF-16; UTF-8 none | `core.pdf20-utf8-strings` planned |
 | §7.11 | File specifications, embedded files | full | read and save attachments; no add/delete/describe | `organize.attachments-*` planned |
 | §7.12 | Extensions dictionary | yes | preserved | |
-| §8 | Graphics: paths, colour spaces, patterns, shadings, images, XObjects | full | **borrowed** renderer; own content parser and serializer (`crates/content`) for editing and redaction | rendering P0s partial |
+| §8 | Graphics: paths, colour spaces, patterns, shadings, images, XObjects | full | **borrowed** renderer; own content parser and serializer (`crates/content`) for editing and redaction | rendering P0s partial; `optimize.pdfx5-reference-xobjects` partial (headless: lists reference XObjects and removes a `/Ref`; no target page is drawn) |
 | §8.6 | ICC-based colour, output intents, colour management | full | ICC preserved; sRGB output intent for PDF/A; no colour management settings or soft proofing | `print.color-management` planned |
 | §9 | Text and fonts: Type 1, TrueType, OpenType/CFF, Type 3, CID-keyed, CMaps, ToUnicode | full | **borrowed** rendering; own text extraction (word-F1 0.98); standard-14 metrics for generated appearances; embedded fonts reused for editing, else Helvetica | `view.render-type3`, `view.render-cid-fonts` partial; no own font engine; no font embedding/subsetting for arbitrary new text beyond craft-fonts Japanese |
 | §10 | Rendering: transfer functions, halftones, overprint, smoothness | full | borrowed; no overprint preview | `print.overprint-preview` planned |

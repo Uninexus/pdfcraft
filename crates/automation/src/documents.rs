@@ -807,6 +807,53 @@ impl Automation {
         Ok(out)
     }
 
+    /// The reference XObjects (forms with a `/Ref`): read, and take the `/Ref` away from the one
+    /// at position `remove` when it is given.
+    pub(crate) fn reference_xobjects(&mut self, a: &Args) -> Result<Value> {
+        let remove = match a.opt_int("remove")? {
+            Some(i) => Some(usize::try_from(i).map_err(|_| ToolError::InvalidArgs("remove must be 0 or more".into()))?),
+            None => None,
+        };
+        use pdfcraft_organize::reference_xobjects::Removal;
+        let removal = match remove {
+            Some(index) => Some((index, self.doc(a)?.reference_xobject_removal(index))),
+            None => None,
+        };
+        let mut out = match removal {
+            Some((index, Removal::Yes)) => {
+                let mut out = self.apply(a, Edit::RemoveReferenceXObject(index))?;
+                out["removed"] = json!(true);
+                out
+            }
+            Some((_, Removal::Refused)) => {
+                return Err(ToolError::InvalidArgs(
+                    "that form is the catalog or a node of the page tree, which this tool does not change (see removable)".into(),
+                ));
+            }
+            Some((_, Removal::NoEntry)) => json!({ "removed": false }),
+            None => json!({}),
+        };
+        let read = self.doc(a)?.reference_xobjects();
+        let items: Vec<Value> = read
+            .items
+            .iter()
+            .map(|r| {
+                json!({
+                    "index": r.index,
+                    "object": format!("{} {}", r.object.num, r.object.generation),
+                    "file": r.file,
+                    "page_index": r.page_index,
+                    "page_label": r.page_label,
+                    "has_id": r.has_id,
+                    "removable": r.removable,
+                    "exact": r.exact,
+                })
+            })
+            .collect();
+        out["reference_xobjects"] = json!({ "count": read.count, "truncated": read.truncated, "capped": read.capped, "items": items });
+        Ok(out)
+    }
+
     pub(crate) fn doc_optimize(&mut self, a: &Args) -> Result<Value> {
         use pdfcraft_engine::optimize::{Compatibility, Compression, ImageSettings, MonoCompression, Preset};
         const MONO_KEYS: [&str; 4] = ["downsample", "ppi", "above_ppi", "compression"];

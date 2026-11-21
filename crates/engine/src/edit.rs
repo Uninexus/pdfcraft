@@ -398,6 +398,8 @@ pub enum Edit {
     },
     /// Article threads (the catalog's `/Threads`): take the entry at this position away.
     RemoveArticleThread(usize),
+    /// Reference XObjects: take the `/Ref` away from the one listed at this position.
+    RemoveReferenceXObject(usize),
     /// Named destinations (the `/Dests` name tree and the catalog's `/Dests` dictionary): take the
     /// name at this position of the listing away.
     RemoveNamedDestination(usize),

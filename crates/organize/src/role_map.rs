@@ -110,11 +110,12 @@ pub(crate) fn locate(doc: &Document, entry: Option<&Object>, streams: bool) -> W
     Where::Other
 }
 
-/// Most nodes [`reaches_page_tree_node`] lets the walk visit.
+/// Most nodes [`reaches_page_tree_node`] lets the walk visit (also the limit of the walk in
+/// `reference_xobjects`).
 pub(crate) const MAX_PAGE_TREE_NODES: usize = 1_000_000;
 /// Most `/Kids` entries [`reaches_page_tree_node`] lets the walk scan in all (a shared `/Kids`
 /// array is scanned once for each node that lists it, so this bounds time as the node cap bounds
-/// memory).
+/// memory; also the limit of the walk in `reference_xobjects`).
 pub(crate) const MAX_KIDS_SCANNED: usize = 2_000_000;
 
 /// Whether `target` is the `/Pages` node or a node under it (an inner `/Pages` node or a page),

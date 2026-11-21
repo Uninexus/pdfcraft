@@ -8419,3 +8419,425 @@ fn a_structural_dictionary_is_never_read_as_the_destinations_or_written() {
     set_catalog_entry(&mut doc, "Dests", Object::Ref(ordinary));
     assert_eq!(names_of(&doc), ["a"]);
 }
+
+/// A form XObject stream with `/Subtype /Form`, the extra entries given and, when there is one,
+/// `/Ref`.
+fn ref_form(doc: &mut Document, entries: Vec<(&str, Object)>, reference: Option<Object>) -> pdfcraft_cos::ObjRef {
+    let mut d = pdfcraft_cos::Dict::new();
+    d.set(b"Subtype".to_vec(), Object::name("Form"));
+    d.set(b"BBox".to_vec(), Object::Array(vec![Object::Int(0), Object::Int(0), Object::Int(10), Object::Int(10)]));
+    for (k, v) in entries {
+        d.set(k.as_bytes().to_vec(), v);
+    }
+    if let Some(r) = reference {
+        d.set(b"Ref".to_vec(), r);
+    }
+    doc.add(Object::Stream(pdfcraft_cos::Stream::flate(d, b"0 0 5 5 re f")))
+}
+
+fn ref_to(file: Object, page: Option<Object>, id: Option<Object>) -> Object {
+    let mut e = vec![("F", file)];
+    if let Some(p) = page {
+        e.push(("Page", p));
+    }
+    if let Some(i) = id {
+        e.push(("ID", i));
+    }
+    uri_with(e)
+}
+
+/// (index, file, page index, page label, has /ID, exact) of each reference XObject listed.
+type Listed = (usize, Option<String>, Option<i64>, Option<String>, bool, bool);
+
+fn listed(doc: &Document) -> Vec<Listed> {
+    crate::reference_xobjects::read_reference_xobjects(doc)
+        .items
+        .iter()
+        .map(|r| (r.index, r.file.clone(), r.page_index, r.page_label.clone(), r.has_id, r.exact))
+        .collect()
+}
+
+/// Hang every object added after the fixture's eleven from the catalog, so that a full save keeps
+/// it (the writer keeps what the trailer reaches: `/Root`, `/Info` and the other trailer entries).
+fn keep_added(doc: &mut Document) {
+    let last = doc.object_numbers().last().copied().unwrap_or(11);
+    let all = (12..=last).map(|n| Object::Ref(pdfcraft_cos::ObjRef::new(n, 0))).collect();
+    set_catalog_entry(doc, "Kept", Object::Array(all));
+}
+
+fn has_ref(doc: &Document, r: pdfcraft_cos::ObjRef) -> bool {
+    doc.get(r).as_dict().is_some_and(|d| d.contains(b"Ref"))
+}
+
+#[test]
+fn reference_xobjects_are_listed_with_their_file_page_and_id() {
+    use crate::reference_xobjects::read_reference_xobjects;
+    let none = read_reference_xobjects(&open(fixture()));
+    assert!(none.items.is_empty() && none.count == 0 && !none.truncated && !none.capped);
+
+    let mut doc = open(fixture());
+    let id = Object::Array(vec![string(b"a"), string(b"b")]);
+    ref_form(&mut doc, vec![], Some(ref_to(string(b"a.pdf"), Some(Object::Int(2)), Some(id))));
+    // A file specification dictionary: /UF wins over /F, and is a UTF-16 string here; the
+    // reference dictionary, the specification and the page are each behind a reference.
+    let spec = doc.add(uri_with(vec![("UF", string(&[0xFE, 0xFF, 0x00, 0xE9, 0x00, 0x41])), ("F", string(b"plain.pdf"))]));
+    let page = doc.add(string(b"iv"));
+    let b_ref = doc.add(ref_to(Object::Ref(spec), Some(Object::Ref(page)), Some(Object::Array(vec![string(b"only")]))));
+    ref_form(&mut doc, vec![], Some(Object::Ref(b_ref)));
+    // /UF that is not a string leaves /F.
+    let spec = doc.add(uri_with(vec![("UF", Object::Int(1)), ("F", string(b"fallback.pdf"))]));
+    ref_form(&mut doc, vec![], Some(ref_to(Object::Ref(spec), None, Some(Object::Array(vec![string(b"x"), Object::Int(1)])))));
+    // /ID behind a reference counts when it holds two direct strings, and not when its two items
+    // are references to strings.
+    let id_ok = doc.add(Object::Array(vec![string(b"a"), string(b"b")]));
+    ref_form(&mut doc, vec![], Some(ref_to(string(b"id1.pdf"), None, Some(Object::Ref(id_ok)))));
+    let s1 = doc.add(string(b"a"));
+    ref_form(&mut doc, vec![], Some(ref_to(string(b"id2.pdf"), None, Some(Object::Array(vec![Object::Ref(s1), Object::Ref(s1)])))));
+    // Not reference XObjects: no /Ref, a /Ref that is not a dictionary, a stream that is not a
+    // form, a /Subtype that is behind a reference, and a dictionary (not a stream).
+    ref_form(&mut doc, vec![], None);
+    ref_form(&mut doc, vec![], Some(Object::Int(3)));
+    ref_form(&mut doc, vec![], Some(Object::Ref(pdfcraft_cos::ObjRef::new(900, 0))));
+    let mut image = pdfcraft_cos::Dict::new();
+    image.set(b"Subtype".to_vec(), Object::name("Image"));
+    image.set(b"Ref".to_vec(), ref_to(string(b"i.pdf"), None, None));
+    doc.add(Object::Stream(pdfcraft_cos::Stream::flate(image, b"x")));
+    let form_name = doc.add(Object::name("Form"));
+    let mut behind = pdfcraft_cos::Dict::new();
+    behind.set(b"Subtype".to_vec(), Object::Ref(form_name));
+    behind.set(b"Ref".to_vec(), ref_to(string(b"b.pdf"), None, None));
+    doc.add(Object::Stream(pdfcraft_cos::Stream::flate(behind, b"x")));
+    doc.add(uri_with(vec![("Subtype", Object::name("Form")), ("Ref", ref_to(string(b"d.pdf"), None, None))]));
+    // A /Ref with nothing in it, and one whose /F and /Page are neither a string nor an integer.
+    ref_form(&mut doc, vec![], Some(uri_with(vec![])));
+    ref_form(&mut doc, vec![], Some(uri_with(vec![("F", Object::Int(5)), ("Page", Object::Real(1.5))])));
+
+    keep_added(&mut doc);
+    let doc = open(write_full(&doc, &SaveOptions::default()).unwrap());
+    let r = read_reference_xobjects(&doc);
+    assert!(r.count == 7 && !r.truncated && !r.capped, "{r:?}");
+    // The save numbers the objects again, but in the order they were added.
+    assert!(r.items.windows(2).all(|w| w[0].object.num < w[1].object.num));
+    assert_eq!(
+        listed(&doc),
+        [
+            (0, Some("a.pdf".to_string()), Some(2), None, true, true),
+            (1, Some("\u{e9}A".to_string()), None, Some("iv".to_string()), false, true),
+            (2, Some("fallback.pdf".to_string()), None, None, false, true),
+            (3, Some("id1.pdf".to_string()), None, None, true, true),
+            (4, Some("id2.pdf".to_string()), None, None, false, true),
+            (5, None, None, None, false, true),
+            (6, None, None, None, false, true),
+        ]
+    );
+    // Reading changes nothing.
+    let before = write_full(&doc, &SaveOptions::default()).unwrap();
+    let _ = read_reference_xobjects(&doc);
+    assert_eq!(write_full(&doc, &SaveOptions::default()).unwrap(), before);
+}
+
+/// The form the fixture-made test marked with `/Marker n`.
+fn marked(doc: &Document, n: i64) -> pdfcraft_cos::ObjRef {
+    doc.object_numbers()
+        .into_iter()
+        .map(|num| pdfcraft_cos::ObjRef::new(num, doc.generation(num)))
+        .find(|r| doc.get(*r).as_dict().and_then(|d| d.get(b"Marker")) == Some(&Object::Int(n)))
+        .expect("marked form")
+}
+
+fn removes(doc: &Document, index: usize) -> bool {
+    crate::reference_xobjects::reference_xobject_removal(doc, index) == crate::reference_xobjects::Removal::Yes
+}
+
+fn files(doc: &Document) -> Vec<String> {
+    crate::reference_xobjects::read_reference_xobjects(doc).items.into_iter().filter_map(|r| r.file).collect()
+}
+
+#[test]
+fn removing_a_reference_xobject_takes_only_its_ref_and_keeps_the_others_in_order() {
+    use crate::reference_xobjects::remove_reference_xobject;
+    let mut doc = open(fixture());
+    let target = doc.add(ref_to(string(b"B.pdf"), Some(Object::Int(1)), None));
+    ref_form(&mut doc, vec![("Marker", Object::Int(1))], Some(ref_to(string(b"A.pdf"), None, None)));
+    ref_form(&mut doc, vec![("Marker", Object::Int(2))], Some(Object::Ref(target)));
+    ref_form(&mut doc, vec![("Marker", Object::Int(3))], Some(ref_to(string(b"C.pdf"), None, None)));
+    keep_added(&mut doc);
+    let mut doc = open(write_full(&doc, &SaveOptions::default()).unwrap());
+    assert_eq!(files(&doc), ["A.pdf", "B.pdf", "C.pdf"]);
+
+    // A position with nothing listed is not offered and changes no byte.
+    let before = write_full(&doc, &SaveOptions::default()).unwrap();
+    for index in [3, 256, usize::MAX] {
+        assert!(!removes(&doc, index));
+        remove_reference_xobject(&mut doc, index).unwrap();
+    }
+    assert_eq!(write_full(&doc, &SaveOptions::default()).unwrap(), before);
+
+    // The middle one: only its /Ref goes; its content, its other entries and the dictionary the
+    // /Ref pointed at stay, and the others keep their order and their positions.
+    let b = marked(&doc, 2);
+    let (content, bbox, old_ref) = {
+        let o = doc.get(b);
+        let Object::Stream(s) = &*o else { panic!("a stream") };
+        (s.decoded().unwrap(), s.dict.get(b"BBox").cloned(), s.dict.get(b"Ref").and_then(Object::as_ref).expect("indirect /Ref"))
+    };
+    assert!(removes(&doc, 1));
+    remove_reference_xobject(&mut doc, 1).unwrap();
+    assert_eq!(files(&doc), ["A.pdf", "C.pdf"]);
+    assert!(!has_ref(&doc, b) && doc.get(old_ref).as_dict().is_some());
+    {
+        let o = doc.get(b);
+        let Object::Stream(s) = &*o else { panic!("a stream") };
+        assert_eq!(s.decoded().unwrap(), content);
+        assert_eq!(s.dict.get(b"BBox").cloned(), bbox);
+        assert_eq!(s.dict.name(b"Subtype"), Some(&b"Form"[..]));
+    }
+    // It is gone in the incremental and in the full save too.
+    for bytes in [write_incremental(&doc, &SaveOptions::default()).unwrap(), write_full(&doc, &SaveOptions::default()).unwrap()] {
+        let saved = open(bytes);
+        assert_eq!(files(&saved), ["A.pdf", "C.pdf"]);
+        assert!(!has_ref(&saved, marked(&saved, 2)));
+    }
+    // The position now holds the next one; the first goes by position 0, and the last by 0 again.
+    assert!(!removes(&doc, 2));
+    remove_reference_xobject(&mut doc, 0).unwrap();
+    assert!(!has_ref(&doc, marked(&doc, 1)) && has_ref(&doc, marked(&doc, 3)));
+    remove_reference_xobject(&mut doc, 0).unwrap();
+    assert!(crate::reference_xobjects::read_reference_xobjects(&doc).items.is_empty());
+}
+
+#[test]
+fn a_reference_xobject_that_is_the_catalog_or_a_page_tree_node_keeps_its_ref() {
+    use crate::reference_xobjects::{Removal, read_reference_xobjects, reference_xobject_removal, remove_reference_xobject};
+    // The catalog (1), the /Pages node (2), an inner /Pages node (3) and a page (4) of the
+    // fixture, each made a form XObject with a /Ref in turn.
+    for num in 1..=4u32 {
+        let mut doc = open(fixture());
+        let at = pdfcraft_cos::ObjRef::new(num, 0);
+        let mut d = doc.get(at).as_dict().cloned().unwrap();
+        d.set(b"Subtype".to_vec(), Object::name("Form"));
+        d.set(b"Ref".to_vec(), ref_to(string(b"x.pdf"), None, None));
+        doc.set_existing(at, Object::Stream(pdfcraft_cos::Stream::flate(d, b"q Q"))).unwrap();
+        // An ordinary reference XObject after it.
+        ref_form(&mut doc, vec![], Some(ref_to(string(b"y.pdf"), None, None)));
+        let found = read_reference_xobjects(&doc);
+        assert!(found.count == 2 && found.items[0].object == at, "object {num}: {found:?}");
+        let before = format!("{:?}", doc.get(at));
+        assert_eq!(reference_xobject_removal(&doc, 0), Removal::Refused, "object {num}");
+        assert!(!found.items[0].removable && found.items[1].removable, "object {num}");
+        remove_reference_xobject(&mut doc, 0).unwrap();
+        assert_eq!(format!("{:?}", doc.get(at)), before, "object {num}");
+        // The other one is still removed, so it is the guard that refused.
+        assert_eq!(reference_xobject_removal(&doc, 1), Removal::Yes, "object {num}");
+        remove_reference_xobject(&mut doc, 1).unwrap();
+        assert_eq!(files(&doc), ["x.pdf"], "object {num}");
+    }
+}
+
+#[test]
+fn a_reference_xobject_that_is_a_page_tree_node_is_found_by_its_number_whatever_generation_the_kids_entry_names() {
+    use crate::reference_xobjects::{Removal, read_reference_xobjects, reference_xobject_removal};
+    let mut doc = open(fixture());
+    let page = pdfcraft_cos::ObjRef::new(4, 0);
+    let mut d = doc.get(page).as_dict().cloned().unwrap();
+    d.set(b"Subtype".to_vec(), Object::name("Form"));
+    d.set(b"Ref".to_vec(), ref_to(string(b"x.pdf"), None, None));
+    doc.set_existing(page, Object::Stream(pdfcraft_cos::Stream::flate(d, b"q Q"))).unwrap();
+    // The inner /Pages node names the page with another generation, in an array behind a
+    // reference.
+    let kids = doc.add(Object::Array(vec![Object::Ref(pdfcraft_cos::ObjRef::new(4, 7)), Object::Ref(pdfcraft_cos::ObjRef::new(5, 0))]));
+    doc.update_dict(pdfcraft_cos::ObjRef::new(3, 0), |n| n.set(b"Kids".to_vec(), Object::Ref(kids))).unwrap();
+    assert_eq!(reference_xobject_removal(&doc, 0), Removal::Refused);
+    assert!(!read_reference_xobjects(&doc).items[0].removable);
+
+    // The walk is cut short, and says so, when an allowance is spent.
+    let whole = crate::reference_xobjects::structural_with(&doc, 1000, 1000, 1000);
+    assert!(!whole.1 && [1, 2, 3, 4, 5, 6].iter().all(|n| whole.0.contains(n)));
+    // Reads: the /Pages node, the page 6, node 3, its /Kids (behind a reference) and the pages 5
+    // and 4: six in all.
+    assert!(!crate::reference_xobjects::structural_with(&doc, 6, 1000, 1000).1);
+    assert!(crate::reference_xobjects::structural_with(&doc, 5, 1000, 1000).1);
+    // ... and with three, the /Kids behind the reference (the fourth read) cannot be read.
+    assert!(crate::reference_xobjects::structural_with(&doc, 3, 1000, 1000).1);
+    // Nodes counted: the /Pages node and four under it.
+    assert!(!crate::reference_xobjects::structural_with(&doc, 1000, 5, 1000).1);
+    assert!(crate::reference_xobjects::structural_with(&doc, 1000, 4, 1000).1);
+    // Entries: two in the /Pages node's /Kids and two in node 3's.
+    assert!(!crate::reference_xobjects::structural_with(&doc, 1000, 1000, 4).1);
+    assert!(crate::reference_xobjects::structural_with(&doc, 1000, 1000, 3).1);
+}
+
+/// `count` forms, each marked `/Marker` from 0, with a direct `/Ref`.
+fn many_forms(count: usize) -> Document {
+    let mut doc = open(fixture());
+    for i in 0..count {
+        ref_form(&mut doc, vec![("Marker", Object::Int(i as i64))], Some(ref_to(string(format!("{i}.pdf").as_bytes()), None, None)));
+    }
+    doc
+}
+
+#[test]
+fn the_reference_xobject_listing_is_bounded_and_counts_what_it_does_not_list() {
+    use crate::reference_xobjects::{MAX_LISTED, read_reference_xobjects, remove_reference_xobject};
+    let exact = read_reference_xobjects(&many_forms(MAX_LISTED));
+    assert!(exact.items.len() == MAX_LISTED && exact.count == MAX_LISTED && !exact.truncated);
+    let mut doc = many_forms(MAX_LISTED + 44);
+    let r = read_reference_xobjects(&doc);
+    assert!(r.items.len() == MAX_LISTED && r.count == MAX_LISTED + 44 && r.truncated && !r.capped);
+    assert!(r.items.iter().enumerate().all(|(i, x)| x.index == i));
+    // The last position listed goes, the first one past the listing is not offered, though the
+    // form is there.
+    assert!(removes(&doc, MAX_LISTED - 1) && !removes(&doc, MAX_LISTED));
+    remove_reference_xobject(&mut doc, MAX_LISTED).unwrap();
+    assert!(has_ref(&doc, marked(&doc, MAX_LISTED as i64)));
+    remove_reference_xobject(&mut doc, MAX_LISTED - 1).unwrap();
+    assert!(!has_ref(&doc, marked(&doc, MAX_LISTED as i64 - 1)) && has_ref(&doc, marked(&doc, MAX_LISTED as i64 - 2)));
+    assert_eq!(read_reference_xobjects(&doc).count, MAX_LISTED + 43);
+}
+
+#[test]
+fn the_reference_xobject_scan_stops_when_its_allowance_is_spent_and_when_it_has_what_it_wants() {
+    use crate::reference_xobjects::scan;
+    let doc = many_forms(300);
+    let objects = doc.object_numbers().len();
+    // One read for each object scanned, none more for a /Ref written in the form.
+    let whole = scan(&doc, None, objects);
+    assert!(whole.count == 300 && !whole.capped);
+    let short = scan(&doc, None, objects - 1);
+    assert!(short.count == 299 && short.capped);
+    assert!(scan(&doc, None, 0).capped);
+    // Looking for the item at a position ends the walk there: the first form is the 12th object,
+    // and the scan for position 0 with 12 reads is not capped while the full scan is.
+    let first = 12;
+    let one = scan(&doc, Some(0), first);
+    assert!(one.items.len() == 1 && !one.capped);
+    assert!(scan(&doc, None, first).capped);
+    let four = scan(&doc, Some(3), first + 3);
+    assert!(four.items.len() == 4 && !four.capped);
+    assert!(scan(&doc, Some(3), first + 2).capped);
+}
+
+/// A document of the fixture's objects and one form whose `/Ref` is `reference`, written
+/// directly.
+fn one_form_with(reference: impl FnOnce(&mut Document) -> Object) -> Document {
+    let mut doc = open(fixture());
+    let r = reference(&mut doc);
+    ref_form(&mut doc, vec![], Some(r));
+    doc
+}
+
+#[test]
+fn every_object_a_reference_xobject_leads_through_is_paid_for_before_it_is_read() {
+    use crate::reference_xobjects::scan;
+    // (what the reads are for, the document, how many reads beyond one for each object it takes)
+    let cases: Vec<(&str, Document, usize)> = vec![
+        (
+            "/F behind a reference",
+            one_form_with(|d| {
+                let f = d.add(string(b"f.pdf"));
+                ref_to_obj("F", Object::Ref(f))
+            }),
+            1,
+        ),
+        (
+            "/Page behind a reference",
+            one_form_with(|d| {
+                let p = d.add(Object::Int(3));
+                ref_to_obj("Page", Object::Ref(p))
+            }),
+            1,
+        ),
+        (
+            "/ID behind a reference",
+            one_form_with(|d| {
+                let id = d.add(Object::Array(vec![string(b"a"), string(b"b")]));
+                ref_to_obj("ID", Object::Ref(id))
+            }),
+            1,
+        ),
+        (
+            "/F a file specification behind a reference with /UF behind a reference",
+            one_form_with(|d| {
+                let uf = d.add(string(b"u.pdf"));
+                let spec = d.add(uri_with(vec![("UF", Object::Ref(uf))]));
+                ref_to_obj("F", Object::Ref(spec))
+            }),
+            2,
+        ),
+        (
+            "/F a file specification with /UF not a string and /F behind a reference",
+            one_form_with(|d| {
+                let f = d.add(string(b"f.pdf"));
+                let spec = d.add(uri_with(vec![("UF", Object::Int(1)), ("F", Object::Ref(f))]));
+                ref_to_obj("F", Object::Ref(spec))
+            }),
+            2,
+        ),
+        ("/Ref behind a reference", one_form_with(|d| Object::Ref(d.add(ref_to(string(b"r.pdf"), None, None)))), 1),
+    ];
+    for (what, doc, extra) in cases {
+        let objects = doc.object_numbers().len();
+        let ok = scan(&doc, None, objects + extra);
+        assert!(ok.count == 1 && !ok.capped, "{what}: {ok:?}");
+        let short = scan(&doc, None, objects + extra - 1);
+        assert!(short.count == 0 && short.capped, "{what}: {short:?}");
+    }
+}
+
+fn ref_to_obj(key: &str, value: Object) -> Object {
+    uri_with(vec![(key, value)])
+}
+
+#[test]
+fn a_reference_xobjects_ref_behind_references_is_followed_as_document_resolve_follows_it() {
+    use crate::reference_xobjects::{read_reference_xobjects, scan};
+    // A chain of `n` objects that are each a reference to the next, ending in the dictionary.
+    let chain = |n: usize| {
+        let mut doc = open(fixture());
+        let mut next = Object::Ref(doc.add(ref_to(string(b"end.pdf"), None, None)));
+        for _ in 0..n {
+            next = Object::Ref(doc.add(next));
+        }
+        ref_form(&mut doc, vec![], Some(next.clone()));
+        (doc, next)
+    };
+    let (doc, entry) = chain(32);
+    assert!(doc.resolve(&entry).as_dict().is_some());
+    assert_eq!(files(&doc), ["end.pdf"]);
+    // 33 reads for the chain, one for each object scanned.
+    let objects = doc.object_numbers().len();
+    assert!(scan(&doc, None, objects + 33).count == 1 && scan(&doc, None, objects + 32).capped);
+    let (doc, entry) = chain(33);
+    assert!(doc.resolve(&entry).as_dict().is_none());
+    assert!(read_reference_xobjects(&doc).items.is_empty());
+    // A reference that leads back to itself ends in nothing and is not a scan that never ends.
+    let mut doc = open(fixture());
+    let looped = doc.add(Object::Null);
+    doc.set_existing(looped, Object::Ref(looped)).unwrap();
+    ref_form(&mut doc, vec![], Some(Object::Ref(looped)));
+    let r = read_reference_xobjects(&doc);
+    assert!(r.items.is_empty() && r.count == 0 && !r.capped);
+}
+
+#[test]
+fn a_reference_xobjects_file_name_and_page_label_are_cut_at_127_characters() {
+    use crate::reference_xobjects::{MAX_TEXT_CHARS, read_reference_xobjects};
+    let long = |n: usize| "n".repeat(n);
+    let mut doc = open(fixture());
+    let whole = long(MAX_TEXT_CHARS);
+    let over = long(MAX_TEXT_CHARS + 1);
+    ref_form(&mut doc, vec![], Some(ref_to(string(whole.as_bytes()), Some(string(whole.as_bytes())), None)));
+    ref_form(&mut doc, vec![], Some(ref_to(string(over.as_bytes()), None, None)));
+    ref_form(&mut doc, vec![], Some(ref_to(string(b"ok.pdf"), Some(string(over.as_bytes())), None)));
+    // Two forms may share one /Ref dictionary: each is listed.
+    let shared = doc.add(ref_to(string(b"shared.pdf"), None, None));
+    ref_form(&mut doc, vec![], Some(Object::Ref(shared)));
+    ref_form(&mut doc, vec![], Some(Object::Ref(shared)));
+    let r = read_reference_xobjects(&doc);
+    assert_eq!(r.count, 5);
+    let items = &r.items;
+    assert!(items[0].exact && items[0].file.as_deref() == Some(whole.as_str()) && items[0].page_label.as_deref() == Some(whole.as_str()));
+    assert!(!items[1].exact && items[1].file.as_deref() == Some(whole.as_str()));
+    assert!(!items[2].exact && items[2].file.as_deref() == Some("ok.pdf") && items[2].page_label.as_deref() == Some(whole.as_str()));
+    assert!(items[3].file == items[4].file && items[3].file.as_deref() == Some("shared.pdf"));
+}
