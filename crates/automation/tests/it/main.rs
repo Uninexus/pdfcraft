@@ -13,6 +13,7 @@ mod batch;
 mod batch_failures;
 mod batch_secrets;
 mod button_caption;
+mod class_map;
 mod compare_ignore_case;
 mod compare_ignore_punctuation;
 mod compare_visual_causes;

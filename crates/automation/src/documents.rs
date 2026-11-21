@@ -684,6 +684,31 @@ impl Automation {
         Ok(out)
     }
 
+    /// The structure tree's class map (`/StructTreeRoot` `/ClassMap`): read, and take the entry
+    /// named `remove` away when it is given.
+    pub(crate) fn class_map(&mut self, a: &Args) -> Result<Value> {
+        let mut out = match a.opt_str("remove")? {
+            Some(class) if self.doc(a)?.class_map_removes(class) => {
+                let mut out = self.apply(a, Edit::RemoveClassMapEntry(class.to_owned()))?;
+                out["removed"] = json!(true);
+                out
+            }
+            Some(_) => json!({ "removed": false }),
+            None => json!({}),
+        };
+        let map = self.doc(a)?.class_map();
+        let entries: Vec<Value> =
+            map.entries.iter().map(|e| json!({ "class": e.class, "kind": e.kind, "items": e.items, "owners": e.owners, "exact": e.exact })).collect();
+        out["class_map"] = json!({
+            "has_structure_tree": map.has_structure_tree,
+            "count": map.count,
+            "truncated": map.truncated,
+            "entries": entries,
+            "unreadable": map.unreadable,
+        });
+        Ok(out)
+    }
+
     pub(crate) fn doc_optimize(&mut self, a: &Args) -> Result<Value> {
         use pdfcraft_engine::optimize::{Compatibility, Compression, ImageSettings, MonoCompression, Preset};
         const MONO_KEYS: [&str; 4] = ["downsample", "ppi", "above_ppi", "compression"];

@@ -7194,3 +7194,404 @@ fn the_listing_is_bounded_names_are_cut_and_not_exact_and_names_that_need_escapi
     let doc = open(write_full(&doc, &SaveOptions::default()).unwrap());
     assert_eq!(roles(&doc), [pair("My Role/(x)#[y]", "Sp ace")]);
 }
+
+/// The fixture with a `/StructTreeRoot` (one indirect dictionary) that has `class_map` as its
+/// `/ClassMap` when given; returns the document and the tree root's reference.
+fn class_tree(class_map: Option<Object>) -> (Document, pdfcraft_cos::ObjRef) {
+    let mut doc = open(fixture());
+    let mut entries = vec![("Type", Object::name("StructTreeRoot"))];
+    if let Some(m) = class_map {
+        entries.push(("ClassMap", m));
+    }
+    let root = doc.add(uri_with(entries));
+    set_catalog_entry(&mut doc, "StructTreeRoot", Object::Ref(root));
+    (doc, root)
+}
+
+/// An attribute dictionary with `/O` set to the name `owner`.
+fn attrs(owner: &str) -> Object {
+    uri_with(vec![("O", Object::name(owner)), ("Placement", Object::name("Block"))])
+}
+
+/// The class map of `doc` as `(class, kind, items, owners)` rows.
+fn classes(doc: &Document) -> Vec<(String, &'static str, usize, Vec<Option<String>>)> {
+    crate::class_map::read_class_map(doc).entries.into_iter().map(|e| (e.class, e.kind, e.items, e.owners)).collect()
+}
+
+fn row(class: &str, kind: &'static str, items: usize, owners: &[Option<&str>]) -> (String, &'static str, usize, Vec<Option<String>>) {
+    (class.to_owned(), kind, items, owners.iter().map(|o| o.map(str::to_owned)).collect())
+}
+
+/// The stored `/ClassMap` dictionary, resolved.
+fn stored_class_map(doc: &Document) -> Option<pdfcraft_cos::Dict> {
+    let c = doc.get(doc.root().unwrap()).as_dict().cloned().unwrap();
+    let root = c.get(b"StructTreeRoot").map(|o| doc.resolve(o))?;
+    root.as_dict()?.get(b"ClassMap").map(|o| doc.resolve(o)).and_then(|o| o.as_dict().cloned())
+}
+
+#[test]
+fn a_class_map_is_listed_with_what_each_entry_maps_to() {
+    use crate::class_map::read_class_map;
+    let none = read_class_map(&open(fixture()));
+    assert!(!none.has_structure_tree && none.entries.is_empty() && none.count == 0 && !none.truncated && none.unreadable.is_empty());
+    let (doc, _) = class_tree(None);
+    let none = read_class_map(&doc);
+    assert!(none.has_structure_tree && none.entries.is_empty() && none.count == 0 && none.unreadable.is_empty());
+
+    let mut doc = open(fixture());
+    let layout = doc.add(attrs("Layout"));
+    let via = doc.add(Object::Ref(layout));
+    let mut s = pdfcraft_cos::Stream::from_raw(pdfcraft_cos::Dict::new(), b"x".to_vec());
+    s.dict.set(b"O".to_vec(), Object::name("Table"));
+    let stream = doc.add(Object::Stream(s));
+    let owner_name = doc.add(Object::name("List"));
+    let list = doc.add(uri_with(vec![("O", Object::Ref(owner_name))]));
+    let map = uri_with(vec![
+        ("Direct", attrs("Layout")),
+        ("Indirect", Object::Ref(via)),
+        ("Stream", Object::Ref(stream)),
+        (
+            "Several",
+            Object::Array(vec![
+                attrs("Layout"),
+                Object::Ref(list),
+                uri_with(vec![("Placement", Object::name("Inline"))]),
+                uri_with(vec![("O", Object::Int(5))]),
+                Object::Int(3),
+                Object::Ref(pdfcraft_cos::ObjRef::new(900, 0)),
+            ]),
+        ),
+        ("Empty", Object::Array(vec![])),
+        ("Number", Object::Int(5)),
+        ("Nothing", Object::Null),
+        ("Dangling", Object::Ref(pdfcraft_cos::ObjRef::new(901, 0))),
+    ]);
+    set_catalog_entry(&mut doc, "StructTreeRoot", uri_with(vec![("ClassMap", map)]));
+    let doc = open(write_full(&doc, &SaveOptions::default()).unwrap());
+    let r = read_class_map(&doc);
+    assert!(r.has_structure_tree && r.unreadable.is_empty() && !r.truncated && r.count == 8);
+    assert!(r.entries.iter().all(|e| e.exact));
+    assert_eq!(
+        classes(&doc),
+        [
+            row("Direct", "dictionary", 1, &[Some("Layout")]),
+            row("Indirect", "dictionary", 1, &[Some("Layout")]),
+            row("Stream", "stream", 1, &[Some("Table")]),
+            row("Several", "array", 6, &[Some("Layout"), Some("List"), None, None, None, None]),
+            row("Empty", "array", 0, &[]),
+            row("Number", "other", 0, &[]),
+            row("Nothing", "other", 0, &[]),
+            row("Dangling", "other", 0, &[]),
+        ]
+    );
+    // Reading changes nothing.
+    let before = write_full(&doc, &SaveOptions::default()).unwrap();
+    let _ = read_class_map(&doc);
+    assert_eq!(write_full(&doc, &SaveOptions::default()).unwrap(), before);
+}
+
+#[test]
+fn removing_a_class_map_entry_keeps_the_rest_and_the_last_takes_the_dictionary() {
+    use crate::class_map::{class_map_removes, read_class_map, remove_class_map_entry};
+    let mut doc = open(fixture());
+    let layout = doc.add(attrs("Layout"));
+    let map = uri_with(vec![("A", Object::Ref(layout)), ("B", attrs("Table")), ("C", Object::Array(vec![attrs("List")]))]);
+    set_catalog_entry(&mut doc, "StructTreeRoot", uri_with(vec![("Type", Object::name("StructTreeRoot")), ("ClassMap", map)]));
+    let mut doc = open(write_full(&doc, &SaveOptions::default()).unwrap());
+    assert_eq!(read_class_map(&doc).count, 3);
+    assert!(class_map_removes(&doc, "B") && !class_map_removes(&doc, "b") && !class_map_removes(&doc, "Z"));
+    remove_class_map_entry(&mut doc, "B").unwrap();
+    assert_eq!(classes(&doc), [row("A", "dictionary", 1, &[Some("Layout")]), row("C", "array", 1, &[Some("List")])]);
+    assert!(!class_map_removes(&doc, "B"), "gone");
+    // Saved and reopened it is still gone, and an entry that is not there is no change.
+    let mut doc = open(write_full(&doc, &SaveOptions::default()).unwrap());
+    assert_eq!(read_class_map(&doc).count, 2);
+    let before = write_full(&doc, &SaveOptions::default()).unwrap();
+    remove_class_map_entry(&mut doc, "B").unwrap();
+    assert_eq!(write_full(&doc, &SaveOptions::default()).unwrap(), before);
+    remove_class_map_entry(&mut doc, "A").unwrap();
+    remove_class_map_entry(&mut doc, "C").unwrap();
+    // The last takes the dictionary with it and keeps the rest of the tree root.
+    assert!(stored_class_map(&doc).is_none());
+    let tree = doc.resolve(doc.get(doc.root().unwrap()).as_dict().unwrap().get(b"StructTreeRoot").unwrap());
+    assert!(tree.as_dict().unwrap().get(b"ClassMap").is_none());
+    assert_eq!(tree.as_dict().unwrap().name(b"Type"), Some(&b"StructTreeRoot"[..]), "the rest of the tree root stays");
+    // The role map is not the class map: removing a class leaves a role of the same name alone.
+    let mut doc = open(fixture());
+    set_catalog_entry(
+        &mut doc,
+        "StructTreeRoot",
+        uri_with(vec![("RoleMap", names_dict(&[("A", "P")])), ("ClassMap", uri_with(vec![("A", attrs("Layout"))]))]),
+    );
+    remove_class_map_entry(&mut doc, "A").unwrap();
+    assert!(stored_class_map(&doc).is_none());
+    assert_eq!(roles(&doc), [pair("A", "P")], "the role map keeps its entry of the same name");
+}
+
+#[test]
+fn a_class_map_is_changed_where_it_is_through_references_and_in_a_direct_tree_root() {
+    use crate::class_map::{read_class_map, remove_class_map_entry};
+    // /StructTreeRoot behind a chain of two references, /ClassMap behind another, an entry's value
+    // behind one more.
+    let mut doc = open(fixture());
+    let attr = doc.add(attrs("Layout"));
+    let map = doc.add(uri_with(vec![("Gone", Object::Ref(attr)), ("Keep", attrs("Table"))]));
+    let map_hop = doc.add(Object::Ref(map));
+    let root = doc.add(uri_with(vec![("Type", Object::name("StructTreeRoot")), ("ClassMap", Object::Ref(map_hop))]));
+    let root_hop = doc.add(Object::Ref(root));
+    set_catalog_entry(&mut doc, "StructTreeRoot", Object::Ref(root_hop));
+    assert_eq!(classes(&doc), [row("Gone", "dictionary", 1, &[Some("Layout")]), row("Keep", "dictionary", 1, &[Some("Table")])]);
+    remove_class_map_entry(&mut doc, "Gone").unwrap();
+    let c = doc.get(doc.root().unwrap()).as_dict().cloned().unwrap();
+    assert_eq!(c.get(b"StructTreeRoot"), Some(&Object::Ref(root_hop)), "the catalog still holds the reference");
+    assert_eq!(doc.get(root).as_dict().unwrap().get(b"ClassMap"), Some(&Object::Ref(map_hop)), "so does the tree root");
+    assert!(doc.get(map).as_dict().unwrap().get(b"Gone").is_none() && doc.get(attr).as_dict().is_some(), "the attribute object stays");
+    assert_eq!(classes(&doc), [row("Keep", "dictionary", 1, &[Some("Table")])]);
+    // Emptying the indirect dictionary takes it out of the tree root, which stays.
+    remove_class_map_entry(&mut doc, "Keep").unwrap();
+    assert!(doc.get(root).as_dict().unwrap().get(b"ClassMap").is_none());
+    assert_eq!(doc.get(root).as_dict().unwrap().name(b"Type"), Some(&b"StructTreeRoot"[..]));
+    // A tree root written in the catalog itself, with a direct and then an indirect map.
+    let mut doc = open(fixture());
+    set_catalog_entry(&mut doc, "StructTreeRoot", uri_with(vec![("ClassMap", uri_with(vec![("A", attrs("Layout")), ("B", attrs("List"))]))]));
+    remove_class_map_entry(&mut doc, "A").unwrap();
+    assert_eq!(classes(&doc), [row("B", "dictionary", 1, &[Some("List")])]);
+    remove_class_map_entry(&mut doc, "B").unwrap();
+    assert!(read_class_map(&doc).has_structure_tree && read_class_map(&doc).count == 0);
+    let map = doc.add(uri_with(vec![("A", attrs("Layout"))]));
+    set_catalog_entry(&mut doc, "StructTreeRoot", uri_with(vec![("ClassMap", Object::Ref(map))]));
+    remove_class_map_entry(&mut doc, "A").unwrap();
+    let c = doc.get(doc.root().unwrap()).as_dict().cloned().unwrap();
+    assert!(matches!(c.get(b"StructTreeRoot"), Some(Object::Dict(d)) if d.is_empty()), "the direct tree root lost its emptied /ClassMap");
+    // A tree root that is a stream counts by its dictionary.
+    let mut doc = open(fixture());
+    let mut s = pdfcraft_cos::Stream::from_raw(pdfcraft_cos::Dict::new(), b"x".to_vec());
+    s.dict.set(b"ClassMap".to_vec(), uri_with(vec![("A", attrs("Layout")), ("B", attrs("List"))]));
+    let stream = doc.add(Object::Stream(s));
+    set_catalog_entry(&mut doc, "StructTreeRoot", Object::Ref(stream));
+    assert_eq!(read_class_map(&doc).count, 2);
+    remove_class_map_entry(&mut doc, "A").unwrap();
+    assert!(matches!(&*doc.get(stream), Object::Stream(s) if matches!(s.dict.get(b"ClassMap"), Some(Object::Dict(d)) if d.len() == 1)));
+}
+
+#[test]
+fn a_class_map_that_is_a_stream_the_catalog_or_the_tree_root_is_unreadable_and_never_written() {
+    use crate::class_map::{class_map_removes, read_class_map, remove_class_map_entry};
+    // /ClassMap that is a stream: its keys (/Length, /A) are not classes, so none is listed.
+    let mut doc = open(fixture());
+    let mut s = pdfcraft_cos::Stream::from_raw(pdfcraft_cos::Dict::new(), b"x".to_vec());
+    s.dict.set(b"Length".to_vec(), Object::Int(1));
+    s.dict.set(b"A".to_vec(), attrs("Layout"));
+    let stream = doc.add(Object::Stream(s));
+    let root = doc.add(uri_with(vec![("ClassMap", Object::Ref(stream))]));
+    set_catalog_entry(&mut doc, "StructTreeRoot", Object::Ref(root));
+    let r = read_class_map(&doc);
+    assert_eq!((r.has_structure_tree, r.entries.len(), r.count, r.unreadable.clone()), (true, 0, 0, vec!["class_map"]));
+    let before = write_full(&doc, &SaveOptions::default()).unwrap();
+    assert!(!class_map_removes(&doc, "A") && !class_map_removes(&doc, "Length"));
+    remove_class_map_entry(&mut doc, "A").unwrap();
+    remove_class_map_entry(&mut doc, "Length").unwrap();
+    assert_eq!(write_full(&doc, &SaveOptions::default()).unwrap(), before);
+    // /ClassMap that is the tree root, or the catalog: removing from it would change /K or /Pages.
+    for target in ["root", "catalog"] {
+        let mut doc = open(fixture());
+        let catalog = doc.root().unwrap();
+        let root = doc.add(uri_with(vec![("Type", Object::name("StructTreeRoot")), ("K", attrs("Layout"))]));
+        set_catalog_entry(&mut doc, "StructTreeRoot", Object::Ref(root));
+        let at = if target == "root" { root } else { catalog };
+        doc.update_dict(root, |d| d.set(b"ClassMap".to_vec(), Object::Ref(at))).unwrap();
+        let r = read_class_map(&doc);
+        assert_eq!((r.entries.len(), r.unreadable.clone()), (0, vec!["class_map"]), "{target}");
+        let before = write_full(&doc, &SaveOptions::default()).unwrap();
+        for key in ["K", "Pages", "Type", "ClassMap"] {
+            assert!(!class_map_removes(&doc, key), "{target} {key}");
+            remove_class_map_entry(&mut doc, key).unwrap();
+        }
+        assert_eq!(write_full(&doc, &SaveOptions::default()).unwrap(), before, "{target}");
+        assert!(doc.get(catalog).as_dict().unwrap().get(b"Pages").is_some());
+    }
+    // A tree root that is the catalog.
+    let mut doc = open(fixture());
+    let catalog = doc.root().unwrap();
+    set_catalog_entry(&mut doc, "StructTreeRoot", Object::Ref(catalog));
+    let r = read_class_map(&doc);
+    assert_eq!((r.has_structure_tree, r.unreadable.clone()), (false, vec!["struct_tree_root"]));
+    let before = write_full(&doc, &SaveOptions::default()).unwrap();
+    assert!(!class_map_removes(&doc, "Pages"));
+    remove_class_map_entry(&mut doc, "Pages").unwrap();
+    assert_eq!(write_full(&doc, &SaveOptions::default()).unwrap(), before);
+}
+
+#[test]
+fn a_tree_root_or_class_map_that_is_not_a_dictionary_is_named_and_never_replaced() {
+    use crate::class_map::{class_map_removes, read_class_map, remove_class_map_entry};
+    for other in [Object::Int(7), Object::name("x"), Object::Array(vec![attrs("Layout")]), string(b"s")] {
+        let mut doc = open(fixture());
+        set_catalog_entry(&mut doc, "StructTreeRoot", other.clone());
+        let r = read_class_map(&doc);
+        assert_eq!((r.has_structure_tree, r.unreadable.clone()), (false, vec!["struct_tree_root"]), "{other:?}");
+        let before = write_full(&doc, &SaveOptions::default()).unwrap();
+        assert!(!class_map_removes(&doc, "A"));
+        remove_class_map_entry(&mut doc, "A").unwrap();
+        assert_eq!(write_full(&doc, &SaveOptions::default()).unwrap(), before, "{other:?}");
+
+        let (mut doc, _) = class_tree(Some(other.clone()));
+        let r = read_class_map(&doc);
+        assert_eq!((r.has_structure_tree, r.unreadable.clone(), r.entries.len()), (true, vec!["class_map"], 0), "{other:?}");
+        let before = write_full(&doc, &SaveOptions::default()).unwrap();
+        remove_class_map_entry(&mut doc, "A").unwrap();
+        assert_eq!(write_full(&doc, &SaveOptions::default()).unwrap(), before, "{other:?}");
+    }
+    // A null or a dangling /ClassMap, and a null or a dangling tree root, are absent: nothing to
+    // remove, nothing unreadable, nothing written.
+    for absent in [Object::Null, Object::Ref(pdfcraft_cos::ObjRef::new(900, 0))] {
+        let (mut doc, _) = class_tree(Some(absent.clone()));
+        let r = read_class_map(&doc);
+        assert_eq!((r.has_structure_tree, r.count, r.unreadable.clone()), (true, 0, vec![]), "{absent:?}");
+        let before = write_full(&doc, &SaveOptions::default()).unwrap();
+        remove_class_map_entry(&mut doc, "A").unwrap();
+        assert_eq!(write_full(&doc, &SaveOptions::default()).unwrap(), before, "{absent:?}");
+        let mut doc = open(fixture());
+        set_catalog_entry(&mut doc, "StructTreeRoot", absent.clone());
+        let r = read_class_map(&doc);
+        assert_eq!((r.has_structure_tree, r.unreadable.clone()), (false, vec![]), "{absent:?}");
+        let before = write_full(&doc, &SaveOptions::default()).unwrap();
+        remove_class_map_entry(&mut doc, "A").unwrap();
+        assert_eq!(write_full(&doc, &SaveOptions::default()).unwrap(), before, "{absent:?}");
+    }
+}
+
+#[test]
+fn a_stored_class_goes_by_its_exact_name_whatever_it_is_and_one_that_is_not_stored_is_no_change() {
+    use crate::class_map::{class_map_removes, read_class_map, remove_class_map_entry};
+    let long = "k".repeat(200);
+    let mut map = pdfcraft_cos::Dict::new();
+    map.set(long.as_bytes().to_vec(), attrs("Layout"));
+    map.set(Vec::<u8>::new(), attrs("Layout"));
+    map.set(vec![b'N', 0], attrs("Layout"));
+    map.set(vec![b'U', 0xff], attrs("Layout"));
+    map.set(b"Fine".to_vec(), attrs("Layout"));
+    let (mut doc, _) = class_tree(Some(Object::Dict(map)));
+    let r = read_class_map(&doc);
+    assert_eq!(r.count, 5);
+    let listed: Vec<(String, bool)> = r.entries.iter().map(|e| (e.class.chars().take(3).collect(), e.exact)).collect();
+    assert_eq!(listed, [("kkk".into(), false), ("".into(), true), ("N\0".into(), true), ("U\u{fffd}".into(), false), ("Fin".into(), true)]);
+    assert_eq!(r.entries[0].class.len(), 127, "a long class is cut before it is copied");
+    let before = write_full(&doc, &SaveOptions::default()).unwrap();
+    let before_incremental = write_incremental(&doc, &SaveOptions::default()).unwrap();
+    // The cut name and the lossy name are not stored names.
+    for unstored in [&long[..127], "U\u{fffd}", "fine", "Fine ", "Nothing"] {
+        assert!(!class_map_removes(&doc, unstored), "{unstored}");
+        remove_class_map_entry(&mut doc, unstored).unwrap();
+        assert_eq!(write_full(&doc, &SaveOptions::default()).unwrap(), before, "{unstored}");
+        assert_eq!(write_incremental(&doc, &SaveOptions::default()).unwrap(), before_incremental, "{unstored}: no object was touched");
+    }
+    for stored in [long.as_str(), "", "N\0", "Fine"] {
+        assert!(class_map_removes(&doc, stored));
+        remove_class_map_entry(&mut doc, stored).unwrap();
+        assert!(!class_map_removes(&doc, stored));
+    }
+    let r = read_class_map(&doc);
+    assert_eq!(r.count, 1, "only the key that is not UTF-8 is left, and it cannot be asked for");
+    assert!(!r.entries[0].exact);
+}
+
+#[test]
+fn the_references_followed_are_those_of_document_resolve_for_the_class_map() {
+    use crate::class_map::{read_class_map, remove_class_map_entry};
+    // A chain of n references to an object: n = 33 resolves, n = 34 does not.
+    let chain = |doc: &mut Document, end: Object, hops: usize| {
+        let mut at = doc.add(end);
+        for _ in 1..hops {
+            at = doc.add(Object::Ref(at));
+        }
+        Object::Ref(at)
+    };
+    for (hops, readable) in [(33usize, true), (34, false)] {
+        // /ClassMap at the end of the chain.
+        let (mut doc, root) = class_tree(None);
+        let start = chain(&mut doc, uri_with(vec![("A", attrs("Layout")), ("B", attrs("List"))]), hops);
+        doc.update_dict(root, |d| d.set(b"ClassMap".to_vec(), start.clone())).unwrap();
+        assert_eq!(doc.resolve(&start).as_dict().is_some(), readable, "Document::resolve at {hops} references");
+        let r = read_class_map(&doc);
+        assert_eq!((r.entries.len(), r.unreadable.clone()), if readable { (2, vec![]) } else { (0, vec!["class_map"]) }, "{hops} references");
+        let before = write_full(&doc, &SaveOptions::default()).unwrap();
+        remove_class_map_entry(&mut doc, "A").unwrap();
+        if readable {
+            assert_eq!(classes(&doc), [row("B", "dictionary", 1, &[Some("List")])]);
+        } else {
+            assert_eq!(write_full(&doc, &SaveOptions::default()).unwrap(), before);
+        }
+        // /StructTreeRoot at the end of one.
+        let mut doc = open(fixture());
+        let start = chain(&mut doc, uri_with(vec![("ClassMap", uri_with(vec![("A", attrs("Layout"))]))]), hops);
+        set_catalog_entry(&mut doc, "StructTreeRoot", start.clone());
+        assert_eq!(doc.resolve(&start).as_dict().is_some(), readable);
+        let r = read_class_map(&doc);
+        assert_eq!(
+            (r.has_structure_tree, r.unreadable.clone()),
+            if readable { (true, vec![]) } else { (false, vec!["struct_tree_root"]) },
+            "{hops} references"
+        );
+        // An entry's value, an array item and an owner at the end of one.
+        let (mut doc, _) = class_tree(None);
+        let value = chain(&mut doc, attrs("Layout"), hops);
+        let item = chain(&mut doc, attrs("Table"), hops);
+        let name = chain(&mut doc, Object::name("List"), hops);
+        let named = doc.add(uri_with(vec![("O", name)]));
+        let map = doc.add(uri_with(vec![("V", value), ("I", Object::Array(vec![item])), ("O", Object::Ref(named))]));
+        set_catalog_entry(&mut doc, "StructTreeRoot", uri_with(vec![("ClassMap", Object::Ref(map))]));
+        let some = |n: &'static str| readable.then_some(n);
+        assert_eq!(
+            classes(&doc),
+            [
+                row("V", if readable { "dictionary" } else { "other" }, usize::from(readable), if readable { &[Some("Layout")] } else { &[] }),
+                row("I", "array", 1, &[some("Table")]),
+                row("O", "dictionary", 1, &[some("List")]),
+            ],
+            "{hops} references"
+        );
+    }
+}
+
+#[test]
+fn the_class_listing_is_bounded_names_are_cut_and_an_array_lists_only_its_first_owners() {
+    use crate::class_map::{MAX_LISTED_CLASSES, MAX_LISTED_OWNERS, read_class_map, remove_class_map_entry};
+    let mut map = pdfcraft_cos::Dict::new();
+    for i in 0..300 {
+        map.set(format!("C{i:03}").into_bytes(), attrs("Layout"));
+    }
+    let (mut doc, _) = class_tree(Some(Object::Dict(map)));
+    let r = read_class_map(&doc);
+    assert_eq!((r.count, r.entries.len(), r.truncated), (300, MAX_LISTED_CLASSES, true));
+    // An entry past the listed ones is still counted, and can be removed by its name.
+    remove_class_map_entry(&mut doc, "C299").unwrap();
+    let r = read_class_map(&doc);
+    assert_eq!((r.count, r.entries.len(), r.truncated), (299, MAX_LISTED_CLASSES, true));
+    // Exactly 256 entries are not truncated.
+    let mut map = pdfcraft_cos::Dict::new();
+    for i in 0..MAX_LISTED_CLASSES {
+        map.set(format!("C{i:03}").into_bytes(), Object::Null);
+    }
+    let (doc, _) = class_tree(Some(Object::Dict(map)));
+    let r = read_class_map(&doc);
+    assert_eq!((r.count, r.entries.len(), r.truncated), (256, 256, false));
+    // An array of 1000 items lists 16 owners and counts all of them; the owners are cut.
+    let items: Vec<Object> = (0..1000).map(|i| attrs(&format!("O{i}"))).collect();
+    let long_owner = "w".repeat(200);
+    let (doc, _) = class_tree(Some(uri_with(vec![
+        ("Many", Object::Array(items)),
+        ("Long", attrs(&long_owner)),
+        ("Exactly", Object::Array((0..MAX_LISTED_OWNERS).map(|i| attrs(&format!("O{i}"))).collect())),
+    ])));
+    let r = read_class_map(&doc);
+    assert_eq!((r.entries[0].items, r.entries[0].owners.len(), r.entries[0].exact), (1000, MAX_LISTED_OWNERS, true));
+    assert_eq!(r.entries[0].owners[15].as_deref(), Some("O15"));
+    assert_eq!(r.entries[1].owners[0].as_deref().map(str::len), Some(127));
+    assert!(!r.entries[1].exact, "a cut owner is not exact");
+    assert_eq!((r.entries[2].items, r.entries[2].owners.len()), (MAX_LISTED_OWNERS, MAX_LISTED_OWNERS));
+    // A name that needs escaping in a file survives a save.
+    let (doc, _) = class_tree(Some(uri_with(vec![("A b/(c)#", attrs("Layout"))])));
+    let doc = open(write_full(&doc, &SaveOptions::default()).unwrap());
+    assert_eq!(classes(&doc), [row("A b/(c)#", "dictionary", 1, &[Some("Layout")])]);
+}
