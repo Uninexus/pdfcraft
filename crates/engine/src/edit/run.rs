@@ -151,6 +151,7 @@ pub(crate) fn check_permission(edit: &Edit, p: &pdfcraft_cos::Permissions) -> Re
         | Edit::RemoveArticleThread(_)
         | Edit::RemoveReferenceXObject(_)
         | Edit::RemoveCollection
+        | Edit::SetSignatureLock { .. }
         | Edit::RemoveNamedDestination(_)
         | Edit::FixHairlines { .. }
         | Edit::AliasInks { .. }
@@ -950,6 +951,7 @@ pub(crate) fn run_edit(doc: &mut pdfcraft_cos::Document, edit: &Edit, cx: &mut E
         Edit::SetRoleMap { role, maps_to } => pdfcraft_organize::role_map::set_role_map(doc, role, maps_to.as_deref())?,
         Edit::RemoveNamedDestination(index) => pdfcraft_organize::destinations::remove_destination(doc, *index)?,
         Edit::RemoveCollection => pdfcraft_organize::collection::remove_collection(doc)?,
+        Edit::SetSignatureLock { field, lock } => pdfcraft_organize::signature_lock::set_signature_lock(doc, *field, lock.as_ref())?,
         Edit::RemoveReferenceXObject(index) => pdfcraft_organize::reference_xobjects::remove_reference_xobject(doc, *index)?,
         Edit::RemoveArticleThread(index) => pdfcraft_organize::articles::remove_article_thread(doc, *index)?,
         Edit::RemoveClassMapEntry(class) => pdfcraft_organize::class_map::remove_class_map_entry(doc, class)?,

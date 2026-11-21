@@ -694,6 +694,23 @@ impl Document {
         self.editor.as_ref().is_some_and(|e| pdfcraft_organize::collection::collection_removes(&e.cos))
     }
 
+    /// The `/Lock` of the signature field with this object, as stored.
+    pub fn signature_lock(&self, field: pdfcraft_cos::ObjRef) -> pdfcraft_organize::signature_lock::SignatureLock {
+        self.editor.as_ref().map(|e| pdfcraft_organize::signature_lock::read_signature_lock(&e.cos, field)).unwrap_or_default()
+    }
+
+    /// What setting `lock` (a removal when `None`) on the field with this object would do.
+    pub fn signature_lock_change(
+        &self,
+        field: pdfcraft_cos::ObjRef,
+        lock: Option<&pdfcraft_organize::signature_lock::LockSpec>,
+    ) -> pdfcraft_organize::signature_lock::Change {
+        match self.editor.as_ref() {
+            Some(e) => pdfcraft_organize::signature_lock::signature_lock_change(&e.cos, field, lock),
+            None => pdfcraft_organize::signature_lock::Change::Refused("the document cannot be edited"),
+        }
+    }
+
     /// Signed: at least one signature field holds a signature.
     pub fn is_signed(&self) -> bool {
         self.signatures.iter().any(|s| s.signed)

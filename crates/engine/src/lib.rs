@@ -106,6 +106,9 @@ pub use pdfcraft_organize::collection::{MAX_GETS as MAX_COLLECTION_GETS, MAX_LIS
 pub use pdfcraft_organize::destinations::{MAX_ITEMS_SCANNED, MAX_LISTED_DESTINATIONS, MAX_NAME_CHARS, MAX_TREE_DEPTH, MAX_TREE_NODES};
 pub use pdfcraft_organize::print_presets::{Duplex, MAX_PRINT_COPIES, MAX_PRINT_RANGES, MIN_PRINT_COPIES, PrintPresets, PrintScaling};
 pub use pdfcraft_organize::role_map::{MAX_LISTED_ROLES, MAX_LOOP_STEPS, MAX_ROLE_BYTES};
+pub use pdfcraft_organize::signature_lock::{
+    Change as LockChange, LockAction, LockSpec, MAX_GETS as MAX_LOCK_GETS, MAX_LOCK_NAMES, MAX_NAME_CHARS as MAX_LOCK_NAME_CHARS,
+};
 pub use pdfcraft_organize::view::{InitialView, Layout as InitialLayout, Magnification, Navigation};
 
 pub use pdfcraft_cos::{Algorithm, civil_from_days};

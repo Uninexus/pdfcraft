@@ -78,21 +78,27 @@ pub struct ReferenceXObjects {
     pub capped: bool,
 }
 
-struct Spent;
+pub(crate) struct Spent;
 
 /// The reads left.
-struct Gets(usize);
+pub(crate) struct Gets(pub(crate) usize);
 
 impl Gets {
+    /// Charge one read that the caller makes itself.
+    pub(crate) fn charge(&mut self) -> Result<(), Spent> {
+        self.0 = self.0.checked_sub(1).ok_or(Spent)?;
+        Ok(())
+    }
+
     /// The object, after charging one read; nothing is read when the allowance is spent.
-    fn get(&mut self, doc: &Document, r: ObjRef) -> Result<Arc<Object>, Spent> {
+    pub(crate) fn get(&mut self, doc: &Document, r: ObjRef) -> Result<Arc<Object>, Spent> {
         self.0 = self.0.checked_sub(1).ok_or(Spent)?;
         Ok(doc.get(r))
     }
 
     /// `o` after references, as `Document::resolve` follows them (the first object and up to 32
     /// more), each read charged before it is made.
-    fn follow<'a>(&mut self, doc: &Document, o: &'a Object) -> Result<Held<'a>, Spent> {
+    pub(crate) fn follow<'a>(&mut self, doc: &Document, o: &'a Object) -> Result<Held<'a>, Spent> {
         let Object::Ref(first) = o else { return Ok(Held::Direct(o)) };
         let mut held = self.get(doc, *first)?;
         for _ in 0..MORE_HOPS {
@@ -211,7 +217,7 @@ pub(crate) fn scan(doc: &Document, stop_after: Option<usize>, allowance: usize) 
 /// entries, or [`MAX_GETS`] reads spent), in which case the set is not all of them. A node is put
 /// on the stack once, and every read after the catalog's is charged before it is made, against the
 /// walk's own allowance of `reads`.
-fn structural(doc: &Document) -> (HashSet<u32>, bool) {
+pub(crate) fn structural(doc: &Document) -> (HashSet<u32>, bool) {
     structural_with(doc, MAX_GETS, MAX_PAGE_TREE_NODES, MAX_KIDS_SCANNED)
 }
 

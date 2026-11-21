@@ -400,6 +400,11 @@ pub enum Edit {
     RemoveArticleThread(usize),
     /// Portfolio collection: take the catalog's `/Collection` away.
     RemoveCollection,
+    /// A signature field's `/Lock`: set it to this lock, or take it out (`None`).
+    SetSignatureLock {
+        field: pdfcraft_cos::ObjRef,
+        lock: Option<pdfcraft_organize::signature_lock::LockSpec>,
+    },
     /// Reference XObjects: take the `/Ref` away from the one listed at this position.
     RemoveReferenceXObject(usize),
     /// Named destinations (the `/Dests` name tree and the catalog's `/Dests` dictionary): take the

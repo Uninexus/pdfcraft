@@ -5222,11 +5222,11 @@ title = "Field properties: signed (lock fields when signed)"
 area = "F"
 tier = "P1"
 milestone = "M9"
-status = "planned"
+status = "partial"
 commands = []
-tools = []
-evidence = []
-notes = ""
+tools = ["signature_field_lock"]
+evidence = ["crates/organize/src/tests.rs::a_signature_lock_is_read_with_its_action_and_names", "crates/organize/src/tests.rs::a_signature_lock_is_set_replaced_removed_and_survives_a_save", "crates/organize/src/tests.rs::a_signature_lock_is_refused_on_a_signed_field_and_on_structural_objects", "crates/organize/src/tests.rs::every_read_a_signature_lock_makes_is_paid_for_before_it_is_made", "crates/organize/src/tests.rs::a_signature_lock_lists_256_names_cuts_long_ones_and_checks_what_it_writes", "crates/automation/tests/it/signature_field_lock.rs::a_lock_is_read_set_saved_removed_undone_and_redone", "crates/automation/tests/it/signature_field_lock.rs::a_call_that_cannot_be_applied_is_named_and_changes_nothing", "crates/automation/tests/it/signature_field_lock.rs::a_signed_field_is_read_but_not_edited_and_an_unsigned_one_still_is", "crates/automation/tests/it/signature_field_lock.rs::a_lock_of_many_names_lists_the_first_256_and_counts_the_rest", "crates/automation/tests/it/signature_field_lock.rs::a_name_two_fields_share_is_refused_rather_than_guessed", "crates/automation/tests/it/signature_field_lock.rs::a_modify_restriction_refuses_a_write_and_still_reads"]
+notes = "Headless only: the signature_field_lock tool reads, sets and removes the /Lock dictionary of an unsigned signature field (ISO 32000-2 12.7.5.5: action all, include or exclude, and the fully qualified names of the fields), one undo step, refusing a signed field and the page tree. The signature validator already reads that lock from the signed revision and marks a later change to a locked field invalid (sign.field-mdp; the tests sign a file and check this). Not yet: the Signed tab of Field Properties, the PDF 2.0 /P entry (a set drops it), and making the locked fields read-only in the viewer once the field is signed"
 
 [[feature]]
 id = "form.align-distribute-fields"

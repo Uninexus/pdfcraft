@@ -54,6 +54,7 @@ mod render_warnings;
 mod role_map;
 mod save_flatten_failure;
 mod shared_name_arrays;
+mod signature_field_lock;
 mod structure_namespaces;
 mod text_copy;
 mod timesheet_compat;
