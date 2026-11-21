@@ -10573,3 +10573,240 @@ fn a_chain_of_references_behind_a_go_to_embedded_action_is_paid_for_hop_by_hop()
     assert_eq!(change_with(&doc, behind, None, 2), Change::Yes);
     assert!(matches!(change_with(&doc, behind, None, 1), Change::Refused(why) if why.contains("allowance")));
 }
+
+fn media_action(kind: &str, entries: Vec<(&str, Object)>) -> Object {
+    let mut all = vec![("S", Object::name(kind))];
+    all.extend(entries);
+    uri_with(all)
+}
+
+#[test]
+fn a_media_action_is_read_with_its_kind_and_entries() {
+    use crate::media_action::read_media_action;
+    let mut doc = open(fixture());
+    for (name, kind) in [("Sound", "sound"), ("Movie", "movie"), ("Rendition", "rendition"), ("RichMediaExecute", "rich_media_execute")] {
+        let l = link_with(&mut doc, vec![("A", media_action(name, vec![]))]);
+        let r = read_media_action(&doc, l);
+        assert_eq!((r.is_link, r.is_media, r.kind, r.action.as_deref(), r.settable, r.capped), (true, true, Some(kind), Some(name), true, false));
+        assert_eq!((r.has_next, r.has_target, r.has_script, r.operation, r.rendition_op, r.exact), (false, false, false, None, None, true));
+    }
+    // A movie: its operation is a name, its target is /Annotation or /T, and /Next is reported.
+    let l = link_with(
+        &mut doc,
+        vec![("A", media_action("Movie", vec![("Operation", Object::name("Pause")), ("T", string(b"clip")), ("Next", uri_with(vec![]))]))],
+    );
+    let r = read_media_action(&doc, l);
+    assert_eq!((r.operation.as_deref(), r.has_target, r.has_next), (Some("Pause"), true, true));
+    let l = link_with(&mut doc, vec![("A", media_action("Movie", vec![("Annotation", Object::Ref(ref_of(4)))]))]);
+    assert!(read_media_action(&doc, l).has_target);
+    // A rendition: /OP is an integer (a real or a name is none), /JS and /AN are only noticed.
+    let l = link_with(
+        &mut doc,
+        vec![("A", media_action("Rendition", vec![("OP", Object::Int(4)), ("JS", string(b"app.alert(1)")), ("AN", Object::Ref(ref_of(4)))]))],
+    );
+    let r = read_media_action(&doc, l);
+    assert_eq!((r.rendition_op, r.has_script, r.has_target, r.operation), (Some(4), true, true, None));
+    for odd in [Object::Real(1.0), Object::name("Play"), string(b"1")] {
+        let l = link_with(&mut doc, vec![("A", media_action("Rendition", vec![("OP", odd)]))]);
+        assert_eq!(read_media_action(&doc, l).rendition_op, None);
+    }
+    // A movie operation that is not a name is none; one that is too long is cut and not exact.
+    let l = link_with(&mut doc, vec![("A", media_action("Movie", vec![("Operation", string(b"Play"))]))]);
+    assert_eq!(read_media_action(&doc, l).operation, None);
+    let long = "P".repeat(300);
+    let l = link_with(&mut doc, vec![("A", media_action("Movie", vec![("Operation", Object::name(&long))]))]);
+    let r = read_media_action(&doc, l);
+    assert_eq!((r.operation.map(|o| o.len()), r.exact), (Some(127), false));
+    // /JS belongs to a rendition only; null entries are none; a rich-media action's target is /TA.
+    let l = link_with(&mut doc, vec![("A", media_action("Movie", vec![("JS", string(b"x"))]))]);
+    assert!(!read_media_action(&doc, l).has_script);
+    let l = link_with(
+        &mut doc,
+        vec![("A", media_action("Rendition", vec![("JS", Object::Null), ("AN", Object::Null), ("OP", Object::Null), ("Next", Object::Null)]))],
+    );
+    let r = read_media_action(&doc, l);
+    assert_eq!((r.is_media, r.has_script, r.has_target, r.rendition_op, r.has_next), (true, false, false, None, false));
+    let l = link_with(&mut doc, vec![("A", media_action("RichMediaExecute", vec![("TA", Object::Ref(ref_of(4)))]))]);
+    assert!(read_media_action(&doc, l).has_target);
+    // Names are compared byte for byte, so other actions and other spellings are not media.
+    for other in ["URI", "JavaScript", "Launch", "Named", "GoToE", "sound", "Sounds", "RichMedia", "SetOCGState"] {
+        let l = link_with(&mut doc, vec![("A", media_action(other, vec![]))]);
+        let r = read_media_action(&doc, l);
+        assert_eq!((r.is_media, r.kind, r.action.as_deref(), r.present), (false, None, Some(other), true), "{other}");
+    }
+    // The action behind a reference, and a /S behind one (not followed: no action).
+    let behind = doc.add(media_action("Sound", vec![]));
+    let l = link_with(&mut doc, vec![("A", Object::Ref(behind))]);
+    assert!(read_media_action(&doc, l).is_media);
+    let name = doc.add(Object::name("Sound"));
+    let l = link_with(&mut doc, vec![("A", uri_with(vec![("S", Object::Ref(name))]))]);
+    let r = read_media_action(&doc, l);
+    assert_eq!((r.present, r.action, r.is_media), (true, None, false));
+    // No action, a null action, an /A that is not a dictionary, a /Dest alone, and non-links.
+    let none = link_with(&mut doc, vec![("Dest", Object::Array(vec![Object::Int(0)]))]);
+    let r = read_media_action(&doc, none);
+    assert_eq!((r.is_link, r.has_entry, r.has_dest, r.is_media), (true, false, true, false));
+    let null = link_with(&mut doc, vec![("A", Object::Null)]);
+    assert!(!read_media_action(&doc, null).has_entry);
+    let number = link_with(&mut doc, vec![("A", Object::Int(3))]);
+    let r = read_media_action(&doc, number);
+    assert_eq!((r.has_entry, r.present, r.is_media), (true, false, false));
+    let widget = doc.add(uri_with(vec![("Subtype", Object::name("Widget")), ("A", media_action("Sound", vec![]))]));
+    let num = doc.add(Object::Int(5));
+    for o in [widget, num, ref_of(9999)] {
+        let r = read_media_action(&doc, o);
+        assert_eq!((r.is_link, r.is_media, r.settable), (false, false, false), "{o:?}");
+    }
+}
+
+#[test]
+fn a_media_action_is_removed_with_its_chain_and_survives_a_save() {
+    use crate::media_action::{Change, media_action_change, read_media_action, remove_media_action};
+    let mut doc = open(fixture());
+    let old = doc.add(media_action("Rendition", vec![("OP", Object::Int(0)), ("JS", string(b"x"))]));
+    let link = link_with(
+        &mut doc,
+        vec![("A", Object::Ref(old)), ("Dest", Object::Array(vec![Object::Int(0)])), ("Border", Object::Array(vec![Object::Int(0); 3]))],
+    );
+    set_catalog_entry(&mut doc, "Probe", Object::Ref(link));
+    assert_eq!(media_action_change(&doc, link), Change::Yes);
+    remove_media_action(&mut doc, link).unwrap();
+    let stored = doc.get(link);
+    let d = stored.as_dict().unwrap();
+    assert!(!d.contains(b"A"), "the action is out of the link");
+    assert!(d.contains(b"Dest") && d.contains(b"Border") && d.name(b"Subtype") == Some(b"Link".as_slice()), "the rest of the link is kept");
+    assert!(doc.get(old).as_dict().is_some_and(|o| o.name(b"S") == Some(b"Rendition".as_slice())), "the old action object is left as it was");
+    let options = || SaveOptions { mod_date: Some("D:20240101000000Z".into()), ..SaveOptions::default() };
+    let saved = write_full(&doc, &options()).unwrap();
+    let again = open(saved.clone());
+    let reopened = again.get(again.root().unwrap()).as_dict().and_then(|c| c.reference(b"Probe")).unwrap();
+    assert!(!read_media_action(&again, reopened).has_entry, "the removal is in the saved file");
+
+    // A second removal is no change: nothing is written.
+    assert_eq!(media_action_change(&doc, link), Change::NoChange);
+    remove_media_action(&mut doc, link).unwrap();
+    assert_eq!(write_full(&doc, &options()).unwrap(), saved);
+
+    // All four kinds go, each with its /Next chain.
+    for kind in ["Sound", "Movie", "Rendition", "RichMediaExecute"] {
+        let l = link_with(&mut doc, vec![("A", media_action(kind, vec![("Next", media_action("URI", vec![]))]))]);
+        assert!(read_media_action(&doc, l).has_next);
+        remove_media_action(&mut doc, l).unwrap();
+        let r = read_media_action(&doc, l);
+        assert_eq!((r.has_entry, r.has_next, r.is_link), (false, false, true), "{kind}");
+    }
+    // Another kind of action, an action whose /S is not direct, a null action and no action are
+    // left as they are: no write.
+    let name = doc.add(Object::name("Sound"));
+    let others = [
+        link_with(&mut doc, vec![("A", media_action("JavaScript", vec![("JS", string(b"x"))]))]),
+        link_with(&mut doc, vec![("A", media_action("Launch", vec![("F", string(b"a.pdf"))]))]),
+        link_with(&mut doc, vec![("A", media_action("URI", vec![("Next", media_action("Sound", vec![]))]))]),
+        link_with(&mut doc, vec![("A", uri_with(vec![("S", Object::Ref(name))]))]),
+        link_with(&mut doc, vec![("A", Object::Null)]),
+        link_with(&mut doc, vec![]),
+    ];
+    // Reachable from the catalog, so that the saved bytes would show a change to any of them.
+    set_catalog_entry(&mut doc, "Others", Object::Array(others.iter().map(|l| Object::Ref(*l)).collect()));
+    let before = write_full(&doc, &options()).unwrap();
+    for l in others {
+        assert_eq!(media_action_change(&doc, l), Change::NoChange);
+        remove_media_action(&mut doc, l).unwrap();
+    }
+    assert_eq!(write_full(&doc, &options()).unwrap(), before, "a removal that finds no media action writes nothing");
+    assert!(doc.get(others[0]).as_dict().is_some_and(|d| d.contains(b"A")));
+    assert!(doc.get(others[2]).as_dict().is_some_and(|d| d.contains(b"A")), "a media action behind another action's /Next stays");
+}
+
+#[test]
+fn a_media_action_is_refused_on_what_is_not_a_link() {
+    use crate::media_action::{Change, media_action_change, read_media_action, remove_media_action};
+    let mut doc = open(fixture());
+    let widget = doc.add(uri_with(vec![("Subtype", Object::name("Widget")), ("A", media_action("Sound", vec![]))]));
+    let number = doc.add(Object::Int(5));
+    // The catalog (1), the /Pages node (2), an inner node (3), a page (4), a widget, a number and
+    // an object that does not exist.
+    let objects = [doc.root().unwrap(), ref_of(2), ref_of(3), ref_of(4), widget, number, ref_of(9999)];
+    let options = || SaveOptions { mod_date: Some("D:20240101000000Z".into()), ..SaveOptions::default() };
+    for o in objects {
+        assert!(!read_media_action(&doc, o).settable, "{o:?}");
+        assert!(matches!(media_action_change(&doc, o), Change::Refused(_)), "{o:?}");
+        let before = write_full(&doc, &options()).unwrap();
+        assert!(remove_media_action(&mut doc, o).is_err(), "{o:?}");
+        assert_eq!(write_full(&doc, &options()).unwrap(), before, "{o:?} is left as it was");
+    }
+    // A page that is also marked as a link, and carries a media action, is still a page.
+    doc.update_dict(ref_of(4), |d| {
+        d.set(b"Subtype".to_vec(), Object::name("Link"));
+        d.set(b"A".to_vec(), media_action("Sound", vec![]));
+    })
+    .unwrap();
+    let r = read_media_action(&doc, ref_of(4));
+    assert!(r.is_link && r.is_media && !r.settable);
+    assert!(matches!(media_action_change(&doc, ref_of(4)), Change::Refused(why) if why.contains("page")));
+    assert!(remove_media_action(&mut doc, ref_of(4)).is_err());
+    assert!(doc.get(ref_of(4)).as_dict().is_some_and(|d| d.contains(b"A")));
+}
+
+#[test]
+fn every_read_a_media_action_makes_is_paid_for_before_it_is_made() {
+    use crate::media_action::{Change, change_with, read_with};
+    let mut doc = open(fixture());
+    // A direct action: the link is the only read, and with none not even the link is read.
+    let direct = link_with(&mut doc, vec![("A", media_action("Movie", vec![("Operation", Object::name("Stop"))]))]);
+    let r = read_with(&doc, direct, 1);
+    assert!(!r.capped && r.operation.as_deref() == Some("Stop") && r.settable);
+    let r = read_with(&doc, direct, 0);
+    assert!(r.capped && !r.is_link && !r.settable, "not even the link was paid for");
+    // The action behind a reference costs one more, and the operation behind one more again.
+    let op = doc.add(Object::name("Stop"));
+    let action = doc.add(media_action("Movie", vec![("Operation", Object::Ref(op))]));
+    let behind = link_with(&mut doc, vec![("A", Object::Ref(action))]);
+    let r = read_with(&doc, behind, 3);
+    assert!(!r.capped && r.operation.as_deref() == Some("Stop"));
+    let r = read_with(&doc, behind, 2);
+    assert!(r.capped && r.is_media && r.operation.is_none() && !r.settable, "the operation was not paid for");
+    let r = read_with(&doc, behind, 1);
+    assert!(r.capped && r.has_entry && !r.present && !r.settable, "the action was not paid for");
+    // The same for a rendition's /OP.
+    let code = doc.add(Object::Int(2));
+    let rendition = link_with(&mut doc, vec![("A", media_action("Rendition", vec![("OP", Object::Ref(code))]))]);
+    assert_eq!(read_with(&doc, rendition, 2).rendition_op, Some(2));
+    let r = read_with(&doc, rendition, 1);
+    assert!(r.capped && r.rendition_op.is_none());
+    // A sound action has no entry to read: the link is the only read.
+    let sound = link_with(&mut doc, vec![("A", media_action("Sound", vec![("Volume", Object::Ref(code))]))]);
+    assert!(!read_with(&doc, sound, 1).capped);
+
+    // A chain of 32 reference objects is followed, as `Document::resolve` follows it, and is paid
+    // for with 33 reads after the link's own; a chain of 33 is not followed.
+    for (hops, followed) in [(32usize, true), (33, false)] {
+        let mut at = doc.add(media_action("Sound", vec![]));
+        for _ in 0..hops {
+            at = doc.add(Object::Ref(at));
+        }
+        let chained = link_with(&mut doc, vec![("A", Object::Ref(at))]);
+        let entry = doc.get(chained).as_dict().and_then(|d| d.get(b"A").cloned()).unwrap();
+        assert_eq!(doc.resolve(&entry).as_dict().is_some(), followed);
+        let r = read_with(&doc, chained, 1 + 33);
+        assert_eq!((r.is_media, r.capped), (followed, false), "{hops}");
+        assert!(read_with(&doc, chained, 1 + 32).capped, "{hops}");
+    }
+    // The same for the operation.
+    let mut at = doc.add(Object::name("Play"));
+    for _ in 0..32 {
+        at = doc.add(Object::Ref(at));
+    }
+    let chained = link_with(&mut doc, vec![("A", media_action("Movie", vec![("Operation", Object::Ref(at))]))]);
+    assert_eq!(read_with(&doc, chained, 1 + 33).operation.as_deref(), Some("Play"));
+    assert!(read_with(&doc, chained, 1 + 32).capped);
+
+    // A change check uses the same allowance: it is refused when the link cannot be read, and
+    // needs nothing more than that read (two with an action behind a reference).
+    let sound = doc.add(media_action("Sound", vec![]));
+    let link = link_with(&mut doc, vec![("A", Object::Ref(sound))]);
+    assert_eq!(change_with(&doc, direct, 1), Change::Yes);
+    assert!(matches!(change_with(&doc, direct, 0), Change::Refused(why) if why.contains("allowance")));
+    assert_eq!(change_with(&doc, link, 2), Change::Yes);
+    assert!(matches!(change_with(&doc, link, 1), Change::Refused(why) if why.contains("allowance")));
+}

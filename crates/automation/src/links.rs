@@ -3,8 +3,8 @@
 
 use pdfcraft_engine::{
     Edit, EmbeddedActionChange, EmbeddedTarget, LaunchActionChange, LaunchTarget, LinkAction, LinkHighlight, LinkStyle, LinkZoom, MAX_ACTION_BEADS,
-    MAX_ACTION_THREADS, NamedActionChange, NamedTarget, ThreadActionChange, ThreadTarget, read_remote_document, remote_document_path_is_absolute,
-    resolve_remote_document_path,
+    MAX_ACTION_THREADS, MediaActionChange, NamedActionChange, NamedTarget, ThreadActionChange, ThreadTarget, read_remote_document,
+    remote_document_path_is_absolute, resolve_remote_document_path,
 };
 use pdfcraft_render::{DestView, LinkTarget, RemoteDestination};
 use serde_json::{Value, json};
@@ -470,6 +470,61 @@ impl Automation {
             "new_window": read.new_window,
             "has_next": read.has_next,
             "platform": read.has_platform,
+            "destination": read.has_dest,
+            "settable": read.settable,
+            "capped": read.capped,
+        });
+        Ok(out)
+    }
+
+    /// A link's sound, movie, rendition or rich-media action: read, or taken out (`remove`). There
+    /// is no set.
+    pub(crate) fn link_media_action(&mut self, a: &Args) -> Result<Value> {
+        let remove = a.opt_bool("remove")?.unwrap_or(false);
+        let (page, index) = (self.page(a)?, a.int("index")?);
+        let link = {
+            let doc = self.doc(a)?;
+            let found = doc.links().iter().find(|l| l.page == page && l.index as i64 + 1 == index);
+            let found = found.ok_or_else(|| failed(format!("page {} has no link {index} (see link_list)", page + 1)))?;
+            found.obj.ok_or_else(|| failed("an inline link has no object to edit"))?
+        };
+        let mut out = json!({});
+        let mut changed = false;
+        let mut removed = None;
+        if remove {
+            let before = self.doc(a)?.link_media_action(link);
+            match self.doc(a)?.link_media_action_change(link) {
+                MediaActionChange::Refused(why) => return Err(failed(why)),
+                MediaActionChange::NoChange => {}
+                MediaActionChange::Yes => {
+                    out = self.apply(a, Edit::RemoveLinkMediaAction { link })?;
+                    changed = true;
+                    removed = Some(json!({ "action": before.action, "kind": before.kind, "next": before.has_next }));
+                }
+            }
+        }
+        let read = self.doc(a)?.link_media_action(link);
+        out["page"] = json!(page + 1);
+        out["index"] = json!(index);
+        if remove {
+            out["changed"] = json!(changed);
+            if let Some(removed) = removed {
+                // What a removal took out.
+                out["removed"] = removed;
+            }
+        }
+        out["media_action"] = json!({
+            "has_entry": read.has_entry,
+            "present": read.present,
+            "action": read.action,
+            "exact": read.exact,
+            "is_media": read.is_media,
+            "kind": read.kind,
+            "operation": read.operation,
+            "rendition_op": read.rendition_op,
+            "has_script": read.has_script,
+            "has_target": read.has_target,
+            "has_next": read.has_next,
             "destination": read.has_dest,
             "settable": read.settable,
             "capped": read.capped,

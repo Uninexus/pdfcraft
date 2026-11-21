@@ -45,7 +45,7 @@ are borrowed; PDF 2.0 additions and most subset standards are missing. **150–2
 | §12.8 | Digital signatures | see table below | | |
 | §12.9 | Measurement and geospatial | full | 2D measuring with viewports and calibration; no geospatial | `comment.geospatial` planned |
 | §12.10 | Document requirements | yes | none | |
-| §13 | Multimedia: sound, movies, screen, rich media, 3D (U3D, PRC) | yes | preserved untouched; not played or shown | `misc.rich-media-*`, `misc.3d-view` planned (P3) |
+| §13 | Multimedia: sound, movies, screen, rich media, 3D (U3D, PRC) | yes | preserved untouched; not played or shown; a link's sound, movie, rendition or rich-media action can be read and removed headlessly (`link_media_action`) | `misc.rich-media-*`, `misc.3d-view` planned (P3) |
 | §14.3 | Metadata: info dictionary, XMP | full, XMP editor | info dictionary edited, with its XMP counterparts (title, author, subject, keywords, creator tool, producer) kept in step; XMP written for PDF/A; custom properties listed, added, changed and deleted (Document Properties ▸ Custom, `doc_info`, `doc_set_info`); no XMP editor | `organize.custom-properties` partial, `organize.xmp-editor` planned |
 | §14.6–14.8 | Marked content, logical structure, tagged PDF | full, with editing tools | read (checker, bookmarks from structure, redaction of tags); `ns_list` (read-only listing of structure namespaces); no tag editing or autotag | gap 11, `core.pdf20-namespaces` partial |
 | §14.9 | Accessibility support: alt text, ActualText, language | full | alt text figure by figure, language, title | `a11y.alt-text-workflow` |
@@ -88,7 +88,8 @@ are borrowed; PDF 2.0 additions and most subset standards are missing. **150–2
 | Launch | yes (restricted) | partial: the render crate reads a link's launch of a `.pdf` file without `/Win` as a link to that file and no other launch; `link_launch_action` (headless) reads, sets and removes the action (any file is reported; a set accepts only a relative path to a `.pdf` file of letters, digits, `.`, `_`, `-`, space and `/`, with `/NewWindow` when given; `/Win`, `/Mac` and `/Unix` are reported when their value is not null (the render crate also counts a `/Win` key with a null value) and dropped by a set, never written; PDF/A does not allow it and a set does not check); no UI (`edit.action-launch` partial) |
 | Thread | yes | partial: `link_thread_action` (headless) reads, sets and removes a link's thread action (`/D`, `/B`; a title-named or remote `/D` is only reported); no viewer goes to the thread and there is no UI (`edit.action-thread` partial) |
 | URI | yes | yes |
-| Sound, Movie, Rendition, GoTo3DView, RichMediaExecute | yes | none (P3) |
+| Sound, Movie, Rendition, RichMediaExecute | yes | partial: `link_media_action` (headless) reads and removes a link's action of these four kinds (a movie's `/Operation`, a rendition's `/OP`, whether a `/JS` script or a target is stored; a removal takes `/A` out with its `/Next` chain); it never writes one and nothing plays them; PDF/A does not allow sound, movie or rendition actions and a removal does not check for it (`edit.action-media` partial) |
+| GoTo3DView | yes | none (P3) |
 | Hide | yes | yes |
 | Named | yes | safe list (print, page navigation) for a form button; for a link, partial: `link_named_action` (headless) reads, sets and removes the action (`/N` one of NextPage, PrevPage, FirstPage, LastPage, Print; any other `/N` is only reported, and `SaveAs`, which form buttons also run, is not offered); the viewer does not follow a link's named action and there is no UI (`edit.action-named` partial) |
 | SubmitForm | yes | explained, not sent |
