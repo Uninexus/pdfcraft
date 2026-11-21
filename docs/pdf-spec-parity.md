@@ -90,7 +90,7 @@ are borrowed; PDF 2.0 additions and most subset standards are missing. **150–2
 | URI | yes | yes |
 | Sound, Movie, Rendition, GoTo3DView, RichMediaExecute | yes | none (P3) |
 | Hide | yes | yes |
-| Named | yes | safe list (print, page navigation) |
+| Named | yes | safe list (print, page navigation) for a form button; for a link, partial: `link_named_action` (headless) reads, sets and removes the action (`/N` one of NextPage, PrevPage, FirstPage, LastPage, Print; any other `/N` is only reported, and `SaveAs`, which form buttons also run, is not offered); the viewer does not follow a link's named action and there is no UI (`edit.action-named` partial) |
 | SubmitForm | yes | explained, not sent |
 | ResetForm | yes | yes |
 | ImportData | yes | via Import form data, not as an action |

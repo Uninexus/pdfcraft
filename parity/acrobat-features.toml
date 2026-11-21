@@ -2390,11 +2390,11 @@ title = "Execute-a-menu-item action (safe list)"
 area = "C"
 tier = "P2"
 milestone = "M7"
-status = "planned"
+status = "partial"
 commands = []
-tools = []
-evidence = []
-notes = ""
+tools = ["link_named_action"]
+evidence = ["crates/organize/src/tests.rs::a_named_action_is_read_with_its_menu_item_and_whether_a_set_accepts_it", "crates/organize/src/tests.rs::a_named_action_is_set_replaced_removed_and_survives_a_save", "crates/organize/src/tests.rs::a_named_action_is_refused_on_what_is_not_a_link", "crates/organize/src/tests.rs::every_read_a_named_action_makes_is_paid_for_before_it_is_made", "crates/automation/tests/it/link_named_action.rs::a_named_action_is_read_set_saved_removed_undone_and_redone", "crates/automation/tests/it/link_named_action.rs::a_call_that_cannot_be_applied_is_named_and_changes_nothing", "crates/automation/tests/it/link_named_action.rs::a_modify_restriction_refuses_a_write_and_still_reads"]
+notes = "Headless only: the link_named_action tool reads, sets and removes the menu-item action of a link (an /A action /S /Named whose /N is NextPage, PrevPage, FirstPage, LastPage or Print, ISO 32000-2 12.6.4.12; any other /N is reported with safe false and cannot be set), one undo step. The app already runs these names, and SaveAs, for a form button (the existing ui-egui test buttons_reset_navigate_and_print, not run for this entry); SaveAs is not on the list because it opens a dialog and is not a standard name, and Print is not allowed in PDF/A files. The form_set_actions tool already writes /S /Named for a field with any name it is given, with no safe list (not changed here). Not yet: running a link's named action (the viewer does not follow it on a link), the Link Properties dialog and the UI, the other menu items of Acrobat, named actions on bookmarks and other triggers, and /Next chains (a set drops the old action's)"
 
 [[feature]]
 id = "edit.action-set-ocg-state"
