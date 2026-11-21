@@ -243,7 +243,7 @@ fn a_stored_loop_is_listed_and_sent_back_unchanged_and_a_value_that_is_not_a_nam
 #[test]
 fn a_tree_root_or_role_map_that_is_not_a_dictionary_is_named_left_and_a_modify_restriction_holds() {
     let (dir, mut a) = setup();
-    let refused = "the structure tree's /StructTreeRoot or /RoleMap cannot be changed (it is not a dictionary, is behind more than 33 references, is a stream role map, or is the catalog or the tree root itself), so it was left as it is";
+    let refused = "the structure tree's /StructTreeRoot or /RoleMap cannot be changed (it is not a dictionary, is behind more than 33 references, is a stream role map, or is the same object as the catalog, the /Pages node, a page or inner /Pages node, or (for a map) the tree root or its other map, or the page tree has over 1000000 nodes or 2000000 /Kids entries and could not be checked), so it was left as it is";
     std::fs::write(dir.path().join("odd.pdf"), tagged_pdf("/RoleMap 7")).unwrap();
     let doc = open(&mut a, "odd.pdf");
     let before = bytes(&dir, &mut a, doc, "odd-before.pdf");
@@ -255,6 +255,19 @@ fn a_tree_root_or_role_map_that_is_not_a_dictionary_is_named_left_and_a_modify_r
     tool(&mut a, "role_map", json!({ "doc": doc, "role": "A", "maps_to": "" }));
     assert_eq!(bytes(&dir, &mut a, doc, "odd-after.pdf"), before);
     assert!(a.call("edit_undo", &json!({ "doc": doc })).is_err());
+
+    // A /RoleMap that is the /Pages node, a page, or the /ClassMap dictionary: named, refused, and
+    // the object is not written (a role named Kids would break the page tree).
+    for (name, extra) in [("pages", "/RoleMap 2 0 R"), ("page", "/RoleMap 3 0 R"), ("sibling", "/RoleMap 8 0 R /ClassMap 8 0 R")] {
+        std::fs::write(dir.path().join(format!("{name}.pdf")), tagged_pdf(extra)).unwrap();
+        let doc = open(&mut a, &format!("{name}.pdf"));
+        let before = bytes(&dir, &mut a, doc, &format!("{name}-before.pdf"));
+        assert_eq!(bad(&mut a, json!({ "doc": doc, "role": "Kids", "maps_to": "P" })), refused, "{name}");
+        assert_eq!(map(&tool(&mut a, "role_map", json!({ "doc": doc })))["unreadable"], json!(["role_map"]), "{name}");
+        tool(&mut a, "role_map", json!({ "doc": doc, "role": "Kids", "maps_to": "" }));
+        assert_eq!(bytes(&dir, &mut a, doc, &format!("{name}-after.pdf")), before, "{name}");
+        assert!(a.call("edit_undo", &json!({ "doc": doc })).is_err(), "{name}");
+    }
 
     let plain = open(&mut a, "a.pdf");
     tool(&mut a, "doc_protect", json!({ "doc": plain, "open_password": "open", "permissions_password": "boss", "changes": "none" }));

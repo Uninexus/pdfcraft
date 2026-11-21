@@ -12,9 +12,10 @@
 //! [`MAX_CLASS_NAME_BYTES`] bytes before it is copied, and an array is measured before any of its
 //! items is looked at.
 //!
-//! No guard refuses a `/ClassMap` that is another live dictionary (the `/Pages` node, a page, the
-//! `/RoleMap` dictionary): it is read and changed as a class map, so removing `Kids` from one that
-//! is the `/Pages` node would break the page tree.
+//! A `/ClassMap` or `/StructTreeRoot` that is one object with the catalog, the `/Pages` node, a
+//! node under it or (for the map) the tree root or the `/RoleMap` dictionary is unreadable and never
+//! changed, as for the role map. Any other dictionary a class map might be (a `/ParentTree`, an
+//! attribute object, an annotation) is not guarded: it is read and changed as a class map.
 
 use pdfcraft_cos::{Document, Object};
 

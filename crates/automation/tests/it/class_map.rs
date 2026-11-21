@@ -178,7 +178,15 @@ fn an_unreadable_class_map_is_named_and_left_and_a_modify_restriction_holds() {
     let (dir, mut a) = setup();
     // A class map that is not a dictionary, and one that is a stream: named, never replaced, and
     // taking an entry from it is no change.
-    for (name, extra) in [("odd", "/ClassMap 7"), ("stream", "/ClassMap 10 0 R"), ("tree", "/ClassMap 5 0 R"), ("catalog", "/ClassMap 1 0 R")] {
+    for (name, extra) in [
+        ("odd", "/ClassMap 7"),
+        ("stream", "/ClassMap 10 0 R"),
+        ("tree", "/ClassMap 5 0 R"),
+        ("catalog", "/ClassMap 1 0 R"),
+        ("pages", "/ClassMap 2 0 R"),
+        ("page", "/ClassMap 3 0 R"),
+        ("sibling", "/RoleMap 9 0 R /ClassMap 9 0 R"),
+    ] {
         std::fs::write(dir.path().join(format!("{name}.pdf")), tagged_pdf(extra)).unwrap();
         let doc = open(&mut a, &format!("{name}.pdf"));
         let before = bytes(&dir, &mut a, doc, &format!("{name}-before.pdf"));
@@ -189,7 +197,7 @@ fn an_unreadable_class_map_is_named_and_left_and_a_modify_restriction_holds() {
             "{name}"
         );
         assert_eq!(r["removed"], false, "{name}");
-        for key in ["Length", "K", "Pages", "Type"] {
+        for key in ["Length", "K", "Pages", "Type", "Kids", "Count", "Parent", "O", "Placement"] {
             assert_eq!(tool(&mut a, "class_map", json!({ "doc": doc, "remove": key }))["removed"], false, "{name} {key}");
         }
         assert_eq!(bytes(&dir, &mut a, doc, &format!("{name}-after.pdf")), before, "{name}");

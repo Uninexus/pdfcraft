@@ -18,9 +18,13 @@
 //! The refusal of a role that maps to itself or leads back to itself within [`MAX_LOOP_STEPS`]
 //! steps is this module's own rule, not the file format's.
 //!
-//! No guard refuses a `/RoleMap` that is another live dictionary (the `/Pages` node, a page, the
-//! `/ClassMap` dictionary): it is read and changed as a role map, so changing `Kids` in one that is
-//! the `/Pages` node would break the page tree.
+//! A `/RoleMap` or a `/StructTreeRoot` that is one object with the catalog, the `/Pages` node, a
+//! node under it (an inner `/Pages` node or a page, found by walking `/Kids` from the `/Pages` node)
+//! or, for the maps, the tree root's other map (`/RoleMap` and `/ClassMap`) is unreadable and never
+//! changed, because a change to it would be a change to that object (see [`with_map`]). Any other
+//! dictionary a map or a tree root might be, such as a `/ParentTree`, an attribute object, the
+//! document information dictionary, an annotation or a font, is not guarded: it is read and changed
+//! as a role map.
 
 use pdfcraft_cos::{Dict, Document, ObjRef, Object};
 
@@ -64,9 +68,11 @@ pub struct RoleMap {
     /// More entries exist than were listed.
     pub truncated: bool,
     /// `struct_tree_root` when the catalog's `/StructTreeRoot` is neither a dictionary nor null,
-    /// is behind too many references, or is the catalog itself; `role_map` the same for the tree
-    /// root's `/RoleMap`, which is also unreadable when it is a stream or is the catalog or the
-    /// tree root.
+    /// is behind too many references, or is one object with the catalog, the `/Pages` node or a
+    /// node under it; `role_map` the same for the tree root's `/RoleMap`, which is also
+    /// unreadable when it is a stream, or is one object with the tree root or its `/ClassMap`
+    /// (a page tree of over `MAX_PAGE_TREE_NODES` nodes or `MAX_KIDS_SCANNED` `/Kids` entries, which
+    /// cannot be checked, also makes either unreadable).
     pub unreadable: Vec<&'static str>,
 }
 
@@ -104,15 +110,78 @@ pub(crate) fn locate(doc: &Document, entry: Option<&Object>, streams: bool) -> W
     Where::Other
 }
 
+/// Most nodes [`reaches_page_tree_node`] lets the walk visit.
+pub(crate) const MAX_PAGE_TREE_NODES: usize = 1_000_000;
+/// Most `/Kids` entries [`reaches_page_tree_node`] lets the walk scan in all (a shared `/Kids`
+/// array is scanned once for each node that lists it, so this bounds time as the node cap bounds
+/// memory).
+pub(crate) const MAX_KIDS_SCANNED: usize = 2_000_000;
+
+/// Whether `target` is the `/Pages` node or a node under it (an inner `/Pages` node or a page),
+/// found by walking `/Kids` from the `/Pages` node. A node is put on the stack once, when it is
+/// first seen, so the stack and the seen set hold at most `max_nodes` + 1 nodes; and every entry
+/// of every `/Kids` array scanned is counted, at most `max_items` + 1 in all. A walk that sees
+/// more than `max_nodes` nodes, or scans more than `max_items` entries, before it finds `target`
+/// answers true, because it could not show that `target` is not one (exactly `max_nodes` nodes
+/// and exactly `max_items` entries still answer by what was found). A document with no `/Pages`
+/// node answers false.
+pub(crate) fn reaches_page_tree_node(doc: &Document, target: ObjRef, max_nodes: usize, max_items: usize) -> bool {
+    walk_page_tree(doc, target, max_nodes, max_items).0
+}
+
+/// [`reaches_page_tree_node`] and the most nodes the stack held (for the tests).
+pub(crate) fn walk_page_tree(doc: &Document, target: ObjRef, max_nodes: usize, max_items: usize) -> (bool, usize) {
+    let Some(top) = doc.root().and_then(|r| doc.get(r).as_dict().and_then(|c| c.reference(b"Pages"))) else {
+        return (false, 0);
+    };
+    if top == target {
+        return (true, 1);
+    }
+    let mut seen = std::collections::HashSet::from([top]);
+    let mut todo = vec![top];
+    let (mut scanned, mut peak) = (0usize, 1usize);
+    while let Some(at) = todo.pop() {
+        let node = doc.get(at);
+        let Some(kids) = node.as_dict().and_then(|d| d.get(b"Kids")) else { continue };
+        let kids = doc.resolve(kids);
+        let Some(items) = kids.as_array() else { continue };
+        for item in items {
+            scanned += 1;
+            if scanned > max_items {
+                return (true, peak);
+            }
+            let Some(kid) = item.as_ref() else { continue };
+            if kid == target {
+                return (true, peak);
+            }
+            if seen.insert(kid) {
+                if seen.len() > max_nodes {
+                    return (true, peak);
+                }
+                todo.push(kid);
+                peak = peak.max(todo.len());
+            }
+        }
+    }
+    (false, peak)
+}
+
 /// Runs `f` with where the tree root and the map `/<map_key>` of the tree root (`RoleMap`,
 /// `ClassMap`) are, and that map's dictionary.
+///
+/// Why the guards: the tree root and a map are changed where they are stored, so one that is the
+/// same object as the catalog, the `/Pages` node, a node under it, or (for a map) the tree root or
+/// the tree root's other map would change that object (a role named `Kids` in the `/Pages` node
+/// breaks the page tree). Each is reported as `Where::Other`, which the callers name as
+/// unreadable and never write. The page tree is walked only for a tree root or a map that is
+/// indirect.
 pub(crate) fn with_map<R>(doc: &Document, map_key: &[u8], f: impl FnOnce(Where, Where, Option<&Dict>) -> R) -> R {
     let Some(catalog) = doc.root().map(|r| doc.get(r)) else { return f(Where::Absent, Where::Absent, None) };
     let Some(catalog) = catalog.as_dict() else { return f(Where::Absent, Where::Absent, None) };
     let entry = catalog.get(b"StructTreeRoot");
     let catalog_ref = doc.root();
     let mut tree = locate(doc, entry, true);
-    if matches!(tree, Where::Indirect(r) if Some(r) == catalog_ref) {
+    if matches!(tree, Where::Indirect(r) if Some(r) == catalog_ref || reaches_page_tree_node(doc, r, MAX_PAGE_TREE_NODES, MAX_KIDS_SCANNED)) {
         tree = Where::Other;
     }
     let root: Option<Held> = match (tree, entry) {
@@ -123,9 +192,18 @@ pub(crate) fn with_map<R>(doc: &Document, map_key: &[u8], f: impl FnOnce(Where, 
     let root_dict = root.as_deref().and_then(Object::as_dict);
     let entry = root_dict.and_then(|d| d.get(map_key));
     let mut map = if root_dict.is_some() { locate(doc, entry, false) } else { Where::Absent };
-    // A role map that is the catalog or the tree root itself would be edited as one.
-    if matches!(map, Where::Indirect(r) if Some(r) == catalog_ref || tree == Where::Indirect(r)) {
-        map = Where::Other;
+    // A map that is the catalog, the tree root, the tree root's other map, the `/Pages` node or a
+    // node under it would be edited as a map.
+    if let Where::Indirect(r) = map {
+        let other_key: &[u8] = if map_key == b"RoleMap" { b"ClassMap" } else { b"RoleMap" };
+        let sibling = if root_dict.is_some() { locate(doc, root_dict.and_then(|d| d.get(other_key)), false) } else { Where::Absent };
+        if Some(r) == catalog_ref
+            || tree == Where::Indirect(r)
+            || sibling == Where::Indirect(r)
+            || reaches_page_tree_node(doc, r, MAX_PAGE_TREE_NODES, MAX_KIDS_SCANNED)
+        {
+            map = Where::Other;
+        }
     }
     let map_held: Option<Held> = match (map, entry) {
         (Where::Direct, Some(o)) => Some(Held::Direct(o)),
@@ -270,7 +348,7 @@ pub fn set_role_map(doc: &mut Document, role: &str, maps_to: Option<&str>) -> Re
             }
             (Where::Other, _) | (_, Where::Other) => {
                 return Err(OrganizeError::Invalid(format!(
-                    "the structure tree's /StructTreeRoot or /RoleMap cannot be changed (it is not a dictionary, is behind more than {} references, is a stream role map, or is the catalog or the tree root itself), so it was left as it is",
+                    "the structure tree's /StructTreeRoot or /RoleMap cannot be changed (it is not a dictionary, is behind more than {} references, is a stream role map, or is the same object as the catalog, the /Pages node, a page or inner /Pages node, or (for a map) the tree root or its other map, or the page tree has over {MAX_PAGE_TREE_NODES} nodes or {MAX_KIDS_SCANNED} /Kids entries and could not be checked), so it was left as it is",
                     MORE_HOPS + 1
                 )));
             }
