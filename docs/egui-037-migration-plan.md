@@ -255,7 +255,7 @@ Bumping all four craft-libs crates from their four current pins listed in sectio
 
 ### 3.8 Vendors outside the UI port
 
-`vendor/hayro*`, `vendor/lopdf` and `vendor/vello_common` are renderer/text-engine vendors. Keep their revisions, patches and tests. Inspect vello package identities and feature unification; incompatible versions may legitimately coexist. Do not force unrelated major versions to unify or edit PDF renderer vendors merely to make `cargo tree -d` empty.
+`vendor/lopdf` and `vendor/vello_common` are renderer/text-engine vendors; the hayro crates are no longer vendored and come from storytold/craft-libs git dependencies. Keep their revisions, patches and tests. Inspect vello package identities and feature unification; incompatible versions may legitimately coexist. Do not force unrelated major versions to unify or edit PDF renderer vendors merely to make `cargo tree -d` empty.
 
 ## 4. egui 0.37 breaking changes that touch PdfCraft
 
@@ -783,7 +783,7 @@ PdfCraft:
 - `apps/pdfcraft/Cargo.toml`, `apps/pdfcraft-web/Cargo.toml`, `apps/pdfcraft/src/main.rs`, `apps/pdfcraft/src/decorations.rs`, `apps/pdfcraft/tests/it/*.rs`.
 - `crates/ui-egui/Cargo.toml`, `crates/ui-egui/src/lib.rs`, `control.rs`, `canvas.rs`, `chrome.rs`, `window_controls.rs`, `window_state.rs`, `theme.rs`, `system_fonts.rs`, `motion.rs`, `recovery.rs`, `fling.rs`, `wheel_pager.rs`, `wheel_boost.rs`, `scroll_speed.rs`, `bidi.rs`, `widgets.rs`, `print_ui.rs`.
 - `crates/print/src/tests.rs`, `crates/ui-egui/tests/it/*.rs`, `crates/ui-egui/tests/perf.rs`, `crates/ui-egui/examples/shot.rs`.
-- `vendor/README.md`, `vendor/winit`, `vendor/egui-wgpu`, retained `vendor/hayro*`, `vendor/lopdf`, `vendor/vello_common`.
+- `vendor/README.md`, `vendor/winit`, `vendor/egui-wgpu`, `vendor/lopdf`, `vendor/vello_common`.
 
 Target/reference source:
 
