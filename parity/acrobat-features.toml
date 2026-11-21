@@ -1378,11 +1378,11 @@ title = "Named destinations panel"
 area = "B"
 tier = "P2"
 milestone = "M12"
-status = "planned"
+status = "partial"
 commands = []
-tools = []
-evidence = []
-notes = ""
+tools = ["named_destinations"]
+evidence = ["crates/organize/src/tests.rs::the_destination_walk_scans_a_huge_array_only_as_far_as_the_allowance", "crates/organize/src/tests.rs::a_structural_dictionary_is_never_read_as_the_destinations_or_written", "crates/organize/src/tests.rs::named_destinations_are_listed_from_the_tree_and_the_dictionary_with_their_page_and_view", "crates/organize/src/tests.rs::a_destinations_entry_that_is_not_a_dictionary_is_named_and_not_listed", "crates/organize/src/tests.rs::removing_a_named_destination_keeps_the_others_in_order_and_everything_else", "crates/organize/src/tests.rs::a_destination_dictionary_held_as_an_object_has_its_name_removed_where_it_is", "crates/organize/src/tests.rs::the_destination_listing_and_the_name_tree_walk_are_bounded", "crates/automation/tests/it/named_destinations.rs::the_names_are_read_one_is_removed_saved_undone_and_redone", "crates/automation/tests/it/named_destinations.rs::a_name_in_an_object_the_tool_does_not_change_is_refused_and_a_bad_argument_is_named", "crates/automation/tests/it/named_destinations.rs::the_dictionary_and_a_leaf_are_changed_where_they_are_and_a_protected_copy_is_left"]
+notes = "Headless, read and remove only; there is no panel and no way to add a name or go to one from a list. named_destinations lists the names a link can go to (ISO 32000-2 12.3.2.4), from the /Dests name tree under the catalog's /Names (at most 1024 nodes, 16 levels and 100000 kids and pairs scanned, and 100000 dictionary entries; a tree root or dictionary that is the catalog, its /Names dictionary, the /Pages node, a node under it or a page is named unreadable and never written, and any other dictionary is not guarded) and then from the catalog's /Dests dictionary: each name's position, source, name (cut at 127 characters), the 1-based page and view it goes to, and whether it can be removed; and, given remove, takes one name out by its position (one undo step, needs permission to modify). Only a name in a leaf that is an object of its own with its /Names array written in it, or in the catalog's /Dests dictionary, can be removed; a removal leaves the page, the links that use the name and every /Limits as they are, so a leaf that lost its first or last name can claim a key it no longer holds, which no longer conforms to 7.9.6. Not done: no name is added or renamed and no target is changed, nothing follows a link by name from the list, and a tree key that is not a direct string is not listed."
 
 [[feature]]
 id = "view.articles-panel"

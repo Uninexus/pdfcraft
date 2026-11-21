@@ -764,6 +764,49 @@ impl Automation {
         Ok(out)
     }
 
+    /// The named destinations: read, and take the one at position `remove` of the listing away
+    /// when it is given.
+    pub(crate) fn named_destinations(&mut self, a: &Args) -> Result<Value> {
+        use pdfcraft_organize::destinations::{Removal, Source};
+        let remove = match a.opt_int("remove")? {
+            Some(i) if i < 0 => return Err(ToolError::InvalidArgs("remove must be 0 or more".into())),
+            // A position this target's `usize` cannot hold is past every name.
+            Some(i) => Some(usize::try_from(i).unwrap_or(usize::MAX)),
+            None => None,
+        };
+        let removal = match remove {
+            Some(index) => Some((index, self.doc(a)?.destination_removal(index))),
+            None => None,
+        };
+        let mut out = match removal {
+            Some((index, Removal::Yes)) => {
+                let mut out = self.apply(a, Edit::RemoveNamedDestination(index))?;
+                out["removed"] = json!(true);
+                out
+            }
+            Some((_, Removal::Unsupported)) => {
+                return Err(ToolError::InvalidArgs("that name is stored in an object this tool does not change (see removable)".into()));
+            }
+            Some((_, Removal::NoEntry)) => json!({ "removed": false }),
+            None => json!({}),
+        };
+        let read = self.doc(a)?.named_destinations();
+        let rows: Vec<Value> = read
+            .destinations
+            .iter()
+            .map(|d| {
+                let source = match d.source {
+                    Source::Names => "names",
+                    Source::Dests => "dests",
+                };
+                json!({ "index": d.index, "source": source, "name": d.name, "name_exact": d.name_exact, "page": d.page, "view": d.view, "removable": d.removable })
+            })
+            .collect();
+        out["named_destinations"] =
+            json!({ "truncated": read.truncated, "tree_capped": read.tree_capped, "destinations": rows, "unreadable": read.unreadable });
+        Ok(out)
+    }
+
     pub(crate) fn doc_optimize(&mut self, a: &Args) -> Result<Value> {
         use pdfcraft_engine::optimize::{Compatibility, Compression, ImageSettings, MonoCompression, Preset};
         const MONO_KEYS: [&str; 4] = ["downsample", "ppi", "above_ppi", "compression"];
