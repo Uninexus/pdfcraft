@@ -60,6 +60,7 @@ mod role_map;
 mod save_flatten_failure;
 mod screen_actions;
 mod shared_name_arrays;
+mod signature_audit_report;
 mod signature_field_lock;
 mod signature_seed_values;
 mod split_name_template;

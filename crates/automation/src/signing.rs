@@ -141,6 +141,67 @@ impl Automation {
         Ok(json!({ "count": list.len(), "signed": signed, "all_valid": all_valid, "signatures": list }))
     }
 
+    /// `signature_audit_report`: what the signatures of the open document say, as the validator
+    /// read them, and optionally the same facts as a new PDF.
+    pub(crate) fn signature_audit_report(&mut self, a: &Args) -> Result<Value> {
+        let (id, own) = {
+            let doc = self.doc(a)?;
+            (doc.id, doc.path.clone())
+        };
+        // The path is read and checked before anything is made, so a bad one leaves no file.
+        let output = match a.opt_str("output")? {
+            Some(o) => {
+                let path = self.resolve(o, true)?;
+                let same =
+                    own.as_deref().is_some_and(|p| std::fs::canonicalize(p).ok().is_some_and(|p| Some(p) == std::fs::canonicalize(&path).ok()));
+                if same {
+                    return Err(bad("output is the open document's own file; the report would replace it"));
+                }
+                Some(path)
+            }
+            None => None,
+        };
+        let report = self.session.signature_audit(id).map_err(failed)?;
+        if output.is_some() && report.signed == 0 {
+            return Err(bad(
+                "the document has no signatures, so there is nothing to put in a report file; leave out output to read the (empty) report",
+            ));
+        }
+        let entries: Vec<Value> = report
+            .entries
+            .iter()
+            .map(|e| {
+                json!({
+                    "field": e.field, "kind": e.kind, "status": e.status, "signer": e.signer,
+                    "certificate_subject": e.certificate_subject, "certificate_issuer": e.certificate_issuer, "self_signed": e.self_signed,
+                    "claimed_time": e.claimed_time, "signing_time": e.signing_time,
+                    "timestamp": e.timestamp, "timestamp_time": e.timestamp_time,
+                    "hash_algorithm": e.digest, "algorithm": e.algorithm, "format": e.sub_filter,
+                    "reasons": e.reasons, "revision": e.revision, "covers": e.covers,
+                    "covers_whole_file": match e.covers { "whole_file" => json!(true), "changes_allowed" | "changes_disallowed" => json!(false), _ => Value::Null }, "changes_after_signing": e.changes_after_signing,
+                    "certification_level": e.certification_level, "page": e.page,
+                    "reason": e.reason, "location": e.location, "text_cut": e.text_cut, "reasons_cut": e.reasons_cut,
+                })
+            })
+            .collect();
+        let mut result = json!({
+            "document": report.document, "pages": report.pages, "bytes": report.bytes, "sha256": report.sha256,
+            "unsaved_changes": report.unsaved_changes, "changed_on_open": report.changed_on_open, "document_cut": report.document_cut, "stand_in_counted": report.stand_in_counted,
+            "found": report.found, "signed": report.signed, "valid": report.valid, "unknown": report.unknown, "invalid": report.invalid,
+            "trusted_certificates": report.trusted_certificates,
+            "listed": entries.len(), "truncated": report.truncated, "signatures": entries,
+            "language": "en", "status_meaning": pdfcraft_engine::signature_audit::STATUS_MEANING,
+            "generated": "a summary generated locally from the signatures in the file; it is not itself signed",
+            "checked": pdfcraft_engine::signature_audit::CHECKED, "not_checked": pdfcraft_engine::signature_audit::NOT_CHECKED,
+        });
+        if let Some(path) = output {
+            let bytes = self.session.signature_audit_pdf(&report).map_err(failed)?;
+            write_atomic(&path, &bytes)?;
+            result["output"] = json!({ "path": path.to_string_lossy(), "bytes": bytes.len() });
+        }
+        Ok(result)
+    }
+
     pub(crate) fn sign_id_create(&mut self, a: &Args) -> Result<Value> {
         let name = a.str("name")?.trim().to_string();
         if name.is_empty() {

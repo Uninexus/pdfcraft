@@ -1042,6 +1042,7 @@ mod tests {
             timestamp_time: None,
             status,
             modification: sign::Modification::None,
+            changes_checked: false,
             verdict_shown: false,
             details: Vec::new(),
         }

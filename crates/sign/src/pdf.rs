@@ -96,6 +96,11 @@ pub struct SignatureInfo {
     pub timestamp_time: Option<Time>,
     pub status: Status,
     pub modification: Modification,
+    /// The changes after signing were classified, so `modification` is a finding. False when
+    /// validation stopped before that step (a signature that could not be read or checked), when
+    /// `modification` is only its starting value, or when it found changes but could not compare
+    /// the fields the signature locks, so it cannot say they are permitted.
+    pub changes_checked: bool,
     /// The display copy draws this verdict into the appearance of at least one of the
     /// signature's visible widgets (its named status layers, see [`crate::status_layers`]). The
     /// document can still clip those layers away or cover them, so this never stands in for the

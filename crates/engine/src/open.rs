@@ -120,6 +120,7 @@ impl Session {
         bytes: Arc<Vec<u8>>,
         password: Option<&str>,
     ) -> Result<PreparedDocument, OpenError> {
+        let input = bytes.clone();
         let cos = std::panic::catch_unwind(|| pdfcraft_cos::Document::open_with_password(bytes.clone(), password));
         // The renderer authenticates on its own. It cannot use the owner password of R2–R4
         // files, so give it the user password that owner authentication recovers.
@@ -291,6 +292,7 @@ impl Session {
         };
         let mut document =
             Self::build_document(context, DocumentOpenData { name, path, bytes, info, structure: cos, render_password, password, xfa });
+        document.changed_on_open = !Arc::ptr_eq(&input, &document.bytes) && *input != *document.bytes;
         // A script that ran away on open turns the form's scripts off for this document.
         document.xfa_template = if ran_away { None } else { xfa_template };
         document.js_output.append(script_output);
@@ -400,6 +402,7 @@ impl Session {
             renderer,
             password: render_password,
             dirty: false,
+            changed_on_open: false,
             generation: 0,
             snapshot_generation: 0,
             read_only_reason,
