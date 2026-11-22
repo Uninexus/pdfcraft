@@ -49,6 +49,10 @@ pub struct Document {
     pub password: Option<String>,
     /// `true` when there are edits that have not been saved.
     pub dirty: bool,
+    /// Opening the file changed the bytes PdfCraft holds (a dynamic XFA form's layout, data sync or
+    /// opening scripts, or a repaired page tree were added as a revision), so they may differ from
+    /// the file on disk even with nothing edited. Not cleared by a later save.
+    pub changed_on_open: bool,
     /// Bumped on every change to the working file (edit, undo, redo, save); autosave compares it.
     pub(crate) generation: u64,
     /// The generation last handed out by `autosave_snapshots`, or another one when storing that

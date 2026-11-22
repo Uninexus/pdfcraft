@@ -879,6 +879,7 @@ mod tests {
             timestamp_time: None,
             status,
             modification: crate::pdf::Modification::None,
+            changes_checked: false,
             verdict_shown: false,
             details: Vec::new(),
         }

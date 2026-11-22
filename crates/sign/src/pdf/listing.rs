@@ -495,6 +495,7 @@ pub fn list_cached(doc: &Document, bytes: &[u8], trust: &TrustStore, cache: &Dig
             timestamp_time: None,
             status: Status::Unknown,
             modification: Modification::None,
+            changes_checked: false,
             verdict_shown: false,
             details: Vec::new(),
         };
@@ -542,6 +543,7 @@ pub fn list_cached(doc: &Document, bytes: &[u8], trust: &TrustStore, cache: &Dig
             timestamp_time: None,
             status: Status::Unknown,
             modification: Modification::None,
+            changes_checked: false,
             verdict_shown: false,
             details: Vec::new(),
         };
@@ -583,6 +585,7 @@ fn unread_fields() -> SignatureInfo {
         timestamp_time: None,
         status: Status::Unknown,
         modification: Modification::None,
+        changes_checked: false,
         verdict_shown: false,
         details: vec![Detail::plain(
             "This form has too many fields, or a field name too long, for PdfCraft to read them all. Any signature among the rest is not listed, so the document is treated as signed.",

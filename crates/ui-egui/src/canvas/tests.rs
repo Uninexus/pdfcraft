@@ -83,6 +83,7 @@ fn signature(signed: bool, visible: bool, page: Option<usize>, rect: Option<[f64
         timestamp_time: None,
         status: pdfcraft_engine::SignatureStatus::Valid,
         modification: pdfcraft_engine::sign::Modification::None,
+        changes_checked: false,
         verdict_shown: false,
         details: Vec::new(),
     }

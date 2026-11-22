@@ -81,10 +81,10 @@ impl std::fmt::Display for BlockedLink {
 
 /// Characters that can hide or disguise part of an address in the confirmation dialog. A plain
 /// space is visible and turns up in real links (`mailto:…?subject=Order form`), so it is allowed.
-fn hides_text(c: char) -> bool {
+pub(crate) fn hides_text(c: char) -> bool {
     (c.is_whitespace() && c != ' ')
         || c.is_control()
-        || matches!(c, '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{2064}' | '\u{2066}'..='\u{2069}' | '\u{FEFF}')
+        || matches!(c, '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{2064}' | '\u{2066}'..='\u{2069}' | '\u{FEFF}' | '\u{061C}' | '\u{00AD}' | '\u{034F}' | '\u{115F}' | '\u{1160}' | '\u{3164}' | '\u{FFA0}' | '\u{180E}' | '\u{E0000}'..='\u{E007F}')
 }
 
 /// Check an address that came from a document (a link, a button's URI action or a script's

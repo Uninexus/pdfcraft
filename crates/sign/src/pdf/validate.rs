@@ -272,6 +272,7 @@ fn finish_validation(context: SignatureValidation<'_>, verified: VerifiedSignatu
     let revoked = revocation == DssRevocation::Revoked;
     // Changes after signing.
     let mut locks = Locked::Kept;
+    info.changes_checked = true;
     info.modification = if covered == bytes.len() || bytes[covered..].iter().all(|b| b.is_ascii_whitespace() || *b == 0) {
         Modification::None
     } else {
@@ -346,6 +347,10 @@ fn finish_validation(context: SignatureValidation<'_>, verified: VerifiedSignatu
     }
     // A lock that could not be read or compared proves nothing either way: the changes may touch
     // a field it locks, so the signature is not Valid.
+    // Its verdict on the changes then stands unproved, so the listing's `modification` is not a finding.
+    if locks == Locked::Unchecked && matches!(info.modification, Modification::Allowed(_)) {
+        info.changes_checked = false;
+    }
     if locks == Locked::Unchecked && !problems {
         info.details.push(Detail::of(
             "The signature could not be checked ({}).",
@@ -613,6 +618,7 @@ pub(super) fn validate_doc_timestamp(doc: &Document, bytes: &[u8], v: &Dict, inf
             info.details.push(Detail::plain("The timestamp authority's certificate is not issued for time stamping."));
         }
     }
+    info.changes_checked = true;
     info.modification = if covered == bytes.len() || bytes[covered..].iter().all(|b| b.is_ascii_whitespace() || *b == 0) {
         Modification::None
     } else {
