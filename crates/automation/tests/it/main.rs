@@ -62,6 +62,7 @@ mod screen_actions;
 mod shared_name_arrays;
 mod signature_field_lock;
 mod signature_seed_values;
+mod split_name_template;
 mod structure_namespaces;
 mod text_copy;
 mod timesheet_compat;

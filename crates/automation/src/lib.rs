@@ -65,6 +65,7 @@ mod error;
 mod json;
 mod pages;
 mod paths;
+mod split_name;
 
 pub use dispatch::Content;
 pub use error::ToolError;
