@@ -4876,6 +4876,22 @@ fn image_right_click_context_menu_items_and_actions() {
     h.run_steps(4);
     assert!(h.state_mut().execute("edit.edit_text"));
     h.run_steps(2);
+    // Edit on a picture page first recognizes its text on a worker thread, and that lands as its own
+    // undoable "Recognize text" step whenever it finishes. Let it finish before the flip, so the
+    // undo history below is the same on a slow machine as on a fast one.
+    let id = h.state().views[0].id;
+    if pdfcraft_engine::ocr::available() {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while (h.state().ocr_run.is_some() || h.state().session.get(id).unwrap().can_undo() != Some("Recognize text"))
+            && std::time::Instant::now() < deadline
+        {
+            h.run_steps(1);
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert!(h.state().ocr_run.is_none(), "the automatic recognition finished");
+    }
+    h.run_steps(2);
+    let before_flip = h.state().session.get(id).unwrap().can_undo().map(str::to_owned);
     let r = h.state().views[0].page_screen_rect(0).expect("on screen");
     let c = r.center();
     // Select image
@@ -4919,15 +4935,14 @@ fn image_right_click_context_menu_items_and_actions() {
     // Flip horizontal via context menu item
     h.get_by_label("Flip horizontal").click();
     h.run_steps(3);
-    let id = h.state().views[0].id;
     let doc = h.state().session.get(id).unwrap();
     assert_eq!(doc.can_undo(), Some("Flip image"));
 
-    // Undo flip
+    // Undo flip: back to exactly the history before it (nothing, or just the recognition step).
     h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Z);
     h.run_steps(3);
     let doc = h.state().session.get(id).unwrap();
-    assert_eq!(doc.can_undo(), None);
+    assert_eq!(doc.can_undo().map(str::to_owned), before_flip);
 }
 
 #[test]

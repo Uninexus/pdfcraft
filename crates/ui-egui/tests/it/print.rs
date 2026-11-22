@@ -415,7 +415,9 @@ fn printing_landscape_sheets_tells_cups_to_turn_them() {
         choose(&mut h.state_mut().print_draft);
         h.run_steps(1);
         h.get_by(|n| n.label().as_deref() == Some("Print") && n.role() == Role::Button).click();
-        for _ in 0..400 {
+        // A background job: wait on a deadline, not a fixed number of polls, so a loaded machine still passes.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while std::time::Instant::now() < deadline {
             h.run_steps(1);
             if jobs.lock().unwrap().len() > before {
                 break;
@@ -1930,7 +1932,9 @@ fn a_custom_paper_prints_at_its_size_and_its_printer_keeps_it() {
     }
     h.run_steps(8);
     h.get_by(|n| n.label().as_deref() == Some("Print") && n.role() == Role::Button).click();
-    for _ in 0..400 {
+    // A background job: wait on a deadline, not a fixed number of polls, so a loaded machine still passes.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while std::time::Instant::now() < deadline {
         h.run_steps(1);
         if !sent.lock().unwrap().is_empty() {
             break;
