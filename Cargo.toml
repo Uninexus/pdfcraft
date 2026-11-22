@@ -165,7 +165,8 @@ incremental = false
 lto = "thin"
 codegen-units = 1
 
-# Vendored, patched third-party crates (see vendor/README.md). Each patch is meant to go upstream.
+# The hayro crates are pinned to storytold/craft-libs revisions; lopdf, vello_common and vello_cpu are
+# vendored, patched copies (see vendor/README.md). Each patch is meant to go upstream.
 [patch.crates-io]
 hayro-interpret = { git = "https://github.com/storytold/craft-libs", rev = "9eb02be84f21898e247daeb2af5827c9fe85a3a0" }
 hayro = { git = "https://github.com/storytold/craft-libs", rev = "9eb02be84f21898e247daeb2af5827c9fe85a3a0" }
