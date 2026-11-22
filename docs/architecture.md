@@ -9,8 +9,8 @@ crate's `README.md` has the detail.
 ## Shape
 
 One Cargo workspace (`Cargo.toml`, edition 2024, Rust ≥ 1.95, `MIT OR Apache-2.0`), 31 library
-crates in `crates/`, three binaries in `apps/`, build tooling in `xtask/`, and patched third-party
-crates in `vendor/`. About 152k lines of Rust and 1,765 tests (2026-10-10). Rust only: no
+crates in `crates/`, three binaries in `apps/`, build tooling in `xtask/`, and third-party
+crates in `vendor/` (a snapshot, three patched path dependencies and two provenance copies). About 152k lines of Rust and 1,765 tests (2026-10-10). Rust only: no
 handwritten JS/TS, in the product or the build.
 
 | Binary | What it is |
