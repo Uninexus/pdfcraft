@@ -109,6 +109,28 @@ pub(crate) fn lexical(path: &Path) -> Option<PathBuf> {
     Some(parts.iter().collect())
 }
 
+/// `path` as a message shows it. Windows hands back canonical paths in the extended-length form
+/// (`\\?\C:\x`, `\\?\UNC\server\share\x`), which is what the root is kept as but not what a
+/// person typed or can read at a glance; this drops that prefix. It is for display only: the path
+/// used to open, write or compare a file is never changed. Nothing changes on other systems.
+pub(crate) fn shown(path: &Path) -> String {
+    shown_str(&path.to_string_lossy())
+}
+
+/// [`shown`] on the text of a path, so the rule can be checked on any system.
+fn shown_str(path: &str) -> String {
+    if let Some(rest) = path.strip_prefix(r"\\?\UNC\") {
+        return format!(r"\\{rest}");
+    }
+    if let Some(rest) = path.strip_prefix(r"\\?\") {
+        let mut chars = rest.chars();
+        if chars.next().is_some_and(|c| c.is_ascii_alphabetic()) && chars.next() == Some(':') {
+            return rest.to_string();
+        }
+    }
+    path.to_string()
+}
+
 /// The file `name` inside `dir`, where `name` comes from a document or an argument: separators,
 /// colons (a Windows drive or stream) and control characters become `_`, and a name of only dots
 /// gets a leading `_`, so it is one plain file name and can't lead out of `dir`.
@@ -160,7 +182,7 @@ impl Written {
         let mut written = Written { made_dirs, created: Vec::new() };
         // A `create_dir_all` that fails part way has made some of the folders already.
         if let Err(e) = std::fs::create_dir_all(dir) {
-            return Err(written.take_back(failed(format!("{}: {e}", dir.display()))));
+            return Err(written.take_back(failed(format!("{}: {e}", shown(dir)))));
         }
         match body(&mut written) {
             Ok(value) => Ok(value),
@@ -239,11 +261,11 @@ pub(crate) fn write_atomic_synced(
     // A folder can't be replaced, and staging beside it could land outside the root: "." names
     // the root itself, whose parent isn't ours to write in.
     if path.is_dir() {
-        return Err(failed(format!("{}: is a folder, not a file", path.display())));
+        return Err(failed(format!("{}: is a folder, not a file", shown(path))));
     }
     let dir = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
     path.file_name().ok_or_else(|| failed(format!("{}: not a file path", path.display())))?;
-    std::fs::create_dir_all(dir).map_err(|e| failed(format!("{}: {e}", dir.display())))?;
+    std::fs::create_dir_all(dir).map_err(|e| failed(format!("{}: {e}", shown(dir))))?;
     // The writer itself is the platform crate's, shared with the desktop app and the CLI
     // (#2166): the staging file is written, flushed (delayed writeback failures surface before
     // the destination is replaced or a document marked clean), closed and renamed; a failure at
@@ -255,6 +277,21 @@ pub(crate) fn write_atomic_synced(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_extended_length_prefix_is_dropped_for_display_only_where_it_adds_nothing() {
+        // Strings, so this runs on every system.
+        assert_eq!(shown_str(r"\\?\C:\Users\me\x.pdf"), r"C:\Users\me\x.pdf");
+        assert_eq!(shown_str(r"\\?\UNC\server\share\x.pdf"), r"\\server\share\x.pdf");
+        assert_eq!(shown_str(r"C:\Users\me\x.pdf"), r"C:\Users\me\x.pdf");
+        assert_eq!(shown_str("/tmp/x.pdf"), "/tmp/x.pdf");
+        assert_eq!(shown_str(r"\\server\share\x.pdf"), r"\\server\share\x.pdf");
+        // The path form takes the same route (on Unix the text is kept as given).
+        assert_eq!(shown(Path::new(r"\\?\C:\x")), r"C:\x");
+        // A verbatim name that is not a drive has no shorter form: left as it is.
+        assert_eq!(shown_str(r"\\?\Volume{1234}\x.pdf"), r"\\?\Volume{1234}\x.pdf");
+        assert_eq!(shown_str(r"\\?\1:\x.pdf"), r"\\?\1:\x.pdf");
+    }
 
     /// A relative folder of new levels, which has no root to stop at: nothing is left, and the
     /// error is the body's, with no `could not remove` after it. Made under the working folder

@@ -1,6 +1,6 @@
 use super::error::{Result, ToolError, failed};
 use super::json::{Args, document_attachment_keys, info, one_based, parse_style_ranges, security, summary, text_style_levels};
-use super::paths::{read_input, write_atomic};
+use super::paths::{read_input, shown, write_atomic};
 use super::{Arc, Automation, Edit, Value, block_overlapping, comments, content, json, tools};
 
 /// One piece of a tool's result.
@@ -452,7 +452,7 @@ impl Automation {
                     if path.is_dir() {
                         // Adding the extension to a folder's name would write beside it: "." is the
                         // root, so that would land outside it.
-                        return Err(failed(format!("{}: is a folder, not a file", path.display())));
+                        return Err(failed(format!("{}: is a folder, not a file", shown(&path))));
                     }
                     if path.extension().is_none() {
                         path.set_extension(ext);
