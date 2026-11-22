@@ -373,6 +373,7 @@ impl Automation {
             "article_threads" => self.article_threads(&a)?,
             "portfolio_collection" => self.portfolio_collection(&a)?,
             "signature_field_lock" => self.signature_field_lock(&a)?,
+            "signature_seed_values" => self.signature_seed_values(&a)?,
             "reference_xobjects" => self.reference_xobjects(&a)?,
             "screen_actions" => self.screen_actions(&a)?,
             "named_destinations" => self.named_destinations(&a)?,

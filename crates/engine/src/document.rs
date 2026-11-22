@@ -724,6 +724,23 @@ impl Document {
         }
     }
 
+    /// The `/SV` (seed values) of the signature field with this object, as stored.
+    pub fn signature_seed(&self, field: pdfcraft_cos::ObjRef) -> pdfcraft_organize::signature_seed::SignatureSeed {
+        self.editor.as_ref().map(|e| pdfcraft_organize::signature_seed::read_signature_seed(&e.cos, field)).unwrap_or_default()
+    }
+
+    /// What setting `seed` (a removal when `None`) on the field with this object would do.
+    pub fn signature_seed_change(
+        &self,
+        field: pdfcraft_cos::ObjRef,
+        seed: Option<&pdfcraft_organize::signature_seed::SeedSpec>,
+    ) -> pdfcraft_organize::signature_seed::Change {
+        match self.editor.as_ref() {
+            Some(e) => pdfcraft_organize::signature_seed::signature_seed_change(&e.cos, field, seed),
+            None => pdfcraft_organize::signature_seed::Change::Refused("the document cannot be edited"),
+        }
+    }
+
     /// The article action of the link annotation with this object, as stored.
     pub fn link_thread_action(&self, link: pdfcraft_cos::ObjRef) -> pdfcraft_organize::thread_action::ThreadAction {
         self.editor.as_ref().map(|e| pdfcraft_organize::thread_action::read_thread_action(&e.cos, link)).unwrap_or_default()

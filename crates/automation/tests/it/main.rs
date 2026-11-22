@@ -61,6 +61,7 @@ mod save_flatten_failure;
 mod screen_actions;
 mod shared_name_arrays;
 mod signature_field_lock;
+mod signature_seed_values;
 mod structure_namespaces;
 mod text_copy;
 mod timesheet_compat;

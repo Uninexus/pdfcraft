@@ -11036,3 +11036,313 @@ fn the_screen_annotation_listing_stops_at_256_and_every_read_is_paid_for_first()
         assert!(r.capped && r.items.is_empty(), "{hops}");
     }
 }
+
+fn seed_dict(entries: Vec<(&str, Object)>) -> Object {
+    let mut all = vec![("Type", Object::name("SV"))];
+    all.extend(entries);
+    uri_with(all)
+}
+
+fn name_list(list: &[&str]) -> Object {
+    Object::Array(list.iter().map(|n| Object::name(n)).collect())
+}
+
+fn seed_spec(
+    reasons: &[&str],
+    sub_filters: &[&str],
+    digests: &[&str],
+    rev: Option<bool>,
+    required: &[crate::signature_seed::Entry],
+) -> crate::signature_seed::SeedSpec {
+    let own = |l: &[&str]| l.iter().map(|s| (*s).to_string()).collect::<Vec<_>>();
+    crate::signature_seed::SeedSpec::new(own(reasons), own(sub_filters), own(digests), rev, required.to_vec()).unwrap()
+}
+
+#[test]
+fn signature_seed_values_are_read_with_their_lists_flags_and_other_entries() {
+    use crate::signature_seed::{Entry, read_signature_seed};
+    let mut doc = open(fixture());
+    let plain = signature_field(&mut doc, vec![]);
+    let none = read_signature_seed(&doc, plain);
+    assert!(!none.has_entry && !none.present && none.flags.is_none() && none.settable && !none.signed && !none.capped && none.exact);
+    let null = signature_field(&mut doc, vec![("SV", Object::Null)]);
+    assert!(!read_signature_seed(&doc, null).has_entry, "a null is no entry");
+    let number = signature_field(&mut doc, vec![("SV", Object::Int(3))]);
+    let r = read_signature_seed(&doc, number);
+    assert!(r.has_entry && !r.present, "a number is an entry and no dictionary");
+
+    // Entries behind references: a flag integer, a reason string, a boolean; a number among the
+    // reasons and a string among the names are skipped; keys the tool does not model are counted.
+    let flags = doc.add(Object::Int(2 | 8 | 64));
+    let reason = doc.add(string(b"I approve"));
+    let rev = doc.add(Object::Bool(true));
+    let reasons = doc.add(Object::Array(vec![string(b"I am the author"), Object::Ref(reason), Object::Int(7)]));
+    let sv = doc.add(seed_dict(vec![
+        ("Ff", Object::Ref(flags)),
+        ("Reasons", Object::Ref(reasons)),
+        ("SubFilter", Object::Array(vec![Object::name("adbe.pkcs7.detached"), string(b"adbe.pkcs7.sha1")])),
+        ("DigestMethod", name_list(&["SHA256", "Custom"])),
+        ("AddRevInfo", Object::Ref(rev)),
+        ("Cert", uri_with(vec![("Type", Object::name("SVCert"))])),
+        ("Filter", Object::Null),
+    ]));
+    let field = signature_field(&mut doc, vec![("SV", Object::Ref(sv))]);
+    let r = read_signature_seed(&doc, field);
+    assert!(r.has_entry && r.present && r.settable && r.exact && !r.capped);
+    assert_eq!(r.flags, Some(74));
+    assert_eq!(r.required, [Entry::SubFilter, Entry::Reasons, Entry::DigestMethod]);
+    assert_eq!(
+        (r.reasons.items.as_slice(), r.reasons.count, r.reasons.skipped),
+        (["I am the author".to_string(), "I approve".to_string()].as_slice(), 3, 1)
+    );
+    assert_eq!((r.sub_filters.items.as_slice(), r.sub_filters.count, r.sub_filters.skipped), (["adbe.pkcs7.detached".to_string()].as_slice(), 2, 1));
+    assert_eq!(r.digest_methods.items, ["SHA256", "Custom"], "a name a write would refuse is still listed");
+    assert_eq!(r.add_rev_info, Some(true));
+    assert_eq!(r.other_entries, 2, "/Cert and a null /Filter, not /Type, /Ff or the four");
+
+    // An /Ff that is not an integer and an /AddRevInfo that is not a boolean read as none.
+    let odd = signature_field(&mut doc, vec![("SV", seed_dict(vec![("Ff", string(b"2")), ("AddRevInfo", Object::Int(1))]))]);
+    let r = read_signature_seed(&doc, odd);
+    assert!(r.present && r.flags.is_none() && r.required.is_empty() && r.add_rev_info.is_none());
+
+    // A field with a value is signed, whether the value is a dictionary or a reference.
+    let value = doc.add(uri_with(vec![("Type", Object::name("Sig"))]));
+    let signed = signature_field(&mut doc, vec![("V", Object::Ref(value))]);
+    let r = read_signature_seed(&doc, signed);
+    assert!(r.signed && !r.settable);
+    let unsigned_null = signature_field(&mut doc, vec![("V", Object::Null)]);
+    assert!(!read_signature_seed(&doc, unsigned_null).signed);
+}
+
+#[test]
+fn signature_seed_values_are_set_replaced_removed_and_survive_a_save() {
+    use crate::signature_seed::{Change, Entry, read_signature_seed, set_signature_seed, signature_seed_change};
+    let mut doc = open(fixture());
+    let old = doc.add(seed_dict(vec![("Reasons", names(&["old"]))]));
+    let field = signature_field(&mut doc, vec![("SV", Object::Ref(old))]);
+    // Reachable from the catalog, so that a save keeps it.
+    set_catalog_entry(&mut doc, "Probe", Object::Ref(field));
+    let spec = seed_spec(
+        &["Approved", "caf\u{e9}"],
+        &["adbe.pkcs7.detached", "ETSI.CAdES.detached"],
+        &["SHA256", "SHA512"],
+        Some(false),
+        &[Entry::Reasons, Entry::DigestMethod],
+    );
+    assert_eq!(signature_seed_change(&doc, field, Some(&spec)), Change::Yes);
+    set_signature_seed(&mut doc, field, Some(&spec)).unwrap();
+    let stored = doc.get(field);
+    let sv = stored.as_dict().unwrap().get(b"SV").unwrap();
+    assert!(matches!(sv, Object::Dict(_)), "the new dictionary is written in the field, not through the old object");
+    let sv = sv.as_dict().unwrap();
+    assert_eq!((sv.name(b"Type"), sv.int(b"Ff")), (Some(b"SV".as_slice()), Some(8 | 64)));
+    assert!(doc.get(old).as_dict().is_some_and(|d| d.contains(b"Reasons")), "the old dictionary is left as it was");
+    let mut doc = open(write_full(&doc, &SaveOptions::default()).unwrap());
+    let field = doc.get(doc.root().unwrap()).as_dict().and_then(|c| c.reference(b"Probe")).unwrap();
+    let r = read_signature_seed(&doc, field);
+    assert_eq!(r.reasons.items, ["Approved", "caf\u{e9}"]);
+    assert_eq!(r.sub_filters.items, ["adbe.pkcs7.detached", "ETSI.CAdES.detached"]);
+    assert_eq!(r.digest_methods.items, ["SHA256", "SHA512"]);
+    assert_eq!((r.add_rev_info, r.flags, r.other_entries, r.exact), (Some(false), Some(72), 0, true));
+    assert_eq!(r.required, [Entry::Reasons, Entry::DigestMethod]);
+
+    // A set with nothing required writes no /Ff, and drops what the new one does not give.
+    set_signature_seed(&mut doc, field, Some(&seed_spec(&[], &["adbe.pkcs7.sha1"], &[], None, &[]))).unwrap();
+    let sv = doc.get(field).as_dict().unwrap().get(b"SV").and_then(Object::as_dict).cloned().unwrap();
+    assert!(!sv.contains(b"Ff") && !sv.contains(b"Reasons") && !sv.contains(b"DigestMethod") && !sv.contains(b"AddRevInfo"));
+    assert_eq!(read_signature_seed(&doc, field).sub_filters.items, ["adbe.pkcs7.sha1"]);
+
+    // A removal takes the entry out and keeps the field; a second one changes nothing and writes
+    // nothing.
+    assert_eq!(signature_seed_change(&doc, field, None), Change::Yes);
+    set_signature_seed(&mut doc, field, None).unwrap();
+    assert!(!doc.get(field).as_dict().unwrap().contains(b"SV"));
+    assert_eq!(doc.get(field).as_dict().unwrap().name(b"FT"), Some(b"Sig".as_slice()), "the rest of the field is kept");
+    assert_eq!(signature_seed_change(&doc, field, None), Change::NoChange);
+    let save = |d: &Document| write_full(d, &SaveOptions { mod_date: Some("D:20240101000000Z".into()), ..SaveOptions::default() }).unwrap();
+    let before = save(&doc);
+    set_signature_seed(&mut doc, field, None).unwrap();
+    assert_eq!(before, save(&doc));
+}
+
+#[test]
+fn a_set_is_refused_over_seed_values_it_would_lose_and_a_removal_is_not() {
+    use crate::signature_seed::{Change, read_signature_seed, set_signature_seed, signature_seed_change};
+    let mut doc = open(fixture());
+    let cert = uri_with(vec![("Type", Object::name("SVCert"))]);
+    let field = signature_field(&mut doc, vec![("SV", seed_dict(vec![("Reasons", names(&["a"])), ("Cert", cert)]))]);
+    let spec = seed_spec(&["b"], &[], &[], None, &[]);
+    assert!(matches!(signature_seed_change(&doc, field, Some(&spec)), Change::Refused(why) if why.contains("entries this does not write")));
+    assert!(set_signature_seed(&mut doc, field, Some(&spec)).is_err());
+    assert_eq!(read_signature_seed(&doc, field).reasons.items, ["a"], "nothing was written");
+    assert_eq!(signature_seed_change(&doc, field, None), Change::Yes);
+    set_signature_seed(&mut doc, field, None).unwrap();
+    assert!(!read_signature_seed(&doc, field).has_entry);
+    set_signature_seed(&mut doc, field, Some(&spec)).unwrap();
+    assert_eq!(read_signature_seed(&doc, field).reasons.items, ["b"]);
+}
+
+#[test]
+fn signature_seed_values_are_refused_on_a_signed_field_and_on_structural_objects() {
+    use crate::signature_seed::{Change, read_signature_seed, set_signature_seed, signature_seed_change};
+    let mut doc = open(fixture());
+    let value = doc.add(uri_with(vec![("Type", Object::name("Sig"))]));
+    let signed = signature_field(&mut doc, vec![("V", Object::Ref(value)), ("SV", seed_dict(vec![("Reasons", names(&["a"]))]))]);
+    // Reachable from the catalog, so that a save keeps it and the byte comparison guards it.
+    set_catalog_entry(&mut doc, "Probe", Object::Ref(signed));
+    let number = doc.add(Object::Int(5));
+    let spec = seed_spec(&["x"], &[], &[], None, &[]);
+    // The catalog (1), the /Pages node (2), an inner node (3), a page (4), a signed field, an
+    // object that is no dictionary and one that does not exist.
+    let targets = [
+        doc.root().unwrap(),
+        pdfcraft_cos::ObjRef { num: 2, generation: 0 },
+        pdfcraft_cos::ObjRef { num: 3, generation: 0 },
+        pdfcraft_cos::ObjRef { num: 4, generation: 0 },
+        signed,
+        number,
+        pdfcraft_cos::ObjRef { num: 9999, generation: 0 },
+    ];
+    let save = |d: &Document| write_full(d, &SaveOptions { mod_date: Some("D:20240101000000Z".into()), ..SaveOptions::default() }).unwrap();
+    for t in targets {
+        assert!(!read_signature_seed(&doc, t).settable, "{t:?}");
+        assert!(matches!(signature_seed_change(&doc, t, Some(&spec)), Change::Refused(_)), "{t:?}");
+        assert!(matches!(signature_seed_change(&doc, t, None), Change::Refused(_)), "{t:?} a removal too");
+        if t == signed {
+            assert!(matches!(signature_seed_change(&doc, t, None), Change::Refused(why) if why.contains("signature")), "a signed field says why");
+        }
+        let bytes = save(&doc);
+        assert!(set_signature_seed(&mut doc, t, Some(&spec)).is_err() && set_signature_seed(&mut doc, t, None).is_err(), "{t:?}");
+        assert_eq!(bytes, save(&doc), "{t:?} is left as it was");
+    }
+    assert!(read_signature_seed(&doc, signed).has_entry, "the signed field's seed values are still read");
+}
+
+/// Reads: one for the field, one for the dictionary behind a reference, one for each list behind a
+/// reference, and one more for each list entry looked at.
+#[test]
+fn every_read_signature_seed_values_make_is_paid_for_before_it_is_made() {
+    use crate::signature_seed::{Change, change_with, read_with};
+    let mut doc = open(fixture());
+    let list = doc.add(name_list(&["adbe.pkcs7.detached", "adbe.pkcs7.sha1"]));
+    let sv = doc.add(seed_dict(vec![("SubFilter", Object::Ref(list))]));
+    let field = signature_field(&mut doc, vec![("SV", Object::Ref(sv))]);
+    // The field, the dictionary, the list, and its two entries.
+    let reads = 5;
+    let whole = read_with(&doc, field, reads);
+    assert!(!whole.capped && whole.sub_filters.items.len() == 2 && whole.settable);
+    let short = read_with(&doc, field, reads - 1);
+    assert!(short.capped && short.sub_filters.items.len() == 1 && !short.settable, "the second entry was not paid for");
+    let three = read_with(&doc, field, 3);
+    assert!(three.capped && three.sub_filters.items.is_empty() && three.sub_filters.count == 2, "the first entry was not paid for");
+    let two = read_with(&doc, field, 2);
+    assert!(two.capped && two.present && two.sub_filters.count == 0, "the list read was not paid for");
+    let one = read_with(&doc, field, 1);
+    assert!(one.capped && one.has_entry && !one.present, "the dictionary read was not paid for");
+    let nothing = read_with(&doc, field, 0);
+    assert!(nothing.capped && !nothing.has_entry && !nothing.settable, "the field read was not paid for");
+    assert_eq!(change_with(&doc, field, None, reads), Change::Yes);
+    for gets in [0, 1, reads - 1] {
+        assert!(matches!(change_with(&doc, field, None, gets), Change::Refused(why) if why.contains("allowance")), "{gets}");
+    }
+
+    // An /SV behind a chain of 32 reference objects is followed, as `Document::resolve` follows it
+    // (33 reads and the field's): a chain of 33 is not.
+    for (hops, followed) in [(32usize, true), (33, false)] {
+        let mut chain = open(fixture());
+        let mut at = chain.add(seed_dict(vec![]));
+        for _ in 0..hops {
+            at = chain.add(Object::Ref(at));
+        }
+        let field = signature_field(&mut chain, vec![("SV", Object::Ref(at))]);
+        let r = read_with(&chain, field, 34);
+        assert_eq!((r.present, r.capped), (followed, false), "{hops}");
+        assert!(read_with(&chain, field, 33).capped, "{hops}");
+    }
+}
+
+#[test]
+fn signature_seed_lists_cut_long_reasons_and_check_what_they_write() {
+    use crate::signature_seed::{MAX_ENTRIES, MAX_TEXT_CHARS, SignatureSeed, read_signature_seed};
+    assert!(SignatureSeed::default().exact, "nothing listed is nothing cut");
+    let mut doc = open(fixture());
+    let many = |n: usize| Object::Array((0..n).map(|i| string(format!("r{i}").as_bytes())).collect());
+    let at_limit = signature_field(&mut doc, vec![("SV", seed_dict(vec![("Reasons", many(MAX_ENTRIES))]))]);
+    let r = read_signature_seed(&doc, at_limit);
+    assert_eq!((r.reasons.items.len(), r.reasons.count, r.reasons.truncated), (MAX_ENTRIES, MAX_ENTRIES, false));
+    let over = signature_field(&mut doc, vec![("SV", seed_dict(vec![("Reasons", many(MAX_ENTRIES + 3))]))]);
+    let r = read_signature_seed(&doc, over);
+    assert_eq!((r.reasons.items.len(), r.reasons.count, r.reasons.truncated), (MAX_ENTRIES, MAX_ENTRIES + 3, true));
+    assert_eq!(r.reasons.items.last().map(String::as_str), Some("r15"), "the 16th in file order");
+
+    let whole = "n".repeat(MAX_TEXT_CHARS);
+    let long = "n".repeat(MAX_TEXT_CHARS + 1);
+    let field = signature_field(&mut doc, vec![("SV", seed_dict(vec![("Reasons", names(&[&whole]))]))]);
+    assert!(read_signature_seed(&doc, field).exact);
+    let field = signature_field(&mut doc, vec![("SV", seed_dict(vec![("Reasons", names(&[&whole, &long]))]))]);
+    let r = read_signature_seed(&doc, field);
+    assert!(!r.exact && r.reasons.items[1] == whole, "a long reason is cut at {MAX_TEXT_CHARS} and not exact");
+    // A name cut at 127 bytes and one that is not valid UTF-8 are not exact either.
+    let field = signature_field(&mut doc, vec![("SV", seed_dict(vec![("SubFilter", name_list(&[&"A".repeat(200)]))]))]);
+    let r = read_signature_seed(&doc, field);
+    assert!(!r.exact && r.sub_filters.items[0].len() == 127);
+    let raw = Object::Array(vec![Object::Name(vec![0xFF, b'x'])]);
+    let field = signature_field(&mut doc, vec![("SV", seed_dict(vec![("DigestMethod", raw)]))]);
+    let r = read_signature_seed(&doc, field);
+    assert!(!r.exact && r.digest_methods.items.len() == 1);
+}
+
+#[test]
+fn signature_seed_values_are_checked_before_they_are_written() {
+    use crate::signature_seed::{Entry, MAX_ENTRIES, MAX_TEXT_CHARS, SeedSpec};
+    let own = |l: &[&str]| l.iter().map(|s| (*s).to_string()).collect::<Vec<_>>();
+    let reasons = |n: usize| (0..n).map(|i| format!("r{i}")).collect::<Vec<_>>();
+    let new = |r: Vec<String>, s: &[&str], d: &[&str], rev, req: Vec<Entry>| SeedSpec::new(r, own(s), own(d), rev, req);
+    assert!(new(reasons(MAX_ENTRIES), &[], &[], None, vec![]).is_ok());
+    assert!(new(reasons(MAX_ENTRIES + 1), &[], &[], None, vec![]).is_err());
+    assert!(new(vec![], &[], &[], None, vec![]).is_err(), "no entry at all is a removal");
+    assert!(new(vec![String::new()], &[], &[], None, vec![]).is_err(), "an empty reason");
+    assert!(new(vec!["n".repeat(127)], &[], &[], None, vec![]).is_ok());
+    assert!(new(vec!["n".repeat(128)], &[], &[], None, vec![]).is_err());
+    assert_eq!(MAX_TEXT_CHARS, 127);
+    assert!(new(own(&["a", "a"]), &[], &[], None, vec![]).is_err(), "a repeated reason");
+}
+
+#[test]
+fn signature_seed_names_and_required_entries_are_checked_before_they_are_written() {
+    use crate::signature_seed::{DIGEST_METHODS, Entry, SUB_FILTERS, SeedSpec};
+    let own = |l: &[&str]| l.iter().map(|s| (*s).to_string()).collect::<Vec<_>>();
+    let new = |r: Vec<String>, s: &[&str], d: &[&str], rev, req: Vec<Entry>| SeedSpec::new(r, own(s), own(d), rev, req);
+    for s in SUB_FILTERS {
+        assert!(new(vec![], &[s], &[], None, vec![]).is_ok(), "{s}");
+    }
+    for d in DIGEST_METHODS {
+        assert!(new(vec![], &[], &[d], None, vec![]).is_ok(), "{d}");
+    }
+    assert!(new(vec![], &["ADBE.PKCS7.DETACHED"], &[], None, vec![]).is_err(), "names are compared byte for byte");
+    assert!(new(vec![], &["adbe.pkcs7.detached", "adbe.pkcs7.detached"], &[], None, vec![]).is_err());
+    assert!(new(vec![], &[], &["sha256"], None, vec![]).is_err());
+    assert!(new(vec![], &[], &["SHA1"], None, vec![]).is_err());
+    assert!(new(vec![], &["x"], &[], None, vec![]).is_err());
+    assert!(new(vec![], &[], &[], Some(true), vec![Entry::AddRevInfo]).is_ok());
+    // Revocation information needs a PKCS#7 sub-filter when sub-filters are given.
+    assert!(new(vec![], &["adbe.x509.rsa_sha1"], &[], Some(true), vec![]).is_err());
+    assert!(new(vec![], &["ETSI.CAdES.detached"], &[], Some(true), vec![]).is_err());
+    assert!(new(vec![], &["ETSI.CAdES.detached", "adbe.pkcs7.sha1"], &[], Some(true), vec![]).is_ok());
+    assert!(new(vec![], &["adbe.pkcs7.detached"], &[], Some(true), vec![]).is_ok());
+    assert!(new(vec![], &["adbe.x509.rsa_sha1"], &[], Some(false), vec![]).is_ok(), "false asks for nothing");
+    assert!(new(own(&["a"]), &[], &[], Some(true), vec![]).is_ok(), "no sub-filters named: nothing to contradict");
+    // One other entry is given each time, so that the set has an entry and only the required one is missing.
+    for entry in [Entry::Reasons, Entry::SubFilter, Entry::DigestMethod, Entry::AddRevInfo] {
+        let other = if entry == Entry::Reasons {
+            new(vec![], &["adbe.pkcs7.sha1"], &[], None, vec![entry])
+        } else {
+            new(own(&["a"]), &[], &[], None, vec![entry])
+        };
+        assert!(other.is_err(), "{entry:?} cannot be required without being given");
+    }
+    assert!(new(vec![], &[], &[], Some(true), vec![Entry::AddRevInfo, Entry::AddRevInfo]).is_err());
+    assert_eq!(Entry::parse("digest_method"), Some(Entry::DigestMethod));
+    assert_eq!(Entry::parse("DigestMethod"), None);
+    assert_eq!([Entry::SubFilter, Entry::Reasons, Entry::AddRevInfo, Entry::DigestMethod].map(Entry::bit), [2, 8, 32, 64]);
+}
