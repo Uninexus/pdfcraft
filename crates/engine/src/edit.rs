@@ -405,6 +405,12 @@ pub enum Edit {
         field: pdfcraft_cos::ObjRef,
         lock: Option<pdfcraft_organize::signature_lock::LockSpec>,
     },
+    /// A form field's private signer label (`/PdfCraftSigner`, an email address): set it, or take
+    /// it out (`None`). A label only: it restricts nobody.
+    SetFieldSigner {
+        field: pdfcraft_cos::ObjRef,
+        email: Option<String>,
+    },
     /// A signature field's `/SV` (seed values): set it to these, or take it out (`None`).
     SetSignatureSeed {
         field: pdfcraft_cos::ObjRef,

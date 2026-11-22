@@ -108,6 +108,7 @@ pub use pdfcraft_organize::destinations::{MAX_ITEMS_SCANNED, MAX_LISTED_DESTINAT
 pub use pdfcraft_organize::embedded_action::{
     Change as EmbeddedActionChange, EmbeddedTarget, MAX_NAME_BYTES as MAX_EMBEDDED_NAME_BYTES, MAX_PAGE as MAX_EMBEDDED_PAGE,
 };
+pub use pdfcraft_organize::field_signer::{Change as FieldSignerChange, FieldSigner, KEY as FIELD_SIGNER_KEY};
 pub use pdfcraft_organize::launch_action::{Change as LaunchActionChange, LaunchTarget, MAX_FILE_BYTES as MAX_LAUNCH_FILE_BYTES};
 pub use pdfcraft_organize::media_action::Change as MediaActionChange;
 pub use pdfcraft_organize::named_action::{Change as NamedActionChange, NamedTarget, SAFE_NAMES as SAFE_MENU_NAMES};

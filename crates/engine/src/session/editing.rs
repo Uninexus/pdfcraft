@@ -124,7 +124,91 @@ fn sync_script_history(doc: &Document, previous: &pdfcraft_cos::Document, restor
     }
 }
 
+/// Whether `edit` is, or (in a batch) holds, a signer label edit.
+fn contains_field_signer(edit: &Edit) -> bool {
+    match edit {
+        Edit::SetFieldSigner { .. } => true,
+        Edit::Batch { edits, .. } => edits.iter().any(contains_field_signer),
+        _ => false,
+    }
+}
+
+/// Why `after` (the signatures as validated once an edit is in) is worse than `before`, when it is:
+/// a signature whose status fell, that now has changes it forbids, or whose changes can no longer
+/// be checked (each with its own sentence), or that can no longer be matched. A signature that
+/// already had changes it forbids passes when nothing about its verdict gets worse: the edit does
+/// not make it worse. `None` when no signature is worse off.
+fn signature_damage(before: &[pdfcraft_sign::pdf::SignatureInfo], after: &[pdfcraft_sign::pdf::SignatureInfo]) -> Option<String> {
+    use pdfcraft_sign::pdf::{Modification, Status, kind};
+    let rank = |s: Status| match s {
+        Status::Valid => 2,
+        Status::Unknown => 1,
+        Status::Invalid => 0,
+    };
+    let word = |s: Status| match s {
+        Status::Valid => "valid",
+        Status::Unknown => "unknown",
+        Status::Invalid => "invalid",
+    };
+    let unmatched = || "the document's signatures could not be compared before and after, so the signer label was not written".to_string();
+    for (i, old) in before.iter().enumerate().filter(|(_, s)| s.signed) {
+        let Some(new) = after.get(i).filter(|n| n.signed && n.field == old.field) else { return Some(unmatched()) };
+        if let Modification::Disallowed(kinds) = &new.modification
+            && !matches!(old.modification, Modification::Disallowed(_))
+        {
+            let list = kinds.join(", ");
+            return Some(if new.certify == Some(1) {
+                format!(
+                    "the signature in field {:?} is a certification that allows no changes, so any change to the form, a label on any field included, is one it forbids ({list}); the signer label was not written",
+                    old.field
+                )
+            } else if kinds.contains(&kind::LOCKED_FIELD) {
+                format!(
+                    "this field is covered by the lock of the signature in field {:?}, so a label on it is a change that signature forbids ({list}); the signer label was not written",
+                    old.field
+                )
+            } else {
+                format!("the signature in field {:?} forbids this change to the form ({list}), so the signer label was not written", old.field)
+            });
+        }
+        if rank(new.status) < rank(old.status) {
+            return Some(format!(
+                "the signature in field {:?} would go from {} to {} with this label, so the signer label was not written",
+                old.field,
+                word(old.status),
+                word(new.status)
+            ));
+        }
+        if old.changes_checked && !new.changes_checked {
+            return Some(format!(
+                "the changes made after the signature in field {:?} could no longer be checked with this label, so the signer label was not written",
+                old.field
+            ));
+        }
+    }
+    None
+}
+
 impl Session {
+    /// Undo what [`Session::apply`] just pushed (its edit could not be kept), and read the
+    /// document again.
+    fn roll_back_last(doc: &mut Document, dropped: Option<crate::history::Snapshot>) {
+        if let Some(ed) = doc.editor.as_mut()
+            && let Some((_, prev, keys, _)) = ed.undo.pop()
+        {
+            ed.cos = prev;
+            ed.keys = keys;
+            // The oldest step the push made room by dropping comes back.
+            if let Some(oldest) = dropped {
+                ed.undo.insert(0, oldest);
+            }
+        }
+        Self::adopt_keys(doc);
+        if !matches!(guard(|| Self::refresh(doc)), Ok(Ok(()))) {
+            Self::show_released(doc);
+        }
+    }
+
     /// Whether [`Edit::DeletePages`] of `pages` (0-based) would be accepted by document `id`, for
     /// the refusals checked here: a read-only document, permissions that refuse page changes, a
     /// page that does not exist, and removing every page; each gives the error [`Session::apply`]
@@ -186,6 +270,7 @@ impl Session {
         cx.today = today;
         let reason = doc.read_only_reason.clone().unwrap_or_default();
         let signed = doc.is_signed();
+        let signatures_before = doc.signatures.clone();
         let editor = doc.editor.as_mut().ok_or(EditError::ReadOnly(reason))?;
         if let Some(p) = editor.cos.permissions() {
             check_permission(&edit, &p)?;
@@ -369,9 +454,10 @@ impl Session {
         let keys = keys_after(&edit).unwrap_or_else(|| editor.keys.clone());
         let previous_keys = std::mem::replace(&mut editor.keys, keys);
         editor.undo.push((label, previous, previous_keys, scope));
-        if editor.undo.len() > MAX_UNDO {
-            editor.undo.remove(0);
-        }
+        // Kept until the edit is accepted, so a refusal puts the oldest step back.
+        let dropped = if editor.undo.len() > MAX_UNDO { Some(editor.undo.remove(0)) } else { None };
+        // A refused signer label leaves the redo steps as they were.
+        let redo_kept = (signed && contains_field_signer(&edit)).then(|| editor.redo.clone());
         editor.redo.clear();
         Self::adopt_keys(doc);
         let refreshed = guard(|| if scope == Scope::Content { Self::refresh_content(doc, Some(&edit)) } else { Self::refresh_scoped(doc, scope) })
@@ -379,17 +465,23 @@ impl Session {
         if let Err(e) = refreshed {
             discard_edit_callbacks(&cx);
             // Roll back: the edit produced something we cannot display.
-            if let Some(ed) = doc.editor.as_mut()
-                && let Some((_, prev, keys, _)) = ed.undo.pop()
-            {
-                ed.cos = prev;
-                ed.keys = keys;
-            }
-            Self::adopt_keys(doc);
-            if !matches!(guard(|| Self::refresh(doc)), Ok(Ok(()))) {
-                Self::show_released(doc);
-            }
+            Self::roll_back_last(doc, dropped);
             return Err(e);
+        }
+        // A field's signer label is a change to the form that no signature covers. Whether a
+        // signature already in the file tolerates it (a certification that allows no changes, a
+        // lock that names the field) is the validator's verdict on the new bytes, not a copy of
+        // its rules: a write that makes any signature worse is rolled back and refused.
+        if signed
+            && contains_field_signer(&edit)
+            && let Some(why) = signature_damage(&signatures_before, &doc.signatures)
+        {
+            discard_edit_callbacks(&cx);
+            Self::roll_back_last(doc, dropped);
+            if let (Some(ed), Some(redo)) = (doc.editor.as_mut(), redo_kept) {
+                ed.redo = redo;
+            }
+            return Err(EditError::Invalid(why));
         }
         doc.dirty = true;
         if let Ok(mut runtime) = doc.js_runtime.lock() {
@@ -876,4 +968,110 @@ fn edit_notices(edit: &Edit, prev: &pdfcraft_cos::Document, next: &pdfcraft_cos:
         }
     }
     notices
+}
+
+#[cfg(test)]
+mod signature_damage_tests {
+    use super::{contains_field_signer, signature_damage};
+    use crate::Edit;
+    use pdfcraft_sign::pdf::{Modification, SignatureInfo, Status, kind};
+
+    fn sig(status: Status, modification: Modification, checked: bool, certify: Option<u8>) -> SignatureInfo {
+        SignatureInfo {
+            field: "Sig".into(),
+            signed: true,
+            page: None,
+            rect: None,
+            visible: false,
+            signer: None,
+            certificate: None,
+            chain: Vec::new(),
+            date: None,
+            signing_time: None,
+            reason: None,
+            location: None,
+            contact: None,
+            sub_filter: None,
+            doc_timestamp: false,
+            certify,
+            revision: 1,
+            signed_len: 1,
+            digest: None,
+            algorithm: None,
+            timestamp: false,
+            timestamp_time: None,
+            status,
+            modification,
+            changes_checked: checked,
+            verdict_shown: false,
+            details: Vec::new(),
+        }
+    }
+
+    fn damage(old: SignatureInfo, new: SignatureInfo) -> Option<String> {
+        signature_damage(&[old], &[new])
+    }
+
+    #[test]
+    fn forbidden_changes_are_refused_even_when_the_status_was_already_invalid() {
+        let old = sig(Status::Invalid, Modification::Allowed(vec![]), true, None);
+        let new = sig(Status::Invalid, Modification::Disallowed(vec![kind::OTHER]), true, None);
+        assert!(damage(old, new).unwrap().contains("forbids this change"));
+    }
+
+    #[test]
+    fn a_status_that_falls_is_refused_with_its_own_sentence() {
+        let old = sig(Status::Valid, Modification::None, true, None);
+        let new = sig(Status::Unknown, Modification::None, true, None);
+        let why = damage(old, new).unwrap();
+        assert!(why.contains("from valid to unknown"), "{why}");
+    }
+
+    #[test]
+    fn changes_that_can_no_longer_be_checked_are_refused_with_their_own_sentence() {
+        let old = sig(Status::Unknown, Modification::None, true, None);
+        let new = sig(Status::Unknown, Modification::None, false, None);
+        let why = damage(old, new).unwrap();
+        assert!(why.contains("could no longer be checked") && !why.contains("lock"), "{why}");
+    }
+
+    #[test]
+    fn the_sentence_follows_the_cause_of_a_forbidden_change() {
+        let old = sig(Status::Valid, Modification::None, true, None);
+        let cert = sig(Status::Invalid, Modification::Disallowed(vec![kind::OTHER]), true, Some(1));
+        let why = damage(old.clone(), cert).unwrap();
+        assert!(why.contains("certification that allows no changes") && why.contains("any field"), "{why}");
+        let lock = sig(Status::Invalid, Modification::Disallowed(vec![kind::LOCKED_FIELD]), true, None);
+        let why = damage(old.clone(), lock).unwrap();
+        assert!(why.contains("covered by the lock") && !why.contains("any field"), "{why}");
+        let other = sig(Status::Invalid, Modification::Disallowed(vec![kind::PAGES]), true, Some(2));
+        let why = damage(old, other).unwrap();
+        assert!(why.contains("forbids this change") && !why.contains("any field") && !why.contains("lock"), "{why}");
+    }
+
+    #[test]
+    fn a_signature_that_already_forbade_the_changes_is_not_made_worse_by_the_label() {
+        let broken = sig(Status::Invalid, Modification::Disallowed(vec![kind::OTHER]), true, None);
+        assert_eq!(damage(broken.clone(), broken), None);
+        let fine = sig(Status::Valid, Modification::Allowed(vec![kind::FORM_FILL]), true, Some(2));
+        assert_eq!(damage(fine.clone(), fine), None);
+    }
+
+    #[test]
+    fn a_signature_that_cannot_be_matched_is_refused() {
+        let one = sig(Status::Valid, Modification::None, true, None);
+        assert!(signature_damage(std::slice::from_ref(&one), &[]).unwrap().contains("could not be compared"));
+        // An unsigned field in front changes nothing.
+        let mut unsigned = one.clone();
+        unsigned.signed = false;
+        assert!(signature_damage(&[unsigned, one], &[sig(Status::Valid, Modification::None, true, None)]).is_some());
+    }
+
+    #[test]
+    fn a_batch_holding_a_label_edit_counts_as_one() {
+        let label = Edit::SetFieldSigner { field: pdfcraft_cos::ObjRef::new(1, 0), email: None };
+        assert!(contains_field_signer(&label));
+        assert!(contains_field_signer(&Edit::Batch { label: "x".into(), edits: vec![Edit::Batch { label: "y".into(), edits: vec![label] }] }));
+        assert!(!contains_field_signer(&Edit::RemoveCollection));
+    }
 }

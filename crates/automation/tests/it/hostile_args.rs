@@ -266,6 +266,18 @@ fn fixture(a: &mut Automation, root: &Path, tool: &str) -> serde_json::Map<Strin
             };
             args.as_object().cloned().unwrap_or_default()
         }
+        // The signer tools need a saved document (the plan sits beside its file) with a field `name`;
+        // each call gets a fresh one, which the caller closes, since a set edits it.
+        "form_field_signer" | "form_signer_report" => {
+            let doc = blank_doc(a);
+            a.call("form_add_field", &json!({ "doc": doc, "page": 1, "type": "text", "name": "name", "rect": [10, 10, 60, 30] }))
+                .expect("add the field");
+            a.call("doc_save", &json!({ "doc": doc, "path": "in.pdf" })).expect("save the fixture document");
+            let recipients = json!([{ "name": "Ana", "email": "ana@example.org" }, { "name": "Bo", "email": "bo@example.org", "role": "viewer" }]);
+            a.call("signing_plan_set", &json!({ "path": "in.pdf", "recipients": recipients, "replace": true })).expect("make the fixture's plan");
+            let args = json!({ "doc": doc, "field": "name" });
+            args.as_object().cloned().unwrap_or_default()
+        }
         // Without a step, action_run returns "give action or steps" before it resolves folder
         // or paths, and that error would be counted as a confinement refusal.
         "action_run" => {

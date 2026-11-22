@@ -25,6 +25,7 @@ mod dedupe;
 pub mod destinations;
 mod dparts;
 pub mod embedded_action;
+pub mod field_signer;
 mod import;
 mod labels;
 pub mod launch_action;
