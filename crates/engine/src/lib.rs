@@ -109,7 +109,7 @@ pub use pdfcraft_organize::embedded_action::{
 };
 pub use pdfcraft_organize::launch_action::{Change as LaunchActionChange, LaunchTarget, MAX_FILE_BYTES as MAX_LAUNCH_FILE_BYTES};
 pub use pdfcraft_organize::media_action::Change as MediaActionChange;
-pub use pdfcraft_organize::named_action::{Change as NamedActionChange, NamedTarget};
+pub use pdfcraft_organize::named_action::{Change as NamedActionChange, NamedTarget, SAFE_NAMES as SAFE_MENU_NAMES};
 pub use pdfcraft_organize::print_presets::{Duplex, MAX_PRINT_COPIES, MAX_PRINT_RANGES, MIN_PRINT_COPIES, PrintPresets, PrintScaling};
 pub use pdfcraft_organize::role_map::{MAX_LISTED_ROLES, MAX_LOOP_STEPS, MAX_ROLE_BYTES};
 pub use pdfcraft_organize::screen_action::Change as ScreenActionChange;

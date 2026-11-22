@@ -1200,7 +1200,7 @@ fn actions_tab_edits_the_script_of_an_existing_action() {
     open(&mut h);
     for (trigger, kind, text) in [(FieldTrigger::MouseUp, 0, script), (FieldTrigger::OnBlur, 1, "https://example.org")] {
         let d = h.state_mut().field_props.as_mut().unwrap();
-        d.new_action = pdfcraft_ui_egui::prepare::ActionDraft { trigger, kind, text: text.into() };
+        d.new_action = pdfcraft_ui_egui::prepare::ActionDraft { trigger, kind, text: text.into(), ..Default::default() };
         h.run_steps(3);
         h.get_by_label("Add").click();
         h.run_steps(2);
@@ -1359,7 +1359,12 @@ fn actions_tab_shows_a_chain_and_keeps_it_when_the_first_action_is_replaced() {
     {
         let d = h.state_mut().field_props.as_mut().unwrap();
         d.actions.retain(|(t, _)| *t != FieldTrigger::MouseUp);
-        d.new_action = pdfcraft_ui_egui::prepare::ActionDraft { trigger: FieldTrigger::MouseUp, kind: 1, text: "https://example.com".into() };
+        d.new_action = pdfcraft_ui_egui::prepare::ActionDraft {
+            trigger: FieldTrigger::MouseUp,
+            kind: 1,
+            text: "https://example.com".into(),
+            ..Default::default()
+        };
     }
     h.run_steps(3);
     h.get_by_label("Add").click();

@@ -3319,6 +3319,28 @@ fn field_actions_round_trip_on_every_trigger() {
 }
 
 #[test]
+fn an_off_list_menu_action_left_as_it_is_survives_a_set_that_replaces_another_trigger() {
+    let mut doc = fixture();
+    let name = "go".to_string();
+    let quit = (Trigger::MouseExit, FieldAction::Named("Quit".into()));
+    set_field_actions(&mut doc, &name, std::slice::from_ref(&quit)).unwrap();
+    let exit_dict = |doc: &Document| {
+        let w = fields(doc).iter().find(|f| f.name == "go").unwrap().widgets[0].obj;
+        let aa = doc.get(w).as_dict().and_then(|d| d.get(b"AA").cloned()).map(|a| doc.resolve(&a)).unwrap();
+        aa.as_dict().and_then(|d| d.get(b"X").cloned()).map(|x| doc.resolve(&x))
+    };
+    let before = exit_dict(&doc);
+    assert!(before.is_some());
+    let up = (Trigger::MouseUp, FieldAction::JavaScript("this.print();".into()));
+    set_field_actions(&mut doc, &name, &[quit.clone(), up.clone()]).unwrap();
+    set_field_actions(&mut doc, &name, &[quit.clone(), (Trigger::MouseUp, FieldAction::JavaScript("app.beep(0);".into()))]).unwrap();
+    assert_eq!(exit_dict(&doc), before, "the unchanged off-list action is kept as it is");
+    let got = field_actions(&doc, &name).unwrap();
+    assert!(got.contains(&quit));
+    assert!(got.contains(&(Trigger::MouseUp, FieldAction::JavaScript("app.beep(0);".into()))));
+}
+
+#[test]
 fn editing_one_script_keeps_the_other_actions_and_the_chain() {
     let mut doc = fixture();
     let go = field(&fields(&doc), "go").obj;
