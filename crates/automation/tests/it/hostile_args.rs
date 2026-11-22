@@ -254,6 +254,18 @@ fn fixture(a: &mut Automation, root: &Path, tool: &str) -> serde_json::Map<Strin
             let args = json!({ "doc": doc, "id": "id.p12", "password": "test", "out": "signed.pdf" });
             args.as_object().cloned().unwrap_or_default()
         }
+        // The signing plan tools need a PDF to sit beside; advance needs a plan to step.
+        "signing_plan_set" | "signing_plan_get" | "signing_plan_advance" | "signing_plan_clear" => {
+            std::fs::write(root.join("in.pdf"), b"%PDF-1.7\n").expect("write the placeholder PDF");
+            let recipients = json!([{ "name": "Ana", "email": "ana@example.org" }, { "name": "Bo", "email": "bo@example.org" }]);
+            a.call("signing_plan_set", &json!({ "path": "in.pdf", "recipients": recipients, "replace": true })).expect("make the fixture's plan");
+            let args = match tool {
+                "signing_plan_set" => json!({ "path": "in.pdf", "recipients": recipients }),
+                "signing_plan_advance" => json!({ "path": "in.pdf", "email": "ana@example.org", "status": "signed" }),
+                _ => json!({ "path": "in.pdf" }),
+            };
+            args.as_object().cloned().unwrap_or_default()
+        }
         // Without a step, action_run returns "give action or steps" before it resolves folder
         // or paths, and that error would be counted as a confinement refusal.
         "action_run" => {
