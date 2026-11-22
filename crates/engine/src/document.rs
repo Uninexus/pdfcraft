@@ -711,6 +711,20 @@ impl Document {
         self.editor.as_ref().is_some_and(|e| pdfcraft_organize::collection::collection_removes(&e.cos))
     }
 
+    /// The private signer label of the form field with this object, as stored.
+    pub fn field_signer(&self, field: pdfcraft_cos::ObjRef) -> pdfcraft_organize::field_signer::FieldSigner {
+        self.editor.as_ref().map(|e| pdfcraft_organize::field_signer::read_field_signer(&e.cos, field)).unwrap_or_default()
+    }
+
+    /// What setting the signer label of the field with this object to `email` (a clear when
+    /// `None`) would do.
+    pub fn field_signer_change(&self, field: pdfcraft_cos::ObjRef, email: Option<&str>) -> pdfcraft_organize::field_signer::Change {
+        match self.editor.as_ref() {
+            Some(e) => pdfcraft_organize::field_signer::field_signer_change(&e.cos, field, email),
+            None => pdfcraft_organize::field_signer::Change::Refused("the document cannot be edited"),
+        }
+    }
+
     /// The `/Lock` of the signature field with this object, as stored.
     pub fn signature_lock(&self, field: pdfcraft_cos::ObjRef) -> pdfcraft_organize::signature_lock::SignatureLock {
         self.editor.as_ref().map(|e| pdfcraft_organize::signature_lock::read_signature_lock(&e.cos, field)).unwrap_or_default()

@@ -119,7 +119,7 @@ struct RecipientInput {
 /// Characters that are controls or that hide, reorder or disguise text: the list of
 /// `crates/engine/src/links.rs` (`hides_text`, not shared because it is private to that crate)
 /// without its other whitespace, plus the line and paragraph separators.
-fn is_hidden(c: char) -> bool {
+pub(crate) fn is_hidden(c: char) -> bool {
     c.is_control()
         || matches!(
             c,
@@ -156,7 +156,7 @@ fn check_name(name: &str) -> Result<String> {
 /// A shallow check only: one `@`, something either side, no spaces, a dot inside the domain. It
 /// does not check that the domain exists, that the address can receive mail or that it is the
 /// person's.
-fn check_email(email: &str) -> Result<String> {
+pub(crate) fn check_email(email: &str) -> Result<String> {
     let email = email.trim();
     let shape = || bad("an email address must look like name@example.org (one @, no spaces, a dot in the domain)");
     let too_long = || {
@@ -390,7 +390,57 @@ fn recipients_arg(a: &Args, now: i64) -> Result<Vec<Recipient>> {
     Ok(out)
 }
 
+/// One recipient of the plan beside an open document, as the form tools see it.
+pub(crate) struct PlanPerson {
+    pub(crate) name: String,
+    pub(crate) email: String,
+    pub(crate) role: &'static str,
+    /// A signer or an approver: someone a field can be meant for.
+    pub(crate) acts: bool,
+}
+
+/// What the form tools found when they looked for the signing plan beside an open document.
+pub(crate) enum PlanLookup {
+    /// No look was possible, for this reason: no plan was checked.
+    Unchecked(&'static str),
+    /// There is no plan file beside the document.
+    Absent,
+    /// The plan's recipients, in plan order.
+    Found(Vec<PlanPerson>),
+}
+
 impl Automation {
+    /// The plan beside the document the form tools work on: its sidecar is derived from the
+    /// document's own path, which goes through `resolve_for` like every path (the file itself may
+    /// be gone) and is held to the read root. Nothing is written.
+    pub(crate) fn plan_beside(&self, path: Option<&str>) -> Result<PlanLookup> {
+        let Some(raw) = path else { return Ok(PlanLookup::Unchecked("the document has no file path, so no plan beside it could be looked for")) };
+        let pdf = self.resolve_for(raw, Access::Read, true)?;
+        let Ok(sidecar) = sidecar_of(&pdf) else {
+            return Ok(PlanLookup::Unchecked("the document's file name does not end in .pdf, so no plan beside it could be looked for"));
+        };
+        let shown = sidecar.to_string_lossy();
+        self.check_roots(&shown, &sidecar, Access::Read)?;
+        Ok(match read_plan_sidecar(&sidecar)? {
+            None => PlanLookup::Absent,
+            Some(plan) => PlanLookup::Found(
+                plan.recipients
+                    .iter()
+                    .map(|r| PlanPerson {
+                        name: r.name.clone(),
+                        email: r.email.clone(),
+                        role: match r.role {
+                            Role::Signer => "signer",
+                            Role::Approver => "approver",
+                            Role::Viewer => "viewer",
+                        },
+                        acts: r.role.acts(),
+                    })
+                    .collect(),
+            ),
+        })
+    }
+
     /// The PDF the plan is about (it must exist, resolved through `resolve`) and its sidecar, which
     /// is derived from that resolved path and held to the read root and, for `write`, the write
     /// root as well (it does not itself pass through `resolve`).

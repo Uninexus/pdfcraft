@@ -21,6 +21,7 @@ mod bates;
 mod comments;
 mod content;
 mod conventions;
+mod field_signer;
 pub mod file_access;
 mod folder_find;
 mod forms;

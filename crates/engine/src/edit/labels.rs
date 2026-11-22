@@ -301,6 +301,7 @@ impl Edit {
             Edit::RemoveArticleThread(_) => Label::of("Remove article thread"),
             Edit::RemoveReferenceXObject(_) => Label::of("Remove reference XObject link"),
             Edit::RemoveCollection => Label::of("Remove portfolio collection"),
+            Edit::SetFieldSigner { .. } => Label::of("Set field signer"),
             Edit::SetSignatureLock { .. } => Label::of("Set signature field lock"),
             Edit::SetSignatureSeed { .. } => Label::of("Set signature field seed values"),
             Edit::SetLinkThreadAction { .. } => Label::of("Set link article action"),
