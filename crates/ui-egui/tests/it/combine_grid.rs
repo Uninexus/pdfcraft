@@ -166,7 +166,9 @@ fn grid_duplicate_warnings_compare_contents_and_follow_undo() {
 
 /// Run frames until `done`, giving render threads time; whether it happened.
 fn settle(h: &mut Harness<'static, PdfCraftApp>, done: impl Fn(&PdfCraftApp) -> bool) -> bool {
-    for _ in 0..400 {
+    // A background job: wait on a deadline, not a fixed number of polls, so a loaded machine still passes.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while std::time::Instant::now() < deadline {
         h.run_steps(1);
         if done(h.state()) {
             return true;
@@ -899,7 +901,9 @@ fn zooming_keeps_the_card_under_the_pointer_in_place_and_thumbnails_never_go_bla
     }
     assert!(h.state().combine_zoom > 1.0, "{zooms:?}");
     // Its thumbnail never went blank: the smaller one stands in until the sharper one arrives.
-    for _ in 0..400 {
+    // A background job: wait on a deadline, not a fixed number of polls, so a loaded machine still passes.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while std::time::Instant::now() < deadline {
         h.run_steps(1);
         match h.state().combine_thumbnails()[i] {
             CombineThumb::Ready { height, .. } if height > small => break,
@@ -925,7 +929,9 @@ fn cards_at_the_top_zoom_render_a_sharper_thumbnail_within_the_texture_limit() {
     // The old thumbnail stands in until the sharper one arrives, so "ready" is not enough: wait
     // for the size to actually change.
     let mut redrawn = false;
-    for _ in 0..400 {
+    // A background job: wait on a deadline, not a fixed number of polls, so a loaded machine still passes.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while std::time::Instant::now() < deadline {
         h.run_steps(1);
         if matches!(h.state().combine_thumbnails()[0], CombineThumb::Ready { width, height, .. } if width.max(height) != at_100) {
             redrawn = true;

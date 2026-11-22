@@ -115,7 +115,9 @@ fn sign(id: &pdfcraft_engine::sign::pkcs12::DigitalId, file: Vec<u8>, more: impl
 
 /// Let the page render finish.
 fn settle(h: &mut Harness<'static, PdfCraftApp>) {
-    for _ in 0..400 {
+    // A background job: wait on a deadline, not a fixed number of polls, so a loaded machine still passes.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while std::time::Instant::now() < deadline {
         h.run_steps(1);
         if !h.state().render_pending() {
             h.run_steps(2);

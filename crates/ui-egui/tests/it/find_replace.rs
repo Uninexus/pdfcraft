@@ -67,7 +67,9 @@ fn replace_all_from_the_find_bar_is_one_undo_step() {
     assert!(has_field(&h, "Replace with"), "the Replace row shows in Edit text");
     h.query_by(|n| n.placeholder() == Some("Find text")).expect("find field").type_text("cat");
     // Both pages' text loads in the background before every match is listed.
-    for _ in 0..400 {
+    // A background job: wait on a deadline, not a fixed number of polls, so a loaded machine still passes.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while std::time::Instant::now() < deadline {
         h.run_steps(1);
         if h.state().views[0].find.as_ref().is_some_and(|f| f.matches.len() == 3) {
             break;
@@ -109,7 +111,9 @@ fn replace_changes_the_highlighted_match() {
     assert!(h.state_mut().execute("edit.replace"));
     h.run_steps(3);
     h.query_by(|n| n.placeholder() == Some("Find text")).expect("find field").type_text("cat");
-    for _ in 0..400 {
+    // A background job: wait on a deadline, not a fixed number of polls, so a loaded machine still passes.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while std::time::Instant::now() < deadline {
         h.run_steps(1);
         if h.state().views[0].find.as_ref().is_some_and(|f| f.matches.len() == 3) {
             break;
@@ -163,7 +167,9 @@ fn subset_harness() -> Harness<'static, PdfCraftApp> {
     assert!(h.state_mut().execute("edit.replace"));
     h.run_steps(3);
     h.query_by(|n| n.placeholder() == Some("Find text")).expect("find field").type_text("ab");
-    for _ in 0..400 {
+    // A background job: wait on a deadline, not a fixed number of polls, so a loaded machine still passes.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while std::time::Instant::now() < deadline {
         h.run_steps(1);
         if h.state().views[0].find.as_ref().is_some_and(|f| f.matches.len() == 2) {
             break;
@@ -247,7 +253,9 @@ fn the_notice_warns_when_a_paragraph_grew_past_its_bottom() {
         assert!(h.state_mut().execute("edit.replace"));
         h.run_steps(3);
         h.query_by(|n| n.placeholder() == Some("Find text")).expect("find field").type_text("beta");
-        for _ in 0..400 {
+        // A background job: wait on a deadline, not a fixed number of polls, so a loaded machine still passes.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while std::time::Instant::now() < deadline {
             h.run_steps(1);
             if h.state().views[0].find.as_ref().is_some_and(|f| f.matches.len() == 1) {
                 break;
