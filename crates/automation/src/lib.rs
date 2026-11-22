@@ -40,6 +40,7 @@ mod printing;
 mod reading;
 mod redact;
 mod signing;
+mod signing_plan;
 mod text_cache;
 mod tools;
 

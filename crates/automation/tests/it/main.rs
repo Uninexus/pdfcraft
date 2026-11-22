@@ -63,6 +63,7 @@ mod shared_name_arrays;
 mod signature_audit_report;
 mod signature_field_lock;
 mod signature_seed_values;
+mod signing_plan;
 mod split_name_template;
 mod structure_namespaces;
 mod text_copy;
