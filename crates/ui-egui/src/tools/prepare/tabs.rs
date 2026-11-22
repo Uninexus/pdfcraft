@@ -215,45 +215,76 @@ pub(super) fn actions_tab(ui: &mut egui::Ui, d: &mut FieldDraft, t: &crate::them
     use pdfcraft_engine::FieldTrigger as T;
     let editing = d.editing.is_some();
     ui.label(egui::RichText::new(if editing { tl!("Edit Action") } else { tl!("Add an Action") }).font(theme::semibold(13.0)));
+    let before = d.new_action.clone();
     let a = &mut d.new_action;
     egui::Grid::new("field-actions-add").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
-        ui.label(tl!("Select Trigger:"));
+        let label = ui.label(tl!("Select Trigger:"));
         // Editing changes the script of one trigger's action: its trigger and kind stay.
         ui.add_enabled_ui(!editing, |ui| {
-            craft_ui::ComboBox::from_id_salt("action-trigger").selected_text(tl!(a.trigger.label())).width(220.0).show_ui(ui, |ui| {
-                for tr in T::ALL {
-                    ui.selectable_value(&mut a.trigger, tr, tl!(tr.label()));
-                }
-            });
+            craft_ui::ComboBox::from_id_salt("action-trigger")
+                .selected_text(tl!(a.trigger.label()))
+                .width(220.0)
+                .show_ui(ui, |ui| {
+                    for tr in T::ALL {
+                        ui.selectable_value(&mut a.trigger, tr, tl!(tr.label()));
+                    }
+                })
+                .response
+                .labelled_by(label.id);
         });
         ui.end_row();
-        ui.label(tl!("Select Action:"));
+        let label = ui.label(tl!("Select Action:"));
         ui.add_enabled_ui(!editing, |ui| {
-            craft_ui::ComboBox::from_id_salt("action-kind").selected_text(tl!(ACTION_KINDS[a.kind])).width(220.0).show_ui(ui, |ui| {
-                for (i, k) in ACTION_KINDS.iter().enumerate() {
-                    ui.selectable_value(&mut a.kind, i, tl!(k));
-                }
-            });
+            craft_ui::ComboBox::from_id_salt("action-kind")
+                .selected_text(tl!(ACTION_KINDS[a.kind]))
+                .width(220.0)
+                .show_ui(ui, |ui| {
+                    for (i, k) in ACTION_KINDS.iter().enumerate() {
+                        ui.selectable_value(&mut a.kind, i, tl!(k));
+                    }
+                })
+                .response
+                .labelled_by(label.id);
         });
         ui.end_row();
         let hint = match a.kind {
             0 => "JavaScript",
             1 => "https://…",
             2 => tl!("Fields to reset (comma-separated; empty: all)"),
-            3 => tl!("Print, NextPage, PrevPage, FirstPage or LastPage"),
+            3 => "",
             4 => tl!("Page number"),
             5 | 6 => tl!("Field names (comma-separated)"),
             _ => tl!("URL to submit to"),
         };
-        ui.label(if a.kind == 0 { tl!("Script:") } else { tl!("Value:") });
-        if a.kind == 0 {
+        let label = ui.label(if a.kind == 0 {
+            tl!("Script:")
+        } else if a.kind == 3 {
+            tl!("Menu item:")
+        } else {
+            tl!("Value:")
+        });
+        if a.kind == 3 {
+            // A menu item is chosen from the safe list and kept apart from the text of the other kinds.
+            craft_ui::ComboBox::from_id_salt("action-menu")
+                .selected_text(tl!(super::draft::menu_item_label(a.menu).unwrap_or("Print")))
+                .width(340.0)
+                .show_ui(ui, |ui| {
+                    for name in pdfcraft_engine::SAFE_MENU_NAMES {
+                        ui.selectable_value(&mut a.menu, name, tl!(super::draft::menu_item_label(name).unwrap_or(name)));
+                    }
+                })
+                .response
+                .labelled_by(label.id);
+        } else if a.kind == 0 {
             ui.add(crate::widgets::block(&mut a.text).code_editor().desired_rows(3).desired_width(340.0).hint_text(hint).id_salt("action-text"));
         } else {
             ui.add(crate::widgets::line(&mut a.text).desired_width(340.0).hint_text(hint).id_salt("action-text"));
         }
         ui.end_row();
     });
-    let mut error = None;
+    if d.new_action != before {
+        d.action_error = None;
+    }
     let (mut commit, mut discard) = (false, false);
     ui.horizontal(|ui| {
         commit = ui.button(if editing { tl!("Update") } else { tl!("Add") }).clicked();
@@ -268,16 +299,20 @@ pub(super) fn actions_tab(ui: &mut egui::Ui, d: &mut FieldDraft, t: &crate::them
                 d.actions.sort_by_key(|(x, _)| T::ALL.iter().position(|y| y == x));
                 d.new_action.text.clear();
                 d.editing = None;
+                d.action_error = None;
             }
-            Err(e) => error = Some(e),
+            Err(e) => d.action_error = Some(e),
         }
     }
     if discard {
         d.new_action = ActionDraft::default();
         d.editing = None;
+        d.action_error = None;
     }
-    if let Some(e) = error {
-        ui.label(egui::RichText::new(tl!(&e)).small().color(t.text_muted));
+    if let Some(e) = &d.action_error {
+        // Drawn every frame until the next edit, as a live region, so it is announced and stays (rule 15).
+        let r = ui.label(egui::RichText::new(tl!(e)).small().color(t.text_muted));
+        ui.ctx().accesskit_node_builder(r.id, |node| node.set_live(egui::accesskit::Live::Assertive));
     }
     ui.add_space(8.0);
     ui.label(egui::RichText::new(tl!("Actions")).font(theme::semibold(13.0)));
@@ -297,6 +332,11 @@ pub(super) fn actions_tab(ui: &mut egui::Ui, d: &mut FieldDraft, t: &crate::them
                     let then = crate::i18n::trn(crate::i18n::current(), more as u64, "then {n} more action", "then {n} more actions");
                     ui.label(format!("{}, {then}", act.describe()));
                 }
+                if let pdfcraft_engine::FieldAction::Named(n) = act
+                    && pdfcraft_engine::NamedTarget::new(n).is_err()
+                {
+                    ui.label(egui::RichText::new(tl!("Not on the safe menu list; kept as it is")).small().color(t.text_muted));
+                }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.push_id(i, |ui| {
                         if ui.button(tl!("Delete")).clicked() {
@@ -312,7 +352,7 @@ pub(super) fn actions_tab(ui: &mut egui::Ui, d: &mut FieldDraft, t: &crate::them
             });
         }
         if let Some((trigger, text)) = edit {
-            d.new_action = ActionDraft { trigger, kind: 0, text };
+            d.new_action = ActionDraft { trigger, kind: 0, text, ..ActionDraft::default() };
             d.editing = Some(trigger);
         }
         if let Some(i) = remove {

@@ -73,11 +73,13 @@ pub struct ActionDraft {
     pub kind: usize,
     /// The script, URL, field names (comma-separated), menu item or page number.
     pub text: String,
+    /// The menu item chosen for kind 3 (one of `SAFE_MENU_NAMES`); `text` is not used for it.
+    pub menu: &'static str,
 }
 
 impl Default for ActionDraft {
     fn default() -> Self {
-        ActionDraft { trigger: pdfcraft_engine::FieldTrigger::MouseUp, kind: 0, text: String::new() }
+        ActionDraft { trigger: pdfcraft_engine::FieldTrigger::MouseUp, kind: 0, text: String::new(), menu: "Print" }
     }
 }
 
@@ -90,7 +92,7 @@ impl ActionDraft {
             0 => A::JavaScript(self.text.clone()),
             1 if !t.is_empty() => A::Uri(t.to_string()),
             2 => A::Reset(names()),
-            3 => A::Named(if t.is_empty() { "Print".into() } else { t.to_string() }),
+            3 => A::Named(pdfcraft_engine::NamedTarget::new(self.menu).map_err(|_| "Choose one of the listed menu items")?.name().to_string()),
             4 => A::GoTo(t.parse::<usize>().ok().filter(|p| *p >= 1).ok_or("Enter a page number")? - 1),
             5 if !t.is_empty() => A::ShowHide { fields: names(), hide: false },
             6 if !t.is_empty() => A::ShowHide { fields: names(), hide: true },
@@ -99,6 +101,19 @@ impl ActionDraft {
             _ => return Err("Enter the field names".into()),
         })
     }
+}
+
+/// The visible name of a menu item the Actions tab offers (one of `SAFE_MENU_NAMES`), `None` for
+/// any other name.
+pub fn menu_item_label(name: &str) -> Option<&'static str> {
+    Some(match name {
+        "NextPage" => "Next page",
+        "PrevPage" => "Previous page",
+        "FirstPage" => "First page",
+        "LastPage" => "Last page",
+        "Print" => "Print",
+        _ => return None,
+    })
 }
 
 /// The Field Properties dialog's working copy.
@@ -151,6 +166,8 @@ pub struct FieldDraft {
     pub new_action: ActionDraft,
     /// Actions tab: the trigger whose script `new_action` is editing (Edit), if any.
     pub editing: Option<pdfcraft_engine::FieldTrigger>,
+    /// Actions tab: why the last Add or Update was refused; cleared by the next edit or a commit.
+    pub action_error: Option<String>,
     /// Actions tab: how many actions the document chains after each trigger's first one. They are
     /// kept when that first action is replaced.
     pub chained: Vec<(pdfcraft_engine::FieldTrigger, usize)>,
@@ -224,6 +241,7 @@ impl FieldDraft {
             actions: Vec::new(),
             new_action: ActionDraft::default(),
             editing: None,
+            action_error: None,
             chained: Vec::new(),
             original: Box::new(None),
         };
@@ -308,3 +326,47 @@ const OPTION_FLAGS: [u32; 10] = {
         ff::COMMIT_ON_SEL_CHANGE,
     ]
 };
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn menu(menu: &'static str, text: &str) -> ActionDraft {
+        ActionDraft { kind: 3, menu, text: text.to_string(), ..ActionDraft::default() }
+    }
+
+    #[test]
+    fn a_menu_item_is_one_of_the_safe_names_and_every_one_has_its_own_label() {
+        let mut labels = Vec::new();
+        for name in pdfcraft_engine::SAFE_MENU_NAMES {
+            assert_eq!(menu(name, "").action(), Ok(pdfcraft_engine::FieldAction::Named(name.to_string())));
+            labels.push(menu_item_label(name).unwrap_or_else(|| panic!("{name} has no label")));
+        }
+        labels.sort_unstable();
+        labels.dedup();
+        assert_eq!(labels.len(), pdfcraft_engine::SAFE_MENU_NAMES.len(), "labels must differ");
+        assert_eq!(menu_item_label("SaveAs"), None);
+    }
+
+    #[test]
+    fn an_off_list_menu_item_is_refused_whatever_text_is_typed() {
+        for off in ["SaveAs", "print", "Quit", "NextPage ", ""] {
+            assert!(menu(off_static(off), "Print").action().is_err(), "{off:?} must be refused");
+        }
+        // The text of another kind neither makes nor breaks a menu item.
+        assert!(menu("Print", "  Quit  ").action().is_ok());
+    }
+
+    #[test]
+    fn the_menu_choice_does_not_touch_the_text_of_another_kind() {
+        let mut d = ActionDraft { kind: 1, text: "https://example.org".into(), ..ActionDraft::default() };
+        d.kind = 3;
+        d.menu = "LastPage";
+        d.kind = 1;
+        assert_eq!(d.action(), Ok(pdfcraft_engine::FieldAction::Uri("https://example.org".into())));
+    }
+
+    fn off_static(s: &str) -> &'static str {
+        Box::leak(s.to_string().into_boxed_str())
+    }
+}
