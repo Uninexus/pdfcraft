@@ -223,3 +223,31 @@ fn a_null_field_id_of_form_set_image_is_left_out_and_a_wrong_one_is_refused_by_n
     assert_eq!(not_refused(&mut a, cases), Vec::<String>::new());
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_menu_item_off_the_safe_list_is_refused_and_the_actions_stay() {
+    let (mut a, doc, dir) = open("menu");
+    a.call("form_add_field", &json!({ "doc": doc, "page": 1, "type": "text", "name": "f", "rect": [10, 10, 60, 30] })).unwrap();
+    a.call("form_set_actions", &json!({ "doc": doc, "field": "f", "actions": [{ "trigger": "mouse_up", "menu": "Print" }] })).unwrap();
+    let before = (document(&mut a, doc), json_of(a.call("form_actions", &json!({ "doc": doc, "field": "f" })).unwrap()));
+    for bad in ["SaveAs", "Quit", "nextpage", "NextPage ", " Print", "", "Full Screen"] {
+        let one = json!({ "doc": doc, "field": "f", "actions": [{ "trigger": "mouse_up", "menu": bad }] });
+        match a.call("form_set_actions", &one) {
+            Err(ToolError::InvalidArgs(m)) => assert!(m.starts_with("menu must be one of"), "{bad:?}: {m}"),
+            other => panic!("{bad:?} was not refused: {other:?}"),
+        }
+    }
+    // A bad item after a good one changes nothing either.
+    let two =
+        json!({ "doc": doc, "field": "f", "actions": [{ "trigger": "mouse_down", "menu": "NextPage" }, { "trigger": "mouse_up", "menu": "Quit" }] });
+    assert!(matches!(a.call("form_set_actions", &two), Err(ToolError::InvalidArgs(_))));
+    let after = (document(&mut a, doc), json_of(a.call("form_actions", &json!({ "doc": doc, "field": "f" })).unwrap()));
+    assert_eq!(before, after, "a refused call leaves the document and the field's actions as they were");
+    // Each name on the list is still written and read back.
+    for name in ["NextPage", "PrevPage", "FirstPage", "LastPage", "Print"] {
+        let ok = json!({ "doc": doc, "field": "f", "actions": [{ "trigger": "mouse_up", "menu": name }] });
+        let r = json_of(a.call("form_set_actions", &ok).unwrap());
+        assert!(r["actions"].to_string().contains(&format!(r#""menu":"{name}""#)), "{name} missing from {r}");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}

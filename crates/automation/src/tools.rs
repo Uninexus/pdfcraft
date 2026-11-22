@@ -1807,7 +1807,7 @@ pub fn tools() -> Vec<ToolDef> {
             .ro()
             .cmd("form.prepare")
             .with(schema(json!({ "doc": doc(), "field": { "type": "string" } }), &["doc", "field"])),
-        t("form_set_actions", "Set field actions", "Field Properties ▸ Actions: replace the field's actions. Each item: trigger (mouse_up, mouse_down, mouse_enter, mouse_exit, on_focus, on_blur) and one of javascript (source), url, reset (field names; [] for all), menu (Print, NextPage, PrevPage, FirstPage, LastPage), page (1-based), show / hide (field names), submit (URL). Triggers not listed lose their action. Undoable.")
+        t("form_set_actions", "Set field actions", "Field Properties ▸ Actions: replace the field's actions. Each item: trigger (mouse_up, mouse_down, mouse_enter, mouse_exit, on_focus, on_blur) and one of javascript (source), url, reset (field names; [] for all), menu (exactly one of Print, NextPage, PrevPage, FirstPage, LastPage; any other name is refused), page (1-based), show / hide (field names), submit (URL). Triggers not listed lose their action. Undoable.")
             .cmd("form.prepare")
             .with(schema(
                 json!({ "doc": doc(), "field": { "type": "string" }, "actions": { "type": "array", "items": { "type": "object", "properties": {
