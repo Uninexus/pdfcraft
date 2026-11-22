@@ -686,9 +686,10 @@ pub enum Edit {
         replace: bool,
         file: Option<MarkFile>,
     },
-    /// Remove every mark of a kind from every page.
+    /// Remove every mark of a kind from `pages` (0-based; `None`: every page).
     RemoveMarks {
         kind: MarkKind,
+        pages: Option<Vec<usize>>,
     },
     /// Edit a PDF ▸ Add content ▸ Text (`text.rect` in display space).
     AddText {

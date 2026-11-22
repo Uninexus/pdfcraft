@@ -4513,12 +4513,12 @@ fn headers_footers_watermarks_and_backgrounds_show_update_and_remove() {
     .unwrap();
     assert_eq!(s.get(id).unwrap().marks().len(), 3);
     assert!(page_texts(&s, id)[0].contains("SECRET"));
-    s.apply(id, Edit::RemoveMarks { kind: MarkKind::HeaderFooter }).unwrap();
-    s.apply(id, Edit::RemoveMarks { kind: MarkKind::Watermark }).unwrap();
-    s.apply(id, Edit::RemoveMarks { kind: MarkKind::Background }).unwrap();
+    s.apply(id, Edit::RemoveMarks { kind: MarkKind::HeaderFooter, pages: None }).unwrap();
+    s.apply(id, Edit::RemoveMarks { kind: MarkKind::Watermark, pages: None }).unwrap();
+    s.apply(id, Edit::RemoveMarks { kind: MarkKind::Background, pages: None }).unwrap();
     assert_eq!(page_texts(&s, id), ["Page 1", "Page 2"]);
     assert!(s.get(id).unwrap().marks().is_empty());
-    assert!(matches!(s.apply(id, Edit::RemoveMarks { kind: MarkKind::Watermark }), Err(EditError::Edit(_))));
+    assert!(matches!(s.apply(id, Edit::RemoveMarks { kind: MarkKind::Watermark, pages: None }), Err(EditError::Edit(_))));
     assert_eq!(s.get(id).unwrap().can_undo(), Some("Remove background"));
 }
 
@@ -4553,7 +4553,7 @@ fn remove_background_names_the_pages_whose_own_backdrop_stays_off() {
     // A tag whose hash doesn't match the bytes before the fill: something changed them since.
     let tag = format!("<< /Index 2 /Op (f) /Before <{}> >>", "00".repeat(32));
     let id = s.open("a.pdf", None, Arc::new(backdrop_pdf(Some(&tag))), None).unwrap();
-    s.apply(id, Edit::RemoveMarks { kind: MarkKind::Background }).unwrap();
+    s.apply(id, Edit::RemoveMarks { kind: MarkKind::Background, pages: None }).unwrap();
     let d = s.get(id).unwrap();
     assert_eq!(d.edit_notices, [EditNotice::BackdropsLeftOff { pages: vec![0] }]);
     let said = d.edit_notices[0].to_string();
@@ -4564,11 +4564,11 @@ fn remove_background_names_the_pages_whose_own_backdrop_stays_off() {
 
     // Added and removed here: the backdrop comes back, and nothing is said.
     let id = s.open("b.pdf", None, Arc::new(backdrop_pdf(None)), None).unwrap();
-    s.apply(id, Edit::RemoveMarks { kind: MarkKind::Background }).unwrap();
+    s.apply(id, Edit::RemoveMarks { kind: MarkKind::Background, pages: None }).unwrap();
     let background = Background { color: [1.0, 0.0, 0.0], ..Background::default() };
     s.apply(id, Edit::AddBackground { pages: vec![0], settings: background, replace: false, file: None }).unwrap();
     assert_eq!(s.get(id).unwrap().page_backdrops(&[0]), [None], "replaced");
-    s.apply(id, Edit::RemoveMarks { kind: MarkKind::Background }).unwrap();
+    s.apply(id, Edit::RemoveMarks { kind: MarkKind::Background, pages: None }).unwrap();
     assert!(s.get(id).unwrap().edit_notices.is_empty());
     assert_eq!(s.get(id).unwrap().page_backdrops(&[0]), [Some(Backdrop::Fill)], "turned back on");
     assert_eq!(page_runs(&[0, 1, 2, 5, 7, 8]), "1-3, 6, 8-9");
@@ -14147,7 +14147,7 @@ fn repeated_backdrop_artwork_survives_background_undo_redo_and_both_save_modes()
     let full = pdfcraft_cos::write_full(&doc, &pdfcraft_cos::SaveOptions::default()).unwrap();
     let rewritten = s.open("full.pdf", None, Arc::new(full), None).unwrap();
     black(&s, rewritten);
-    s.apply(rewritten, Edit::RemoveMarks { kind: MarkKind::Background }).unwrap();
+    s.apply(rewritten, Edit::RemoveMarks { kind: MarkKind::Background, pages: None }).unwrap();
     black(&s, rewritten);
 }
 

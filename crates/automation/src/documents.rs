@@ -1328,7 +1328,10 @@ impl Automation {
                 };
                 Edit::AddPrinterMarks { pages, settings, replace: a.opt_bool("replace")?.unwrap_or(true) }
             }
-            "doc_bates_remove" => Edit::RemoveMarks { kind: MarkKind::Bates },
+            "doc_bates_remove" => {
+                let chosen = a.opt_ints("pages")?.is_some().then_some(pages);
+                Edit::RemoveMarks { kind: MarkKind::Bates, pages: chosen }
+            }
             _ => {
                 let kind = match a.str("kind")? {
                     "header_footer" => MarkKind::HeaderFooter,
@@ -1337,7 +1340,7 @@ impl Automation {
                     "printer_marks" => MarkKind::PrinterMarks,
                     other => return Err(ToolError::InvalidArgs(format!("unknown kind {other:?}"))),
                 };
-                Edit::RemoveMarks { kind }
+                Edit::RemoveMarks { kind, pages: None }
             }
         };
         self.apply(a, edit)

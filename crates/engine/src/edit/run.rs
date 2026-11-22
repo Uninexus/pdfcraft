@@ -590,6 +590,16 @@ fn invalidate_form_script_snapshot(cx: &mut EditCtx) {
     }
 }
 
+/// Remove marks of `kind` from `pages` (0-based; `None`: every page), refusing when there are none.
+fn remove_marks(doc: &mut pdfcraft_cos::Document, kind: pdfcraft_edit::MarkKind, pages: Option<&[usize]>) -> Result<(), EditError> {
+    let chosen = pages.map_or_else(|| (0..pdfcraft_model::pages(doc).len()).collect(), <[usize]>::to_vec);
+    if pdfcraft_edit::remove_marks(doc, &chosen, kind)? == 0 {
+        let what = if pages.is_some() { "there is nothing to remove on the chosen pages" } else { "there is nothing to remove" };
+        return Err(EditError::Edit(pdfcraft_edit::EditError::Invalid(what.into())));
+    }
+    Ok(())
+}
+
 /// Perform an edit on a working copy (the caller discards it on error).
 pub(crate) fn run_edit(doc: &mut pdfcraft_cos::Document, edit: &Edit, cx: &mut EditCtx) -> Result<(), EditError> {
     match edit {
@@ -1060,12 +1070,7 @@ pub(crate) fn run_edit(doc: &mut pdfcraft_cos::Document, edit: &Edit, cx: &mut E
             }
             pdfcraft_edit::add_background(doc, pages, &s, *replace)?
         }
-        Edit::RemoveMarks { kind } => {
-            let n = pdfcraft_model::pages(doc).len();
-            if pdfcraft_edit::remove_marks(doc, &(0..n).collect::<Vec<_>>(), *kind)? == 0 {
-                return Err(EditError::Edit(pdfcraft_edit::EditError::Invalid("there is nothing to remove".into())));
-            }
-        }
+        Edit::RemoveMarks { kind, pages } => remove_marks(doc, *kind, pages.as_deref())?,
         Edit::AddText { page, text } => {
             pdfcraft_edit::add_content(doc, *page, &AddedContent::Text(text.clone()))?;
         }

@@ -15851,6 +15851,21 @@ fn removing_bates_takes_its_shrink_with_it_but_keeps_a_headers_own() {
 }
 
 #[test]
+fn removing_bates_from_chosen_pages_restores_only_their_shrink() {
+    let original = streams(&reopen(&fixture()), 0);
+    let mut doc = fixture();
+    add_header_footer(&mut doc, &[0, 1], &shrinking("", "<<Bates Number#6#1##>>"), false, &cx()).unwrap();
+    assert!(remove_marks(&mut doc, &[0], MarkKind::Bates).unwrap() >= 1);
+    assert_eq!(streams(&reopen(&doc), 0), original, "page 1 is back at full size");
+    let kept = streams(&reopen(&doc), 1);
+    assert!(
+        kept.join("").contains("(000002)") && kept.iter().any(|x| x.ends_with(" cm\n") && !x.contains("Tj")),
+        "page 2 keeps number and shrink: {kept:?}"
+    );
+    assert_eq!(marks_present(&doc), [MarkKind::Bates]);
+}
+
+#[test]
 fn a_line_mixing_text_and_a_bates_token_keeps_its_text_when_bates_goes() {
     let mut hf = HeaderFooter::default();
     hf.text[5] = "Page <<1>> | <<Bates Number#4#7#B-#>> end".into();

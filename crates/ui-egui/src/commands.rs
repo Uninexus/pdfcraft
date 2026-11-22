@@ -588,10 +588,10 @@ impl PdfCraftApp {
                     "prepress.marks.remove" => K::PrinterMarks,
                     _ => K::Background,
                 };
-                self.apply_edit(Edit::RemoveMarks { kind });
+                self.apply_edit(Edit::RemoveMarks { kind, pages: None });
             }
             "edit.bates_remove" => {
-                self.apply_edit(Edit::RemoveMarks { kind: pdfcraft_engine::MarkKind::Bates });
+                self.apply_edit(Edit::RemoveMarks { kind: pdfcraft_engine::MarkKind::Bates, pages: None });
             }
             "export.image" => self.dialog = Some(Dialog::Export(crate::export_ui::ExportKind::Image)),
             "export.text" => self.dialog = Some(Dialog::Export(crate::export_ui::ExportKind::Text)),
