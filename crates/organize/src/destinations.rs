@@ -206,10 +206,10 @@ impl Tree<'_, '_, '_> {
         let names = entry.map(|o| held(self.doc, o));
         if let (false, Some(Object::Array(items))) = (shared, names.as_deref()) {
             let own = if matches!(entry, Some(Object::Array(_))) { at } else { None };
-            for (pos, pair) in items.chunks_exact(2).enumerate() {
+            for (pos, [name, value]) in items.as_chunks::<2>().0.iter().enumerate() {
                 self.charge()?;
-                let Object::String(key) = &pair[0] else { continue };
-                let entry = Entry { source: Source::Names, key: Key::Text(key), value: &pair[1], place: Place::Leaf(own, pos) };
+                let Object::String(key) = name else { continue };
+                let entry = Entry { source: Source::Names, key: Key::Text(key), value, place: Place::Leaf(own, pos) };
                 self.emit(&entry)?;
             }
         }
