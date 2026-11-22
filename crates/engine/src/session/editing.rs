@@ -869,7 +869,7 @@ fn edit_notices(edit: &Edit, prev: &pdfcraft_cos::Document, next: &pdfcraft_cos:
         Vec::new()
     };
     // Pages whose own white backdrop Remove background couldn't turn back on.
-    if matches!(edit, Edit::RemoveMarks { kind: MarkKind::Background }) {
+    if matches!(edit, Edit::RemoveMarks { kind: MarkKind::Background, .. }) {
         let pages = guard(|| pdfcraft_edit::backdrops_left_off(next)).unwrap_or_default();
         if !pages.is_empty() {
             notices.push(EditNotice::BackdropsLeftOff { pages });

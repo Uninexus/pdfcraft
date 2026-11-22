@@ -4148,6 +4148,43 @@ fn bates_remove_takes_only_the_bates_numbers_off_every_page_and_survives_save_re
 }
 
 #[test]
+fn bates_remove_with_pages_takes_numbers_off_only_the_chosen_pages() {
+    let dir = workdir("bates-remove-pages");
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "a.pdf" }))["doc"].as_u64().unwrap();
+    ok(&mut a, "doc_header_footer", json!({ "doc": doc, "footer_left": "ACME-FTR" }));
+    ok(&mut a, "doc_header_footer", json!({ "doc": doc, "footer_right": "<<Bates Number#6#1#BX-#>>" }));
+    ok(&mut a, "doc_bates_remove", json!({ "doc": doc, "pages": [2] }));
+    let text = page_text(&mut a, doc);
+    assert!(!text[1].contains("BX-"), "page 2 lost its number: {:?}", text[1]);
+    assert!(text[0].contains("BX-000001") && text[2].contains("BX-000003"), "pages 1 and 3 keep theirs: {text:?}");
+    assert!(text.iter().all(|t| t.contains("ACME-FTR")), "the footer stays on every page: {text:?}");
+    // Undoable in one step.
+    ok(&mut a, "edit_undo", json!({ "doc": doc }));
+    assert!(page_text(&mut a, doc)[1].contains("BX-000002"));
+    // Without `pages` every page still loses its number.
+    ok(&mut a, "doc_bates_remove", json!({ "doc": doc }));
+    assert!(page_text(&mut a, doc).iter().all(|t| !t.contains("BX-")));
+}
+
+#[test]
+fn bates_remove_with_pages_refuses_an_empty_or_out_of_range_choice_and_pages_without_numbers() {
+    let dir = workdir("bates-remove-pages-refused");
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "a.pdf" }))["doc"].as_u64().unwrap();
+    ok(&mut a, "doc_header_footer", json!({ "doc": doc, "pages": [1], "footer_right": "<<Bates Number#6#1#BX-#>>" }));
+    let e = err(&mut a, "doc_bates_remove", json!({ "doc": doc, "pages": [] }));
+    assert!(matches!(&e, ToolError::InvalidArgs(m) if m.contains("at least one page")), "empty: {e}");
+    let e = err(&mut a, "doc_bates_remove", json!({ "doc": doc, "pages": [4] }));
+    assert!(matches!(&e, ToolError::InvalidArgs(m) if m.contains("out of range")), "out of range: {e}");
+    assert!(matches!(a.call("doc_bates_remove", &json!({ "doc": doc, "pages": [0] })), Err(ToolError::InvalidArgs(_))), "page 0");
+    // Page 2 has no numbers: refused, and page 1 keeps its own.
+    let e = err(&mut a, "doc_bates_remove", json!({ "doc": doc, "pages": [2, 3] }));
+    assert!(matches!(&e, ToolError::Failed(m) if m.contains("nothing to remove")), "{e}");
+    assert!(page_text(&mut a, doc)[0].contains("BX-000001"));
+}
+
+#[test]
 fn bates_remove_with_no_bates_numbers_says_there_is_nothing_to_remove() {
     let dir = workdir("bates-none");
     let mut a = auto(&dir);

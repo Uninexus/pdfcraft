@@ -196,7 +196,7 @@ fn replacing_and_removing_marks_restores_the_original_stream_list() {
             id = session.open("saved.pdf", None, saved, None).unwrap();
         }
         let mark_kind = if kind == "WATERMARK" { pdfcraft_edit::MarkKind::Watermark } else { pdfcraft_edit::MarkKind::HeaderFooter };
-        session.apply(id, Edit::RemoveMarks { kind: mark_kind }).unwrap();
+        session.apply(id, Edit::RemoveMarks { kind: mark_kind, pages: None }).unwrap();
         let saved = session.save_bytes(id).unwrap();
         let page = Document::open(saved.clone()).unwrap();
         assert_eq!(stream_list(&page), stream_list(&original), "{kind}: removal restores original references");
