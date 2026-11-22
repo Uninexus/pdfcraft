@@ -447,7 +447,12 @@ impl Automation {
             } else if Args(it).get("reset").is_some() {
                 A::Reset(names(it, "reset")?)
             } else if let Some(m) = it["menu"].as_str() {
-                A::Named(m.into())
+                // The same five names `link_named_action` writes; any other name would be a menu
+                // item the viewer cannot run (or, for `SaveAs`, one it should not run unasked).
+                let target = pdfcraft_organize::named_action::NamedTarget::new(m).map_err(|_| {
+                    bad(format!("menu must be one of {} (exactly), not {m:?}", pdfcraft_organize::named_action::SAFE_NAMES.join(", ")))
+                })?;
+                A::Named(target.name().into())
             } else if let Some(p) = it["page"].as_u64() {
                 A::GoTo((p.max(1) - 1) as usize)
             } else if Args(it).get("show").is_some() {
