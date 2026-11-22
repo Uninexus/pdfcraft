@@ -2241,11 +2241,10 @@ fn each_printer_keeps_what_it_last_printed_with_across_a_restart() {
         }
         h.run_steps(2);
         h.get_by(|n| n.label().as_deref() == Some("Print") && n.role() == Role::Button).click();
-        for _ in 0..400 {
+        // The job is built on a worker thread, so on a loaded machine it can take a while.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while jobs.lock().unwrap().len() <= before && std::time::Instant::now() < deadline {
             h.run_steps(1);
-            if jobs.lock().unwrap().len() > before {
-                break;
-            }
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
         jobs.lock().unwrap().last().cloned().expect("the job reached the spooler")
