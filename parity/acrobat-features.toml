@@ -5304,9 +5304,9 @@ tier = "P2"
 milestone = "M6"
 status = "partial"
 commands = []
-tools = []
-evidence = ["crates/ui-egui/tests/it/prepare.rs::tab_numbers_follow_fill_order_without_dirtying_the_document", "crates/ui-egui/tests/it/control.rs::form_tab_numbers_can_be_shown_and_captured_through_the_control_channel", "crates/ui-egui/tests/it/forms.rs::tab_and_shift_tab_follow_widget_order_across_pages"]
-notes = "The GUI's Prepare a form ▸ Show tab numbers overlays each visible, fillable widget with its 1-based position in the order used by Tab and Shift+Tab; repeated widgets receive separate numbers. This is a view-only toggle and does not dirty the PDF. Missing: headless engine and automation access to the setting."
+tools = ["form_tab_order"]
+evidence = ["crates/ui-egui/tests/it/prepare.rs::tab_numbers_follow_fill_order_without_dirtying_the_document", "crates/ui-egui/tests/it/control.rs::form_tab_numbers_can_be_shown_and_captured_through_the_control_channel", "crates/ui-egui/tests/it/forms.rs::tab_and_shift_tab_follow_widget_order_across_pages", "crates/automation/tests/it/automation.rs::tab_order_and_field_appearance_through_tools"]
+notes = "The GUI's Prepare a form ▸ Show tab numbers overlays each visible, fillable widget with its 1-based position in the order used by Tab and Shift+Tab; repeated widgets receive separate numbers. This is a view-only toggle and does not dirty the PDF. Headless: form_tab_order returns the order fields are visited in (tab_order, a field's 1-based tab number is its position in that array) and each page's order (page_tabs), and sets it per page; it has no overlay. Missing: the on-screen overlay is in the app only and is not an engine setting, so it has no headless form."
 
 [[feature]]
 id = "form.preview-form"
