@@ -6706,6 +6706,78 @@ fn a_fields_own_actions_are_removed_with_links_actions_and_scripts() {
     removes_from_every_owner(doc, crate::sanitize::Hidden::LinksActionsScripts, b"LEAK_");
 }
 
+/// A form with a field that is its own widget, a parent field with a widget kid and a nested field
+/// whose own kid is a widget, each carrying a signer label (an email address) that must not leave.
+fn signer_form() -> Document {
+    let label = |who: &str| format!("/PdfCraftSigner (LEAK_{who}@example.org)");
+    let mut doc = one_page(
+        b"BT /F1 10 Tf 10 100 Td (Visible) Tj ET",
+        "",
+        vec![
+            format!("<< /Type /Annot /Subtype /Widget /FT /Tx /T (plain) /Ff 1 {} /Rect [10 200 150 220] >>", label("plain")).into_bytes(),
+            format!("<< /FT /Tx /T (group) {} /Kids [9 0 R 10 0 R] >>", label("group")).into_bytes(),
+            format!("<< /Type /Annot /Subtype /Widget /Parent 8 0 R /Rect [10 150 150 170] {} >>", label("kid")).into_bytes(),
+            format!("<< /T (inner) /Parent 8 0 R {} /Kids [11 0 R] >>", label("inner")).into_bytes(),
+            format!("<< /Type /Annot /Subtype /Widget /Parent 10 0 R /Rect [10 100 150 120] {} >>", label("deep")).into_bytes(),
+        ],
+    );
+    doc.update_dict(doc.root().unwrap(), |d| d.set(b"AcroForm".to_vec(), fields_dict(&[7, 8]))).unwrap();
+    doc.update_dict(ObjRef::new(3, 0), |d| d.set(b"Annots".to_vec(), ref_array(&[7, 9, 11]))).unwrap();
+    doc
+}
+
+/// Private data takes a field's signer label out of the field, its widget kids and its nested
+/// fields, counts each dictionary that held one, and keeps the fields and their other keys.
+#[test]
+fn private_data_removes_signer_labels_from_fields_widgets_and_nested_fields() {
+    use crate::sanitize::{Hidden, remove_hidden, scan_only};
+    let mut doc = signer_form();
+    let fields_before = pdfcraft_forms::fields(&doc).len();
+    assert_eq!(scan_only(&doc, &[Hidden::PrivateData]), [(Hidden::PrivateData, 5)]);
+    let done = remove_hidden(&mut doc, &[Hidden::PrivateData]).unwrap();
+    assert_eq!(done, [(Hidden::PrivateData, 5)]);
+    assert_no_secret(&doc, b"LEAK_");
+    assert_no_secret(&doc, b"PdfCraftSigner");
+    assert_eq!(scan_only(&reopen(&doc), &[Hidden::PrivateData]), [(Hidden::PrivateData, 0)]);
+    // The form is still a form: same fields, same names, and the other keys stay.
+    let plain = doc.get(ObjRef::new(7, 0)).as_dict().cloned().unwrap();
+    assert_eq!(
+        (plain.get(b"T").and_then(Object::as_string).map(|s| s.to_text()), plain.get(b"Ff").and_then(Object::as_f64)),
+        (Some("plain".into()), Some(1.0))
+    );
+    assert!(doc.get(ObjRef::new(8, 0)).as_dict().is_some_and(|d| d.contains(b"Kids") && d.contains(b"T")));
+    assert!(doc.get(ObjRef::new(11, 0)).as_dict().is_some_and(|d| d.contains(b"Parent") && d.contains(b"Rect")));
+    assert_eq!(pdfcraft_forms::fields(&doc).len(), fields_before);
+}
+
+/// A form with no label is left as it was: nothing is counted, and asking for private data alone
+/// refuses with nothing changed.
+#[test]
+fn a_form_without_signer_labels_is_not_touched_by_private_data() {
+    use crate::sanitize::{Hidden, remove_hidden, scan_only};
+    let mut doc = one_page(
+        b"BT /F1 10 Tf 10 100 Td (Visible) Tj ET",
+        "",
+        vec![b"<< /Type /Annot /Subtype /Widget /FT /Tx /T (plain) /Rect [10 200 150 220] >>".to_vec()],
+    );
+    doc.update_dict(doc.root().unwrap(), |d| d.set(b"AcroForm".to_vec(), fields_dict(&[7]))).unwrap();
+    doc.update_dict(ObjRef::new(3, 0), |d| d.set(b"Annots".to_vec(), ref_array(&[7]))).unwrap();
+    let before = doc.get(ObjRef::new(7, 0)).as_dict().cloned().unwrap();
+    assert_eq!(scan_only(&doc, &[Hidden::PrivateData]), [(Hidden::PrivateData, 0)]);
+    assert!(matches!(remove_hidden(&mut doc, &[Hidden::PrivateData]), Err(RedactError::NothingToApply)));
+    assert_eq!(doc.get(ObjRef::new(7, 0)).as_dict().cloned().unwrap(), before);
+}
+
+/// Sanitize Document (every category) leaves no signer label in the saved file, whether or not
+/// the fields themselves are flattened away.
+#[test]
+fn sanitize_leaves_no_signer_label_in_the_saved_file() {
+    let mut doc = signer_form();
+    let done = crate::sanitize::sanitize(&mut doc).unwrap();
+    assert!(done.iter().any(|(h, n)| *h == crate::sanitize::Hidden::PrivateData && *n == 5), "{done:?}");
+    assert_no_secret(&doc, b"LEAK_");
+}
+
 /// Resource names are chosen by the producer: a font named like an owned entry stays.
 #[test]
 fn a_resource_named_like_an_owned_entry_is_kept() {

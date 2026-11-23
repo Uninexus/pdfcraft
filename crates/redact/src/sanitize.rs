@@ -28,8 +28,9 @@ pub enum Hidden {
     Bookmarks,
     /// Links, actions (open action, additional actions, what bookmarks run) and document JavaScript.
     LinksActionsScripts,
-    /// Private data of other applications (`/PieceInfo`), and prepress data on images and Forms
-    /// (`/OPI`, `/Alternates`).
+    /// Private data of other applications (`/PieceInfo`), prepress data on images and Forms
+    /// (`/OPI`, `/Alternates`), and PdfCraft's own signer label on form fields and widgets
+    /// ([`SIGNER_LABEL_KEY`], a recipient's email address).
     PrivateData,
 }
 
@@ -56,7 +57,7 @@ impl Hidden {
             Hidden::HiddenLayers => "Hidden layers",
             Hidden::Bookmarks => "Bookmarks",
             Hidden::LinksActionsScripts => "Links, actions and JavaScripts",
-            Hidden::PrivateData => "Private data of other applications",
+            Hidden::PrivateData => "Private data (other applications' data and PdfCraft signer labels)",
         }
     }
 
@@ -267,15 +268,23 @@ fn outline_action_count(doc: &Document, cat: &Dict) -> usize {
     n
 }
 
+/// The private key a form field's signer label (an email address) is written under. It is the
+/// same text as `pdfcraft_organize::field_signer::KEY`, repeated here because this crate does not
+/// depend on that one; a test in the automation crate checks the two are equal. Removed with the
+/// private-data category, from every dictionary the owner sweep reaches (fields and their widget
+/// kids included), not only from dictionaries that are form fields.
+pub const SIGNER_LABEL_KEY: &[u8] = b"PdfCraftSigner";
+
 /// Entries that hold a category's data wherever they appear, not only on the catalog and pages:
 /// XMP on images, fonts and Forms, private data on Forms, associated files on pages and
 /// annotations, additional actions on fields. Images and Forms also carry prepress data: an OPI
 /// proxy's link to the original file, and alternate images, which can be the unedited original.
-const OWNED: [(Hidden, &[u8]); 6] = [
+const OWNED: [(Hidden, &[u8]); 7] = [
     (Hidden::Metadata, b"Metadata"),
     (Hidden::PrivateData, b"PieceInfo"),
     (Hidden::PrivateData, b"OPI"),
     (Hidden::PrivateData, b"Alternates"),
+    (Hidden::PrivateData, SIGNER_LABEL_KEY),
     (Hidden::Attachments, b"AF"),
     (Hidden::LinksActionsScripts, b"AA"),
 ];

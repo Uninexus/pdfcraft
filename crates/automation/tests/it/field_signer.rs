@@ -537,3 +537,78 @@ fn the_refusal_names_its_cause() {
     let m = refused(&mut a, "form_field_signer", json!({ "doc": doc, "field": "name", "signer": "ana@example.org" }));
     assert!(m.contains("covered by the lock") && !m.contains("any field"), "{m}");
 }
+
+#[test]
+fn the_sanitizers_copy_of_the_key_is_the_one_the_label_is_written_under() {
+    assert_eq!(pdfcraft_engine::SANITIZED_SIGNER_LABEL_KEY, pdfcraft_engine::FIELD_SIGNER_KEY);
+}
+
+fn private_data(a: &mut Automation, doc: u64) -> u64 {
+    let info = tool(a, "doc_hidden_info", json!({ "doc": doc }));
+    info["categories"].as_array().unwrap().iter().find(|c| c["category"] == "private-data").unwrap()["count"].as_u64().unwrap()
+}
+
+#[test]
+fn removing_private_data_takes_the_label_out_counts_it_and_can_be_undone() {
+    let (dir, mut a, doc) = setup();
+    assert_eq!(private_data(&mut a, doc), 0, "a form with no label holds no private data");
+    set(&mut a, doc, "name", json!("ana@example.org"));
+    set(&mut a, doc, "city", json!("bo@example.org"));
+    assert_eq!(private_data(&mut a, doc), 2);
+
+    // Another category leaves the labels alone (and says it has nothing to remove here).
+    let m = refused(&mut a, "doc_remove_hidden", json!({ "doc": doc, "categories": ["comments"] }));
+    assert!(m.starts_with("nothing to remove"), "{m}");
+    assert_eq!(read(&mut a, doc, "name")["signer"], "ana@example.org");
+
+    let r = tool(&mut a, "doc_remove_hidden", json!({ "doc": doc, "categories": ["private-data"] }));
+    assert_eq!(r["removed"], 2, "{r}");
+    assert_eq!(private_data(&mut a, doc), 0);
+    assert_eq!((read(&mut a, doc, "name")["signer"].clone(), read(&mut a, doc, "city")["signer"].clone()), (Value::Null, Value::Null));
+    // The fields themselves stay.
+    assert_eq!(tool(&mut a, "form_fields", json!({ "doc": doc }))["count"], 4);
+    assert!(!has_label(&saved(&dir, &mut a, doc, "clean.pdf")));
+
+    // Undo brings both labels back; Sanitize document (every category) takes them out again.
+    tool(&mut a, "edit_undo", json!({ "doc": doc }));
+    assert_eq!(read(&mut a, doc, "name")["signer"], "ana@example.org");
+    assert!(has_label(&saved(&dir, &mut a, doc, "undone.pdf")));
+    tool(&mut a, "doc_remove_hidden", json!({ "doc": doc }));
+    assert!(!has_label(&saved(&dir, &mut a, doc, "sanitized.pdf")));
+}
+
+#[test]
+fn a_signed_document_is_not_sanitized_and_keeps_its_label() {
+    let (dir, mut a, doc) = signed_form(None, None);
+    set(&mut a, doc, "name", json!("ana@example.org"));
+    let m = refused(&mut a, "doc_remove_hidden", json!({ "doc": doc, "categories": ["private-data"] }));
+    assert!(m.to_lowercase().contains("sign"), "{m}");
+    assert_eq!(read(&mut a, doc, "name")["signer"], "ana@example.org");
+    tool(&mut a, "doc_save", json!({ "doc": doc, "path": "signed.pdf" }));
+    assert!(has_label(&std::fs::read(dir.path().join("signed.pdf")).unwrap()), "the incremental save keeps the label");
+}
+
+/// Without `form-fields` the fields are not flattened away, so only the private-data category
+/// stands between a label and the saved file.
+#[test]
+fn private_data_removed_with_other_categories_but_not_form_fields_leaves_no_label_in_the_file() {
+    let (dir, mut a, doc) = setup();
+    set(&mut a, doc, "name", json!("ana@example.org"));
+    tool(&mut a, "doc_set_info", json!({ "doc": doc, "key": "Title", "value": "Plan" }));
+    tool(&mut a, "doc_remove_hidden", json!({ "doc": doc, "categories": ["private-data", "metadata"] }));
+    assert_eq!(read(&mut a, doc, "name")["signer"], Value::Null);
+    assert_eq!(tool(&mut a, "form_fields", json!({ "doc": doc }))["count"], 4, "the form is kept");
+    assert!(!has_label(&saved(&dir, &mut a, doc, "clean.pdf")));
+}
+
+/// The optimizer's discard runs the same removal on its copy.
+#[test]
+fn the_optimizers_private_data_discard_leaves_no_label_in_the_copy() {
+    let (dir, mut a, doc) = setup();
+    set(&mut a, doc, "name", json!("ana@example.org"));
+    tool(&mut a, "doc_optimize", json!({ "doc": doc, "path": "kept.pdf" }));
+    assert!(has_label(&std::fs::read(dir.path().join("kept.pdf")).unwrap()), "an optimized copy keeps the label unless told to discard it");
+    tool(&mut a, "doc_optimize", json!({ "doc": doc, "path": "discarded.pdf", "discard": ["private-data"] }));
+    assert!(!has_label(&std::fs::read(dir.path().join("discarded.pdf")).unwrap()));
+    assert_eq!(read(&mut a, doc, "name")["signer"], "ana@example.org", "the open document is not changed");
+}
