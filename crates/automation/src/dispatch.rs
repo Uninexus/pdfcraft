@@ -904,6 +904,7 @@ impl Automation {
             "signing_plan_get" => self.signing_plan_get(&a)?,
             "signing_plan_advance" => self.signing_plan_advance(&a)?,
             "signing_plan_clear" => self.signing_plan_clear(&a)?,
+            "signing_plan_sign" => self.signing_plan_sign(&a)?,
             "accessibility_check" => self.a11y_check(&a)?,
             "accessibility_find_untagged" => self.a11y_find_untagged(&a)?,
             "accessibility_autotag_preview" => self.accessibility_autotag_preview(&a)?,

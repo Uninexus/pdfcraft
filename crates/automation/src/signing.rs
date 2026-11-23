@@ -89,8 +89,21 @@ pub(crate) fn cert_json(c: &Certificate) -> Value {
     })
 }
 
+/// A signed file made by [`Automation::sign_bytes`] and not yet written, with what the writing
+/// and the result of `sign_document` need.
+pub(crate) struct Signing {
+    pub(crate) signed: std::sync::Arc<Vec<u8>>,
+    pub(crate) doc_id: pdfcraft_engine::DocId,
+    pub(crate) out: std::path::PathBuf,
+    before: bool,
+    changed: Vec<Value>,
+    scripted: bool,
+    signing: Option<String>,
+    run_scripts: bool,
+}
+
 impl Automation {
-    fn sig_json(&self, a: &Args, s: &SignatureInfo) -> Result<Value> {
+    pub(crate) fn sig_json(&self, a: &Args, s: &SignatureInfo) -> Result<Value> {
         let doc = self.doc(a)?;
         let rect = match (s.page, s.rect) {
             (Some(p), Some(r)) if s.visible => doc.info.pages.get(p).map(|pi| {
@@ -261,9 +274,12 @@ impl Automation {
         })
     }
 
-    /// `sign_document`: sign the document with a digital ID into `out`, visibly (in a field or a
-    /// rectangle) or not, running a dynamic form's signing scripts around it.
-    pub(crate) fn sign_document(&mut self, a: &Args) -> Result<Value> {
+    /// The signed file for the arguments of `sign_document`, made and not yet written: its ID,
+    /// field, page, rectangle, graphic and appearance are read and checked, a dynamic form's
+    /// preSign scripts run when asked, and the session signs. A failure leaves the document as it
+    /// was (what the preSign scripts did is taken back). `sign_document` saves what this returns
+    /// and `signing_plan_sign` checks it first.
+    pub(crate) fn sign_bytes(&mut self, a: &Args) -> Result<Signing> {
         let id = self.open_id(a)?;
         let doc = self.doc(a)?;
         let doc_id = doc.id;
@@ -364,6 +380,13 @@ impl Automation {
                 return Err(e);
             }
         };
+        Ok(Signing { signed, doc_id, out, before, changed, scripted, signing, run_scripts })
+    }
+
+    /// `sign_document`: sign the document with a digital ID into `out`, visibly (in a field or a
+    /// rectangle) or not, running a dynamic form's signing scripts around it.
+    pub(crate) fn sign_document(&mut self, a: &Args) -> Result<Value> {
+        let Signing { signed, doc_id, out, before, changed, scripted, signing, run_scripts } = self.sign_bytes(a)?;
         if let Err(e) = write_atomic(&out, &signed) {
             // Not saved, so not signed: what the preSign scripts did is taken back too.
             if before {
