@@ -92,6 +92,7 @@ mod search_folder;
 mod search_position;
 mod side_panels;
 mod signing;
+mod signing_plan_panel;
 mod snapshot_tabs;
 mod split_view;
 mod split_view_edits;

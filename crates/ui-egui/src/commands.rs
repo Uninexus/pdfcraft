@@ -755,6 +755,8 @@ impl PdfCraftApp {
                     self.open_field_props(&name, w);
                 }
             }
+            "sign.plan.show" => self.show_signing_plan(),
+            "sign.plan.recipient.add" | "sign.plan.recipient.remove" | "sign.plan.message.set" => self.change_signing_plan(id),
             "form.field.signer.set" => self.set_field_signer(false),
             "form.field.signer.clear" => self.set_field_signer(true),
             field if crate::prepare::FieldTool::from_command(field).is_some() => {

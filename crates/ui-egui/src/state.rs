@@ -143,6 +143,8 @@ pub enum Dialog {
     AttachmentDescription,
     /// Replace Pages (after choosing the file).
     ReplacePages,
+    /// Sign ▸ Signing plan: the local record of who is asked to sign (`signing_plan_ui`).
+    SigningPlan,
     /// Prepare a form ▸ Field Properties.
     FieldProps,
     /// Shared properties of several selected form fields.
