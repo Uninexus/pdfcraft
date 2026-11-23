@@ -278,6 +278,22 @@ fn fixture(a: &mut Automation, root: &Path, tool: &str) -> serde_json::Map<Strin
             let args = json!({ "doc": doc, "field": "name" });
             args.as_object().cloned().unwrap_or_default()
         }
+        // The signing tool needs a saved, labelled document with a plan beside it and an ID that
+        // opens; each call gets a fresh document, which the caller closes, since a success signs it.
+        "signing_plan_sign" => {
+            let id = Path::new(env!("CARGO_MANIFEST_DIR")).join("../sign/tests/data/ec-p256.p12");
+            std::fs::copy(&id, root.join("id.p12")).expect("copy the test digital ID");
+            let doc = blank_doc(a);
+            a.call("form_add_field", &json!({ "doc": doc, "page": 1, "type": "signature", "name": "Sig", "rect": [10, 10, 100, 60] }))
+                .expect("add the field");
+            a.call("doc_save", &json!({ "doc": doc, "path": "in.pdf" })).expect("save the fixture document");
+            let recipients = json!([{ "name": "Ana", "email": "ana@example.org" }, { "name": "Bo", "email": "bo@example.org" }]);
+            a.call("signing_plan_set", &json!({ "path": "in.pdf", "recipients": recipients, "replace": true })).expect("make the fixture's plan");
+            a.call("form_field_signer", &json!({ "doc": doc, "field": "Sig", "signer": "ana@example.org" })).expect("label the field");
+            a.call("doc_save", &json!({ "doc": doc, "path": "in.pdf" })).expect("save the label");
+            let args = json!({ "doc": doc, "email": "ana@example.org", "id": "id.p12", "password": "test" });
+            args.as_object().cloned().unwrap_or_default()
+        }
         // Without a step, action_run returns "give action or steps" before it resolves folder
         // or paths, and that error would be counted as a confinement refusal.
         "action_run" => {
@@ -298,6 +314,8 @@ fn no_tool_panics_on_hostile_arguments() {
 
     for def in tools() {
         empty_dir(&root);
+        // Whether any call of `signing_plan_sign` left a signature in the fixture's file.
+        let mut plan_signed = false;
         // The whole arguments object, not just its properties.
         for bad in [json!(null), json!([]), json!("string"), json!(7), json!(true), json!({})] {
             calls += 1;
@@ -317,6 +335,10 @@ fn no_tool_panics_on_hostile_arguments() {
                 if let Err(e) = guarded(&mut a, def.name, &Value::Object(obj)) {
                     failures.push(e);
                 }
+                if def.name == "signing_plan_sign" {
+                    let file = std::fs::read(root.join("in.pdf")).unwrap_or_default();
+                    plan_signed |= file.windows(9).any(|w| w == b"ByteRange");
+                }
                 // Later tools pass placeholder document ids, which must not find this one open.
                 if let Some(doc) = fixture_doc {
                     a.call("doc_close", &json!({ "doc": doc, "discard_changes": true })).expect("close the fixture's document");
@@ -326,6 +348,9 @@ fn no_tool_panics_on_hostile_arguments() {
         // A signed file shows the fixture got calls past the ID and document checks.
         if def.name == "sign_document" {
             assert!(root.join("signed.pdf").is_file(), "no sign_document call signed: the hostile values stop at the ID or document");
+        }
+        if def.name == "signing_plan_sign" {
+            assert!(plan_signed, "no signing_plan_sign call signed: the hostile values stop before the signature");
         }
     }
 

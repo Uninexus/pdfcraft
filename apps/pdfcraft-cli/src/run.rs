@@ -26,11 +26,22 @@ pub(crate) fn tools() -> Result<(), CliError> {
 
 /// Print a tool's result: JSON as JSON; images go to `--out` (or are summarised). The image is
 /// written like a tool's own output, so `--root` confines it too.
+/// Why a tool's result is not a success although the call did not fail: a result that says it
+/// needs attention (`signing_plan_sign` with status `partial`: the work was done but a later step
+/// was not). The body is still printed; the run fails, as a batch with failed files does.
+fn attention(values: &[serde_json::Value]) -> Option<String> {
+    let flagged = |v: &serde_json::Value| v["needs_attention"] == true || (v["ok"] == false && v["status"] == "partial");
+    values.iter().any(flagged).then(|| "the tool finished only partly (needs_attention); see the JSON result".to_string())
+}
+
 pub(crate) fn print_output(
     auto: &pdfcraft_automation::Automation,
     content: Vec<pdfcraft_automation::Content>,
     out: Option<&str>,
 ) -> Result<(), CliError> {
+    let partly = attention(
+        &content.iter().filter_map(|c| if let pdfcraft_automation::Content::Json(v) = c { Some(v.clone()) } else { None }).collect::<Vec<_>>(),
+    );
     for c in content {
         match c {
             pdfcraft_automation::Content::Json(v) => stdout_line(format_args!("{}", serde_json::to_string_pretty(&v).unwrap_or_default()))?,
@@ -43,7 +54,7 @@ pub(crate) fn print_output(
             },
         }
     }
-    Ok(())
+    partly.map_or(Ok(()), |m| Err(CliError::Message(m)))
 }
 
 /// What a PNG result is reported as when it isn't written to a file.
@@ -96,7 +107,15 @@ fn run_script_report(auto: &mut pdfcraft_automation::Automation, steps: &[serde_
                 .map_err(|e| format!("step {n} ({t}): {e}")),
         };
         match outcome {
-            Ok(result) => report.push(serde_json::json!({ "step": n, "tool": tool, "status": "ok", "result": result })),
+            Ok(result) => match attention(&result) {
+                None => report.push(serde_json::json!({ "step": n, "tool": tool, "status": "ok", "result": result })),
+                // The body is kept, and the step is an error: the work was only partly done.
+                Some(why) => {
+                    let message = format!("step {n} ({}): {why}", tool.unwrap_or(""));
+                    report.push(serde_json::json!({ "step": n, "tool": tool, "status": "error", "error": message, "result": result }));
+                    failure = Some(message);
+                }
+            },
             Err(message) => {
                 report.push(serde_json::json!({ "step": n, "tool": tool, "status": "error", "error": message }));
                 failure = Some(message);
@@ -185,4 +204,22 @@ pub(crate) fn mcp(args: &[String]) -> Result<(), CliError> {
         if compact { ", compact tool list" } else { "" }
     );
     server.serve(std::io::stdin().lock(), std::io::stdout().lock()).map_err(|e| CliError::Message(e.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use pdfcraft_automation::Content;
+    use serde_json::json;
+
+    #[test]
+    fn a_result_that_needs_attention_fails_the_run_and_an_ordinary_one_does_not() {
+        let auto = pdfcraft_automation::Automation::new();
+        for body in [json!({ "needs_attention": true }), json!({ "ok": false, "status": "partial" })] {
+            assert!(super::print_output(&auto, vec![Content::Json(body.clone())], None).is_err(), "{body}");
+            assert!(super::attention(&[body]).is_some());
+        }
+        for body in [json!({ "ok": true, "status": "complete", "needs_attention": false }), json!({ "status": "partial" }), json!({ "ok": false })] {
+            assert!(super::print_output(&auto, vec![Content::Json(body.clone())], None).is_ok(), "{body}");
+        }
+    }
 }

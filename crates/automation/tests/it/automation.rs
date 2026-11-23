@@ -979,7 +979,7 @@ fn arabic_ligature_actual_text_is_one_editable_word_through_save_reopen() {
 /// dictionary's updates rewrite the file in place (lower-cased and sorted), so it counts too.
 #[test]
 fn file_writing_tools_are_not_read_only() {
-    for name in ["doc_export_data", "accessibility_report", "image_save", "ocr_dictionary"] {
+    for name in ["doc_export_data", "accessibility_report", "image_save", "ocr_dictionary", "signing_plan_sign"] {
         let t = tools().into_iter().find(|t| t.name == name).unwrap();
         assert!(!t.read_only, "{name} writes a file but advertises read-only");
         assert!(t.destructive, "{name} overwrites its path but advertises non-destructive");

@@ -133,12 +133,42 @@ fn contains_field_signer(edit: &Edit) -> bool {
     }
 }
 
+/// What the change being judged is, for the words of a refusal.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Act {
+    /// A signer label written on a form field.
+    Label,
+    /// A new signature made in another field.
+    Signing,
+}
+
+impl Act {
+    fn outcome(self) -> &'static str {
+        match self {
+            Act::Label => "the signer label was not written",
+            Act::Signing => "the document was not signed",
+        }
+    }
+
+    fn with(self) -> &'static str {
+        match self {
+            Act::Label => "this label",
+            Act::Signing => "this signature",
+        }
+    }
+}
+
 /// Why `after` (the signatures as validated once an edit is in) is worse than `before`, when it is:
 /// a signature whose status fell, that now has changes it forbids, or whose changes can no longer
 /// be checked (each with its own sentence), or that can no longer be matched. A signature that
 /// already had changes it forbids passes when nothing about its verdict gets worse: the edit does
 /// not make it worse. `None` when no signature is worse off.
 fn signature_damage(before: &[pdfcraft_sign::pdf::SignatureInfo], after: &[pdfcraft_sign::pdf::SignatureInfo]) -> Option<String> {
+    signature_damage_by(before, after, Act::Label)
+}
+
+/// [`signature_damage`] for the change `act`, which only chooses the words.
+fn signature_damage_by(before: &[pdfcraft_sign::pdf::SignatureInfo], after: &[pdfcraft_sign::pdf::SignatureInfo], act: Act) -> Option<String> {
     use pdfcraft_sign::pdf::{Modification, Status, kind};
     let rank = |s: Status| match s {
         Status::Valid => 2,
@@ -150,30 +180,41 @@ fn signature_damage(before: &[pdfcraft_sign::pdf::SignatureInfo], after: &[pdfcr
         Status::Unknown => "unknown",
         Status::Invalid => "invalid",
     };
-    let unmatched = || "the document's signatures could not be compared before and after, so the signer label was not written".to_string();
+    let (outcome, with) = (act.outcome(), act.with());
+    let unmatched = || format!("the document's signatures could not be compared before and after, so {outcome}");
     for (i, old) in before.iter().enumerate().filter(|(_, s)| s.signed) {
         let Some(new) = after.get(i).filter(|n| n.signed && n.field == old.field) else { return Some(unmatched()) };
+        // A signature that already had changes it forbids passes a label as long as its verdict is
+        // no worse. For a new signature it must not gain a kind of forbidden change it did not have.
+        let gained = match (&old.modification, &new.modification) {
+            (Modification::Disallowed(_), Modification::Disallowed(_)) if act == Act::Label => false,
+            (Modification::Disallowed(was), Modification::Disallowed(now)) => now.iter().any(|k| !was.contains(k)),
+            (_, Modification::Disallowed(_)) => true,
+            _ => false,
+        };
         if let Modification::Disallowed(kinds) = &new.modification
-            && !matches!(old.modification, Modification::Disallowed(_))
+            && gained
         {
             let list = kinds.join(", ");
             return Some(if new.certify == Some(1) {
+                let what = if act == Act::Label { "any change to the form, a label on any field included," } else { "signing another field" };
                 format!(
-                    "the signature in field {:?} is a certification that allows no changes, so any change to the form, a label on any field included, is one it forbids ({list}); the signer label was not written",
+                    "the signature in field {:?} is a certification that allows no changes, so {what} is one it forbids ({list}); {outcome}",
                     old.field
                 )
             } else if kinds.contains(&kind::LOCKED_FIELD) {
+                let what = if act == Act::Label { "a label on it" } else { "signing it" };
                 format!(
-                    "this field is covered by the lock of the signature in field {:?}, so a label on it is a change that signature forbids ({list}); the signer label was not written",
+                    "this field is covered by the lock of the signature in field {:?}, so {what} is a change that signature forbids ({list}); {outcome}",
                     old.field
                 )
             } else {
-                format!("the signature in field {:?} forbids this change to the form ({list}), so the signer label was not written", old.field)
+                format!("the signature in field {:?} forbids this change to the form ({list}), so {outcome}", old.field)
             });
         }
         if rank(new.status) < rank(old.status) {
             return Some(format!(
-                "the signature in field {:?} would go from {} to {} with this label, so the signer label was not written",
+                "the signature in field {:?} would go from {} to {} with {with}, so {outcome}",
                 old.field,
                 word(old.status),
                 word(new.status)
@@ -181,7 +222,7 @@ fn signature_damage(before: &[pdfcraft_sign::pdf::SignatureInfo], after: &[pdfcr
         }
         if old.changes_checked && !new.changes_checked {
             return Some(format!(
-                "the changes made after the signature in field {:?} could no longer be checked with this label, so the signer label was not written",
+                "the changes made after the signature in field {:?} could no longer be checked with {with}, so {outcome}",
                 old.field
             ));
         }
@@ -190,6 +231,30 @@ fn signature_damage(before: &[pdfcraft_sign::pdf::SignatureInfo], after: &[pdfcr
 }
 
 impl Session {
+    /// Whether `signed`, the document `doc` signed in the field named `field` (what
+    /// [`Session::sign`] returned, not yet saved or adopted), is a file whose signatures are as
+    /// good as the open document's: the validator reads `signed` and every signature the open
+    /// document holds must still be there and not worse (status, changes it forbids, changes
+    /// that can still be checked), and `field` must hold a signature that is not invalid. The
+    /// open document is not touched. The error says why not.
+    pub fn check_signing(&self, doc: DocId, signed: &Arc<Vec<u8>>, field: &str) -> Result<(), String> {
+        let d = self.get(doc).ok_or("there is no such document")?;
+        let editor = d.editor.as_ref().ok_or("the document cannot be read")?;
+        let cos = pdfcraft_cos::Document::open_with_password(signed.clone(), editor.keys.reopen.as_deref())
+            .map_err(|e| format!("the signed file could not be read back, so the document was not signed ({e})"))?;
+        let after = signatures_of(&cos, signed, &d.trust, &d.sig_cache);
+        if let Some(why) = signature_damage_by(&d.signatures, &after, Act::Signing) {
+            return Err(why);
+        }
+        match after.iter().find(|s| s.signed && s.field == field) {
+            None => Err(format!("the signature in field {field:?} is not in the signed file, so the document was not signed")),
+            Some(s) if s.status == pdfcraft_sign::pdf::Status::Invalid => {
+                Err(format!("the new signature in field {field:?} reads as invalid, so the document was not signed"))
+            }
+            Some(_) => Ok(()),
+        }
+    }
+
     /// Undo what [`Session::apply`] just pushed (its edit could not be kept), and read the
     /// document again.
     fn roll_back_last(doc: &mut Document, dropped: Option<crate::history::Snapshot>) {
@@ -972,7 +1037,7 @@ fn edit_notices(edit: &Edit, prev: &pdfcraft_cos::Document, next: &pdfcraft_cos:
 
 #[cfg(test)]
 mod signature_damage_tests {
-    use super::{contains_field_signer, signature_damage};
+    use super::{Act, contains_field_signer, signature_damage, signature_damage_by};
     use crate::Edit;
     use pdfcraft_sign::pdf::{Modification, SignatureInfo, Status, kind};
 
@@ -1010,6 +1075,18 @@ mod signature_damage_tests {
 
     fn damage(old: SignatureInfo, new: SignatureInfo) -> Option<String> {
         signature_damage(&[old], &[new])
+    }
+
+    #[test]
+    fn a_signing_may_not_add_a_kind_of_forbidden_change_to_a_signature_that_already_had_one() {
+        let old = sig(Status::Invalid, Modification::Disallowed(vec![kind::OTHER]), true, None);
+        let same = sig(Status::Invalid, Modification::Disallowed(vec![kind::OTHER]), true, None);
+        let more = sig(Status::Invalid, Modification::Disallowed(vec![kind::OTHER, kind::LOCKED_FIELD]), true, None);
+        assert!(signature_damage_by(std::slice::from_ref(&old), &[same], Act::Signing).is_none());
+        let why = signature_damage_by(std::slice::from_ref(&old), std::slice::from_ref(&more), Act::Signing).unwrap();
+        assert!(why.contains("covered by the lock") && why.contains("the document was not signed"), "{why}");
+        // A label keeps its older, looser rule: the same signature passes it.
+        assert!(signature_damage_by(&[old], &[more], Act::Label).is_none());
     }
 
     #[test]

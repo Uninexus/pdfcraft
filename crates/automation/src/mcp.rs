@@ -343,11 +343,12 @@ fn guarded_dispatch(method: &str, f: impl FnOnce() -> Result<Value, (i64, String
 }
 
 fn tool_content(name: &str, content: Vec<Content>) -> Value {
-    let failed = matches!(name, "command_batch" | "doc_batch")
-        && content.iter().any(|c| match c {
-            Content::Json(v) => v.get("failed").and_then(Value::as_u64).is_some_and(|n| n > 0),
-            _ => false,
-        });
+    // A batch with failures, and a signing whose plan step was not recorded, are not successes.
+    let failed = content.iter().any(|c| match c {
+        Content::Json(v) if matches!(name, "command_batch" | "doc_batch") => v.get("failed").and_then(Value::as_u64).is_some_and(|n| n > 0),
+        Content::Json(v) if name == "signing_plan_sign" => v.get("status").and_then(Value::as_str) == Some("partial"),
+        _ => false,
+    });
     let mut result = call_result(content);
     if let Some(object) = result.as_object_mut() {
         object.insert("isError".into(), json!(failed));
@@ -525,6 +526,17 @@ mod tests {
 
     use super::{McpServer, Resource, first_sentence, parse_uri};
     use crate::Automation;
+
+    #[test]
+    fn a_partial_signing_is_reported_as_an_error_and_a_complete_one_is_not() {
+        use crate::Content;
+        let partial = super::tool_content("signing_plan_sign", vec![Content::Json(json!({ "status": "partial", "signed": true }))]);
+        let complete = super::tool_content("signing_plan_sign", vec![Content::Json(json!({ "status": "complete" }))]);
+        let other = super::tool_content("sign_list", vec![Content::Json(json!({ "status": "partial" }))]);
+        assert_eq!((partial["isError"].clone(), complete["isError"].clone(), other["isError"].clone()), (json!(true), json!(false), json!(false)));
+        // The body is kept for the caller to read.
+        assert!(partial["content"][0]["text"].as_str().unwrap().contains("partial"));
+    }
 
     #[test]
     fn conventions_panic_is_a_tool_error() {
