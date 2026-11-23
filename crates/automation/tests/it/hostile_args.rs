@@ -294,6 +294,33 @@ fn fixture(a: &mut Automation, root: &Path, tool: &str) -> serde_json::Map<Strin
             let args = json!({ "doc": doc, "email": "ana@example.org", "id": "id.p12", "password": "test" });
             args.as_object().cloned().unwrap_or_default()
         }
+        // The audit tool needs a saved document with a plan beside it; each call gets a fresh one,
+        // which the caller closes.
+        // The document holds a signature in a field whose name has a zero-width character and a space
+        // at its end, which the audit lists cleaned and must not match to a field.
+        "signing_plan_audit" => {
+            let id = Path::new(env!("CARGO_MANIFEST_DIR")).join("../sign/tests/data/ec-p256.p12");
+            std::fs::copy(&id, root.join("id.p12")).expect("copy the test digital ID");
+            let first = blank_doc(a);
+            let name = "Sig\u{200b}A ";
+            let field = json!({ "doc": first, "page": 1, "type": "signature", "name": name, "rect": [20.0, 20.0, 180.0, 60.0] });
+            a.call("form_add_field", &field).expect("add the odd field");
+            let signed = json!({ "doc": first, "id": "id.p12", "password": "test", "field": "Sig\u{200b}A", "out": "odd.pdf" });
+            a.call("sign_document", &signed).expect("sign the odd field");
+            a.call("doc_close", &json!({ "doc": first, "discard_changes": true })).expect("close the unsigned document");
+            std::fs::rename(root.join("odd.pdf"), root.join("in.pdf")).expect("the signed document is the fixture's file");
+            let opened = a.call("doc_open", &json!({ "path": "in.pdf" })).expect("open the signed document");
+            let doc = opened
+                .into_iter()
+                .find_map(|c| match c {
+                    pdfcraft_automation::Content::Json(v) => v["doc"].as_u64(),
+                    pdfcraft_automation::Content::Png { .. } => None,
+                })
+                .expect("the signed document's id");
+            let recipients = json!([{ "name": "Ana", "email": "ana@example.org" }, { "name": "Bo", "email": "bo@example.org" }]);
+            a.call("signing_plan_set", &json!({ "path": "in.pdf", "recipients": recipients, "replace": true })).expect("make the fixture's plan");
+            json!({ "doc": doc }).as_object().cloned().unwrap_or_default()
+        }
         // The hand-off tools: export needs a saved document with a plan beside it and a zip name that
         // is free; import needs a package (made by export) and a folder that is free. Each call gets
         // fresh ones, and the document is closed by the caller.
@@ -338,6 +365,8 @@ fn no_tool_panics_on_hostile_arguments() {
         let mut plan_signed = false;
         // Whether any call of a hand-off tool wrote its package or its files.
         let mut handed_off = false;
+        // Whether the audit of the fixture produced a report.
+        let mut audited = false;
         // The whole arguments object, not just its properties.
         for bad in [json!(null), json!([]), json!("string"), json!(7), json!(true), json!({})] {
             calls += 1;
@@ -361,6 +390,18 @@ fn no_tool_panics_on_hostile_arguments() {
             if let Some(doc) = fixture_doc {
                 a.call("doc_close", &json!({ "doc": doc, "discard_changes": true })).expect("close the fixture's document");
             }
+        }
+        // The audit takes one required argument, so no hostile value leaves it valid: one call with
+        // the fixture as it is must produce a report, which shows the fixture reaches the work.
+        if def.name == "signing_plan_audit" {
+            let fixed = fixture(&mut a, &root, def.name);
+            let doc = fixed.get("doc").cloned().expect("the fixture's document");
+            calls += 1;
+            let report = a.call(def.name, &Value::Object(fixed)).expect("the audit of the fixture's document");
+            audited = matches!(report.first(), Some(pdfcraft_automation::Content::Json(v)) if v["ok"] == true
+                    && v["recipients"].as_array().is_some_and(|r| r.len() == 2)
+                    && v["not_determined_signatures"].as_array().is_some_and(|n| n.len() == 1));
+            a.call("doc_close", &json!({ "doc": doc, "discard_changes": true })).expect("close the fixture's document");
         }
         let props: Vec<String> = def.input_schema["properties"].as_object().map(|p| p.keys().cloned().collect()).unwrap_or_default();
         for prop in &props {
@@ -390,6 +431,9 @@ fn no_tool_panics_on_hostile_arguments() {
         }
         if def.name.starts_with("signing_handoff_") {
             assert!(handed_off, "no {} call wrote a package or its files: the hostile values stop before the work", def.name);
+        }
+        if def.name == "signing_plan_audit" {
+            assert!(audited, "the audit of the fixture's document produced no report");
         }
         if def.name == "signing_plan_sign" {
             assert!(plan_signed, "no signing_plan_sign call signed: the hostile values stop before the signature");

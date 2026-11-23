@@ -905,6 +905,7 @@ impl Automation {
             "signing_plan_advance" => self.signing_plan_advance(&a)?,
             "signing_plan_clear" => self.signing_plan_clear(&a)?,
             "signing_plan_sign" => self.signing_plan_sign(&a)?,
+            "signing_plan_audit" => self.signing_plan_audit(&a)?,
             "signing_handoff_export" => self.signing_handoff_export(&a)?,
             "signing_handoff_import" => self.signing_handoff_import(&a)?,
             "accessibility_check" => self.a11y_check(&a)?,

@@ -20,6 +20,7 @@ use crate::signing::Signing;
 use crate::{Args, Automation, Result, ToolError, failed, write_atomic};
 use pdfcraft_engine::FormFieldKind;
 
+mod audit;
 mod handoff;
 
 fn bad(m: impl Into<String>) -> ToolError {
