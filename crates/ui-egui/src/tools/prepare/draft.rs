@@ -1,54 +1,6 @@
 use super::{Calculate, FieldLook, FieldProps, FormField, FormFieldKind, Format, Validate};
 
-// ───────────────────────────────────────────────────────────────────────── Field Properties
-
-impl crate::PdfCraftApp {
-    /// Open Field Properties for a field of the active document.
-    pub fn open_field_props(&mut self, name: &str, widget: usize) {
-        let Some((index, id)) = self.active_ids() else { return };
-        let names = self.views[index].prepare.names();
-        if names.len() > 1 && names.iter().any(|n| n == name) {
-            let draft = self.session.get(id).map_or(Err("The document is no longer open."), |doc| crate::bulk_fields::Draft::new(doc, names));
-            match draft {
-                Ok(draft) => {
-                    self.field_props = None;
-                    self.bulk_field_props = Some(draft);
-                    self.dialog = Some(crate::Dialog::BulkFieldProps);
-                }
-                Err(why) => self.notify_tr(why),
-            }
-            return;
-        }
-        self.bulk_field_props = None;
-        let Some(f) = self.session.get(id).and_then(|d| d.form.iter().find(|f| f.name == name).cloned()) else { return };
-        let mut d = FieldDraft::new(&f, widget);
-        d.look = self.session.get(id).and_then(|doc| doc.field_look(name));
-        d.check_style = self.session.get(id).and_then(|doc| doc.field_check_style(name));
-        if let Some(o) = d.original.as_mut() {
-            o.look = d.look;
-            o.check_style = d.check_style;
-        }
-        let others: Vec<String> =
-            self.session.get(id).map(|doc| doc.form.iter().filter(|x| x.name != name).map(|x| x.name.clone()).collect()).unwrap_or_default();
-        d.others = others.clone();
-        d.actions = self.session.get(id).map(|doc| doc.field_actions(name)).unwrap_or_default();
-        d.chained = self.session.get(id).map(|doc| doc.field_action_chains(name)).unwrap_or_default();
-        if let Some(o) = d.original.as_mut() {
-            o.others = others;
-            o.actions = d.actions.clone();
-        }
-        d.doc = Some(id);
-        if f.kind == FormFieldKind::Signature {
-            d.signer_view = self.signer_view(id, &f.name);
-            d.signer = d.signer_view.label.clone().unwrap_or_default();
-            d.signer_plan_beside = self.plan_sidecar_beside(id);
-        }
-        self.field_props = Some(d);
-        self.dialog = Some(crate::Dialog::FieldProps);
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum FieldTab {
     General,
     Appearance,
@@ -79,13 +31,11 @@ pub struct ActionDraft {
     pub kind: usize,
     /// The script, URL, field names (comma-separated), menu item or page number.
     pub text: String,
-    /// The menu item chosen for kind 3 (one of `SAFE_MENU_NAMES`); `text` is not used for it.
-    pub menu: &'static str,
 }
 
 impl Default for ActionDraft {
     fn default() -> Self {
-        ActionDraft { trigger: pdfcraft_engine::FieldTrigger::MouseUp, kind: 0, text: String::new(), menu: "Print" }
+        ActionDraft { trigger: pdfcraft_engine::FieldTrigger::MouseUp, kind: 0, text: String::new() }
     }
 }
 
@@ -98,7 +48,7 @@ impl ActionDraft {
             0 => A::JavaScript(self.text.clone()),
             1 if !t.is_empty() => A::Uri(t.to_string()),
             2 => A::Reset(names()),
-            3 => A::Named(pdfcraft_engine::NamedTarget::new(self.menu).map_err(|_| "Choose one of the listed menu items")?.name().to_string()),
+            3 => A::Named(if t.is_empty() { "Print".into() } else { t.to_string() }),
             4 => A::GoTo(t.parse::<usize>().ok().filter(|p| *p >= 1).ok_or("Enter a page number")? - 1),
             5 if !t.is_empty() => A::ShowHide { fields: names(), hide: false },
             6 if !t.is_empty() => A::ShowHide { fields: names(), hide: true },
@@ -107,19 +57,6 @@ impl ActionDraft {
             _ => return Err("Enter the field names".into()),
         })
     }
-}
-
-/// The visible name of a menu item the Actions tab offers (one of `SAFE_MENU_NAMES`), `None` for
-/// any other name.
-pub fn menu_item_label(name: &str) -> Option<&'static str> {
-    Some(match name {
-        "NextPage" => "Next page",
-        "PrevPage" => "Previous page",
-        "FirstPage" => "First page",
-        "LastPage" => "Last page",
-        "Print" => "Print",
-        _ => return None,
-    })
 }
 
 /// The Field Properties dialog's working copy.
@@ -172,21 +109,9 @@ pub struct FieldDraft {
     pub new_action: ActionDraft,
     /// Actions tab: the trigger whose script `new_action` is editing (Edit), if any.
     pub editing: Option<pdfcraft_engine::FieldTrigger>,
-    /// Actions tab: why the last Add or Update was refused; cleared by the next edit or a commit.
-    pub action_error: Option<String>,
     /// Actions tab: how many actions the document chains after each trigger's first one. They are
     /// kept when that first action is replaced.
     pub chained: Vec<(pdfcraft_engine::FieldTrigger, usize)>,
-    /// General tab of a signature field: the address typed for its signer label.
-    pub signer: String,
-    /// What the field holds now, re-read every frame the dialog is drawn (so an undo shows).
-    pub signer_view: super::signer::SignerView,
-    /// A signing plan file sits beside the document, which this entry is not checked against.
-    pub signer_plan_beside: bool,
-    /// The document this dialog was opened on: the signer commands refuse any other.
-    pub doc: Option<pdfcraft_engine::DocId>,
-    /// The registered command a Signer button asked for, run by the dialog host after this frame.
-    pub signer_command: Option<&'static str>,
     pub(super) original: Box<Option<FieldDraft>>,
 }
 
@@ -214,7 +139,71 @@ pub(crate) fn da_font(da: &str) -> &str {
     font
 }
 
+/// An empty text-field draft: the value type the form dialog starts from before the dialog's own
+/// draft is bound over it.
+impl Default for FieldDraft {
+    fn default() -> Self {
+        FieldDraft {
+            field: String::new(),
+            kind: FormFieldKind::Text,
+            widget: 0,
+            tab: FieldTab::General,
+            name: String::new(),
+            tooltip: String::new(),
+            caption: String::new(),
+            read_only: false,
+            required: false,
+            multiline: false,
+            limit: false,
+            max_len: 0,
+            options: Vec::new(),
+            new_option: String::new(),
+            flags: 0,
+            locked: false,
+            quadding: 0,
+            default: String::new(),
+            on_state: String::new(),
+            export_value: String::new(),
+            font_size: 0.0,
+            position: [0.0; 4],
+            rotation: 0,
+            look: None,
+            check_style: None,
+            format: Format::default(),
+            validate: Validate::default(),
+            calculate: Calculate::default(),
+            script_refused: false,
+            others: Vec::new(),
+            actions: Vec::new(),
+            new_action: ActionDraft::default(),
+            editing: None,
+            chained: Vec::new(),
+            original: Box::new(None),
+        }
+    }
+}
+
 impl FieldDraft {
+    /// Whether the field was locked when the dialog opened and still is: its properties stay as
+    /// they are until it is unlocked.
+    pub(super) fn is_locked(&self) -> bool {
+        self.original.as_ref().as_ref().is_some_and(|o| o.locked) && self.locked
+    }
+
+    /// The Comb rule, which holds whenever COMB is set: a comb is a limited single line with no
+    /// password or file selection, and its limit is never zero.
+    pub(super) fn settle_comb(&mut self) {
+        use pdfcraft_engine::field_flags as ff;
+        if self.flags & ff::COMB != 0 {
+            self.limit = true;
+            self.multiline = false;
+            self.flags &= !(ff::PASSWORD | ff::FILE_SELECT);
+            if self.max_len == 0 {
+                self.max_len = 10;
+            }
+        }
+    }
+
     pub fn new(f: &FormField, widget: usize) -> Self {
         let r = f.widgets.get(widget).map(|w| w.rect).unwrap_or_default();
         let mut d = FieldDraft {
@@ -257,13 +246,7 @@ impl FieldDraft {
             actions: Vec::new(),
             new_action: ActionDraft::default(),
             editing: None,
-            action_error: None,
             chained: Vec::new(),
-            signer: String::new(),
-            signer_view: Default::default(),
-            signer_plan_beside: false,
-            doc: None,
-            signer_command: None,
             original: Box::new(None),
         };
         d.original = Box::new(Some(d.clone()));
@@ -347,47 +330,3 @@ const OPTION_FLAGS: [u32; 10] = {
         ff::COMMIT_ON_SEL_CHANGE,
     ]
 };
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn menu(menu: &'static str, text: &str) -> ActionDraft {
-        ActionDraft { kind: 3, menu, text: text.to_string(), ..ActionDraft::default() }
-    }
-
-    #[test]
-    fn a_menu_item_is_one_of_the_safe_names_and_every_one_has_its_own_label() {
-        let mut labels = Vec::new();
-        for name in pdfcraft_engine::SAFE_MENU_NAMES {
-            assert_eq!(menu(name, "").action(), Ok(pdfcraft_engine::FieldAction::Named(name.to_string())));
-            labels.push(menu_item_label(name).unwrap_or_else(|| panic!("{name} has no label")));
-        }
-        labels.sort_unstable();
-        labels.dedup();
-        assert_eq!(labels.len(), pdfcraft_engine::SAFE_MENU_NAMES.len(), "labels must differ");
-        assert_eq!(menu_item_label("SaveAs"), None);
-    }
-
-    #[test]
-    fn an_off_list_menu_item_is_refused_whatever_text_is_typed() {
-        for off in ["SaveAs", "print", "Quit", "NextPage ", ""] {
-            assert!(menu(off_static(off), "Print").action().is_err(), "{off:?} must be refused");
-        }
-        // The text of another kind neither makes nor breaks a menu item.
-        assert!(menu("Print", "  Quit  ").action().is_ok());
-    }
-
-    #[test]
-    fn the_menu_choice_does_not_touch_the_text_of_another_kind() {
-        let mut d = ActionDraft { kind: 1, text: "https://example.org".into(), ..ActionDraft::default() };
-        d.kind = 3;
-        d.menu = "LastPage";
-        d.kind = 1;
-        assert_eq!(d.action(), Ok(pdfcraft_engine::FieldAction::Uri("https://example.org".into())));
-    }
-
-    fn off_static(s: &str) -> &'static str {
-        Box::leak(s.to_string().into_boxed_str())
-    }
-}

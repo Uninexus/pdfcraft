@@ -512,7 +512,6 @@ mod tests {
         // remove is what `Written::write` or `record` was given under it.
         const RESOLVED_BY_CALLER: &[&str] = &[
             "write_atomic",
-            "write_atomic_with",
             "read_input",
             "read_input_bytes",
             "read_model",

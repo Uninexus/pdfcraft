@@ -7,7 +7,8 @@ pub(super) mod create_multiple_ui;
 pub(super) mod create_ui;
 pub(super) mod export_ui;
 pub(super) mod files;
-pub(super) mod insert_clipboard;
+pub(crate) mod job_count;
+pub(super) mod js_dialogs;
 pub(super) mod js_ui;
 #[cfg(any(target_arch = "wasm32", test))]
 pub(super) mod ocr_route;
@@ -15,10 +16,8 @@ pub(super) mod ocr_ui;
 pub(super) mod ocr_verify;
 #[cfg(target_arch = "wasm32")]
 pub(super) mod ocr_web;
-pub(super) mod office_batch;
 pub(super) mod optimize_ui;
 pub(super) mod print_paper;
 pub(super) mod print_ui;
 pub(super) mod scan_clean_ui;
 pub(super) mod web_print;
-pub(super) mod white_margins_ui;
