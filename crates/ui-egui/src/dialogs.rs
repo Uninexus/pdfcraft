@@ -68,6 +68,7 @@ struct Pending {
     export_now: bool,
     props_now: bool,
     field_props_now: bool,
+    signer_command: Option<&'static str>,
     bulk_field_props_now: bool,
     redact_now: Option<Dialog>,
     import_words: bool,
@@ -376,11 +377,14 @@ fn dialog_body(ui: &mut egui::Ui, app: &mut PdfCraftApp, dialog: Dialog, req: &m
             return false;
         }
         Dialog::FieldProps => {
+            app.refresh_signer_view();
             let Some(d) = app.field_props.as_mut() else {
                 req.close = true;
                 return false;
             };
             let (go, cancel) = crate::prepare::body(ui, d, &t);
+            // A Signer button asked for a registered command; it runs once the dialog is drawn.
+            req.signer_command = d.signer_command.take();
             req.apply = go;
             req.field_props_now = req.apply;
             req.close = req.apply || cancel;
@@ -2077,6 +2081,9 @@ fn finish_redactions_and_fields(app: &mut PdfCraftApp, req: &mut Pending) {
         }
         _ => {}
     }
+    if let Some(command) = req.signer_command {
+        app.execute(command);
+    }
     if req.bulk_field_props_now {
         req.close = app.apply_bulk_field_props();
     }
@@ -2260,6 +2267,10 @@ fn finish_close(app: &mut PdfCraftApp, dialog: Dialog, modal_closed: bool, req: 
         }
         app.discard_properties();
         app.bulk_field_props = None;
+        // The draft goes with the dialog: a later command must not act on what was typed in it.
+        if dialog == Dialog::FieldProps {
+            app.field_props = None;
+        }
         app.unmarked_page = Default::default();
     } else {
         app.dialog = Some(req.next.unwrap_or(dialog));

@@ -30,6 +30,53 @@ fn alignment(ui: &mut egui::Ui, quadding: &mut i64) {
         });
 }
 
+/// General tab of a signature field: who it is meant for, as a label in the file. The buttons ask
+/// for the registered commands `form.field.signer.set` and `form.field.signer.clear`; the dialog
+/// host runs them, so a panel never changes the document itself.
+fn signer_section(ui: &mut egui::Ui, d: &mut FieldDraft, t: &crate::theme::Tokens) {
+    widgets::section_title(ui, tl!("Signer"));
+    // A live region: the label the field holds now, which a Set, a Clear or an undo changes.
+    let v = &d.signer_view;
+    let now = match (&v.label, v.has_entry) {
+        (Some(who), _) => crate::i18n::fmt(tl!("Signer: {who}"), &[("who", who)]),
+        (None, true) => tl!("Signer: a label that is not an address").to_string(),
+        (None, false) => tl!("Signer: No one").to_string(),
+    };
+    let r = ui.label(now);
+    ui.ctx().accesskit_node_builder(r.id, |node| node.set_live(egui::accesskit::Live::Polite));
+    if v.hidden_removed {
+        ui.label(egui::RichText::new(tl!("Hidden characters in the stored label are not shown.")).small().color(t.text_muted));
+    }
+    if v.cut {
+        ui.label(egui::RichText::new(tl!("The stored label is longer than can be read; only its start is shown.")).small().color(t.text_muted));
+    }
+    if d.signer_plan_beside {
+        ui.label(
+            egui::RichText::new(tl!("A signing plan sits beside this file. The address is not checked against it.")).small().color(t.text_muted),
+        );
+    }
+    egui::Grid::new("field-signer").num_columns(2).spacing([12.0, 10.0]).show(ui, |ui| {
+        let l = ui.label(tl!("Signer email:"));
+        ui.add(widgets::line(&mut d.signer).desired_width(340.0).hint_text(tl!("name@example.org"))).labelled_by(l.id);
+        ui.end_row();
+    });
+    ui.horizontal(|ui| {
+        if ui.button(tl!("Set signer")).clicked() {
+            d.signer_command = Some("form.field.signer.set");
+        }
+        if ui.add_enabled(d.signer_view.has_entry, egui::Button::new(tl!("No one (clear signer)"))).clicked() {
+            d.signer_command = Some("form.field.signer.clear");
+        }
+    });
+    ui.label(
+        egui::RichText::new(tl!(
+            "The signer is a label stored in this file. It does not restrict who can fill or sign the field, nothing is sent, and other PDF readers ignore it. The address travels with every copy of the file."
+        ))
+        .small()
+        .color(t.text_muted),
+    );
+}
+
 /// Draw Field Properties; returns (apply, cancel).
 pub(crate) fn body(ui: &mut egui::Ui, d: &mut FieldDraft, t: &crate::theme::Tokens) -> (bool, bool) {
     use crate::widgets;
@@ -70,6 +117,10 @@ pub(crate) fn body(ui: &mut egui::Ui, d: &mut FieldDraft, t: &crate::theme::Toke
                 widgets::section_title(ui, tl!("Common Properties"));
                 ui.add(widgets::checkbox(&mut d.read_only, tl!("Read Only")));
                 ui.add(widgets::checkbox(&mut d.required, tl!("Required")));
+                if d.kind == FormFieldKind::Signature {
+                    ui.add_space(12.0);
+                    signer_section(ui, d, t);
+                }
             }
             FieldTab::Appearance => {
                 egui::Grid::new("field-appearance").num_columns(2).spacing([12.0, 10.0]).show(ui, |ui| {
