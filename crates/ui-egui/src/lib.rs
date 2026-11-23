@@ -327,6 +327,33 @@ struct PendingDestination {
 /// How a tab moves to a window of its own: the file and the page to show.
 pub type WindowSpawner = fn(&str, usize) -> Result<(), String>;
 
+/// What "Set up PdfCraft as a PDF app…" and its undo do to the machine: write or delete the
+/// current user's registry keys and open Windows Settings. The default is the real thing
+/// (`pdfcraft_platform::file_types`); tests replace it so that running these commands never
+/// changes the registry or opens a window of the PC the tests run on.
+#[derive(Clone, Copy)]
+pub struct DefaultAppHooks {
+    /// Whether the commands act at all; false elsewhere than Windows, where they only say so.
+    pub available: bool,
+    /// Offer the program at this path as a PDF app for the current user.
+    pub register: fn(&std::path::Path) -> Result<(), pdfcraft_platform::file_types::FileTypeError>,
+    /// Open Windows Settings ▸ Default apps.
+    pub open_settings: fn() -> Result<(), pdfcraft_platform::file_types::FileTypeError>,
+    /// Remove what `register` wrote.
+    pub unregister: fn() -> Result<(), pdfcraft_platform::file_types::FileTypeError>,
+}
+
+impl Default for DefaultAppHooks {
+    fn default() -> Self {
+        Self {
+            available: cfg!(windows),
+            register: pdfcraft_platform::file_types::register_current_user,
+            open_settings: pdfcraft_platform::file_types::open_default_apps_settings,
+            unregister: pdfcraft_platform::file_types::unregister_current_user,
+        }
+    }
+}
+
 /// The colour Highlight fields draws over form fields until Preferences ▸ Forms changes it.
 pub(crate) const FIELD_HIGHLIGHT_DEFAULT: [u8; 3] = [0x6E, 0x8E, 0xF5];
 
@@ -346,6 +373,9 @@ pub struct PdfCraftApp {
     /// Starts a PdfCraft window of its own on a file, at a page (0-based), for a tab moved out of
     /// this window. Replaced in tests, which must not start a real window.
     pub window_spawner: WindowSpawner,
+    /// What the "PDF app" commands do to the registry and Settings. Replaced in tests, which must
+    /// not change the machine they run on.
+    pub default_app_hooks: DefaultAppHooks,
     /// The Rename dialog's name being typed.
     pub(crate) rename_draft: Option<rename_ui::RenameDraft>,
     /// A name typed in Rename whose "Save and Rename" save did not go through; the dialog opens

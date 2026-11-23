@@ -73,6 +73,7 @@ impl PdfCraftApp {
             views: Vec::new(),
             closed_tabs: Vec::new(),
             window_spawner: crate::menus::tab_context::spawn_new_window,
+            default_app_hooks: Default::default(),
             rename_draft: None,
             rename_returned: rename_ui::Returned::default(),
             active: None,
