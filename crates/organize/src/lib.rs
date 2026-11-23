@@ -42,6 +42,7 @@ pub mod role_map;
 pub mod screen_action;
 pub mod signature_lock;
 pub mod signature_seed;
+pub mod signing_plan;
 mod templates;
 pub mod thread_action;
 mod transition;

@@ -9,10 +9,9 @@
 //! sidecar; keeping it inside the PDF as an attachment is not built. A time (`at`, `created`) is 0
 //! when the host has no clock.
 
-use std::fs::Metadata;
 use std::path::{Path, PathBuf};
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::{Value, json};
 
 use crate::file_access::Access;
@@ -27,18 +26,7 @@ fn bad(m: impl Into<String>) -> ToolError {
     ToolError::InvalidArgs(m.into())
 }
 
-/// The most recipients a plan holds.
-pub(crate) const MAX_RECIPIENTS: usize = 50;
-/// The longest name (characters), email address (bytes, the 254 octets of an SMTP path) and message
-/// (characters); a local part is at most 64 bytes.
-pub(crate) const MAX_NAME_CHARS: usize = 200;
-pub(crate) const MAX_MESSAGE_CHARS: usize = 2000;
-/// The most status events one recipient may have in a file read back.
-const MAX_HISTORY: usize = 8;
-/// The largest sidecar read (bytes); a plan written here is far smaller.
-const MAX_SIDECAR_BYTES: u64 = 1 << 20;
-/// The suffix of the sidecar's name, added to the PDF's whole file name after a dot.
-const SIDECAR_EXTENSION: &str = "pdfcraft-sign.json";
+pub(crate) use pdfcraft_organize::signing_plan::{MAX_RECIPIENTS, MAX_SIDECAR_BYTES};
 
 /// What every result says, so no one reads a plan as a sent request.
 pub(crate) const NOTE: &str = "This is a local record kept in a file beside the PDF. It does not send the document, notify anyone or collect \
@@ -48,71 +36,7 @@ pub(crate) const NOTE: &str = "This is a local record kept in a file beside the 
 pub(crate) const SIGN_NOTE: &str = "The plan does not check who holds the digital ID: the signature is made with the ID you gave, whoever it belongs to, \
      and its certificate is not compared with the recipient's address (identity_checked is false). Nothing was sent and nobody was told; the plan is a local record.";
 
-#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
-#[serde(rename_all = "lowercase")]
-enum Role {
-    Signer,
-    Approver,
-    Viewer,
-}
-
-impl Role {
-    /// A viewer has nothing to do; a signer and an approver each take a turn.
-    fn acts(self) -> bool {
-        self != Role::Viewer
-    }
-}
-
-/// `Sent` is part of the file format for a later route that sends; these tools never set it.
-#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
-#[serde(rename_all = "lowercase")]
-enum Status {
-    Pending,
-    Sent,
-    Signed,
-    /// An approver's counterpart of `Signed`.
-    Approved,
-    Declined,
-}
-
-impl Status {
-    /// The status that takes a turn for a role, or `None` for a viewer.
-    fn done_for(role: Role) -> Option<Status> {
-        match role {
-            Role::Signer => Some(Status::Signed),
-            Role::Approver => Some(Status::Approved),
-            Role::Viewer => None,
-        }
-    }
-}
-
-#[derive(Serialize, Deserialize, Clone, Copy, Debug)]
-#[serde(deny_unknown_fields)]
-struct Event {
-    status: Status,
-    /// Seconds since 1970, from the clock of the host.
-    at: i64,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-#[serde(deny_unknown_fields)]
-struct Recipient {
-    name: String,
-    email: String,
-    role: Role,
-    order: u32,
-    status: Status,
-    history: Vec<Event>,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-#[serde(deny_unknown_fields)]
-struct Plan {
-    version: u32,
-    message: String,
-    created: i64,
-    recipients: Vec<Recipient>,
-}
+pub(crate) use pdfcraft_organize::signing_plan::{Event, Plan, Recipient, Role, Status, plan_bytes, plan_from_bytes};
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -126,14 +50,7 @@ struct RecipientInput {
 pub(crate) use pdfcraft_organize::field_signer::is_hidden;
 
 fn check_name(name: &str) -> Result<String> {
-    let name = name.trim();
-    if name.is_empty() || name.chars().count() > MAX_NAME_CHARS {
-        return Err(bad(format!("a recipient's name must have 1 to {MAX_NAME_CHARS} characters")));
-    }
-    if name.chars().any(is_hidden) {
-        return Err(bad("a recipient's name must not hold control, hidden or direction-changing characters"));
-    }
-    Ok(name.to_string())
+    pdfcraft_organize::signing_plan::check_name(name).map_err(|e| bad(e.0))
 }
 
 /// A shallow check only (see `pdfcraft_organize::field_signer::check_address`, the one rule the
@@ -143,135 +60,16 @@ pub(crate) fn check_email(email: &str) -> Result<String> {
 }
 
 fn check_message(message: &str) -> Result<String> {
-    if message.chars().count() > MAX_MESSAGE_CHARS {
-        return Err(bad(format!("message is longer than {MAX_MESSAGE_CHARS} characters")));
-    }
-    if message.chars().any(|c| is_hidden(c) && !matches!(c, '\n' | '\t' | '\r')) {
-        return Err(bad("message must not hold control, hidden or direction-changing characters"));
-    }
-    Ok(message.to_string())
+    pdfcraft_organize::signing_plan::check_message(message).map_err(|e| bad(e.0))
 }
 
-impl Plan {
-    /// The recipients who still have a turn and the one whose turn it is.
-    fn next(&self) -> Option<&Recipient> {
-        self.recipients.iter().find(|r| r.role.acts() && Some(r.status) != Status::done_for(r.role))
-    }
-
-    /// `declined`, `completed` (everyone who acts has signed or approved) or `in_progress`.
-    fn state(&self) -> &'static str {
-        if self.recipients.iter().any(|r| r.status == Status::Declined) {
-            "declined"
-        } else if self.next().is_none() {
-            "completed"
-        } else {
-            "in_progress"
-        }
-    }
-
-    /// The rules a plan must keep, for a file read back as well as one just made: the same
-    /// limits as `signing_plan_set`, orders 1..n in list order, and turns taken in order.
-    fn validate(&self) -> Result<()> {
-        if self.version != 1 {
-            return Err(failed(format!("the plan file has version {}; this build reads version 1", self.version)));
-        }
-        let n = self.recipients.len();
-        if n == 0 || n > MAX_RECIPIENTS || !self.recipients.iter().any(|r| r.role.acts()) {
-            return Err(failed("the plan file does not hold a valid set of recipients"));
-        }
-        check_message(&self.message).map_err(|e| failed(format!("the plan file: {e}")))?;
-        let mut seen = Vec::new();
-        let mut stopped = false;
-        for (i, r) in self.recipients.iter().enumerate() {
-            let (name, email) = (check_name(&r.name), check_email(&r.email));
-            if name.as_ref().ok() != Some(&r.name) || email.as_ref().ok() != Some(&r.email) {
-                return Err(failed("the plan file has a name or address that is not valid or not trimmed"));
-            }
-            let key = r.email.to_lowercase();
-            if seen.contains(&key) {
-                return Err(failed("the plan file repeats an address"));
-            }
-            if r.order as usize != i + 1 {
-                return Err(failed("the plan file's order numbers are not 1, 2, 3 ... in list order"));
-            }
-            seen.push(key);
-            let last = r.history.last().map(|e| e.status);
-            let starts_pending = r.history.first().is_some_and(|e| e.status == Status::Pending);
-            if r.history.is_empty() || r.history.len() > MAX_HISTORY || last != Some(r.status) || !starts_pending {
-                return Err(failed("the plan file's status history does not start pending and end at the recipient's status"));
-            }
-            if r.history.windows(2).any(|w| w[0].at > w[1].at) {
-                return Err(failed("the plan file's status history has times that run backwards"));
-            }
-            let done = Status::done_for(r.role) == Some(r.status);
-            let right_role = match r.status {
-                Status::Signed | Status::Approved => done,
-                Status::Declined => r.role.acts(),
-                Status::Pending | Status::Sent => true,
-            };
-            if !right_role {
-                return Err(failed("the plan file has a recipient who signed, approved or declined in the wrong role"));
-            }
-            if matches!(r.status, Status::Signed | Status::Approved | Status::Declined) && stopped {
-                return Err(failed("the plan file has a recipient who signed, approved or declined out of turn"));
-            }
-            if r.role.acts() && !done {
-                stopped = true;
-            }
-        }
-        Ok(())
-    }
-
-    /// The index of the recipient whose address is `email` (lower case) when it is that
-    /// recipient's turn, or why it is not: the plan is finished, no recipient has the address,
-    /// the recipient is a viewer, or someone else is next. Shared by `signing_plan_advance` and
-    /// `signing_plan_sign`.
-    fn turn_of(&self, email: &str) -> Result<usize> {
-        match self.state() {
-            "completed" => return Err(failed("the plan is finished: everyone who signs or approves has done so")),
-            "declined" => return Err(failed("the plan is finished: a recipient declined")),
-            _ => {}
-        }
-        let index =
-            self.recipients.iter().position(|r| r.email.to_lowercase() == email).ok_or_else(|| failed("no recipient has that email address"))?;
-        if !self.recipients[index].role.acts() {
-            return Err(failed("that recipient is a viewer, who has no turn to sign"));
-        }
-        if let Some(next) = self.next()
-            && next.email.to_lowercase() != email
-        {
-            return Err(failed(format!("it is not that recipient's turn: the plan goes in order and {} ({}) is next", next.name, next.email)));
-        }
-        Ok(index)
-    }
-
-    /// Write down `status` for the recipient at `index` (whose turn it is) and check the plan
-    /// again. Nothing is saved here.
-    fn record(&mut self, index: usize, status: Status, now: i64) -> Result<()> {
-        let r = &mut self.recipients[index];
-        if status != Status::Declined && Some(status) != Status::done_for(r.role) {
-            return Err(failed("a signer's step is signed and an approver's is approved; either may decline"));
-        }
-        r.status = status;
-        // A clock that reads earlier than the last event (it was set back, or the file came from
-        // another computer) does not make the history run backwards.
-        let at = now.max(r.history.last().map_or(0, |e| e.at));
-        r.history.push(Event { status, at });
-        self.validate()
-    }
-
-    /// Whether anything beyond the first, pending state was recorded (`sent` counts).
-    fn started(&self) -> bool {
-        self.recipients.iter().any(|r| !matches!(r.status, Status::Pending))
-    }
-
-    fn json(&self, sidecar: &Path) -> Value {
-        let next = self.next().filter(|_| self.state() == "in_progress").map(|r| json!({ "name": r.name, "email": r.email, "order": r.order }));
-        json!({
-            "plan": self, "state": self.state(), "next": next, "sidecar": sidecar.to_string_lossy(),
-            "local_record_only": true, "note": NOTE,
-        })
-    }
+/// The JSON every plan tool answers with.
+fn plan_json(plan: &Plan, sidecar: &Path) -> Value {
+    let next = plan.next().filter(|_| plan.state() == "in_progress").map(|r| json!({ "name": r.name, "email": r.email, "order": r.order }));
+    json!({
+        "plan": plan, "state": plan.state(), "next": next, "sidecar": sidecar.to_string_lossy(),
+        "local_record_only": true, "note": NOTE,
+    })
 }
 
 /// The signature field `signing_plan_sign` is to sign: the one `named` when the caller names one
@@ -326,88 +124,19 @@ fn signature_fields(doc: &pdfcraft_engine::Document, email: &str, named: Option<
     }
 }
 
-/// `<folder>/<file name>.pdfcraft-sign.json` for `<folder>/<file name>`: the whole name is kept, so
-/// `a.pdf` and `a.PDF` never share a plan.
 fn sidecar_of(pdf: &Path) -> Result<PathBuf> {
-    let is_pdf = pdf.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("pdf"));
-    if !is_pdf {
-        return Err(bad("path must be a file whose name ends in .pdf"));
-    }
-    let mut name = pdf.file_name().ok_or_else(|| bad("path must name a file"))?.to_os_string();
-    name.push(".");
-    name.push(SIDECAR_EXTENSION);
-    Ok(pdf.with_file_name(name))
+    pdfcraft_organize::signing_plan::sidecar_of(pdf).map_err(|e| bad(e.0))
 }
 
-/// The plan in `resolved_sidecar`: `None` when there is no file, an error when there is one that
-/// is not a readable, valid plan. Nothing is written either way.
-///
-/// A link is refused (the name is looked at without following it), the file is opened once, and
-/// what was opened must be a plain file, within the size limit and (on unix) the same file the
-/// name showed, so swapping a link in after the look is refused too. The read itself stops one
-/// byte past the limit. There is no `O_NOFOLLOW` here: it needs `libc` or `rustix`, and `rustix` is
-/// only a macOS test dependency of this crate.
+/// The plan in `resolved_sidecar` (see `pdfcraft_organize::signing_plan::read_sidecar`, which the
+/// app reads with too): `None` when there is no file, an error when it is not a valid plan.
 fn read_plan_sidecar(resolved_sidecar: &Path) -> Result<Option<Plan>> {
-    use std::io::Read as _;
-    let shown = resolved_sidecar.display();
-    let named = match std::fs::symlink_metadata(resolved_sidecar) {
-        Ok(m) => m,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(e) => return Err(failed(format!("{shown}: {e}"))),
-    };
-    let not_plain = || failed(format!("{shown} is not a plain file (a link or folder is not followed); it was left alone"));
-    let too_big = || failed(format!("{shown} is larger than {MAX_SIDECAR_BYTES} bytes, so it is not a plan this tool wrote; it was left alone"));
-    if !named.file_type().is_file() {
-        return Err(not_plain());
-    }
-    let file = std::fs::File::open(resolved_sidecar).map_err(|e| failed(format!("{shown}: {e}")))?;
-    let opened = file.metadata().map_err(|e| failed(format!("{shown}: {e}")))?;
-    if !opened.is_file() || !same_file(&named, &opened) {
-        return Err(not_plain());
-    }
-    if opened.len() > MAX_SIDECAR_BYTES {
-        return Err(too_big());
-    }
-    let mut bytes = Vec::new();
-    file.take(MAX_SIDECAR_BYTES + 1).read_to_end(&mut bytes).map_err(|e| failed(format!("{shown}: {e}")))?;
-    if bytes.len() as u64 > MAX_SIDECAR_BYTES {
-        return Err(too_big());
-    }
-    plan_from_bytes(&bytes, &shown.to_string(), "it was left alone").map(Some)
-}
-
-/// A plan read from `bytes` (`shown` names where they came from) and checked whole; `after` ends
-/// each refusal (what happened to the source).
-fn plan_from_bytes(bytes: &[u8], shown: &str, after: &str) -> Result<Plan> {
-    let plan: Plan = serde_json::from_slice(bytes).map_err(|e| failed(format!("{shown} is not a signing plan ({e}); {after}")))?;
-    plan.validate().map_err(|e| failed(format!("{shown} is not a usable signing plan ({e}); {after}")))?;
-    Ok(plan)
-}
-
-/// Whether two looks at a file are of the same file (always true where the system does not say).
-fn same_file(a: &Metadata, b: &Metadata) -> bool {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::MetadataExt as _;
-        (a.dev(), a.ino()) == (b.dev(), b.ino())
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = (a, b);
-        true
-    }
+    Ok(pdfcraft_organize::signing_plan::read_sidecar(resolved_sidecar)?)
 }
 
 /// Write the plan to its sidecar, atomically.
 fn save(sidecar: &Path, plan: &Plan) -> Result<()> {
     write_atomic(sidecar, &plan_bytes(plan)?)
-}
-
-/// The bytes of a plan's sidecar file.
-fn plan_bytes(plan: &Plan) -> Result<Vec<u8>> {
-    let mut bytes = serde_json::to_vec_pretty(plan).map_err(failed)?;
-    bytes.push(b'\n');
-    Ok(bytes)
 }
 
 /// The recipients of `signing_plan_set`, checked whole, in plan order with orders 1..n.
@@ -540,7 +269,7 @@ impl Automation {
         let plan = Plan { version: 1, message, created: now, recipients };
         plan.validate()?;
         save(&sidecar, &plan)?;
-        let mut result = plan.json(&sidecar);
+        let mut result = plan_json(&plan, &sidecar);
         // Whether a plan was there and was replaced, and whether it had history that is now gone.
         result["replaced"] = json!(old.is_some());
         result["discarded_history"] = json!(discards);
@@ -551,7 +280,7 @@ impl Automation {
     pub(crate) fn signing_plan_get(&self, a: &Args) -> Result<Value> {
         let (_, sidecar) = self.resolve_plan_paths(a, false)?;
         Ok(match read_plan_sidecar(&sidecar)? {
-            Some(plan) => plan.json(&sidecar),
+            Some(plan) => plan_json(&plan, &sidecar),
             None => json!({ "plan": null, "state": "none", "sidecar": sidecar.to_string_lossy(), "local_record_only": true, "note": NOTE }),
         })
     }
@@ -573,7 +302,7 @@ impl Automation {
         let index = plan.turn_of(&email)?;
         plan.record(index, status, now)?;
         save(&sidecar, &plan)?;
-        Ok(plan.json(&sidecar))
+        Ok(plan_json(&plan, &sidecar))
     }
 
     /// `signing_plan_sign`: the next signer's turn in one step. Checks the plan and the field,
@@ -688,8 +417,8 @@ impl Automation {
         // `Err((true, _))` is a write that failed, `Err((false, _))` a plan that could not be used.
         let advanced = (|| -> std::result::Result<Plan, (bool, ToolError)> {
             let mut plan = read_plan_sidecar(&sidecar).map_err(|e| (false, e))?.ok_or_else(|| (false, failed("the plan file is gone")))?;
-            let index = plan.turn_of(&email).map_err(|e| (false, e))?;
-            plan.record(index, Status::Signed, now).map_err(|e| (false, e))?;
+            let index = plan.turn_of(&email).map_err(|e| (false, e.into()))?;
+            plan.record(index, Status::Signed, now).map_err(|e| (false, e.into()))?;
             save_plan(&sidecar, &plan).map_err(|e| (true, e))?;
             Ok(plan)
         })();
@@ -721,7 +450,7 @@ impl Automation {
         let new = doc.signatures.iter().find(|s| s.signed && s.field == field).cloned();
         let all = doc.signatures.iter().filter(|s| s.signed).count();
         let new = new.map(|s| self.sig_json(a, &s)).transpose()?;
-        let mut result = plan.json(&sidecar);
+        let mut result = plan_json(&plan, &sidecar);
         result["ok"] = json!(true);
         result["needs_attention"] = json!(false);
         result["status"] = json!("complete");
