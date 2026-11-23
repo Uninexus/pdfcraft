@@ -8,7 +8,46 @@ use egui::{Key, Modifiers};
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
 use pdfcraft_engine::commands::COMMANDS;
-use pdfcraft_ui_egui::{Dialog, PdfCraftApp};
+use pdfcraft_ui_egui::{DefaultAppHooks, Dialog, PdfCraftApp};
+
+thread_local! {
+    /// What the stand-ins for the registry and Settings were asked, in order (per test thread).
+    static OS_CALLS: std::cell::RefCell<Vec<&'static str>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+thread_local! {
+    /// The program path `register` was given last (checked after `execute`, which would turn a
+    /// panic inside the stand-in into a notice).
+    static REGISTERED_EXE: std::cell::RefCell<Option<std::path::PathBuf>> = const { std::cell::RefCell::new(None) };
+}
+
+fn os_calls() -> Vec<&'static str> {
+    OS_CALLS.with(|c| c.borrow().clone())
+}
+
+/// Stand-ins that record and change nothing: running the "PDF app" commands on a developer's PC
+/// must not write its registry or open Windows Settings.
+fn recording_hooks() -> DefaultAppHooks {
+    fn note(what: &'static str) {
+        OS_CALLS.with(|c| c.borrow_mut().push(what));
+    }
+    DefaultAppHooks {
+        available: true,
+        register: |exe| {
+            note("register");
+            REGISTERED_EXE.with(|c| *c.borrow_mut() = Some(exe.to_path_buf()));
+            Ok(())
+        },
+        open_settings: || {
+            note("open_settings");
+            Ok(())
+        },
+        unregister: || {
+            note("unregister");
+            Ok(())
+        },
+    }
+}
 
 fn fixture(n: usize) -> Vec<u8> {
     let mut objs: Vec<String> = vec!["<< /Type /Catalog /Pages 2 0 R >>".into()];
@@ -76,6 +115,8 @@ fn every_registered_command_is_implemented() {
             continue;
         }
         let mut app = PdfCraftApp::new();
+        // Commands that change the machine (the registry, Settings) must not do so from a test.
+        app.default_app_hooks = recording_hooks();
         app.set_option("language", "en").unwrap();
         if spec.id.starts_with("form.") || spec.id == "comment.flatten" {
             app.open_bytes("form.pdf", None, include_bytes!("../data/form.pdf").to_vec()).unwrap();
@@ -194,6 +235,53 @@ fn every_registered_command_is_implemented() {
         app.pick_override = Some(Vec::new());
         assert!(app.execute(spec.id), "{} is registered but not implemented (or wrongly disabled)", spec.id);
     }
+    // The two "PDF app" commands ran, and only against the stand-ins.
+    let calls = os_calls();
+    assert!(calls.contains(&"register") && calls.contains(&"unregister"), "{calls:?}");
+}
+
+/// The "PDF app" commands go through `PdfCraftApp::default_app_hooks` and nothing else: with
+/// stand-ins installed they are asked to register, open Settings after it, and unregister, and
+/// the notices report what they answered. (Elsewhere than Windows the real functions can only
+/// refuse, so a notice of success proves they were not reached.)
+#[test]
+fn the_pdf_app_commands_use_only_the_installed_hooks() {
+    OS_CALLS.with(|c| c.borrow_mut().clear());
+    let mut app = PdfCraftApp::new();
+    app.set_option("language", "en").unwrap();
+    app.default_app_hooks = recording_hooks();
+
+    assert!(app.execute("help.default_app"));
+    let toast = app.toast.clone().map(|(m, _)| m).unwrap_or_default();
+    assert!(toast.contains("can now be chosen"), "{toast:?}");
+    assert_eq!(os_calls(), ["register", "open_settings"], "Settings opens only after the registration");
+    let exe = REGISTERED_EXE.with(|c| c.borrow().clone()).expect("register was given a path");
+    assert!(exe.is_absolute(), "the program's own path is passed: {exe:?}");
+
+    assert!(app.execute("help.default_app.remove"));
+    let toast = app.toast.clone().map(|(m, _)| m).unwrap_or_default();
+    assert!(toast.contains("no longer offered"), "{toast:?}");
+    assert_eq!(os_calls(), ["register", "open_settings", "unregister"]);
+}
+
+/// A registration that fails is reported and Settings is not opened.
+#[test]
+fn a_failed_pdf_app_registration_opens_no_settings() {
+    OS_CALLS.with(|c| c.borrow_mut().clear());
+    let mut app = PdfCraftApp::new();
+    app.set_option("language", "en").unwrap();
+    app.default_app_hooks = DefaultAppHooks {
+        register: |_| {
+            OS_CALLS.with(|c| c.borrow_mut().push("register"));
+            Err(pdfcraft_platform::file_types::FileTypeError::OnlyOnWindows)
+        },
+        ..recording_hooks()
+    };
+    app.execute("help.default_app");
+    assert_eq!(os_calls(), ["register"]);
+    let toast = app.toast.clone().map(|(m, _)| m).unwrap_or_default();
+    assert_eq!(toast, pdfcraft_platform::file_types::FileTypeError::OnlyOnWindows.to_string());
+    assert!(!toast.contains("can now be chosen"), "{toast:?}");
 }
 
 #[test]
