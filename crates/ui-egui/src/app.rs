@@ -368,6 +368,7 @@ impl PdfCraftApp {
             signature_images: Default::default(),
             comment_props: None,
             field_props: None,
+            signing_plan: None,
             bulk_field_props: None,
             redact_prefs: RedactPrefs::default(),
             redact_defaults: RedactPrefs::default(),

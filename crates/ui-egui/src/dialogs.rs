@@ -24,6 +24,7 @@ mod prompts;
 pub(super) mod protect;
 pub(super) mod readiness_ui;
 pub(super) mod rename_ui;
+pub(super) mod signing_plan_ui;
 pub(super) mod standards_ui;
 pub(super) mod word_count_ui;
 
@@ -129,6 +130,9 @@ fn dialogs(app: &mut PdfCraftApp, ctx: &egui::Context) {
     if app.dialog != Some(Dialog::AskAi) {
         app.ai.ask.cancel();
     }
+    if app.dialog != Some(Dialog::SigningPlan) {
+        app.signing_plan = None;
+    }
     if app.dialog != Some(Dialog::FieldTable) {
         app.field_table_draft = None;
     }
@@ -173,6 +177,7 @@ fn dialogs(app: &mut PdfCraftApp, ctx: &egui::Context) {
             Dialog::Properties(_) => 640.0,
             Dialog::Print => 820.0,
             Dialog::FieldProps | Dialog::BulkFieldProps => 600.0,
+            Dialog::SigningPlan => 640.0,
             Dialog::Preferences => 610.0,
             Dialog::About => 820.0,
             Dialog::PrintReadiness => 640.0,
@@ -199,6 +204,10 @@ fn dialog_body(ui: &mut egui::Ui, app: &mut PdfCraftApp, dialog: Dialog, req: &m
         }
         Dialog::JavaScripts => {
             req.close = crate::javascripts_ui::body(ui, app);
+            return false;
+        }
+        Dialog::SigningPlan => {
+            req.close = crate::signing_plan_ui::body(ui, app);
             return false;
         }
         Dialog::AskAi => {
@@ -2270,6 +2279,9 @@ fn finish_close(app: &mut PdfCraftApp, dialog: Dialog, modal_closed: bool, req: 
         // The draft goes with the dialog: a later command must not act on what was typed in it.
         if dialog == Dialog::FieldProps {
             app.field_props = None;
+        }
+        if dialog == Dialog::SigningPlan {
+            app.signing_plan = None;
         }
         app.unmarked_page = Default::default();
     } else {

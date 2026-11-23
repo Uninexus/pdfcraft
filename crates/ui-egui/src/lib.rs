@@ -140,6 +140,8 @@ use dialogs::printer_marks_ui;
 use dialogs::protect;
 use dialogs::readiness_ui;
 use dialogs::rename_ui;
+use dialogs::signing_plan_ui;
+pub use dialogs::signing_plan_ui::{Draft as SigningPlanDraft, View as SigningPlanView};
 use dialogs::standards_ui;
 use dialogs::word_count_ui;
 pub use home::folders_ui;
@@ -953,6 +955,8 @@ pub struct PdfCraftApp {
     /// The Comment Properties dialog's state.
     pub comment_props: Option<comment_props::PropsDraft>,
     pub field_props: Option<prepare::FieldDraft>,
+    /// The Signing plan dialog's draft, while that dialog is open (`signing_plan_ui`).
+    pub signing_plan: Option<SigningPlanDraft>,
     pub bulk_field_props: Option<bulk_fields::Draft>,
     pub redact_prefs: RedactPrefs,
     /// The Redaction Tool Properties kept for the next run (what the last OK with "Make

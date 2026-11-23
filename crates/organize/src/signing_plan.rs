@@ -236,7 +236,7 @@ impl Plan {
     /// Write down `status` for the recipient at `index` (whose turn it is) and check the plan
     /// again. Nothing is saved here.
     pub fn record(&mut self, index: usize, status: Status, now: i64) -> Result<()> {
-        let r = &mut self.recipients[index];
+        let r = self.recipients.get_mut(index).ok_or_else(|| err("there is no recipient at that position"))?;
         if status != Status::Declined && Some(status) != Status::done_for(r.role) {
             return Err(err("a signer's step is signed and an approver's is approved; either may decline"));
         }
@@ -251,6 +251,85 @@ impl Plan {
     /// Whether anything beyond the first, pending state was recorded (`sent` counts).
     pub fn started(&self) -> bool {
         self.recipients.iter().any(|r| !matches!(r.status, Status::Pending))
+    }
+
+    /// A plan with no recipients yet, made at `now`. It is not valid until a signer or an approver
+    /// is added; nothing is saved.
+    pub fn empty(now: i64) -> Plan {
+        Plan { version: 1, message: String::new(), created: now, recipients: Vec::new() }
+    }
+
+    /// Add a recipient at the end of the list (order n + 1, status pending). Refused once any
+    /// recipient has signed, approved, declined or been marked sent (`signing_plan_set` needs
+    /// `replace` to discard that history, and a one-recipient edit does not), for a name or address
+    /// that breaks the rules, for an address already in the plan (compared without regard to case),
+    /// past `MAX_RECIPIENTS`, and for a first recipient who is a viewer. The plan is left as it was
+    /// on a refusal. Nothing is saved here.
+    pub fn add_recipient(&mut self, name: &str, email: &str, role: Role, now: i64) -> Result<()> {
+        self.edit_allowed()?;
+        let name = check_name(name)?;
+        let email = crate::field_signer::check_address(email).map_err(|e| err(e.why()))?;
+        if self.recipients.len() >= MAX_RECIPIENTS {
+            return Err(err(format!("a plan holds at most {MAX_RECIPIENTS} recipients")));
+        }
+        let key = email.to_lowercase();
+        if self.recipients.iter().any(|r| r.email.to_lowercase() == key) {
+            return Err(err("that address is already in the plan (compared without regard to case)"));
+        }
+        if !role.acts() && !self.recipients.iter().any(|r| r.role.acts()) {
+            return Err(err("the first recipient must be a signer or an approver, because a viewer has no turn"));
+        }
+        let mut next = self.clone();
+        let order = next.recipients.len() as u32 + 1;
+        next.recipients.push(Recipient {
+            name,
+            email,
+            role,
+            order,
+            status: Status::Pending,
+            history: vec![Event { status: Status::Pending, at: now }],
+        });
+        next.validate()?;
+        *self = next;
+        Ok(())
+    }
+
+    /// Take out the recipient whose address is `email` (compared without regard to case) and number
+    /// the rest 1, 2, 3 ... again. Refused once the plan has started, for an address no recipient has,
+    /// and when it would leave no signer or approver (a plan with none is not a plan; the headless
+    /// `signing_plan_clear` removes a whole plan). The plan is left as it was on a refusal. Nothing is
+    /// saved here.
+    pub fn remove_recipient(&mut self, email: &str) -> Result<()> {
+        self.edit_allowed()?;
+        let key = email.trim().to_lowercase();
+        let index = self.recipients.iter().position(|r| r.email.to_lowercase() == key).ok_or_else(|| err("no recipient has that email address"))?;
+        let mut next = self.clone();
+        next.recipients.remove(index);
+        if !next.recipients.iter().any(|r| r.role.acts()) {
+            return Err(err("the plan needs at least one signer or approver, so the last one cannot be removed"));
+        }
+        for (i, r) in next.recipients.iter_mut().enumerate() {
+            r.order = i as u32 + 1;
+        }
+        next.validate()?;
+        *self = next;
+        Ok(())
+    }
+
+    /// Replace the message. Refused once the plan has started, or for a message that breaks the rules.
+    pub fn set_message(&mut self, message: &str) -> Result<()> {
+        self.edit_allowed()?;
+        self.message = check_message(message)?;
+        Ok(())
+    }
+
+    fn edit_allowed(&self) -> Result<()> {
+        if self.started() {
+            return Err(err(
+                "the plan already has a recipient who signed, approved, declined or was marked sent, so it can no longer be edited; remake it with signing_plan_set (replace true) to discard that history",
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -381,6 +460,56 @@ mod tests {
         p.record(j, Status::Approved, 10).unwrap();
         assert_eq!(p.state(), "completed");
         assert!(p.turn_of("ana@example.org").unwrap_err().0.contains("finished"));
+    }
+
+    #[test]
+    fn a_recipient_is_added_and_removed_keeping_every_rule_and_nothing_once_started() {
+        let mut p = Plan::empty(7);
+        assert!(p.add_recipient("Vi", "vi@example.org", Role::Viewer, 7).is_err(), "a viewer cannot be first");
+        assert!(p.recipients.is_empty());
+        p.add_recipient("  Ana ", "ana@example.org", Role::Signer, 7).unwrap();
+        p.add_recipient("Vi", "vi@example.org", Role::Viewer, 8).unwrap();
+        p.add_recipient("Bo", "bo@example.org", Role::Approver, 9).unwrap();
+        assert!(p.validate().is_ok());
+        assert_eq!(p.recipients.iter().map(|r| r.order).collect::<Vec<_>>(), [1, 2, 3]);
+        assert_eq!(p.recipients[0].name, "Ana");
+        // The same address in another case, a bad address and a hidden character change nothing.
+        let before = plan_bytes(&p).unwrap();
+        for (n, e) in [("X", "ANA@example.org"), ("X", "not an address"), ("A\u{202E}b", "x@example.org"), ("", "y@example.org")] {
+            assert!(p.add_recipient(n, e, Role::Signer, 9).is_err(), "{n:?} {e:?}");
+        }
+        assert_eq!(plan_bytes(&p).unwrap(), before);
+        // A stored address in mixed case is found by a lower case one, in both directions.
+        p.add_recipient("Di", "Di@Example.org", Role::Viewer, 9).unwrap();
+        assert!(p.add_recipient("Di2", "dI@example.ORG", Role::Viewer, 9).is_err());
+        p.remove_recipient("DI@EXAMPLE.ORG").unwrap();
+        // Removing the middle one numbers the rest again; the last signer or approver stays.
+        p.remove_recipient(" VI@example.org").unwrap();
+        assert_eq!(p.recipients.iter().map(|r| (r.name.as_str(), r.order)).collect::<Vec<_>>(), [("Ana", 1), ("Bo", 2)]);
+        assert!(p.remove_recipient("nobody@example.org").is_err());
+        p.remove_recipient("ana@example.org").unwrap();
+        assert!(p.remove_recipient("bo@example.org").unwrap_err().0.contains("at least one"));
+        assert_eq!(p.recipients.len(), 1);
+        assert!(p.set_message("Please sign").is_ok() && p.set_message(&"x".repeat(MAX_MESSAGE_CHARS + 1)).is_err());
+        assert_eq!(p.message, "Please sign");
+        // Once a turn is recorded none of the three edits is allowed.
+        let mut started = two();
+        started.record(0, Status::Signed, 9).unwrap();
+        assert!(started.add_recipient("Cy", "cy@example.org", Role::Signer, 9).unwrap_err().0.contains("can no longer be edited"));
+        assert!(started.remove_recipient("bo@example.org").is_err());
+        assert!(started.set_message("new").is_err());
+        assert_eq!(started.recipients.len(), 2);
+    }
+
+    #[test]
+    fn the_most_recipients_is_a_limit_and_a_bad_index_is_an_error_not_a_panic() {
+        let mut p = Plan::empty(1);
+        for i in 0..MAX_RECIPIENTS {
+            p.add_recipient("N", &format!("n{i}@example.org"), Role::Signer, 1).unwrap();
+        }
+        assert!(p.add_recipient("N", "extra@example.org", Role::Signer, 1).is_err());
+        assert_eq!(p.recipients.len(), MAX_RECIPIENTS);
+        assert!(two().record(9, Status::Signed, 1).is_err());
     }
 
     #[test]
