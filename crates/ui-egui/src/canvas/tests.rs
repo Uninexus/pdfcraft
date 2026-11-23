@@ -17,6 +17,7 @@ fn typed_zoom_percentages_parse() {
 fn signature(signed: bool, visible: bool, page: Option<usize>, rect: Option<[f64; 4]>) -> pdfcraft_engine::SignatureInfo {
     pdfcraft_engine::SignatureInfo {
         field: "Signature1".into(),
+        changes_checked: false,
         signed,
         page,
         rect,

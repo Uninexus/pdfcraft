@@ -12,6 +12,7 @@ const RECT: [f64; 4] = [20.0, 110.0, 140.0, 180.0];
 fn listing(name: &str, page: usize, rect: [f64; 4]) -> SignatureInfo {
     SignatureInfo {
         field: name.into(),
+        changes_checked: false,
         signed: false,
         page: Some(page),
         rect: Some(rect),
@@ -44,6 +45,8 @@ fn listing(name: &str, page: usize, rect: [f64; 4]) -> SignatureInfo {
 fn field(name: &str, page: usize, rect: [f64; 4]) -> FormField {
     FormField {
         name: name.into(),
+        options_omitted: false,
+        value_omitted: false,
         obj: pdfcraft_cos::ObjRef::new(4, 0),
         kind: FormFieldKind::Signature,
         value: Vec::new(),

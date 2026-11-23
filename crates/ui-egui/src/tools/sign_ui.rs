@@ -973,6 +973,7 @@ mod tests {
     fn signature(certify: Option<u8>, status: SignatureStatus) -> SignatureInfo {
         SignatureInfo {
             field: "Signature".into(),
+            changes_checked: false,
             signed: true,
             page: None,
             rect: None,
