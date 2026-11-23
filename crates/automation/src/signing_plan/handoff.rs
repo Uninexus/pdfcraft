@@ -234,7 +234,7 @@ impl Automation {
             let _ = std::fs::remove_file(&pdf_target);
             return Err(e);
         }
-        let mut result = plan.json(&sidecar_target);
+        let mut result = super::plan_json(&plan, &sidecar_target);
         result["ok"] = json!(true);
         result["path"] = json!(pdf_target.to_string_lossy());
         result["pdf_sha256"] = json!(manifest.pdf_sha256);

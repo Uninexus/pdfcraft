@@ -26,6 +26,12 @@ pub(crate) fn failed(e: impl std::fmt::Display) -> ToolError {
     ToolError::Failed(e.to_string())
 }
 
+impl From<pdfcraft_organize::signing_plan::PlanError> for ToolError {
+    fn from(e: pdfcraft_organize::signing_plan::PlanError) -> Self {
+        ToolError::Failed(e.0)
+    }
+}
+
 impl From<pdfcraft_engine::EditError> for ToolError {
     fn from(e: pdfcraft_engine::EditError) -> Self {
         failed(e)
