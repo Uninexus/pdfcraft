@@ -20,6 +20,8 @@ use crate::signing::Signing;
 use crate::{Args, Automation, Result, ToolError, failed, write_atomic};
 use pdfcraft_engine::FormFieldKind;
 
+mod handoff;
+
 fn bad(m: impl Into<String>) -> ToolError {
     ToolError::InvalidArgs(m.into())
 }
@@ -418,9 +420,15 @@ fn read_plan_sidecar(resolved_sidecar: &Path) -> Result<Option<Plan>> {
     if bytes.len() as u64 > MAX_SIDECAR_BYTES {
         return Err(too_big());
     }
-    let plan: Plan = serde_json::from_slice(&bytes).map_err(|e| failed(format!("{shown} is not a signing plan ({e}); it was left alone")))?;
-    plan.validate().map_err(|e| failed(format!("{shown} is not a usable signing plan ({e}); it was left alone")))?;
-    Ok(Some(plan))
+    plan_from_bytes(&bytes, &shown.to_string(), "it was left alone").map(Some)
+}
+
+/// A plan read from `bytes` (`shown` names where they came from) and checked whole; `after` ends
+/// each refusal (what happened to the source).
+fn plan_from_bytes(bytes: &[u8], shown: &str, after: &str) -> Result<Plan> {
+    let plan: Plan = serde_json::from_slice(bytes).map_err(|e| failed(format!("{shown} is not a signing plan ({e}); {after}")))?;
+    plan.validate().map_err(|e| failed(format!("{shown} is not a usable signing plan ({e}); {after}")))?;
+    Ok(plan)
 }
 
 /// Whether two looks at a file are of the same file (always true where the system does not say).
@@ -439,9 +447,14 @@ fn same_file(a: &Metadata, b: &Metadata) -> bool {
 
 /// Write the plan to its sidecar, atomically.
 fn save(sidecar: &Path, plan: &Plan) -> Result<()> {
+    write_atomic(sidecar, &plan_bytes(plan)?)
+}
+
+/// The bytes of a plan's sidecar file.
+fn plan_bytes(plan: &Plan) -> Result<Vec<u8>> {
     let mut bytes = serde_json::to_vec_pretty(plan).map_err(failed)?;
     bytes.push(b'\n');
-    write_atomic(sidecar, &bytes)
+    Ok(bytes)
 }
 
 /// The recipients of `signing_plan_set`, checked whole, in plan order with orders 1..n.

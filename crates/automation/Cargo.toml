@@ -16,6 +16,7 @@ pdfcraft-ai = { workspace = true }
 pdfcraft-organize = { workspace = true }
 pdfcraft-platform = { workspace = true }
 craft-prc = { workspace = true }
+craft-zip = { workspace = true }
 pdfcraft-prc-render = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
