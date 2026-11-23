@@ -57,7 +57,7 @@
     "crate": "pdfcraft-automation",
     "name": "ureq",
     "reachable": true,
-    "path": "pdfcraft-automation -> craft -> craft-update -> ureq"
+    "path": "pdfcraft-automation -> pdfcraft-ai -> ureq"
   },
   {
     "crate": "pdfcraft-engine",
