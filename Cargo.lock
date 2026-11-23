@@ -5007,6 +5007,7 @@ dependencies = [
  "craft-mcp-server",
  "craft-prc",
  "craft-wordmodel 0.1.0 (git+https://github.com/storytold/craft-libs?rev=b8eaa8e2f3561f9fa27fcf3b7f67ce915e93caa3)",
+ "craft-zip 0.1.0 (git+https://github.com/storytold/craft-libs?rev=e2dc681a3)",
  "flate2",
  "pdfcraft-ai",
  "pdfcraft-cos",

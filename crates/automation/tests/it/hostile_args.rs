@@ -294,6 +294,26 @@ fn fixture(a: &mut Automation, root: &Path, tool: &str) -> serde_json::Map<Strin
             let args = json!({ "doc": doc, "email": "ana@example.org", "id": "id.p12", "password": "test" });
             args.as_object().cloned().unwrap_or_default()
         }
+        // The hand-off tools: export needs a saved document with a plan beside it and a zip name that
+        // is free; import needs a package (made by export) and a folder that is free. Each call gets
+        // fresh ones, and the document is closed by the caller.
+        "signing_handoff_export" | "signing_handoff_import" => {
+            let _ = std::fs::remove_file(root.join("out.zip"));
+            let _ = std::fs::remove_file(root.join("pkg.zip"));
+            let _ = std::fs::remove_dir_all(root.join("dest"));
+            let doc = blank_doc(a);
+            a.call("doc_save", &json!({ "doc": doc, "path": "in.pdf" })).expect("save the fixture document");
+            let recipients = json!([{ "name": "Ana", "email": "ana@example.org" }, { "name": "Bo", "email": "bo@example.org" }]);
+            a.call("signing_plan_set", &json!({ "path": "in.pdf", "recipients": recipients, "replace": true })).expect("make the fixture's plan");
+            let args = if tool == "signing_handoff_export" {
+                json!({ "doc": doc, "path": "out.zip" })
+            } else {
+                a.call("signing_handoff_export", &json!({ "doc": doc, "path": "pkg.zip" })).expect("make the fixture's package");
+                a.call("doc_close", &json!({ "doc": doc, "discard_changes": true })).expect("close the package's document");
+                json!({ "path": "pkg.zip", "folder": "dest" })
+            };
+            args.as_object().cloned().unwrap_or_default()
+        }
         // Without a step, action_run returns "give action or steps" before it resolves folder
         // or paths, and that error would be counted as a confinement refusal.
         "action_run" => {
@@ -316,11 +336,30 @@ fn no_tool_panics_on_hostile_arguments() {
         empty_dir(&root);
         // Whether any call of `signing_plan_sign` left a signature in the fixture's file.
         let mut plan_signed = false;
+        // Whether any call of a hand-off tool wrote its package or its files.
+        let mut handed_off = false;
         // The whole arguments object, not just its properties.
         for bad in [json!(null), json!([]), json!("string"), json!(7), json!(true), json!({})] {
             calls += 1;
             if let Err(e) = guarded(&mut a, def.name, &bad) {
                 failures.push(e);
+            }
+        }
+        // The hand-off tools take only required arguments, so no hostile value leaves the fixture's
+        // others valid: one call with the fixture as it is shows the fixture reaches the work.
+        if def.name.starts_with("signing_handoff_") {
+            let fixed = fixture(&mut a, &root, def.name);
+            let fixture_doc = fixed.get("doc").cloned();
+            calls += 1;
+            if let Err(e) = guarded(&mut a, def.name, &Value::Object(fixed)) {
+                failures.push(e);
+            }
+            handed_off = (def.name == "signing_handoff_export" && root.join("out.zip").is_file())
+                || (def.name == "signing_handoff_import"
+                    && root.join("dest/in.pdf").is_file()
+                    && root.join("dest/in.pdf.pdfcraft-sign.json").is_file());
+            if let Some(doc) = fixture_doc {
+                a.call("doc_close", &json!({ "doc": doc, "discard_changes": true })).expect("close the fixture's document");
             }
         }
         let props: Vec<String> = def.input_schema["properties"].as_object().map(|p| p.keys().cloned().collect()).unwrap_or_default();
@@ -348,6 +387,9 @@ fn no_tool_panics_on_hostile_arguments() {
         // A signed file shows the fixture got calls past the ID and document checks.
         if def.name == "sign_document" {
             assert!(root.join("signed.pdf").is_file(), "no sign_document call signed: the hostile values stop at the ID or document");
+        }
+        if def.name.starts_with("signing_handoff_") {
+            assert!(handed_off, "no {} call wrote a package or its files: the hostile values stop before the work", def.name);
         }
         if def.name == "signing_plan_sign" {
             assert!(plan_signed, "no signing_plan_sign call signed: the hostile values stop before the signature");
