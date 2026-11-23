@@ -66,6 +66,7 @@ mod signature_field_lock;
 mod signature_seed_values;
 mod signing_handoff;
 mod signing_plan;
+mod signing_plan_audit;
 mod signing_plan_sign;
 mod split_name_template;
 mod structure_namespaces;
