@@ -192,10 +192,12 @@ fn apply_step(s: &mut Session, id: DocId, step: &Step, log: &mut Vec<String>) ->
         }
         Step::RunJavaScript(js) => {
             let o = s.run_javascript(id, js, None)?;
-            log.push(match o.error {
-                Some(e) => format!("Run a JavaScript: {e}"),
-                None => "Run a JavaScript".into(),
-            });
+            // A script that runs and throws comes back as an outcome with an error. Like any other failed
+            // step it fails the file, so nothing is published for a half-done action.
+            if let Some(e) = o.error {
+                return Err(EditError::Invalid(e));
+            }
+            log.push("Run a JavaScript".into());
             return Ok(None);
         }
     };

@@ -8373,6 +8373,23 @@ fn an_action_runs_a_javascript_step_only_when_javascript_is_on() {
     assert!(actions::run_on(&action, "f.pdf", src, false, |_, _| {}).is_err());
 }
 
+/// A script that runs and throws fails the file like a step that cannot run; one that runs cleanly is written.
+#[test]
+fn a_javascript_step_that_throws_fails_the_file() {
+    let step = |js: &str| actions::Action {
+        name: "Script".into(),
+        description: String::new(),
+        steps: vec![actions::Step::RunJavaScript(js.into())],
+        builtin: false,
+    };
+    let src = Arc::new(scripted_form());
+    let clean = actions::run_on(&step("getField('price').value = 3;"), "f.pdf", src.clone(), true, |_, _| {});
+    assert!(clean.is_ok(), "a script that runs cleanly still writes the file: {:?}", clean.map(|r| r.log));
+    let e =
+        actions::run_on(&step("getField('price').value = 3; throw new Error('boom');"), "f.pdf", src, true, |_, _| {}).map(|r| r.log).unwrap_err();
+    assert!(e.starts_with("Run a JavaScript:") && e.contains("boom"), "{e}");
+}
+
 /// A removal step that fails (here: a signed file can't be rewritten without its hidden data)
 /// fails the action, so the file is not passed on as cleaned.
 #[test]
