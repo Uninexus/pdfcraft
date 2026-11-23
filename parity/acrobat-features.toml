@@ -2961,8 +2961,8 @@ milestone = "M4"
 status = "partial"
 commands = ["page.organize"]
 tools = ["page_rotate"]
-evidence = ["crates/engine/src/tests.rs::split_by_size_and_bookmarks_and_page_filters"]
-notes = "Organize ▸ Select: all, odd, even, landscape, portrait; ranges via the page tools"
+evidence = ["crates/engine/src/tests.rs::split_by_size_and_bookmarks_and_page_filters", "crates/ui-egui/src/panels/page_selection_ui.rs::selection_ranges_are_sorted_unique_and_bounded", "crates/ui-egui/tests/it/editing.rs::organize_page_range_tracks_thumbnails_and_applies_typed_selection"]
+notes = "In the app only (not headless): the Organize panel's Pages selected field takes typed pages and ranges (1,3-5; sorted, de-duplicated, bounded) and its menu picks all, even, odd, landscape, portrait or none; each menu choice is one criterion, so odd and landscape cannot be combined there. The UI control channel's select view option sets the same selection from the same range parser. There is no pdfcraft-cli run or MCP select tool: the page tools take a pages list, and among the page tools only page_rotate also takes subset (all, even, odd) and orientation (all, landscape, portrait); doc_print takes a subset for printing. Not yet: a headless select tool, subset or orientation on other page tools, a test of the panel's menu choices themselves (the engine filter, the range parser and typing a range are tested)"
 
 [[feature]]
 id = "organize.thumbnail-size"
@@ -9676,8 +9676,8 @@ milestone = "M13"
 status = "partial"
 commands = ["actions.wizard"]
 tools = ["action_list", "action_run"]
-evidence = ["crates/ui-egui/tests/it/actions.rs::desktop_actions_preserve_duplicate_names_and_results_from_earlier_runs", "crates/engine/src/tests.rs::actions_run_their_steps_on_files", "crates/automation/tests/it/automation.rs::actions_through_tools", "crates/ui-egui/tests/it/actions.rs::run_and_create_actions"]
-notes = "Desktop output filenames receive numbered suffixes when occupied, preserving every batch result and previous outputs. Pick an action and files; results go to a chosen folder, in the background with progress. Known gap: a failing non-removal step still publishes its output as success (crates/engine/src/actions.rs:200-208)."
+evidence = ["crates/ui-egui/tests/it/actions.rs::desktop_actions_preserve_duplicate_names_and_results_from_earlier_runs", "crates/engine/src/tests.rs::actions_run_their_steps_on_files", "crates/automation/tests/it/automation.rs::actions_through_tools", "crates/ui-egui/tests/it/actions.rs::run_and_create_actions", "crates/engine/src/tests.rs::actions_fail_when_hidden_information_could_not_be_removed", "crates/engine/src/tests.rs::an_action_runs_a_javascript_step_only_when_javascript_is_on", "crates/automation/tests/it/action_failures.rs::failing_watermark_step_fails_the_file_and_publishes_nothing", "crates/automation/tests/it/action_failures.rs::action_run_marks_the_failing_file_as_error_without_output"]
+notes = "Desktop output filenames receive numbered suffixes when occupied, preserving every batch result and previous outputs. Pick an action and files; results go to a chosen folder, in the background with progress. A step that errors fails that file (run_on returns the error and nothing is written for it; only a step that finds nothing to do is logged as such and passed): tested for a watermark step that cannot draw its text, through run_on and through action_run (the file gets an error entry and no output), for a removal step on a signed file and for a script step with JavaScript off. A Run a JavaScript step whose script runs and throws does not fail the file: the error is logged as Run a JavaScript: <error> and the file is written (it fails only when the script cannot run, such as JavaScript off). Not every other step kind is tested to fail. Limited to twelve step kinds (recognize text, reduce file size, remove hidden information, sanitize, flatten comments, flatten fields, watermark, header, footer, set title, detect form fields, run a JavaScript) and five built-in actions; no step asks the person for input. The desktop run of a failing file is not tested."
 
 [[feature]]
 id = "misc.action-wizard-create"
