@@ -354,6 +354,8 @@ pub const COMMANDS: &[CommandSpec] = &[
     c("protect.remove_hidden", "Remove hidden information…", None, None, Modification, "eye-off"),
     c("redact.sanitize", "Sanitize document…", None, None, Modification, "sparkles"),
     c("form.field.properties", "Field properties…", None, None, HasFields, "settings-2"),
+    c("form.field.signer.set", "Set the signer of a signature field", None, None, HasFields, "signature"),
+    c("form.field.signer.clear", "Clear the signer of a signature field", None, None, HasFields, "eraser"),
     c("form.add.text", "Add a text field", None, None, Modification, "text-cursor-input"),
     c("form.add.text_table", "Add text field table", None, None, Modification, "grid-3x3"),
     c("form.add.checkbox", "Add a checkbox", None, None, Modification, "check-circle-2"),

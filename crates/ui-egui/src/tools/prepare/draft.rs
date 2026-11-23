@@ -37,6 +37,12 @@ impl crate::PdfCraftApp {
             o.others = others;
             o.actions = d.actions.clone();
         }
+        d.doc = Some(id);
+        if f.kind == FormFieldKind::Signature {
+            d.signer_view = self.signer_view(id, &f.name);
+            d.signer = d.signer_view.label.clone().unwrap_or_default();
+            d.signer_plan_beside = self.plan_sidecar_beside(id);
+        }
         self.field_props = Some(d);
         self.dialog = Some(crate::Dialog::FieldProps);
     }
@@ -171,6 +177,16 @@ pub struct FieldDraft {
     /// Actions tab: how many actions the document chains after each trigger's first one. They are
     /// kept when that first action is replaced.
     pub chained: Vec<(pdfcraft_engine::FieldTrigger, usize)>,
+    /// General tab of a signature field: the address typed for its signer label.
+    pub signer: String,
+    /// What the field holds now, re-read every frame the dialog is drawn (so an undo shows).
+    pub signer_view: super::signer::SignerView,
+    /// A signing plan file sits beside the document, which this entry is not checked against.
+    pub signer_plan_beside: bool,
+    /// The document this dialog was opened on: the signer commands refuse any other.
+    pub doc: Option<pdfcraft_engine::DocId>,
+    /// The registered command a Signer button asked for, run by the dialog host after this frame.
+    pub signer_command: Option<&'static str>,
     pub(super) original: Box<Option<FieldDraft>>,
 }
 
@@ -243,6 +259,11 @@ impl FieldDraft {
             editing: None,
             action_error: None,
             chained: Vec::new(),
+            signer: String::new(),
+            signer_view: Default::default(),
+            signer_plan_beside: false,
+            doc: None,
+            signer_command: None,
             original: Box::new(None),
         };
         d.original = Box::new(Some(d.clone()));

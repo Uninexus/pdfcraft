@@ -755,6 +755,8 @@ impl PdfCraftApp {
                     self.open_field_props(&name, w);
                 }
             }
+            "form.field.signer.set" => self.set_field_signer(false),
+            "form.field.signer.clear" => self.set_field_signer(true),
             field if crate::prepare::FieldTool::from_command(field).is_some() => {
                 let Some(tool) = crate::prepare::FieldTool::from_command(field) else { return Some(false) };
                 self.quick_tool = crate::QuickTool::Field(tool);

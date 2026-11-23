@@ -32,12 +32,83 @@ use crate::reference_xobjects::{Gets, Spent};
 pub const KEY: &[u8] = b"PdfCraftSigner";
 /// Most bytes of an address written, which is the longest an address may be (RFC 5321 path).
 pub const MAX_EMAIL_BYTES: usize = 254;
+/// Most bytes before the `@` of an address written (RFC 5321 local part).
+pub const MAX_LOCAL_BYTES: usize = 64;
 /// Most characters of a label listed from a file; a longer one is cut and not `exact`.
 pub const MAX_READ_CHARS: usize = 254;
 /// Most reads one call of [`read_field_signer`] makes.
 pub const MAX_GETS: usize = 1_000;
 /// Most `/Parent` links followed to find a field's type.
 const MAX_PARENTS: usize = 32;
+
+/// Characters that are controls or that hide, reorder or disguise text: the list of
+/// `crates/engine/src/links.rs` (`hides_text`, which is private to that crate) without its other
+/// whitespace, plus the line and paragraph separators. The one list the signing plan, the
+/// `form_field_signer` tool and the app's Signer entry all use.
+pub fn is_hidden(c: char) -> bool {
+    c.is_control()
+        || matches!(
+            c,
+            '\u{200B}'..='\u{200F}'
+                | '\u{2028}'
+                | '\u{2029}'
+                | '\u{202A}'..='\u{202E}'
+                | '\u{2060}'..='\u{2064}'
+                | '\u{2066}'..='\u{2069}'
+                | '\u{FEFF}'
+                | '\u{061C}'
+                | '\u{00AD}'
+                | '\u{034F}'
+                | '\u{115F}'
+                | '\u{1160}'
+                | '\u{3164}'
+                | '\u{FFA0}'
+                | '\u{180E}'
+                | '\u{E0000}'..='\u{E007F}'
+        )
+}
+
+/// Why [`check_address`] refused an address.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AddressError {
+    /// Not one `@` with something either side, no spaces or hidden characters, a dot in the domain.
+    Shape,
+    /// More than [`MAX_EMAIL_BYTES`] bytes, or more than [`MAX_LOCAL_BYTES`] before the `@`.
+    TooLong,
+}
+
+impl AddressError {
+    /// The reason, in English.
+    pub fn why(self) -> &'static str {
+        match self {
+            AddressError::Shape => "an email address must look like name@example.org (one @, no spaces, a dot in the domain)",
+            AddressError::TooLong => "an email address may have at most 254 bytes, and at most 64 bytes before the @ (bytes, not characters)",
+        }
+    }
+}
+
+/// A shallow check only: one `@`, something either side, no spaces or hidden characters, a dot
+/// inside the domain, at most [`MAX_EMAIL_BYTES`] bytes and [`MAX_LOCAL_BYTES`] before the `@`. It
+/// does not check that the domain exists, that the address can receive mail or that it is the
+/// person's. Returns the address trimmed.
+pub fn check_address(text: &str) -> Result<String, AddressError> {
+    let email = text.trim();
+    if email.len() > MAX_EMAIL_BYTES {
+        return Err(AddressError::TooLong);
+    }
+    if email.chars().any(|c| is_hidden(c) || c.is_whitespace()) {
+        return Err(AddressError::Shape);
+    }
+    let (local, domain) = email.split_once('@').ok_or(AddressError::Shape)?;
+    let dotted = domain.contains('.') && !domain.starts_with('.') && !domain.ends_with('.') && !domain.contains("..");
+    if local.len() > MAX_LOCAL_BYTES {
+        return Err(AddressError::TooLong);
+    }
+    if local.is_empty() || domain.contains('@') || !dotted {
+        return Err(AddressError::Shape);
+    }
+    Ok(email.to_string())
+}
 
 /// What [`read_field_signer`] read.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -136,7 +207,11 @@ pub fn field_signer_change(doc: &Document, field: ObjRef, email: Option<&str>) -
     match email {
         None if !read.has_entry => Change::NoChange,
         Some(e) if read.exact && read.email.as_deref() == Some(e) => Change::NoChange,
-        Some(e) if e.is_empty() || e.len() > MAX_EMAIL_BYTES => Change::Refused("an address is 1 to 254 bytes"),
+        // Every caller gets the same rule: the label is an address as `check_address` reads it,
+        // and untrimmed (a label with spaces round it would not match the plan).
+        Some(e) if e != e.trim() || check_address(e).is_err() => {
+            Change::Refused(check_address(e).err().map_or("an address must not have spaces round it", AddressError::why))
+        }
         _ => Change::Yes,
     }
 }
@@ -155,4 +230,29 @@ pub fn set_field_signer(doc: &mut Document, field: ObjRef, email: Option<&str>) 
         }
     })?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_address_rule_refuses_hidden_text_and_long_parts_and_keeps_plain_addresses() {
+        assert_eq!(check_address("  ana@example.org "), Ok("ana@example.org".to_string()));
+        for bad in [
+            "ana\u{00AD}@example.org",
+            "ana\u{E0041}@example.org",
+            "ana\u{202E}@example.org",
+            "a b@example.org",
+            "a@@example.org",
+            "a@b",
+            "@example.org",
+        ] {
+            assert_eq!(check_address(bad), Err(AddressError::Shape), "{bad:?}");
+        }
+        let local = |n: usize| format!("{}@example.org", "a".repeat(n));
+        assert!(check_address(&local(MAX_LOCAL_BYTES)).is_ok());
+        assert_eq!(check_address(&local(MAX_LOCAL_BYTES + 1)), Err(AddressError::TooLong));
+        assert_eq!(check_address(&format!("a@{}.org", "d".repeat(MAX_EMAIL_BYTES))), Err(AddressError::TooLong));
+    }
 }

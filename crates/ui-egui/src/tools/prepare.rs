@@ -20,11 +20,13 @@ use crate::widgets;
 
 mod draft;
 mod properties;
+mod signer;
 mod tabs;
 
 pub use draft::{ACTION_KINDS, ActionDraft, FieldDraft, FieldTab};
 pub(crate) use draft::{da_font, da_size};
 pub(crate) use properties::body;
+pub use signer::SignerView;
 
 const SELECT_BLUE: Color32 = Color32::from_rgb(0x14, 0x73, 0xE6);
 /// Acrobat's field fill in Prepare Form (light blue).

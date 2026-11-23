@@ -32,8 +32,6 @@ pub(crate) const MAX_RECIPIENTS: usize = 50;
 /// The longest name (characters), email address (bytes, the 254 octets of an SMTP path) and message
 /// (characters); a local part is at most 64 bytes.
 pub(crate) const MAX_NAME_CHARS: usize = 200;
-pub(crate) const MAX_EMAIL_BYTES: usize = 254;
-const MAX_LOCAL_BYTES: usize = 64;
 pub(crate) const MAX_MESSAGE_CHARS: usize = 2000;
 /// The most status events one recipient may have in a file read back.
 const MAX_HISTORY: usize = 8;
@@ -125,31 +123,7 @@ struct RecipientInput {
     order: Option<u32>,
 }
 
-/// Characters that are controls or that hide, reorder or disguise text: the list of
-/// `crates/engine/src/links.rs` (`hides_text`, not shared because it is private to that crate)
-/// without its other whitespace, plus the line and paragraph separators.
-pub(crate) fn is_hidden(c: char) -> bool {
-    c.is_control()
-        || matches!(
-            c,
-            '\u{200B}'..='\u{200F}'
-                | '\u{2028}'
-                | '\u{2029}'
-                | '\u{202A}'..='\u{202E}'
-                | '\u{2060}'..='\u{2064}'
-                | '\u{2066}'..='\u{2069}'
-                | '\u{FEFF}'
-                | '\u{061C}'
-                | '\u{00AD}'
-                | '\u{034F}'
-                | '\u{115F}'
-                | '\u{1160}'
-                | '\u{3164}'
-                | '\u{FFA0}'
-                | '\u{180E}'
-                | '\u{E0000}'..='\u{E007F}'
-        )
-}
+pub(crate) use pdfcraft_organize::field_signer::is_hidden;
 
 fn check_name(name: &str) -> Result<String> {
     let name = name.trim();
@@ -162,32 +136,10 @@ fn check_name(name: &str) -> Result<String> {
     Ok(name.to_string())
 }
 
-/// A shallow check only: one `@`, something either side, no spaces, a dot inside the domain. It
-/// does not check that the domain exists, that the address can receive mail or that it is the
-/// person's.
+/// A shallow check only (see `pdfcraft_organize::field_signer::check_address`, the one rule the
+/// app's Signer entry uses too).
 pub(crate) fn check_email(email: &str) -> Result<String> {
-    let email = email.trim();
-    let shape = || bad("an email address must look like name@example.org (one @, no spaces, a dot in the domain)");
-    let too_long = || {
-        bad(format!(
-            "an email address may have at most {MAX_EMAIL_BYTES} bytes, and at most {MAX_LOCAL_BYTES} bytes before the @ (bytes, not characters)"
-        ))
-    };
-    if email.len() > MAX_EMAIL_BYTES {
-        return Err(too_long());
-    }
-    if email.chars().any(|c| is_hidden(c) || c.is_whitespace()) {
-        return Err(shape());
-    }
-    let (local, domain) = email.split_once('@').ok_or_else(shape)?;
-    let dotted = domain.contains('.') && !domain.starts_with('.') && !domain.ends_with('.') && !domain.contains("..");
-    if local.len() > MAX_LOCAL_BYTES {
-        return Err(too_long());
-    }
-    if local.is_empty() || domain.contains('@') || !dotted {
-        return Err(shape());
-    }
-    Ok(email.to_string())
+    pdfcraft_organize::field_signer::check_address(email).map_err(|e| bad(e.why()))
 }
 
 fn check_message(message: &str) -> Result<String> {
