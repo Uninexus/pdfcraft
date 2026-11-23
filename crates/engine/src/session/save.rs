@@ -214,7 +214,6 @@ impl Session {
         }
         // Caches keyed by the edit generation (edit lines, images, measurements) must see a new one.
         doc.generation = generation + 1;
-        doc.snapshot_generation = doc.generation;
         // Guides are the reader's view state too, and keep their ids; those on pages the new file
         // no longer has are dropped.
         doc.guides = guides.kept_within(doc.info.pages.len());

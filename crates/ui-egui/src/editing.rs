@@ -293,6 +293,7 @@ impl PdfCraftApp {
                         pdfcraft_engine::EditNotice::RedactionIdentification(id) => {
                             crate::redact_ui::identification_note(id).unwrap_or_else(|| n.to_string())
                         }
+                        pdfcraft_engine::EditNotice::SubstituteFont { .. } => n.to_string(),
                     });
                 }
                 let out = self.session.take_js_output(id);

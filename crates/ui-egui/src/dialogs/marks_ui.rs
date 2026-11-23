@@ -222,7 +222,7 @@ const BOX_NAMES: [&str; 6] =
 /// The key of the dialog for `kind`, which the host pass finds it by.
 fn dialog_key(kind: MarkKind) -> &'static str {
     match kind {
-        MarkKind::HeaderFooter => "marks.header_footer",
+        MarkKind::HeaderFooter | MarkKind::Bates => "marks.header_footer",
         MarkKind::Watermark => "marks.watermark",
         MarkKind::Background => "marks.background",
         MarkKind::PrinterMarks => "marks.printer_marks",
@@ -283,7 +283,7 @@ fn step_preview(range: &PageRange, shown: usize, count: usize, current: usize, s
 /// draw it), as the engine decides it. Pictures draw no text.
 fn undrawable(kind: MarkKind, d: &MarksDraft) -> Option<char> {
     match kind {
-        MarkKind::HeaderFooter => d.hf.first_undrawable(),
+        MarkKind::HeaderFooter | MarkKind::Bates => d.hf.first_undrawable(),
         MarkKind::Watermark if !d.use_file => d.wm.first_undrawable(),
         MarkKind::Watermark | MarkKind::Background | MarkKind::PrinterMarks => None,
     }
@@ -298,7 +298,7 @@ fn mark_file(d: &MarksDraft) -> Option<pdfcraft_engine::MarkFile> {
 pub fn edit(d: &MarksDraft, kind: MarkKind, count: usize, current: usize, selection: &[usize]) -> Edit {
     let pages = d.range.pages(count, current, selection);
     match kind {
-        MarkKind::HeaderFooter => Edit::AddHeaderFooter { pages, settings: d.hf.clone(), replace: d.replace },
+        MarkKind::HeaderFooter | MarkKind::Bates => Edit::AddHeaderFooter { pages, settings: d.hf.clone(), replace: d.replace },
         MarkKind::Watermark => {
             let mut wm = d.wm.clone();
             if d.fit {
@@ -355,7 +355,7 @@ fn opening_fields(d: &MarksDraft, kind: MarkKind, m: &MarginUnits) -> DialogFiel
     let mut f = DialogFields::new();
     f.set("range", PageRangeOptions::field_value(&d.range));
     match kind {
-        MarkKind::HeaderFooter => {
+        MarkKind::HeaderFooter | MarkKind::Bates => {
             f.set("font", FieldValue::Text(face_id(d.hf.font).into()));
             f.set("hf.size", FieldValue::Number(d.hf.font_size));
             f.set("hf.underline", FieldValue::Bool(d.hf.underline));
@@ -415,7 +415,7 @@ fn read_fields(d: &mut MarksDraft, f: &DialogFields, kind: MarkKind, m: &MarginU
         d.range = range;
     }
     match kind {
-        MarkKind::HeaderFooter => {
+        MarkKind::HeaderFooter | MarkKind::Bates => {
             if let Some(face) = f.text("font").and_then(|id| FACES.iter().find(|(i, _)| *i == id)) {
                 d.hf.font = face.1;
             }
@@ -488,7 +488,7 @@ fn notes_of(kind: MarkKind, d: &MarksDraft, has_file: bool, g: &Geometry, select
     let refused = undrawable(kind, d);
     let ready = refused.is_none()
         && match kind {
-            MarkKind::HeaderFooter => d.hf.text.iter().any(|x| !x.trim().is_empty()),
+            MarkKind::HeaderFooter | MarkKind::Bates => d.hf.text.iter().any(|x| !x.trim().is_empty()),
             MarkKind::Watermark => {
                 if d.use_file {
                     has_file
@@ -580,7 +580,7 @@ fn file_rows(rows: &mut Vec<Param>) {
 fn rows(kind: MarkKind, g: &Geometry) -> Vec<Param> {
     let mut rows = Vec::new();
     match kind {
-        MarkKind::HeaderFooter => {
+        MarkKind::HeaderFooter | MarkKind::Bates => {
             rows.push(Param::new("font", tl!("Font:"), choice(FACES.iter().map(|(id, f)| ((*id).to_string(), f.label().to_string())), "helvetica")));
             rows.push(Param::number("hf.size", tl!("Size"), 12.0, 0.5, 1).bounds(Some(4.0), Some(72.0)).beside_previous());
             rows.push(Param::new("hf.underline", tl!("Underline"), ParamKind::bool(false)).beside_previous());
@@ -679,7 +679,7 @@ fn backdrop_rows(dialog: &mut HostedParamDialog, n: &BackdropCount) {
 fn title(kind: MarkKind, replace: bool) -> String {
     let verb = if replace { tl!("Update") } else { tl!("Add") };
     match kind {
-        MarkKind::HeaderFooter => crate::i18n::fmt(tl!("{verb} Header and Footer"), &[("verb", verb)]),
+        MarkKind::HeaderFooter | MarkKind::Bates => crate::i18n::fmt(tl!("{verb} Header and Footer"), &[("verb", verb)]),
         MarkKind::Watermark => crate::i18n::fmt(tl!("{verb} Watermark"), &[("verb", verb)]),
         MarkKind::Background => crate::i18n::fmt(tl!("{verb} Background"), &[("verb", verb)]),
         // Printer marks have a dialog of their own (printer_marks_ui); this one is never opened for them.
@@ -845,7 +845,7 @@ fn overlay(kind: MarkKind, d: &MarksDraft, size: (f64, f64)) -> SharedOverlay {
         let p = &cx.painter;
         let s = (f64::from(r.width()) / page_w) as f32;
         match kind {
-            MarkKind::HeaderFooter => {
+            MarkKind::HeaderFooter | MarkKind::Bates => {
                 if hf.shrink {
                     // The band the page content shrinks into, centred across.
                     let (top, bottom) = hf.bands();

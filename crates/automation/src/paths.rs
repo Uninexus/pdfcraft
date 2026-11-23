@@ -1,4 +1,4 @@
-use super::error::{Result, failed};
+use super::error::{Result, ToolError, failed};
 use super::{Automation, Path, PathBuf, file_access};
 
 impl Automation {
@@ -251,7 +251,7 @@ pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
     }
     let dir = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
     path.file_name().ok_or_else(|| failed(format!("{}: not a file path", path.display())))?;
-    std::fs::create_dir_all(dir).map_err(|e| failed(format!("{}: {e}", dir.display())))?;
+    std::fs::create_dir_all(dir).map_err(|e| failed(format!("{}: {e}", shown(dir))))?;
     // The writer itself is the framework's, shared with the desktop app and the CLI (#2166): the
     // staging file is written, flushed (delayed writeback failures surface before the
     // destination is replaced or a document marked clean), closed and renamed; a failure at any

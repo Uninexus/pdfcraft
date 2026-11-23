@@ -321,7 +321,7 @@ impl PdfCraftApp {
             }
             commands::Needs::Marks(k) if self.active.is_some() => {
                 let kind = match k {
-                    pdfcraft_engine::MarkKind::HeaderFooter => tl!("header or footer"),
+                    pdfcraft_engine::MarkKind::HeaderFooter | pdfcraft_engine::MarkKind::Bates => tl!("header or footer"),
                     pdfcraft_engine::MarkKind::Watermark => tl!("watermark"),
                     pdfcraft_engine::MarkKind::Background => tl!("background"),
                     pdfcraft_engine::MarkKind::PrinterMarks => tl!("printer marks"),
@@ -752,7 +752,7 @@ impl PdfCraftApp {
                     "prepress.marks.remove" => K::PrinterMarks,
                     _ => K::Background,
                 };
-                self.apply_edit(ctx, Edit::RemoveMarks { kind });
+                self.apply_edit(ctx, Edit::RemoveMarks { kind, pages: None });
             }
             "export.image" => crate::export_ui::open(self, ctx, crate::export_ui::ExportKind::Image),
             "export.text" => crate::export_ui::open(self, ctx, crate::export_ui::ExportKind::Text),
