@@ -467,6 +467,24 @@ fn a_wheel_notch_scrolls_at_once_with_animation_effects_off() {
     }
 }
 
+/// Plain wheel scrolling works in a visible window that another application has focus over: Windows'
+/// "Scroll inactive windows" setting sends the wheel to the window under the pointer.
+#[test]
+fn plain_wheel_scrolls_an_unfocused_window() {
+    let mut h = harness(&[("layout", "continuous"), ("zoom", "100")]);
+    let at = h.state().views[0].viewport_rect().center();
+    h.hover_at(at);
+    h.input_mut().focused = false;
+    h.run_steps(2);
+    let before = rect(&h, 0).expect("page 1 on screen").min.y;
+    for _ in 0..4 {
+        h.event(wheel(MouseWheelUnit::Line, -3.0, TouchPhase::Move));
+        h.run_steps(4);
+    }
+    let after = rect(&h, 0).map_or(f32::NEG_INFINITY, |r| r.min.y);
+    assert!(after < before - 1.0, "the wheel scrolls without window focus: page 1 moved from {before} to {after}");
+}
+
 #[test]
 fn page_display_commands_switch_layouts() {
     let mut h = harness(&[]);
