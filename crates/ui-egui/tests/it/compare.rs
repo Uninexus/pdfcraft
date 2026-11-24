@@ -5,7 +5,7 @@ use crate::support::AppHarness as _;
 use craft::ui::dialog::dialog_id;
 use craft::ui::patterns::form_dialogs::HostedParamDialog;
 use egui_kittest::Harness;
-use egui_kittest::kittest::{NodeT, Queryable};
+use egui_kittest::kittest::Queryable;
 use pdfcraft_engine::Session;
 use pdfcraft_ui_egui::{PdfCraftApp, RightPanel};
 
@@ -306,8 +306,8 @@ fn compare_dialog_takes_a_page_range_for_each_file() {
     let mut h = four_page_harness();
     assert!(h.execute("doc.compare"));
     h.run_steps(2);
-    assert!(shows(&h, "Old file pages:"));
-    assert!(shows(&h, "New file pages:"));
+    assert!(shows(&h, "Old file pages"));
+    assert!(shows(&h, "New file pages"));
     // Old page 4 against new pages 3 to 4.
     set_field(&mut h, "old_pages", serde_json::json!("4"));
     set_field(&mut h, "pages", serde_json::json!("3-4"));
