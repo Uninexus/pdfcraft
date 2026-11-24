@@ -256,6 +256,19 @@ pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
     // staging file is written, flushed (delayed writeback failures surface before the
     // destination is replaced or a document marked clean), closed and renamed; a failure at any
     // step removes it and leaves the destination as it was.
+    // The framework's writer saves through a link, to what it points at; a tool writes the name it
+    // was given, so a link there (which may point outside the write root) is replaced, not followed.
+    if path.symlink_metadata().is_ok_and(|m| m.file_type().is_symlink()) {
+        let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let staged = dir.join(format!(".{name}.{}.link-replace", std::process::id()));
+        let result = craft::atomic::atomic_write(&staged, bytes)
+            .and_then(|()| std::fs::rename(&staged, path))
+            .map_err(|e| failed(format!("{}: {e}", path.display())));
+        if result.is_err() {
+            let _ = std::fs::remove_file(&staged);
+        }
+        return result;
+    }
     craft::atomic::atomic_write(path, bytes).map_err(|e| failed(format!("{}: {e}", path.display())))
 }
 
