@@ -54,6 +54,8 @@ pub enum RightPanel {
     Search,
     /// Compare files: the differences.
     Compare,
+    /// The named destinations of the document.
+    Destinations,
 }
 
 /// Quick-action bar tools (the vertical floating strip).
