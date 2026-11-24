@@ -222,7 +222,7 @@ fn header_and_footer_dialog_can_shrink_the_page_content() {
     h.get_by_label("OK").click();
     h.steps(4);
     assert!(!is_open(&h));
-    assert_eq!(marks(&h), [MarkKind::HeaderFooter]);
+    assert_eq!(marks(&h), [MarkKind::Bates], "edit.bates fills only the Bates box, which this fork records as a mark of its own");
 }
 
 #[test]
