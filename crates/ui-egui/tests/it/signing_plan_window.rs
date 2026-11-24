@@ -3,12 +3,12 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::support::{AppHarness as _, shown_notice};
+use crate::support::{shown_notice, AppHarness as _};
 use egui::accesskit::Role;
-use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
+use egui_kittest::Harness;
+use pdfcraft_engine::signing_plan::{plan_bytes, read_sidecar, sidecar_of, Plan, Role as PlanRole, Status};
 use pdfcraft_engine::Session;
-use pdfcraft_engine::signing_plan::{Plan, Role as PlanRole, Status, plan_bytes, read_sidecar, sidecar_of};
 use pdfcraft_ui_egui::PdfCraftApp;
 
 fn fixture() -> Vec<u8> {
@@ -171,7 +171,7 @@ fn a_document_with_no_saved_file_is_refused_and_a_closed_window_discards_the_dra
     type_into(&mut h, "Ann Author", "ann@example.org", PlanRole::Signer);
     run(&mut h, "sign.plan.recipient.add");
     assert!(result(&h).contains("no saved file"), "{}", result(&h));
-    h.get_by_role_and_label(Role::Button, "Close").click();
+    h.query_all_by_role_and_label(Role::Button, "Close").last().expect("the window's Close").click();
     h.run_steps(3);
     assert!(h.state().signing_plan.is_none(), "Close discards the draft");
     run(&mut h, "sign.plan.recipient.add");

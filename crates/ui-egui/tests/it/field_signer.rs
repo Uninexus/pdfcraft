@@ -2,14 +2,14 @@
 //! commands `form.field.signer.set` and `form.field.signer.clear`, each one undo step, with the address rule and the
 //! signing plan beside the file applied as the `form_field_signer` tool does.
 
-use crate::support::{AppHarness as _, shown_notice};
+use crate::support::{shown_notice, AppHarness as _};
 use egui::accesskit::Role;
-use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
-use pdfcraft_engine::signing_plan::{Plan, Role as PlanRole, plan_bytes};
+use egui_kittest::Harness;
+use pdfcraft_engine::signing_plan::{plan_bytes, Plan, Role as PlanRole};
 use pdfcraft_engine::{Edit, NewField, Session};
-use pdfcraft_ui_egui::PdfCraftApp;
 use pdfcraft_ui_egui::prepare::FieldPropsDialog;
+use pdfcraft_ui_egui::PdfCraftApp;
 
 /// A blank page with a signature field `Sig1` and a text field `Name`.
 fn fixture() -> Vec<u8> {
@@ -71,10 +71,10 @@ fn can_undo(h: &Harness<'static, PdfCraftApp>) -> bool {
 }
 
 fn type_email(h: &mut Harness<'static, PdfCraftApp>, text: &str) {
-    h.get_by_role_and_label(Role::TextInput, "Signer email").click();
+    h.get_by_role_and_label(Role::TextInput, "Signer email:").click();
     h.run_steps(1);
     h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
-    h.get_by_role_and_label(Role::TextInput, "Signer email").type_text(text);
+    h.get_by_role_and_label(Role::TextInput, "Signer email:").type_text(text);
     h.run_steps(2);
 }
 

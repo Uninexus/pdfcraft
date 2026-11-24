@@ -6,9 +6,9 @@ use std::sync::Arc;
 use crate::support::AppHarness as _;
 use craft::host::{Picked, ScriptedFiles};
 use egui::accesskit::Role;
-use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT as _, Queryable};
-use pdfcraft_engine::signing_plan::{Plan, Role as PlanRole, plan_bytes};
+use egui_kittest::Harness;
+use pdfcraft_engine::signing_plan::{plan_bytes, Plan, Role as PlanRole};
 use pdfcraft_engine::{Edit, NewField, Session};
 use pdfcraft_ui_egui::{PdfCraftApp, SignatureReportKind};
 
@@ -63,7 +63,7 @@ fn the_audit_opens_from_the_command_says_what_was_not_checked_and_changes_nothin
     assert!(h.query_all_by_label_contains("No online revocation check").count() > 0, "what was not checked is on screen");
     let save = h.query_all_by_role_and_label(Role::Button, "Save as PDF…").last().expect("a Save as PDF button");
     assert!(save.accesskit_node().is_disabled(), "an audit of a document with no signature has nothing to save");
-    h.get_by_role_and_label(Role::Button, "Close").click();
+    h.query_all_by_role_and_label(Role::Button, "Close").last().expect("the window's Close").click();
     h.run_steps(3);
     assert!(h.state().signature_report.is_none());
     assert_eq!(h.state().session.get(id).unwrap().edit_generation(), generation, "nothing was edited");
