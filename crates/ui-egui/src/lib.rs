@@ -338,6 +338,10 @@ pub struct PdfCraftApp {
     /// Preferences ▸ Invert middle-button drag: the middle button's pan or auto-scroll moves the
     /// view the other way. Off by default.
     pub invert_middle_drag: bool,
+    /// Preferences ▸ Use single-key accelerators to access tools (off by default). On, an
+    /// unmodified Z picks Marquee zoom and G picks Snapshot, through the catalog's chords, so a
+    /// text field or dialog that has the keyboard keeps its letters. V and H work with it off.
+    pub single_key_accelerators: bool,
     /// Preferences ▸ Animation effects: on, off, or as the system's animation setting says.
     pub animation_effects: craft::theme::MotionChoice,
     /// Preferences ▸ Esc leaves full screen (on by default). Off, only ⌘L / Ctrl+L leaves it, as

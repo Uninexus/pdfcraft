@@ -59,7 +59,9 @@ impl PdfCraftApp {
         options.editable = false;
         options.fixed = fixed_rows(ctx);
         // The catalog the keys run on, in the app scope; the page view's own keys are the fixed rows.
-        let defs = crate::commands::catalog::shared_catalog(crate::commands::mac_shortcuts(ctx)).map(|c| c.defs().to_vec()).unwrap_or_default();
+        let defs = crate::commands::catalog::shared_catalog(crate::commands::mac_shortcuts(ctx), self.single_key_accelerators)
+            .map(|c| c.defs().to_vec())
+            .unwrap_or_default();
         let keymap = Keymap::new(defs, Scopes::new(), Platform::current());
         self.shortcuts = Some(ShortcutsSession { state: DialogState::new(), keymap, options });
     }

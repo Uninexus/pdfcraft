@@ -1841,11 +1841,11 @@ title = "Single-key tool accelerators"
 area = "B"
 tier = "P2"
 milestone = "M3"
-status = "planned"
+status = "partial"
 commands = []
 tools = []
-evidence = []
-notes = "Preferences ▸ Use single-key accelerators to access tools (single_key_accelerators, off by default, remembered): with it on and nothing holding the keyboard (a text field, dialog, palette or menu), an unmodified Z picks Marquee zoom and G picks Snapshot. V (Select) and H (Hand) always worked and are not gated by it. Only those four letters are mapped: Acrobat's letters for comments, Edit text and other tools are not, and the letter is not shown in menus or tooltips. UI only: no automation tool, because the headless tools have no pointer tools; an agent reads and sets the preference with the UI control channel (ui.set / ui.state single_key_accelerators) and picks a tool with ui.set quick. Partial because of the unmapped tools UI to be re-ported onto the craft framework UI after the 0.22.0 sync."
+evidence = ["crates/ui-egui/tests/it/viewer.rs::the_single_key_accelerators_preference_is_off_by_default_and_kept_in_the_settings", "crates/ui-egui/src/commands/catalog.rs::z_and_g_pick_their_tools_only_when_the_preference_is_on"]
+notes = "Preferences ▸ Use single-key accelerators to access tools (single_key_accelerators, off by default, remembered): with it on and nothing holding the keyboard (a text field, dialog, palette or menu), an unmodified Z picks Marquee zoom and G picks Snapshot. V (Select) and H (Hand) always worked and are not gated by it. Only those four letters are mapped: Acrobat's letters for comments, Edit text and other tools are not, and the letter is not shown in menus or tooltips. UI only: no automation tool, because the headless tools have no pointer tools; an agent reads and sets the preference with the UI control channel (ui.set / ui.state single_key_accelerators) and picks a tool with ui.set quick. Partial because of the unmapped tools. Re-ported onto the craft framework UI: Z and G are catalog chords added only while the preference is on, so the keymap holds them back from text fields and dialogs. The key press itself is not covered by a UI test."
 
 [[feature]]
 id = "view.customize-quick-tools"

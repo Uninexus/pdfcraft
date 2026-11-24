@@ -43,8 +43,8 @@ const CATALOG_ONLY: &[(&str, &str, &str)] = &[
 /// Commands whose chords and rows are the framework's clipboard commands.
 const FRAMEWORK_EDIT: &[&str] = &["edit.copy", "edit.paste"];
 
-static CATALOG_WIN: OnceLock<Option<AppCatalog>> = OnceLock::new();
-static CATALOG_MAC: OnceLock<Option<AppCatalog>> = OnceLock::new();
+/// The built catalogs, one per platform and single-key setting (see [`shared_catalog`]).
+static CATALOGS: [OnceLock<Option<AppCatalog>>; 4] = [OnceLock::new(), OnceLock::new(), OnceLock::new(), OnceLock::new()];
 
 /// What a command is to the keymap: a toggle or a radio choice for the ones that carry a checked state.
 fn kind_of(id: &str) -> CommandKind {
@@ -60,7 +60,7 @@ fn kind_of(id: &str) -> CommandKind {
 
 /// The catalog's rows, for the chords of macOS (`mac`) or of the other platforms. A row an earlier one already
 /// has the id of is left out, so the catalog never refuses two defs of one id.
-pub(crate) fn catalog(mac: bool) -> Result<AppCatalog, CommandDefError> {
+pub(crate) fn catalog(mac: bool, single_key: bool) -> Result<AppCatalog, CommandDefError> {
     let mut defs: Vec<CommandDef> = Vec::new();
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut push = |def: CommandDef, chords: Vec<Chord>| {
@@ -82,6 +82,9 @@ pub(crate) fn catalog(mac: bool) -> Result<AppCatalog, CommandDefError> {
         }
         let mut chords: Vec<Chord> = spec.shortcut_for(mac).and_then(menus::chord).into_iter().collect();
         chords.extend(second_chords(spec.id));
+        if single_key {
+            chords.extend(single_key_chord(spec.id));
+        }
         push(def, chords);
     }
     for (id, label, shortcut) in EXTRA.iter().filter(|(id, ..)| !FRAMEWORK_EDIT.contains(id)) {
@@ -96,7 +99,7 @@ pub(crate) fn catalog(mac: bool) -> Result<AppCatalog, CommandDefError> {
         push(def, Vec::new());
     }
     // The platform catalogs have different bindings, so switching between them rebuilds the keymap.
-    AppCatalog::new(defs, u64::from(mac))
+    AppCatalog::new(defs, u64::from(mac) | (u64::from(single_key) << 1))
 }
 
 /// The chords a registry command takes beside its own shortcut: Alt+← / Alt+→ (⌥ on macOS) go back and forward
@@ -113,10 +116,21 @@ fn second_chords(id: &str) -> Vec<Chord> {
     }
 }
 
-/// The catalog for this platform's chords, built once.
-pub(crate) fn shared_catalog(mac: bool) -> Option<AppCatalog> {
-    let cell = if mac { &CATALOG_MAC } else { &CATALOG_WIN };
-    cell.get_or_init(|| catalog(mac).ok()).clone()
+/// The opt-in single-key accelerators (Preferences): an unmodified Z picks Marquee zoom and G picks Snapshot. Plain
+/// letters like V and H, so the keymap holds them back while a text field or dialog has the keyboard.
+fn single_key_chord(id: &str) -> Option<Chord> {
+    let key = match id {
+        "view.marquee_zoom" => "Z",
+        "edit.snapshot" => "G",
+        _ => return None,
+    };
+    menus::chord(engine::Shortcut { command: false, shift: false, mac_ctrl: false, key })
+}
+
+/// The catalog for this platform's chords and the single-key setting, built once each.
+pub(crate) fn shared_catalog(mac: bool, single_key: bool) -> Option<AppCatalog> {
+    let cell = &CATALOGS[usize::from(mac) | (usize::from(single_key) << 1)];
+    cell.get_or_init(|| catalog(mac, single_key).ok()).clone()
 }
 
 /// The command state for this frame: the gate, the catalog and a state row for every command. The rows go into the
@@ -129,7 +143,7 @@ pub(crate) fn command_input(app: &mut PdfCraftApp, ctx: &egui::Context) -> Comma
     let organize = app.active.and_then(|i| app.views.get(i)).is_some_and(|v| v.organize);
     let reads_clipboard = !organize && !app.is_preparing();
     let mut input = CommandInput::new().gate(CommandGate::new(gated, |gated, _| !*gated)).paste_reads_clipboard(reads_clipboard);
-    if let Some(catalog) = shared_catalog(super::mac_shortcuts(ctx)) {
+    if let Some(catalog) = shared_catalog(super::mac_shortcuts(ctx), app.single_key_accelerators) {
         input = input.catalog(catalog);
     }
     let mut commands: Vec<CommandRef> = engine::COMMANDS.iter().map(|s| CommandRef::new(s.id)).collect();
@@ -247,4 +261,23 @@ fn checked(app: &PdfCraftApp, command: &CommandRef) -> Option<bool> {
         PANEL => menus::panel(command).is_some_and(|p| app.right() == Some(p)),
         _ => return None,
     })
+}
+
+#[cfg(test)]
+mod single_key_tests {
+    use super::catalog;
+
+    fn bound(single_key: bool, id: &str) -> usize {
+        let catalog = catalog(false, single_key).expect("the catalog builds");
+        catalog.defs().iter().find(|d| d.command.id == id).map_or(0, |d| d.defaults.len())
+    }
+
+    #[test]
+    fn z_and_g_pick_their_tools_only_when_the_preference_is_on() {
+        for id in ["view.marquee_zoom", "edit.snapshot"] {
+            assert!(bound(true, id) > bound(false, id), "{id} gains a chord with single-key accelerators on");
+        }
+        // The always-on keys do not depend on the preference.
+        assert_eq!(bound(true, "view.hand_tool"), bound(false, "view.hand_tool"));
+    }
 }

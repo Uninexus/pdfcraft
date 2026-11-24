@@ -148,6 +148,7 @@ impl PdfCraftApp {
             theme: Some(self.theme_preference),
             scroll_speed: Some(self.scroll_speed),
             invert_middle_drag: Some(self.invert_middle_drag),
+            single_key_accelerators: Some(self.single_key_accelerators),
             animation_effects: Some(self.animation_effects),
             default_mode: Some(self.default_mode),
             default_layout: Some(canvas::display_token(self.view_defaults.display, self.view_defaults.continuous).to_string()),
@@ -372,6 +373,9 @@ impl PdfCraftApp {
         }
         if let Some(invert) = s.invert_middle_drag {
             self.invert_middle_drag = invert;
+        }
+        if let Some(on) = s.single_key_accelerators {
+            self.single_key_accelerators = on;
         }
         if let Some(effects) = s.animation_effects {
             self.animation_effects = effects;

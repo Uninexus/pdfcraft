@@ -321,6 +321,7 @@ impl PdfCraftApp {
             show_page_edge_shadows: true,
             scroll_speed: scroll_speed::ScrollSpeed::default(),
             invert_middle_drag: false,
+            single_key_accelerators: false,
             animation_effects: craft::theme::MotionChoice::System,
             full_screen_escape_exits: true,
             full_screen_fill: true,

@@ -83,6 +83,7 @@ struct PrefsDraft {
     units: Unit,
     scroll_speed: ScrollSpeed,
     invert_middle_drag: bool,
+    single_key_accelerators: bool,
     author: String,
     hide_empty_highlight_hover: bool,
     flatten_fill_sign_on_save: bool,
@@ -119,6 +120,7 @@ impl PrefsDraft {
             units: app.units,
             scroll_speed: app.scroll_speed,
             invert_middle_drag: app.invert_middle_drag,
+            single_key_accelerators: app.single_key_accelerators,
             author: app.comment_prefs.author.clone(),
             hide_empty_highlight_hover: app.comment_prefs.hide_empty_highlight_hover,
             flatten_fill_sign_on_save: app.flatten_fill_sign_on_save,
@@ -160,6 +162,7 @@ impl PrefsDraft {
             units: Unit::default(),
             scroll_speed: ScrollSpeed::default(),
             invert_middle_drag: false,
+            single_key_accelerators: false,
             author: prefs.author,
             hide_empty_highlight_hover: prefs.hide_empty_highlight_hover,
             flatten_fill_sign_on_save: false,
@@ -465,6 +468,7 @@ impl PreferencesModel for Prefs<'_> {
             ("view.units", PrefValue::Choice(id)) => d.units = lookup(&unit_table(), &id).unwrap_or(d.units),
             ("view.scroll_speed", PrefValue::Choice(id)) => d.scroll_speed = lookup(&speed_table(), &id).unwrap_or(d.scroll_speed),
             ("view.invert_middle", PrefValue::Bool(v)) => d.invert_middle_drag = v,
+            ("view.single_key", PrefValue::Bool(v)) => d.single_key_accelerators = v,
             ("comment.author", PrefValue::Text(v)) => d.author = v.chars().take(crate::MAX_AUTHOR_CHARS).collect(),
             ("comment.hide_hover", PrefValue::Bool(v)) => d.hide_empty_highlight_hover = v,
             ("fill.flatten", PrefValue::Bool(v)) => d.flatten_fill_sign_on_save = v,
@@ -556,6 +560,7 @@ impl PreferencesModel for Prefs<'_> {
                 d.units = fresh.units;
                 d.scroll_speed = fresh.scroll_speed;
                 d.invert_middle_drag = fresh.invert_middle_drag;
+                d.single_key_accelerators = fresh.single_key_accelerators;
             }
             "comment" => {
                 d.author = fresh.author;
@@ -634,6 +639,7 @@ impl PreferencesDraft for Prefs<'_> {
         self.app.units = d.units;
         self.app.scroll_speed = d.scroll_speed;
         self.app.invert_middle_drag = d.invert_middle_drag;
+        self.app.single_key_accelerators = d.single_key_accelerators;
         self.app.comment_prefs.author = d.author;
         self.app.comment_prefs.hide_empty_highlight_hover = d.hide_empty_highlight_hover;
         self.app.flatten_fill_sign_on_save = d.flatten_fill_sign_on_save;
@@ -771,6 +777,8 @@ impl Prefs<'_> {
             choice_row("view.scroll_speed", tl!("Scroll speed (mouse wheel and arrow keys)"), d.scroll_speed, &speed_table()),
             RowSpec::new("view.invert_middle", tl!("Invert middle-button drag"), RowKind::Bool(d.invert_middle_drag))
                 .help(tl!("Panning or auto-scrolling with the middle (wheel) button moves the page the other way.")),
+            RowSpec::new("view.single_key", tl!("Use single-key accelerators to access tools"), RowKind::Bool(d.single_key_accelerators))
+                .help(tl!("Z picks Marquee zoom and G picks Snapshot. V (Select) and H (Hand) always work.")),
         ];
         PageSpec::new("documents", tl!("Documents and view"), rows)
     }

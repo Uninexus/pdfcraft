@@ -2306,6 +2306,22 @@ fn the_invert_middle_drag_preference_is_off_by_default_and_kept_in_the_settings(
     assert!(!off.invert_middle_drag, "turned off, that is saved too");
 }
 
+#[test]
+fn the_single_key_accelerators_preference_is_off_by_default_and_kept_in_the_settings() {
+    let mut app = crate::control::new_app();
+    assert!(!app.single_key_accelerators, "Z and G pick no tool unless asked");
+    app.set_option(&egui::Context::default(), "single_key_accelerators", "true").unwrap();
+    assert!(app.set_option(&egui::Context::default(), "single_key_accelerators", "yes").unwrap_err().contains("true or false"));
+    let mut again = crate::control::new_app();
+    again.apply_settings(&app.settings_snapshot());
+    assert!(again.single_key_accelerators, "turned on, it survives a restart");
+    again.set_option(&egui::Context::default(), "single_key_accelerators", "false").unwrap();
+    let mut off = crate::control::new_app();
+    off.single_key_accelerators = true;
+    off.apply_settings(&again.settings_snapshot());
+    assert!(!off.single_key_accelerators, "turned off, that is saved too");
+}
+
 /// A 40 × 30 picture (one red corner) and a harness showing a PDF of it.
 fn picture_harness() -> (image::RgbaImage, Harness<'static, PdfCraftApp>) {
     picture_harness_sized(egui::vec2(1400.0, 900.0))
