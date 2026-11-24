@@ -64,6 +64,16 @@ impl PdfCraftApp {
             ("compare-ignore-punctuation", _) => {
                 self.compare_ignore_punctuation = value.parse::<bool>().map_err(|_| "compare-ignore-punctuation must be true or false")?;
             }
+            // The Print readiness thresholds: a number in the engine's range, or `default`.
+            ("readiness-ink-limit", _) | ("readiness-min-bleed-mm", _) | ("readiness-min-ppi", _) => {
+                let field = crate::readiness_ui::ReadinessField::ALL.into_iter().find(|f| f.key() == key).ok_or("unknown option")?;
+                // An empty value, or anything but a number in the range or `default`, is refused.
+                if value.trim().is_empty() {
+                    return Err(field.key_error());
+                }
+                let setting = field.parse(value).map_err(|_| field.key_error())?;
+                self.set_readiness_option(field, setting)?;
+            }
             ("animation_effects", _) => {
                 // PLAN: assumed `crate::settings::motion_from_name(&str) -> Option<MotionChoice>` and `set_motion(&mut self, MotionChoice)`, which writes the field and the store (pdf-shell-w9).
                 // The control channel and the command line take the names in any case, as before the port.

@@ -437,6 +437,8 @@ impl PdfCraftApp {
             compare: None,
             readiness_open: false,
             readiness_report: None,
+            readiness_options: Default::default(),
+            readiness_edit: Default::default(),
             js_console: Default::default(),
             #[cfg(not(target_arch = "wasm32"))]
             script_pending: None,

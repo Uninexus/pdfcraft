@@ -42,6 +42,11 @@
 //!   `compare-ignore-case=true|false` and `compare-ignore-punctuation=true|false` set the Compare
 //!   dialog's Ignore checkboxes, which persist; `ui.state.compare_ignore` reports `case` and
 //!   `punctuation`.
+//!   `readiness-ink-limit=<100-400>`, `readiness-min-bleed-mm=<0-50>` and `readiness-min-ppi=<36-1200>`
+//!   set the thresholds of Print production > Print readiness (the `ink_limit`, `min_bleed_mm` and
+//!   `min_ppi` of the `print_readiness` tool; `default` restores one; any other value is refused and
+//!   changes nothing); they persist, and `ui.state.print_readiness` reports each as a number or null
+//!   for the default.
 //!   `folder-collapsed=<folder>=on|off` folds a pinned folder on Home down to its heading or
 //!   opens it again; `ui.state.pinned_folders` lists each pinned folder and whether it is.
 //! - `ui.open {path}`: open a file. A file whose tab is already open focuses it

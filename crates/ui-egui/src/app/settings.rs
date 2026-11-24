@@ -107,6 +107,10 @@ pub struct Behavior {
     /// The Compare Files dialog's Ignore checkboxes.
     pub compare_ignore_case: Option<bool>,
     pub compare_ignore_punctuation: Option<bool>,
+    /// The Print readiness thresholds (`ink_limit`, `min_bleed_mm`, `min_ppi`); absent is the default.
+    pub readiness_ink_limit: Option<f64>,
+    pub readiness_min_bleed_mm: Option<f64>,
+    pub readiness_min_ppi: Option<f64>,
 }
 
 impl Behavior {
@@ -582,6 +586,8 @@ pub fn import_json(text: &str) -> (PdfCraftSettings, Vec<SectionError>) {
     let behavior = {
         // The fork's releases kept the Compare Ignore checkboxes as `compare_ignore: { case, punctuation }`.
         let ignore = |key: &str| root.get("compare_ignore").and_then(|v| v.get(key)).and_then(Value::as_bool);
+        // ... and the Print readiness thresholds as `print_readiness: { ink_limit, min_bleed_mm, min_ppi }`.
+        let readiness = |key: &str| root.get("print_readiness").and_then(|v| v.get(key)).and_then(Value::as_f64);
         let mut r = Reader::new(&root, Behavior::KEY, &mut errors);
         Behavior {
             default_page_gaps: r.bool("default_page_gaps"),
@@ -606,6 +612,9 @@ pub fn import_json(text: &str) -> (PdfCraftSettings, Vec<SectionError>) {
             redact_prefs: r.text("redact_prefs"),
             compare_ignore_case: r.bool("compare_ignore_case").or_else(|| ignore("case")),
             compare_ignore_punctuation: r.bool("compare_ignore_punctuation").or_else(|| ignore("punctuation")),
+            readiness_ink_limit: r.f64("readiness_ink_limit").or_else(|| readiness("ink_limit")),
+            readiness_min_bleed_mm: r.f64("readiness_min_bleed_mm").or_else(|| readiness("min_bleed_mm")),
+            readiness_min_ppi: r.f64("readiness_min_ppi").or_else(|| readiness("min_ppi")),
         }
     };
 

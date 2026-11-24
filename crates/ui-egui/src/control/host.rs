@@ -153,6 +153,7 @@ impl crate::PdfCraftApp {
             "show_page_edge_shadows": self.show_page_edge_shadows,
             "single_key_accelerators": self.single_key_accelerators,
             "compare_ignore": json!({ "case": self.compare_ignore_case, "punctuation": self.compare_ignore_punctuation }),
+            "print_readiness": json!({ "ink_limit": self.readiness_options.ink_limit, "min_bleed_mm": self.readiness_options.min_bleed_mm, "min_ppi": self.readiness_options.min_ppi }),
             "language": self.language,
             "notice": notice,
             "progress": progress,

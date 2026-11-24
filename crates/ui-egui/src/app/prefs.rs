@@ -199,6 +199,10 @@ impl PdfCraftApp {
             redact_prefs: json_text(&self.redact_defaults.to_json()),
             compare_ignore_case: Some(self.compare_ignore_case),
             compare_ignore_punctuation: Some(self.compare_ignore_punctuation),
+            // A default threshold is left out, so it does not overwrite a choice made since.
+            readiness_ink_limit: self.readiness_options.ink_limit,
+            readiness_min_bleed_mm: self.readiness_options.min_bleed_mm,
+            readiness_min_ppi: self.readiness_options.min_ppi,
         };
         let view = settings::View {
             reading_colors: Some(self.reading_colors),
@@ -536,6 +540,20 @@ impl PdfCraftApp {
         }
         if let Some(on) = b.compare_ignore_punctuation {
             self.compare_ignore_punctuation = on;
+        }
+        // The Print readiness thresholds; each one is read alone, and anything that is not a number the engine accepts
+        // keeps the current choice.
+        for (saved, field) in [
+            (b.readiness_ink_limit, crate::readiness_ui::ReadinessField::InkLimit),
+            (b.readiness_min_bleed_mm, crate::readiness_ui::ReadinessField::MinBleed),
+            (b.readiness_min_ppi, crate::readiness_ui::ReadinessField::MinPpi),
+        ] {
+            if let Some(n) = saved
+                && field.accepts(n)
+            {
+                // `-0` is read as 0.
+                self.readiness_options.set(field, Some(n + 0.0));
+            }
         }
         if let Some(prefs) = parsed(&b.redact_prefs).and_then(|v| RedactPrefs::from_json(&v)) {
             self.redact_prefs = prefs.clone();

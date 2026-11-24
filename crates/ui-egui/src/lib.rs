@@ -45,6 +45,7 @@ macro_rules! tl_ctx {
 pub mod canvas;
 mod chrome;
 pub use combine_ui::{CombineView, Lock as CombineLock, SortKey};
+pub use dialogs::readiness_ui::{ReadinessEdit, ReadinessField, ReadinessOptions};
 mod commands;
 pub mod control;
 mod menus;
@@ -123,6 +124,7 @@ use dialogs::hairlines_ui;
 use dialogs::marks_ui;
 use dialogs::pageboxes;
 use dialogs::printer_marks_ui;
+use dialogs::readiness_ui;
 use dialogs::rename_ui;
 use dialogs::standards_ui;
 use dialogs::word_count_ui;
@@ -627,6 +629,11 @@ pub struct PdfCraftApp {
     pub readiness_open: bool,
     /// The report it shows, measured when it opened; nothing is kept once it closes.
     pub readiness_report: Option<pdfcraft_engine::printcheck::PrintReadiness>,
+    /// The thresholds the report is measured against (`print_readiness`'s `ink_limit`, `min_bleed_mm` and `min_ppi`);
+    /// `None` is the default. Remembered with the settings.
+    pub readiness_options: readiness_ui::ReadinessOptions,
+    /// What the dialog's three fields hold as typed.
+    pub readiness_edit: readiness_ui::ReadinessEdit,
     /// The JavaScript console.
     pub js_console: js_ui::JsConsole,
     #[cfg(not(target_arch = "wasm32"))]
