@@ -1332,6 +1332,14 @@ impl PdfCraftApp {
                 self.paste_bookmarks(ctx, id, parent, index);
                 return;
             }
+            A::Export(path) => {
+                self.export_bookmarks(id, &path);
+                return;
+            }
+            A::Import { parent, index } => {
+                self.import_bookmarks_dialog(id, parent, index);
+                return;
+            }
             A::FromStructure => {
                 self.set_right(Some(crate::RightPanel::Bookmarks));
                 Edit::BookmarksFromStructure
@@ -1375,14 +1383,93 @@ impl PdfCraftApp {
         }
     }
 
+    /// Add `bookmarks` under `parent` at `index` as one undoable edit. How many of them point past the
+    /// last page of the document (and so arrive without a destination), or `None` when nothing was added.
+    fn insert_bookmarks(
+        &mut self,
+        ctx: &egui::Context,
+        id: pdfcraft_engine::DocId,
+        parent: Vec<usize>,
+        index: usize,
+        bookmarks: Vec<pdfcraft_engine::OutlineNode>,
+    ) -> Option<usize> {
+        let pages = self.session.get(id).map_or(0, |d| d.info.pages.len());
+        let unmapped = pdfcraft_engine::outline_unmapped(&bookmarks, pages).len();
+        self.apply_edit(ctx, Edit::ImportBookmarks { parent, index, bookmarks, replace: false }).then_some(unmapped)
+    }
+
+    /// Bookmarks ▸ Export: ask where, then write the bookmark at `path` and its subtree (the whole tree
+    /// for the empty path) as the JSON file `bookmark_export` writes.
+    fn export_bookmarks(&mut self, id: pdfcraft_engine::DocId, path: &[usize]) {
+        let tree = match self.session.outline_tree(id, path) {
+            Some(Ok(tree)) => tree,
+            Some(Err(e)) => return self.notify_error(e),
+            None => return self.notify_tr("The bookmarks of this document can't be read, so they can't be exported."),
+        };
+        let bytes = match pdfcraft_engine::bookmark_json::bookmark_file_bytes(&tree.nodes, tree.truncated) {
+            Ok(bytes) => bytes,
+            Err(e) => return self.notify_error(e),
+        };
+        if tree.truncated {
+            self.notify_tr("Bookmarks nested too deep to list were left out of the export.");
+        }
+        let stem = self.session.get(id).map(|d| d.name.trim_end_matches(".pdf").trim_end_matches(".PDF").to_string()).unwrap_or_default();
+        let request = craft::host::PickRequest::save("bookmarks.export")
+            .title(tl!("Export bookmarks"))
+            .filter("JSON", &["json"])
+            .file_name(format!("{stem} bookmarks.json"));
+        self.pick_file(request, None, move |app, _, picked| {
+            let Some(path) = picked.first_path() else { return };
+            match app.host.files().write(&path, &bytes, craft::host::WriteIntent::SaveAs) {
+                Ok(_) => app.notify_fmt("Exported to {path}", &[("path", &path.display().to_string())]),
+                Err(e) => app.notify_fmt("Couldn't write {name}: {e}", &[("name", &path.display().to_string()), ("e", &e.to_string())]),
+            }
+        });
+    }
+
+    /// Bookmarks ▸ Import: choose a bookmark file, then add its bookmarks under `parent` at `index` as one
+    /// undoable edit. A file that can't be read or isn't a bookmark file is refused whole, with the reason.
+    fn import_bookmarks_dialog(&mut self, id: pdfcraft_engine::DocId, parent: Vec<usize>, index: usize) {
+        let request = craft::host::PickRequest::open("bookmarks.import").title(tl!("Import bookmarks")).filter("JSON", &["json"]);
+        let target = self.pick_target(Some(id));
+        self.pick_file(request, target, move |app, ctx, picked| {
+            let files = match app.read_picked(picked) {
+                Ok(files) => files,
+                Err((name, e)) => return app.notify_fmt("Couldn't read {name}: {e}", &[("name", &name), ("e", &e)]),
+            };
+            let Some((name, bytes)) = files.into_iter().next() else { return };
+            let (bookmarks, truncated) = match pdfcraft_engine::bookmark_json::read_bookmark_file(&bytes) {
+                Ok(read) => read,
+                Err(e) => return app.notify_fmt("Couldn't import {name}: {e}", &[("name", &name), ("e", &e)]),
+            };
+            let Some(unmapped) = app.insert_bookmarks(ctx, id, parent.clone(), index, bookmarks) else { return };
+            // A bookmark added under a closed one would not show.
+            if !parent.is_empty()
+                && let Some(view) = app.views.iter_mut().find(|v| v.id == id)
+            {
+                view.bookmarks_open.set(&parent, true);
+            }
+            if unmapped > 0 {
+                let n = u64::try_from(unmapped).unwrap_or(u64::MAX);
+                app.notify(crate::i18n::trn(
+                    crate::i18n::current(),
+                    n,
+                    "{n} imported bookmark points past the last page of this document and has no destination.",
+                    "{n} imported bookmarks point past the last page of this document and have no destination.",
+                ));
+            }
+            if truncated {
+                app.notify_tr("That file was exported without some bookmarks that were nested too deep to list.");
+            }
+        });
+    }
+
     /// Paste the bookmark clipboard as one undoable edit. Bookmarks whose page this document lacks
     /// arrive without a destination, and the toast says how many.
     fn paste_bookmarks(&mut self, ctx: &egui::Context, id: pdfcraft_engine::DocId, parent: Vec<usize>, index: usize) {
         let Some(bookmarks) = self.bookmark_clipboard.clone() else { return };
-        let pages = self.session.get(id).map_or(0, |d| d.info.pages.len());
-        let unmapped = pdfcraft_engine::outline_unmapped(&bookmarks, pages).len();
-        if self.apply_edit(ctx, Edit::ImportBookmarks { parent, index, bookmarks, replace: false }) && unmapped > 0 {
-            let n = u64::try_from(unmapped).unwrap_or(u64::MAX);
+        if let Some(n) = self.insert_bookmarks(ctx, id, parent, index, bookmarks).filter(|n| *n > 0) {
+            let n = u64::try_from(n).unwrap_or(u64::MAX);
             self.notify(crate::i18n::trn(
                 crate::i18n::current(),
                 n,

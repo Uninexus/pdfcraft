@@ -26,6 +26,7 @@ mod attachment_row;
 mod bates_multi;
 mod bookmark_position;
 mod bookmarks;
+mod bookmarks_io;
 mod bulk_fields;
 mod buttons;
 mod camera;

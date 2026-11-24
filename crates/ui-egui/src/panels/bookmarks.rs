@@ -42,6 +42,14 @@ pub enum BmAction {
         parent: Vec<usize>,
         index: usize,
     },
+    /// Choose a file, then write the bookmark at the path and everything under it (the whole tree for
+    /// the empty path) to it as JSON.
+    Export(Vec<usize>),
+    /// Choose a bookmark file, then add its bookmarks under `parent` at `index` (past the end appends) as one edit.
+    Import {
+        parent: Vec<usize>,
+        index: usize,
+    },
     /// Bookmarks from the tagged headings, under a new first "Untitled" bookmark.
     FromStructure,
     /// Open New bookmarks from text styles, to choose a style per bookmark level (#1693).
@@ -67,6 +75,8 @@ pub(super) fn options_menu(_app: &PdfCraftApp) -> Vec<PanelRow> {
         "bookmark.from_structure",
         "bookmark.from_text_styles",
         "bookmark.paste",
+        "bookmark.export",
+        "bookmark.import",
         "bookmark.expand_all",
         "bookmark.collapse_all",
         "bookmark.expand_level",
@@ -371,6 +381,8 @@ pub(super) fn body(app: &mut PdfCraftApp, ui: &mut egui::Ui) -> PanelResult {
             pick(ui, tl!("Copy"), true, BmAction::Copy(path.clone()));
             let parent = path.get(..depth).unwrap_or_default().to_vec();
             pick(ui, tl!("Paste"), can_paste, BmAction::Paste { parent, index: i.saturating_add(1) });
+            pick(ui, tl!("Export This Bookmark…"), true, BmAction::Export(path.clone()));
+            pick(ui, tl!("Import Under This Bookmark…"), true, BmAction::Import { parent: path.clone(), index: usize::MAX });
             pick(ui, tl!("Delete"), true, BmAction::Delete(path.clone()));
             if let Some(action) = picked.take() {
                 result.bookmark = Some(action);
