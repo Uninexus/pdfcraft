@@ -22,15 +22,6 @@ const SHOWN: usize = 300;
 const MAX_PDF_BYTES: u64 = 512 * 1024 * 1024;
 
 impl PdfCraftApp {
-    /// Says what happened in a notice and, while the Signing plan window is open, in its live line.
-    fn say_handoff(&mut self, text: String, ok: bool) {
-        if let Some(d) = self.signing_plan.as_mut() {
-            d.result = text.clone();
-            d.result_ok = ok;
-        }
-        self.notify(text);
-    }
-
     /// The package of the active document: the name to offer for the zip and its bytes, or why there is none.
     fn build_handoff(&self) -> Result<(String, Vec<u8>), String> {
         let (_, id) = self.active_ids().ok_or_else(|| tl!("Open a document first").to_string())?;
@@ -74,7 +65,7 @@ impl PdfCraftApp {
         }
         let (name, bytes) = match self.build_handoff() {
             Ok(built) => built,
-            Err(why) => return self.say_handoff(why, false),
+            Err(why) => return self.say_plan(why, false),
         };
         let ask = PickRequest::save("handoff").title(tl!("Save the hand-off package").to_string()).file_name(name).filter("Zip", &["zip"]);
         self.pick_first(ask, None, move |app, _, path| app.write_handoff(path, &bytes));
@@ -94,7 +85,7 @@ impl PdfCraftApp {
         if self.host.files().exists(&path) {
             let why =
                 crate::i18n::fmt(tl!("{path} already exists; it was left alone and nothing was written. Choose a new name."), &[("path", &shown)]);
-            return self.say_handoff(why, false);
+            return self.say_plan(why, false);
         }
         match self.host.files().write(&path, bytes, WriteIntent::SaveAs) {
             Ok(_) => {
@@ -104,11 +95,11 @@ impl PdfCraftApp {
                     ),
                     &[("path", &shown)],
                 );
-                self.say_handoff(done, true);
+                self.say_plan(done, true);
             }
             Err(e) => {
                 let why = crate::i18n::fmt(tl!("Couldn't save the package: {e}"), &[("e", &clean(&e.to_string(), SHOWN))]);
-                self.say_handoff(why, false);
+                self.say_plan(why, false);
             }
         }
     }
@@ -129,12 +120,12 @@ impl PdfCraftApp {
             Ok(bytes) => bytes,
             Err(e) => {
                 let why = crate::i18n::fmt(tl!("Couldn't read the package: {e}"), &[("e", &clean(&e.to_string(), SHOWN))]);
-                return self.say_handoff(why, false);
+                return self.say_plan(why, false);
             }
         };
         let package = match handoff::read(&bytes, MAX_PDF_BYTES) {
             Ok(package) => package,
-            Err(e) => return self.say_handoff(clean(&e.0, SHOWN), false),
+            Err(e) => return self.say_plan(clean(&e.0, SHOWN), false),
         };
         let ask = PickRequest::folder("handoff.import").title(tl!("Choose a folder for the document and its plan").to_string());
         self.pick_first(ask, None, move |app, ctx, dir| app.place_handoff(ctx, package, &dir));
@@ -145,7 +136,7 @@ impl PdfCraftApp {
         let pdf_target = dir.join(&package.file_name);
         let sidecar_target = match plan_rules::sidecar_of(&pdf_target) {
             Ok(path) => path,
-            Err(e) => return self.say_handoff(clean(&e.0, SHOWN), false),
+            Err(e) => return self.say_plan(clean(&e.0, SHOWN), false),
         };
         let taken: Vec<String> = [&pdf_target, &sidecar_target]
             .into_iter()
@@ -157,19 +148,19 @@ impl PdfCraftApp {
                 tl!("{names} already exists; nothing was overwritten and nothing was written. Choose another folder."),
                 &[("names", &taken.join(" and "))],
             );
-            return self.say_handoff(why, false);
+            return self.say_plan(why, false);
         }
         let shown = clean(&pdf_target.display().to_string(), SHOWN);
         if let Err(e) = self.host.files().write(&pdf_target, &package.pdf, WriteIntent::SaveAs) {
             let why = crate::i18n::fmt(tl!("Couldn't write the document: {e}"), &[("e", &clean(&e.to_string(), SHOWN))]);
-            return self.say_handoff(why, false);
+            return self.say_plan(why, false);
         }
         if let Err(e) = self.host.files().write(&sidecar_target, &package.plan_file, WriteIntent::SaveAs) {
             let why = crate::i18n::fmt(
                 tl!("The document was saved to {path} but its signing plan could not be written: {e}. The plan was not imported."),
                 &[("path", &shown), ("e", &clean(&e.to_string(), SHOWN))],
             );
-            return self.say_handoff(why, false);
+            return self.say_plan(why, false);
         }
         let name = package.file_name.clone();
         let opened = self.open_bytes(ctx, &name, Some(pdf_target.to_string_lossy().into_owned()), package.pdf);
@@ -191,6 +182,6 @@ impl PdfCraftApp {
                 false,
             ),
         };
-        self.say_handoff(said, ok);
+        self.say_plan(said, ok);
     }
 }

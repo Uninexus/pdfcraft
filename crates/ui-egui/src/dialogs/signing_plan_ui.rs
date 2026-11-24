@@ -29,7 +29,7 @@ use craft::ui::runtime::env::Label;
 use craft::ui::runtime::focus::FocusRequest;
 use craft::ui::sections::{DialogRole, FooterButton};
 use craft::ui::style::TypeRole;
-use craft::ui::text::TextField;
+use craft::ui::text::{SelectableText, TextField};
 use pdfcraft_engine::DocId;
 use pdfcraft_engine::signing_plan::{self as plan_rules, MAX_MESSAGE_CHARS, Plan, Role, Status};
 
@@ -38,6 +38,8 @@ use crate::prepare::signer::clean;
 
 /// The longest piece of a refusal read from a file that the window shows (characters).
 const SHOWN_ERROR_CHARS: usize = 300;
+/// Lines of a plan check shown; Copy the check has them all.
+const MAX_CHECK_LINES: usize = 200;
 /// The Remove part of a recipient's row.
 const REMOVE: TrailingPart = TrailingPart::new(0);
 /// The roles, in the order the Role choice lists them.
@@ -81,6 +83,10 @@ pub struct Draft {
     pub expect: Option<String>,
     /// Where the focus goes in the next pass, once the control it was on is gone.
     pub refocus: Option<Refocus>,
+    /// The text of the last plan check (`sign.plan.audit`), until the plan changes.
+    pub check: Option<String>,
+    /// The Copy the check button was pressed: the window puts the text on the clipboard after this pass.
+    pub copy_check: bool,
 }
 
 /// A step waiting for the person's answer.
@@ -217,6 +223,8 @@ impl PdfCraftApp {
             confirm: None,
             expect: None,
             refocus: None,
+            check: None,
+            copy_check: false,
         });
     }
 
@@ -258,6 +266,8 @@ impl PdfCraftApp {
         // Read it again either way, so the window shows the file as it is: what was written, or what made the command
         // refuse (a plan started elsewhere, a file gone).
         draft.view = view_of(path.as_deref());
+        // A check says what the plan was when it was made.
+        draft.check = None;
         draft.result_ok = outcome.is_ok();
         let said = match outcome {
             Ok(done) => {
@@ -348,6 +358,72 @@ impl PdfCraftApp {
 }
 
 impl PdfCraftApp {
+    /// Says what a command did in a notice and, while the window is open, in its live line.
+    pub(crate) fn say_plan(&mut self, text: String, ok: bool) {
+        if let Some(d) = self.signing_plan.as_mut() {
+            d.result = text.clone();
+            d.result_ok = ok;
+        }
+        self.notify(text);
+    }
+
+    /// `sign.plan.audit`: sets the plan beside the signatures the saved file holds and shows the result in the Signing plan
+    /// window (opened first when it is not). It only reads: nothing is written, signed or sent.
+    pub fn check_signing_plan(&mut self) {
+        let Some((_, id)) = self.active_ids() else { return };
+        if self.signing_plan.as_ref().is_none_or(|d| d.doc != id) {
+            self.show_signing_plan();
+        }
+        match self.plan_check(id) {
+            Ok((text, line)) => {
+                if let Some(d) = self.signing_plan.as_mut() {
+                    d.check = Some(text);
+                }
+                self.say_plan(line, true);
+            }
+            Err(why) => {
+                if let Some(d) = self.signing_plan.as_mut() {
+                    d.check = None;
+                }
+                self.say_plan(why, false);
+            }
+        }
+    }
+
+    /// The text of the check of document `id` and the one line that says how it came out, or why there is none.
+    fn plan_check(&self, id: DocId) -> Result<(String, String), String> {
+        let doc = self.session.get(id).ok_or_else(|| tl!("Open a document first").to_string())?;
+        let sidecar = sidecar(doc.path.as_deref())?;
+        if doc.dirty {
+            return Err(tl!("The document has changes that are not saved. Save it first: the check is about the saved file.").to_string());
+        }
+        if doc.changed_on_open {
+            return Err(tl!(
+                "Opening this file changed it (a repair or a form layout), so it cannot be compared with the file on disk. Save it, reopen it and try again."
+            )
+            .to_string());
+        }
+        let plan = match plan_rules::read_sidecar(&sidecar) {
+            Ok(Some(plan)) => plan,
+            Ok(None) => return Err(tl!("There is no signing plan beside this document yet: add a recipient first.").to_string()),
+            Err(e) => return Err(clean(&e.0, SHOWN_ERROR_CHARS)),
+        };
+        if let Some(path) = doc.path.as_deref() {
+            let on_disk = self.host.files().read(Path::new(path)).map_err(|e| clean(&e.to_string(), SHOWN_ERROR_CHARS))?;
+            if on_disk != *doc.saved_bytes() {
+                return Err(tl!("The file changed on disk since it was opened. Reopen it and check again.").to_string());
+            }
+        }
+        let report = self.session.signature_audit(id).map_err(|e| clean(&e.to_string(), SHOWN_ERROR_CHARS))?;
+        let audit = pdfcraft_engine::plan_audit::cross_check(doc, &report, &plan);
+        let line = match audit.consistent {
+            Some(true) => tl!("The plan and the file agree, and nothing was left undetermined."),
+            Some(false) => tl!("The plan and the file do not agree: see the problems listed."),
+            None => tl!("No problem was found, but something could not be determined: see the open questions."),
+        };
+        Ok((audit.text(&plan), line.to_string()))
+    }
+
     /// `sign.plan.sign_next`: start signing as the plan's next recipient. It finds the one unsigned signature field
     /// labelled for them, turns to its page and opens Sign with a Digital ID on it. The plan is only a record: once the
     /// signed file is saved, the step is written down with Record (a signature cannot be told from outside who made it).
@@ -425,6 +501,12 @@ pub(crate) fn show(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
         return;
     }
     let command = d.command.take();
+    if std::mem::take(&mut d.copy_check)
+        && let Some(text) = d.check.clone()
+        && app.put_text(&text)
+    {
+        app.notify_tr("Check copied");
+    }
     app.signing_plan = Some(d);
     if let Some(command) = command {
         let ctx = ui.ctx().clone();
@@ -563,12 +645,30 @@ fn body(ui: &mut egui::Ui, d: &mut Draft) {
     .role(TypeRole::Caption)
     .shade(Shade::Muted)
     .show(ui);
-    let can_export = matches!(d.view, View::Plan(_));
-    if clicked(&Button::new(tl!("Save the hand-off package…")).enabled(can_export).show(ui)) {
+    let has_plan = matches!(d.view, View::Plan(_));
+    if clicked(&Button::new(tl!("Save the hand-off package…")).enabled(has_plan).show(ui)) {
         d.command = Some("sign.plan.handoff_export");
     }
     if clicked(&Button::new(tl!("Open a hand-off package…")).show(ui)) {
         d.command = Some("sign.plan.handoff_import");
+    }
+    Text::new(tl!("Check")).role(TypeRole::Heading).show(ui);
+    Text::new(tl!(
+        "Sets the plan beside the signatures the saved file holds. It only reads: nothing is changed, signed or sent. A field's signer label is text anyone can write, so this does not show who signed."
+    ))
+    .role(TypeRole::Caption)
+    .shade(Shade::Muted)
+    .show(ui);
+    if clicked(&Button::new(tl!("Check the plan")).enabled(has_plan).show(ui)) {
+        d.command = Some("sign.plan.audit");
+    }
+    if let Some(text) = d.check.clone() {
+        let lines: Vec<&str> = text.lines().collect();
+        let shown = lines.iter().take(MAX_CHECK_LINES).copied().collect::<Vec<_>>().join("\n");
+        SelectableText::new(tl!("Plan check"), &shown).multiline().show(ui);
+        if clicked(&Button::new(tl!("Copy the check")).show(ui)) {
+            d.copy_check = true;
+        }
     }
     if let Some(c) = d.confirm.as_mut() {
         Notice::new(Tone::Warn, c.question.clone()).layout(NoticeLayout::Inline).announce(Politeness::Polite).id_salt(14usize).show(ui);

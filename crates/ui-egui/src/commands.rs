@@ -433,6 +433,7 @@ impl PdfCraftApp {
                 self.change_signing_plan(id)
             }
             "sign.plan.sign_next" => self.sign_as_next_recipient(ctx),
+            "sign.plan.audit" => self.check_signing_plan(),
             "sign.plan.handoff_export" => self.export_signing_handoff(),
             "sign.plan.handoff_import" => self.import_signing_handoff(),
             "protect.remove" => {

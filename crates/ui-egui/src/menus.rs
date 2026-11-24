@@ -229,6 +229,7 @@ const SIGN: &[&str] = &[
     SEP,
     "sign.plan.show",
     "sign.plan.sign_next",
+    "sign.plan.audit",
     "sign.plan.handoff_export",
     "sign.plan.handoff_import",
     "form.signer_report",
