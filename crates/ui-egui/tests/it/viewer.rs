@@ -2583,12 +2583,28 @@ fn a_picture_inside_form_artwork_under_text_is_selected_and_copied() {
     assert_eq!(png.into_raw(), vec![255, 0, 0, 255, 0, 0, 255, 255]);
 }
 
+/// Edit reads a page that is one picture by itself when text recognition models are installed (a
+/// developer's PC has them, a build machine has not). Its answer changes the document whenever the
+/// worker is done, so a test that edits the picture waits until it has landed (or was dropped) and
+/// the page has been judged, instead of racing it.
+fn settle_text_recognition(h: &mut Harness<'static, PdfCraftApp>) {
+    for _ in 0..400 {
+        if h.state().ocr_run.is_none() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(25));
+        h.run_steps(2);
+    }
+    h.run_steps(4);
+}
+
 /// A picture in Edit text & images, right-clicked so its menu is open (in a tall window, so the
 /// whole menu is on screen).
 fn picture_menu() -> (image::RgbaImage, Harness<'static, PdfCraftApp>) {
     let (px, mut h) = picture_harness_sized(egui::vec2(1400.0, 1500.0));
     h.set_option("quick", "edit-text").unwrap();
     h.run_steps(3);
+    settle_text_recognition(&mut h);
     let i = h.state().active.unwrap();
     let at = h.state().views[i].page_screen_rect(0).expect("on screen").center();
     h.hover_at(at);
@@ -2644,6 +2660,7 @@ fn the_picture_menu_opens_link_properties_and_recognize_text_for_the_picture() {
     h.run_steps(2);
     h.get_all_by_label("OK").last().expect("Link Properties' OK").click();
     h.run_steps(3);
+    assert!(h.state().dialogs.open_dialogs().is_empty(), "OK closed Link Properties");
     let s = h.state();
     let links = s.session.get(s.active_ids().unwrap().1).unwrap().links();
     assert_eq!(links.len(), 1, "the link was made");
