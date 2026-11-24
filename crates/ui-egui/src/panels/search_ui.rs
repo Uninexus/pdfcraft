@@ -5,6 +5,7 @@
 use std::collections::HashMap;
 
 use craft::behavior::{DisplayOrder, ItemSource, Selection, SelectionChange};
+use craft::ui::buttons::Button;
 use craft::ui::choice::Checkbox;
 use craft::ui::contract::{Bind, CollectionEvent, Props as _, SelectMode, Show as _, ShowCollection as _, ShowContainer as _};
 use craft::ui::display::Text;
@@ -17,6 +18,7 @@ use craft::ui::text::TextField;
 
 use super::right::PanelResult;
 use crate::PdfCraftApp;
+use crate::folder_search_ui::Action;
 
 /// Glyphs of context shown on each side of a match.
 const CONTEXT: usize = 36;
@@ -54,15 +56,17 @@ impl ItemSource<Hit> for Results {}
 
 /// Draw the Search panel with its query, options, progress and clickable result excerpts.
 pub(crate) fn show(app: &mut PdfCraftApp, ui: &mut egui::Ui) -> PanelResult {
-    let result = PanelResult::default();
+    let mut result = PanelResult::default();
     let Some((index, id)) = app.active_ids() else { return result };
     let pages = app.session.get(id).map_or(0, |d| d.info.pages.len());
+    let folder = &mut app.folder_search;
     let Some(view) = app.views.get_mut(index) else { return result };
     let searched = view.session.texts.len() + view.session.text_failed.len();
     let Some(find) = view.find.as_mut() else { return result };
     find.in_panel = true;
     Text::new(tl!("What word or phrase would you like to search for?").to_string()).show(ui);
-    let field = TextField::search(tl!("Search").to_string(), Bind::bound(&mut find.query)).placeholder(tl!("Search")).select_on_focus().show(ui);
+    let field =
+        TextField::search(tl!("Search").to_string(), Bind::bound(&mut find.query)).placeholder(tl!("Search")).select_on_focus().submits().show(ui);
     // The bar was asked for (⇧⌘F, also with the panel open): the field takes the focus once.
     if find.bar.taken() {
         focus::request(ui.ctx(), FocusTarget::Id(field.response.id));
@@ -74,6 +78,18 @@ pub(crate) fn show(app: &mut PdfCraftApp, ui: &mut egui::Ui) -> PanelResult {
     });
     if before != (find.options.whole_word, find.options.match_case) {
         find.case_query.clear();
+    }
+    if folder.on {
+        let can_search = !find.query.trim().is_empty();
+        let submitted = field.submitted && can_search && folder.folder.is_some() && !folder.running();
+        let mut action = crate::folder_search_ui::section(ui, folder, can_search);
+        if submitted && action.is_none() {
+            action = Some(Action::Search);
+        }
+        return apply(app, action, result);
+    }
+    if Button::new(tl!("Search all PDFs in a folder…").to_string()).show(ui).clicked() {
+        result.command = Some("edit.search_folder");
     }
     if find.query != find.case_query {
         view.rerun_find();
@@ -153,6 +169,20 @@ pub(crate) fn show(app: &mut PdfCraftApp, ui: &mut egui::Ui) -> PanelResult {
     }
     if let Some(i) = go {
         view.go_to_match(i);
+    }
+    result
+}
+
+/// What the folder scope's buttons asked for, done. The panel can't open files itself, and choosing a folder goes
+/// through the registered command.
+fn apply(app: &mut PdfCraftApp, action: Option<Action>, mut result: PanelResult) -> PanelResult {
+    match action {
+        Some(Action::Choose) => result.command = Some("edit.search_folder"),
+        Some(Action::Search) => app.start_folder_search(),
+        Some(Action::Stop) => app.cancel_folder_search(),
+        Some(Action::ThisDocument) => app.folder_search.on = false,
+        Some(Action::Open(path, page)) => app.open_search_result(&path, page),
+        None => {}
     }
     result
 }

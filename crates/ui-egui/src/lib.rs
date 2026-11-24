@@ -181,6 +181,7 @@ use workflows::compare_ui;
 use workflows::create_ui;
 use workflows::export_ui;
 use workflows::files;
+use workflows::folder_search_ui;
 pub(crate) use workflows::job_count::JobCount;
 use workflows::js_dialogs;
 use workflows::js_ui;
@@ -712,6 +713,9 @@ pub struct PdfCraftApp {
     pub white_margins_draft: white_margins_ui::WhiteMarginsDraft,
     pub white_margins_run: Option<white_margins_ui::WhiteMarginsRun>,
     pub(crate) white_margins_jobs: Queue<DocId, Result<pdfcraft_engine::white_margins::WhiteMargins, pdfcraft_engine::EditError>>,
+    /// Edit ▸ Search all PDFs in a folder: the Search panel's Folder scope and its running search.
+    pub folder_search: folder_search_ui::FolderSearch,
+    pub(crate) folder_search_jobs: Queue<(), Result<pdfcraft_engine::folder_search::Summary, String>>,
     /// Pages copied or cut in Organize Pages, ready to paste (into any document).
     pub page_clipboard: Option<PageClip>,
     /// Copied comments (XFDF), to paste into this or another document (M14).

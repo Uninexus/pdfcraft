@@ -264,6 +264,7 @@ impl PdfCraftApp {
             optimize_jobs: queue(&host, &wake, "pdfcraft-optimize"),
             scan_cleans: queue(&host, &wake, "pdfcraft-scan-clean"),
             white_margins_jobs: queue(&host, &wake, "pdfcraft-white-margins"),
+            folder_search_jobs: queue(&host, &wake, "pdfcraft-folder-search"),
             export_jobs: queue(&host, &wake, "pdfcraft-export"),
             font_scan: queue(&host, &wake, "pdfcraft-font-scan"),
             print_tasks: print_ui::PrintTasks::new(host.jobs_shared().clone(), wake.clone()),
@@ -474,6 +475,7 @@ impl PdfCraftApp {
             scan_clean_run: None,
             white_margins_draft: white_margins_ui::WhiteMarginsDraft::default(),
             white_margins_run: None,
+            folder_search: Default::default(),
             page_clipboard: None,
             comment_clipboard: None,
             object_clipboard: None,
@@ -839,6 +841,7 @@ impl PdfCraftApp {
         self.poll_optimize();
         self.poll_scan_clean();
         self.poll_white_margins(ctx);
+        self.poll_folder_search();
         self.poll_action();
         // The OCR Verify screen's runs and re-reads may have finished while no frame was drawn.
         let verify = self.verify_jobs.counts();
