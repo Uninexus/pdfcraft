@@ -342,6 +342,15 @@ pub(crate) fn show(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
     if !app.ai_open {
         return;
     }
+    // Preferences takes over (opened from anywhere, not only this window's button); a question about unsaved work
+    // is answered first, and the window comes back after it.
+    if app.preferences.is_some() {
+        app.ai_open = false;
+        return;
+    }
+    if app.close_guard.is_some() {
+        return;
+    }
     let ctx = ui.ctx().clone();
     app.ai.ask.poll();
     app.ai.plan.poll();

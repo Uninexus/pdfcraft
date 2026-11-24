@@ -82,3 +82,14 @@ fn a_proposal_naming_a_missing_page_is_not_shown() {
     let mut h = harness(2);
     assert!(h.state_mut().ai_propose_for_test("x", &[("rotate_pages", json!({ "pages": [9], "degrees": 90 }))]).is_err());
 }
+
+#[test]
+fn opening_preferences_from_anywhere_closes_the_ai_window() {
+    let mut h = harness(1);
+    assert!(h.execute("ai.ask"));
+    h.run_steps(2);
+    assert!(h.state().ai_open);
+    assert!(h.execute("app.preferences"));
+    h.run_steps(3);
+    assert!(!h.state().ai_open, "two windows are not stacked");
+}
