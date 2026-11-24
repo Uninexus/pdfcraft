@@ -153,9 +153,21 @@ fn cases() -> Vec<Case> {
         },
         Case {
             name: "comment author",
-            page: "Comment",
+            page: "Identity",
             edit: |h| type_into(h, "Name on new comments", "Ada"),
             applied: |a| a.comment_prefs.author == "Ada",
+        },
+        Case {
+            name: "identity email",
+            page: "Identity",
+            edit: |h| type_into(h, "Email", "ada@example.com"),
+            applied: |a| a.identity_email == "ada@example.com",
+        },
+        Case {
+            name: "field tooltips",
+            page: "Forms",
+            edit: |h| click(h, "Show a field's tooltip when the pointer rests on it"),
+            applied: |a| !a.form_tooltips,
         },
         Case {
             name: "date format",

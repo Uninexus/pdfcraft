@@ -370,7 +370,8 @@ pub(crate) fn hover_moved(session: &mut PageSession, now: Option<WidgetRef>) {
 /// would earn, its tooltip (`/TU`, the name the user interface identifies the field by, ISO 32000-2 Table 226, as
 /// Acrobat shows it on hover, #3854) and, when it can be filled, a focus stop. The stops come first in the document's
 /// tab order (each page's `/Tabs`), so the framework's Tab and Shift+Tab follow it. Over the page's text too: a check
-/// box drawn with a glyph, or set on printed text, is a button, not text to select.
+/// box drawn with a glyph, or set on printed text, is a button, not text to select. `field_tips` is Preferences > Forms >
+/// Show a field's tooltip: off, a field shows no tooltip (a signature's verdict still shows).
 pub(crate) fn field_parts(
     session: &PageSession,
     info: &DocInfo,
@@ -378,6 +379,7 @@ pub(crate) fn field_parts(
     page: usize,
     can_fill: bool,
     badge_tips: bool,
+    field_tips: bool,
     geo: PageGeometry<'_>,
 ) -> Vec<PagePart> {
     let Some(xf) = session.page_xform(page, geo) else { return Vec::new() };
@@ -409,7 +411,7 @@ pub(crate) fn field_parts(
             .flatten();
         if let Some(tip) = badge_tip {
             part = part.tip_now(tip);
-        } else if let Some(tip) = f.tooltip.as_deref().filter(|t| !t.trim().is_empty()) {
+        } else if field_tips && let Some(tip) = f.tooltip.as_deref().filter(|t| !t.trim().is_empty()) {
             part = part.tip(tip.to_owned());
         }
         let is_focused = session.forms.focus.as_ref().is_some_and(|x| x.is_on(f, wi));

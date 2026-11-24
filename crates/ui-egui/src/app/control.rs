@@ -57,6 +57,18 @@ impl PdfCraftApp {
             ("single_key_accelerators", _) => {
                 self.single_key_accelerators = value.parse::<bool>().map_err(|_| "single_key_accelerators must be true or false")?;
             }
+            // Preferences > Identity > Email: the contact information of new digital signatures.
+            ("identity-email", _) => self.identity_email = value.trim().chars().take(crate::MAX_AUTHOR_CHARS).collect(),
+            // Preferences > Forms: a field's tooltip on hover, and the Highlight fields colour (`default` follows the theme).
+            ("form-tooltips", _) => {
+                self.form_tooltips = value.parse::<bool>().map_err(|_| "form-tooltips must be true or false")?;
+            }
+            ("field-highlight-color", _) => {
+                self.field_highlight_color = match value {
+                    "default" => None,
+                    hex => Some(hex_colour(hex).ok_or("field-highlight-color must be #RRGGBB or default")?),
+                };
+            }
             // Preferences > Documents and view: the unit lengths are shown in and the paper Create > Blank page uses.
             ("units", _) => {
                 self.units = crate::units::Unit::from_token(value).ok_or("units must be in, mm, cm or pt")?;
@@ -627,4 +639,12 @@ fn side_name<'a>(value: &'a str, key: &str) -> Result<&'a str, String> {
         "left" | "right" => Ok(value),
         _ => Err(format!("{key} must be left or right")),
     }
+}
+
+/// A colour written `#RRGGBB`; `None` for anything else.
+fn hex_colour(text: &str) -> Option<[u8; 3]> {
+    let hex = text.strip_prefix('#').filter(|h| h.len() == 6 && h.bytes().all(|b| b.is_ascii_hexdigit()))?;
+    // All six bytes are ASCII hex digits, so every two-byte slice is on a char boundary.
+    let byte = |i: usize| hex.get(i..i + 2).and_then(|pair| u8::from_str_radix(pair, 16).ok());
+    Some([byte(0)?, byte(2)?, byte(4)?])
 }

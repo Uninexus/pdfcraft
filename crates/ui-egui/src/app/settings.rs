@@ -89,6 +89,12 @@ pub struct Behavior {
     pub blank_paper: Option<String>,
     pub always_default_view: Option<bool>,
     pub highlight_fields: Option<bool>,
+    /// Preferences > Identity > Email, the contact information of new digital signatures.
+    pub identity_email: Option<String>,
+    /// Preferences > Forms: a field's tooltip shows on hover.
+    pub form_tooltips: Option<bool>,
+    /// Preferences > Forms: the Highlight fields colour; absent follows the theme (TOML has no null).
+    pub field_highlight_color: Option<[u8; 3]>,
     pub comments_panel_closed: Option<bool>,
     pub right_panel_closed: Option<bool>,
     /// JSON text: the Scan & OCR choices.
@@ -599,6 +605,9 @@ pub fn import_json(text: &str) -> (PdfCraftSettings, Vec<SectionError>) {
             blank_paper: r.string("blank_paper"),
             always_default_view: r.bool("always_default_view"),
             highlight_fields: r.bool("highlight_fields"),
+            identity_email: r.string("identity_email"),
+            form_tooltips: r.bool("form_tooltips"),
+            field_highlight_color: r.typed("field_highlight_color"),
             comments_panel_closed: r.bool("comments_panel_closed"),
             right_panel_closed: r.bool("right_panel_closed"),
             ocr: r.text("ocr"),

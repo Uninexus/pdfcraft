@@ -893,6 +893,10 @@ struct PageBodyCx<'a> {
     can_copy: bool,
     comments_hidden: bool,
     text_links: bool,
+    /// Preferences > Forms: a field's tooltip shows on hover.
+    form_tooltips: bool,
+    /// Preferences > Forms: the Highlight fields colour; `None` follows the theme.
+    field_highlight_color: Option<[u8; 3]>,
     /// No dialog, close prompt or palette over the pages.
     unobstructed: bool,
     /// Every page's size in view space, unturned by the view (`DocView::page_sizes`).
@@ -1021,7 +1025,7 @@ fn page_parts_of(ui: &mut egui::Ui, body: &PageBody<'_>, session: &mut PageSessi
     if cx.tool == QuickTool::Select && !cx.preparing {
         let can_fill = cx.doc.allows_form_filling();
         for placed in body.pages {
-            parts.extend(crate::forms_ui::field_parts(session, cx.info, cx.doc, placed.page, can_fill, badge_tips, geo));
+            parts.extend(crate::forms_ui::field_parts(session, cx.info, cx.doc, placed.page, can_fill, badge_tips, cx.form_tooltips, geo));
         }
     }
     // The sign tabs of each page, after the fields: a tab is painted over its field.
@@ -1423,6 +1427,9 @@ fn page_body(ui: &mut egui::Ui, body: &PageBody<'_>, callbacks: &mut PageCallbac
         let mut overlays = PageOverlays::new(*page, *xf, cx.doc, page_tabs, &session.compare_marks, &mut session.flash)
             .highlight_fields(session.highlight_fields)
             .guides(cx.guides);
+        if let Some(colour) = cx.field_highlight_color {
+            overlays = overlays.field_color(colour);
+        }
         if let Some(picked) = view_picked.filter(|p| p.page == *page) {
             overlays = overlays.picked(picked.rect);
         }
@@ -1823,6 +1830,8 @@ pub fn document_area_at(app: &mut PdfCraftApp, index: usize, rect: Rect, ui: &mu
         can_copy: doc.allows_copying(),
         comments_hidden: doc.comments_hidden(),
         text_links: app.text_links,
+        form_tooltips: app.form_tooltips,
+        field_highlight_color: app.field_highlight_color,
         unobstructed,
         prefs: &app.comment_prefs,
         redact_hover: (app.redact_prefs.hover_fill, app.redact_prefs.opacity),

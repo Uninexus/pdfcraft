@@ -249,6 +249,9 @@ impl Default for DefaultAppHooks {
     }
 }
 
+/// The colour Highlight fields shows in Preferences > Forms while it follows the theme.
+pub(crate) const FIELD_HIGHLIGHT_DEFAULT: [u8; 3] = [0x6E, 0x8E, 0xF5];
+
 pub struct PdfCraftApp {
     /// The app's services: jobs, files, settings sections, commands. Every queue is built from it.
     pub(crate) host: std::sync::Arc<craft::host::Host>,
@@ -477,6 +480,13 @@ pub struct PdfCraftApp {
     /// Preferences: web and email addresses written as plain page text open on a click, like
     /// links (#4207).
     pub text_links: bool,
+    /// Preferences > Identity > Email: the contact information of new digital signatures. Empty is none. (The name
+    /// is `comment_prefs.author`.)
+    pub identity_email: String,
+    /// Preferences > Forms: show a field's tooltip (its `/TU`) when the pointer rests on it.
+    pub form_tooltips: bool,
+    /// Preferences > Forms: the colour Highlight fields draws over fillable fields; `None` follows the theme.
+    pub field_highlight_color: Option<[u8; 3]>,
     /// Preferences: open every document at Default zoom and Default page display, whatever
     /// layout or zoom it asks for (#1618).
     pub always_default_view: bool,

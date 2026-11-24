@@ -39,6 +39,11 @@
 //!   `guides=on|off` shows or hides the active tab's ruler guides (View > Guides > Show Guides,
 //!   `view.show_guides`); `ui.state.active.show_guides` and `.guides` (how many the document has) report it.
 //!   `comment-tool-pinned=true|false` remembers the annotation quick bar's pin across restarts.
+//!   `identity-email=<address>` sets Preferences > Identity > Email (the contact information of new
+//!   digital signatures), `form-tooltips=true|false` shows or hides a field's tooltip, and
+//!   `field-highlight-color=#RRGGBB|default` sets the colour Highlight fields draws (`default`
+//!   follows the theme); `ui.state` reports `identity_email`, `form_tooltips` and
+//!   `field_highlight_color` (null while it follows the theme).
 //!   `units=in|mm|cm|pt` and `blank-paper=letter|a4` set Preferences > Documents and view > Units
 //!   (the unit page sizes and margins are shown in) and Paper for new blank pages (what Create >
 //!   Blank page uses); `ui.state.units` and `ui.state.blank_paper` report them.

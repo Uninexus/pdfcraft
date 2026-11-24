@@ -183,6 +183,9 @@ impl PdfCraftApp {
             blank_paper: Some(self.blank_paper.token().to_string()),
             always_default_view: Some(self.always_default_view),
             highlight_fields: Some(self.highlight_fields),
+            identity_email: Some(self.identity_email.clone()),
+            form_tooltips: Some(self.form_tooltips),
+            field_highlight_color: self.field_highlight_color,
             comments_panel_closed: Some(self.comments_panel_closed),
             right_panel_closed: Some(self.right_panel_closed),
             ocr: json_text(&self.ocr_draft.to_pref()),
@@ -495,6 +498,16 @@ impl PdfCraftApp {
         }
         if let Some(on) = b.highlight_fields {
             self.highlight_fields = on;
+        }
+        // Settings are untrusted: the email is trimmed and cut like the name.
+        if let Some(email) = b.identity_email.as_deref() {
+            self.identity_email = email.trim().chars().take(MAX_AUTHOR_CHARS).collect();
+        }
+        if let Some(on) = b.form_tooltips {
+            self.form_tooltips = on;
+        }
+        if let Some(colour) = b.field_highlight_color {
+            self.field_highlight_color = Some(colour);
         }
         if let Some(closed) = b.comments_panel_closed {
             self.comments_panel_closed = closed;

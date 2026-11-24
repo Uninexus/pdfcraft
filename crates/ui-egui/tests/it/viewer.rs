@@ -2291,6 +2291,35 @@ fn the_scroll_speed_preference_scales_mouse_wheel_notches() {
 }
 
 #[test]
+fn the_forms_preferences_are_set_kept_and_read_from_the_last_release() {
+    let ctx = egui::Context::default();
+    let mut app = crate::control::new_app();
+    assert!(app.form_tooltips && app.field_highlight_color.is_none(), "tooltips on and the theme's colour until asked");
+    app.set_option(&ctx, "form-tooltips", "false").unwrap();
+    assert!(app.set_option(&ctx, "form-tooltips", "no").unwrap_err().contains("true or false"));
+    app.set_option(&ctx, "field-highlight-color", "#102030").unwrap();
+    for bad in ["102030", "#12345", "#12345G", "#1020304", "blue"] {
+        assert!(app.set_option(&ctx, "field-highlight-color", bad).unwrap_err().contains("#RRGGBB"), "{bad}");
+    }
+    assert_eq!(app.field_highlight_color, Some([0x10, 0x20, 0x30]), "a refused colour changes nothing");
+    let mut again = crate::control::new_app();
+    again.apply_settings(&app.settings_snapshot());
+    assert!(!again.form_tooltips);
+    assert_eq!(again.field_highlight_color, Some([0x10, 0x20, 0x30]), "both survive a restart");
+    again.set_option(&ctx, "field-highlight-color", "default").unwrap();
+    assert!(again.field_highlight_color.is_none());
+    // The last release kept the colour as three whole numbers; anything else keeps the current one.
+    let read = pdfcraft_ui_egui::settings::import_json(r#"{"field_highlight_color": [1, 2, 3], "form_tooltips": false}"#).0;
+    let mut next = crate::control::new_app();
+    next.apply_settings(&read);
+    assert_eq!((next.field_highlight_color, next.form_tooltips), (Some([1, 2, 3]), false));
+    for hostile in [r#"{"field_highlight_color": [1, 2]}"#, r#"{"field_highlight_color": [1, 2, 300]}"#, r#"{"field_highlight_color": "red"}"#] {
+        next.apply_settings(&pdfcraft_ui_egui::settings::import_json(hostile).0);
+        assert_eq!(next.field_highlight_color, Some([1, 2, 3]), "{hostile}");
+    }
+}
+
+#[test]
 fn the_units_and_blank_paper_are_set_reported_and_kept_in_the_settings() {
     use pdfcraft_ui_egui::paper::Paper;
     use pdfcraft_ui_egui::units::Unit;

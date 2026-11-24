@@ -87,6 +87,9 @@ struct PrefsDraft {
     invert_middle_drag: bool,
     single_key_accelerators: bool,
     author: String,
+    identity_email: String,
+    form_tooltips: bool,
+    field_highlight_color: Option<[u8; 3]>,
     hide_empty_highlight_hover: bool,
     comment_tool_pinned: bool,
     flatten_fill_sign_on_save: bool,
@@ -126,6 +129,9 @@ impl PrefsDraft {
             invert_middle_drag: app.invert_middle_drag,
             single_key_accelerators: app.single_key_accelerators,
             author: app.comment_prefs.author.clone(),
+            identity_email: app.identity_email.clone(),
+            form_tooltips: app.form_tooltips,
+            field_highlight_color: app.field_highlight_color,
             hide_empty_highlight_hover: app.comment_prefs.hide_empty_highlight_hover,
             comment_tool_pinned: app.comment_prefs.pinned,
             flatten_fill_sign_on_save: app.flatten_fill_sign_on_save,
@@ -170,6 +176,9 @@ impl PrefsDraft {
             invert_middle_drag: false,
             single_key_accelerators: false,
             author: prefs.author,
+            identity_email: String::new(),
+            form_tooltips: true,
+            field_highlight_color: None,
             hide_empty_highlight_hover: prefs.hide_empty_highlight_hover,
             comment_tool_pinned: prefs.pinned,
             flatten_fill_sign_on_save: false,
@@ -410,7 +419,16 @@ fn date_language_picker_name(ctx: &egui::Context, l: &pdfcraft_engine::dates::Da
 
 impl PreferencesModel for Prefs<'_> {
     fn pages(&self) -> Vec<PageSpec<'_>> {
-        vec![self.general_page(), self.appearance_page(), self.documents_page(), self.comment_page(), self.fill_sign_page(), self.javascript_page()]
+        vec![
+            self.general_page(),
+            self.appearance_page(),
+            self.documents_page(),
+            self.identity_page(),
+            self.comment_page(),
+            self.forms_page(),
+            self.fill_sign_page(),
+            self.javascript_page(),
+        ]
     }
 
     fn set(&mut self, key: &str, value: PrefValue) {
@@ -433,7 +451,6 @@ impl PreferencesModel for Prefs<'_> {
             ("general.recent", PrefValue::Int(v)) => d.recent_limit = usize::try_from(v).unwrap_or(0).min(crate::RECENT_FILES_MAX),
             ("general.title_bar", PrefValue::Bool(v)) => d.system_title_bar = v,
             ("appearance.edge_shadows", PrefValue::Bool(v)) => d.show_page_edge_shadows = v,
-            ("appearance.highlight_fields", PrefValue::Bool(v)) => d.highlight_fields = v,
             ("appearance.reading.mode", PrefValue::Choice(id)) => {
                 if id == "custom" {
                     if d.reading_colors.params.is_none() {
@@ -481,7 +498,11 @@ impl PreferencesModel for Prefs<'_> {
             ("view.scroll_speed", PrefValue::Choice(id)) => d.scroll_speed = lookup(&speed_table(), &id).unwrap_or(d.scroll_speed),
             ("view.invert_middle", PrefValue::Bool(v)) => d.invert_middle_drag = v,
             ("view.single_key", PrefValue::Bool(v)) => d.single_key_accelerators = v,
-            ("comment.author", PrefValue::Text(v)) => d.author = v.chars().take(crate::MAX_AUTHOR_CHARS).collect(),
+            ("identity.name", PrefValue::Text(v)) => d.author = v.chars().take(crate::MAX_AUTHOR_CHARS).collect(),
+            ("identity.email", PrefValue::Text(v)) => d.identity_email = v.chars().take(crate::MAX_AUTHOR_CHARS).collect(),
+            ("forms.highlight", PrefValue::Bool(v)) => d.highlight_fields = v,
+            ("forms.highlight_color", PrefValue::Color(c)) => d.field_highlight_color = Some([c.0[0], c.0[1], c.0[2]]),
+            ("forms.tooltips", PrefValue::Bool(v)) => d.form_tooltips = v,
             ("comment.hide_hover", PrefValue::Bool(v)) => d.hide_empty_highlight_hover = v,
             ("comment.pinned", PrefValue::Bool(v)) => d.comment_tool_pinned = v,
             ("fill.flatten", PrefValue::Bool(v)) => d.flatten_fill_sign_on_save = v,
@@ -583,7 +604,6 @@ impl PreferencesModel for Prefs<'_> {
                 *self.selection = SelectionChange::default();
                 d.show_page_edge_shadows = fresh.show_page_edge_shadows;
                 d.reading_colors = fresh.reading_colors;
-                d.highlight_fields = fresh.highlight_fields;
             }
             "documents" => {
                 d.default_mode = fresh.default_mode;
@@ -598,8 +618,16 @@ impl PreferencesModel for Prefs<'_> {
                 d.invert_middle_drag = fresh.invert_middle_drag;
                 d.single_key_accelerators = fresh.single_key_accelerators;
             }
-            "comment" => {
+            "identity" => {
                 d.author = fresh.author;
+                d.identity_email = fresh.identity_email;
+            }
+            "forms" => {
+                d.highlight_fields = fresh.highlight_fields;
+                d.field_highlight_color = fresh.field_highlight_color;
+                d.form_tooltips = fresh.form_tooltips;
+            }
+            "comment" => {
                 d.hide_empty_highlight_hover = fresh.hide_empty_highlight_hover;
                 d.comment_tool_pinned = fresh.comment_tool_pinned;
             }
@@ -678,6 +706,9 @@ impl PreferencesDraft for Prefs<'_> {
         self.app.invert_middle_drag = d.invert_middle_drag;
         self.app.single_key_accelerators = d.single_key_accelerators;
         self.app.comment_prefs.author = d.author;
+        self.app.identity_email = d.identity_email.trim().chars().take(crate::MAX_AUTHOR_CHARS).collect();
+        self.app.form_tooltips = d.form_tooltips;
+        self.app.field_highlight_color = d.field_highlight_color;
         self.app.comment_prefs.hide_empty_highlight_hover = d.hide_empty_highlight_hover;
         self.app.comment_prefs.pinned = d.comment_tool_pinned;
         self.app.blank_paper = d.blank_paper;
@@ -791,10 +822,7 @@ impl Prefs<'_> {
             RowSpec::new("appearance.reading.line_art", tl!("Change the colour of line art as well as text"), RowKind::Bool(line_art))
                 .enabled(custom),
         ];
-        let display = vec![
-            RowSpec::new("appearance.edge_shadows", tl!("Show Page Edge Shadows"), RowKind::Bool(d.show_page_edge_shadows)),
-            RowSpec::new("appearance.highlight_fields", tl!("Highlight fields"), RowKind::Bool(d.highlight_fields)),
-        ];
+        let display = vec![RowSpec::new("appearance.edge_shadows", tl!("Show Page Edge Shadows"), RowKind::Bool(d.show_page_edge_shadows))];
         PageSpec::custom("appearance", tl_ctx!("theme", "Appearance"))
             .group(GroupSpec::new(None, display))
             .group(GroupSpec::new(Some(tl!("Reading colours")), reading))
@@ -833,10 +861,36 @@ impl Prefs<'_> {
         PageSpec::new("documents", tl!("Documents and view"), rows)
     }
 
+    fn identity_page(&self) -> PageSpec<'_> {
+        let d = &*self.draft;
+        let rows = vec![
+            RowSpec::new("identity.name", tl!("Name on new comments"), RowKind::Text(d.author.as_str()))
+                .help(tl!("Also the text a typed signature starts from. It starts as your login name.")),
+            RowSpec::new("identity.email", tl!("Email"), RowKind::Text(d.identity_email.as_str()))
+                .help(tl!("Written as the contact information of digital signatures you add.")),
+        ];
+        PageSpec::new("identity", tl!("Identity"), rows)
+    }
+
+    fn forms_page(&self) -> PageSpec<'_> {
+        let d = &*self.draft;
+        let rows = vec![
+            RowSpec::new("forms.highlight", tl!("Highlight fields"), RowKind::Bool(d.highlight_fields))
+                .help(tl!("The same setting as the toggle in the form bar. It applies to documents opened from now on.")),
+            RowSpec::new(
+                "forms.highlight_color",
+                tl!("Highlight colour"),
+                RowKind::Color(rgb(d.field_highlight_color.unwrap_or(crate::FIELD_HIGHLIGHT_DEFAULT))),
+            )
+            .help(tl!("Drawn over fields you can fill in. Reset this page to follow the theme again.")),
+            RowSpec::new("forms.tooltips", tl!("Show a field's tooltip when the pointer rests on it"), RowKind::Bool(d.form_tooltips)),
+        ];
+        PageSpec::new("forms", tl!("Forms"), rows)
+    }
+
     fn comment_page(&self) -> PageSpec<'_> {
         let d = &*self.draft;
         let rows = vec![
-            RowSpec::new("comment.author", tl!("Name on new comments"), RowKind::Text(d.author.as_str())),
             RowSpec::new(
                 "comment.hide_hover",
                 tl!("Hide hover previews for highlights without comment text"),
