@@ -6,7 +6,7 @@
 //! recipient it is labelled for, the signature fields with none, the labels that name nobody in the plan beside the file
 //! and the plan's signers who have no field. Both change nothing in the document, send nothing and sign nothing.
 
-use craft::ui::contract::{Bind, Props as _, Show as _, ShowContainer as _};
+use craft::ui::contract::{Bind, Show as _, ShowContainer as _};
 use craft::ui::dialog::Dialog;
 use craft::ui::display::{Shade, Text};
 use craft::ui::sections::{DialogRole, FooterButton};

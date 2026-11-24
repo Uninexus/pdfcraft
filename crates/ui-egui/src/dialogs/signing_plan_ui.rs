@@ -319,7 +319,8 @@ impl PdfCraftApp {
                 );
             }
             _ => {
-                return self.notify_fmt("More than one unsigned signature field is labelled for {who}: only one can be signed here", &[("who", &who)]);
+                return self
+                    .notify_fmt("More than one unsigned signature field is labelled for {who}: only one can be signed here", &[("who", &who)]);
             }
         };
         if let Some(view) = self.views.get_mut(index) {

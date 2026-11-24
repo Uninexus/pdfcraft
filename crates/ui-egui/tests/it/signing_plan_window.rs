@@ -12,7 +12,7 @@ use pdfcraft_engine::signing_plan::{Plan, Role as PlanRole, Status, plan_bytes, 
 use pdfcraft_ui_egui::PdfCraftApp;
 
 fn fixture() -> Vec<u8> {
-    let mut session = Session::new();
+    let session = Session::new();
     let bytes = session.create_blank(300.0, 400.0, 1).unwrap();
     bytes.as_ref().clone()
 }
@@ -33,8 +33,8 @@ fn harness(path: Option<String>) -> Harness<'static, PdfCraftApp> {
 }
 
 /// A saved document in its own folder, and the window open on it.
-fn saved() -> (tempfile::TempDir, PathBuf, Harness<'static, PdfCraftApp>) {
-    let dir = tempfile::tempdir().unwrap();
+fn saved() -> (crate::support::TempDir, PathBuf, Harness<'static, PdfCraftApp>) {
+    let dir = crate::support::TempDir::new().unwrap();
     let pdf = dir.path().join("contract.pdf");
     std::fs::write(&pdf, fixture()).unwrap();
     let h = harness(Some(pdf.to_string_lossy().into_owned()));
@@ -229,7 +229,7 @@ fn a_recorded_step_is_asked_for_first_and_then_locks_the_plan() {
 #[test]
 fn signing_as_the_next_recipient_opens_signing_on_the_field_labelled_for_them() {
     use pdfcraft_engine::{Edit, NewField};
-    let dir = tempfile::tempdir().unwrap();
+    let dir = crate::support::TempDir::new().unwrap();
     let pdf = dir.path().join("contract.pdf");
     let mut session = Session::new();
     let bytes = session.create_blank(300.0, 400.0, 1).unwrap();

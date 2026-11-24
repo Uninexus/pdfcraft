@@ -322,6 +322,30 @@ pub fn right(app: &PdfCraftApp) -> Option<RightPanel> {
 }
 
 /// Whether the dialog host holds a dialog.
+/// A folder of its own under the system temp directory, removed when dropped (std only).
+pub struct TempDir(std::path::PathBuf);
+
+impl TempDir {
+    pub fn new() -> Self {
+        static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!("pdfcraft-it-{}-{n}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&path);
+        std::fs::create_dir_all(&path).unwrap();
+        TempDir(path)
+    }
+
+    pub fn path(&self) -> &std::path::Path {
+        &self.0
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
 pub fn dialog_open(h: &Harness<'_, PdfCraftApp>) -> bool {
     !h.state().dialogs.is_empty()
 }

@@ -5,7 +5,7 @@
 use crate::support::{AppHarness as _, shown_notice};
 use egui::accesskit::Role;
 use egui_kittest::Harness;
-use egui_kittest::kittest::{NodeT as _, Queryable};
+use egui_kittest::kittest::Queryable};
 use pdfcraft_engine::signing_plan::{Plan, Role as PlanRole, plan_bytes};
 use pdfcraft_engine::{Edit, NewField, Session};
 use pdfcraft_ui_egui::PdfCraftApp;
@@ -40,8 +40,8 @@ fn harness(path: Option<String>) -> Harness<'static, PdfCraftApp> {
 }
 
 /// The document with a signing plan of Ann (signer), Bob (viewer) beside its file.
-fn with_plan() -> (tempfile::TempDir, Harness<'static, PdfCraftApp>) {
-    let dir = tempfile::tempdir().unwrap();
+fn with_plan() -> (crate::support::TempDir, Harness<'static, PdfCraftApp>) {
+    let dir = crate::support::TempDir::new().unwrap();
     let pdf = dir.path().join("signer.pdf");
     std::fs::write(&pdf, fixture()).unwrap();
     let mut plan = Plan::empty(1);
