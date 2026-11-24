@@ -1809,10 +1809,7 @@ fn comment_summary_is_unavailable_in_a_booklet_and_starts_off_each_job() {
     assert!(!h.state().print_draft.comment_summary, "a greyed-out ticked box can't apply");
     assert!(h.state().print_draft.comment_summary_blocked().is_some_and(|r| r.contains("Booklet")));
     assert!(h.has_note("note.comment_summary"), "the reason is shown");
-    assert!(
-        h.query_by(|n| n.label().as_deref() == Some("Include a summary of the comments") && n.is_disabled()).is_some(),
-        "no place for it in a booklet"
-    );
+    assert!(h.query_all_by_label("Include a summary of the comments").any(|n| n.accesskit_node().is_disabled()), "no place for it in a booklet");
     // Back to a layout it fits, ticked again, then the dialog is opened afresh.
     h.set("handling", json!("size"));
     h.set("comment_summary", json!(true));

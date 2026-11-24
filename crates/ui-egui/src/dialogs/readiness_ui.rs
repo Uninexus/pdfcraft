@@ -8,6 +8,7 @@ use craft::ui::contract::{Bind, Props as _, Show as _, ShowContainer as _};
 use craft::ui::dialog::Dialog;
 use craft::ui::display::{Shade, Text};
 use craft::ui::notices::{Notice, NoticeLayout};
+use craft::ui::runtime::focus;
 use craft::ui::sections::{DialogRole, FooterButton};
 use craft::ui::style::TypeRole;
 use craft::ui::text::{SelectableText, TextField};
@@ -386,7 +387,13 @@ fn options_body(ui: &mut egui::Ui, text: &mut [String; 3], refused: &[Option<Str
         let default = field.default_value().to_string();
         let edit = TextField::new(field.label(), Bind::bound(&mut text[at])).placeholder(default.clone()).submits().show(ui);
         events.typed[at] = text[at] != before;
-        events.apply[at] = edit.submitted || edit.response.lost_focus();
+        // The focus is on the field's text part, which `focus::is_focused` counts as the field; the response alone
+        // does not report the field losing it.
+        let had_focus_key = egui::Id::new(("readiness-field-focus", at));
+        let has_focus = focus::is_focused(ui.ctx(), edit.response.id);
+        let had_focus = ui.ctx().data_mut(|d| d.get_temp::<bool>(had_focus_key).unwrap_or(false));
+        ui.ctx().data_mut(|d| d.insert_temp(had_focus_key, has_focus));
+        events.apply[at] = edit.submitted || edit.response.lost_focus() || (had_focus && !has_focus);
         match &refused[at] {
             Some(why) => Text::new(why.clone()).role(TypeRole::Caption).tone(Tone::Bad).show(ui),
             None => {
