@@ -11,6 +11,7 @@ pub(super) mod convert_colours_ui;
 pub(crate) mod duplicate_field;
 pub(super) mod hairlines_ui;
 pub(crate) mod host;
+pub(super) mod javascripts_ui;
 pub(super) mod marks_ui;
 pub(crate) mod page_dialogs;
 pub(crate) mod page_props;

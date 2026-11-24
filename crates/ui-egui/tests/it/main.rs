@@ -50,6 +50,7 @@ mod fonts;
 mod forms;
 mod identity;
 mod javascript;
+mod javascripts_window;
 mod layer_actions;
 mod legacy_settings;
 mod links;

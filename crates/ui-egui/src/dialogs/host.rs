@@ -41,6 +41,7 @@ fn windows(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
     app.password_pass(ui);
     crate::workflows::js_dialogs::show(app, ui);
     super::readiness_ui::show(app, ui);
+    super::javascripts_ui::show(app, ui);
     crate::redact_ui::dialogs::show_props(app, ui);
     crate::redact_ui::dialogs::show_search(app, ui);
     crate::redact_ui::dialogs::show_hidden(app, ui);

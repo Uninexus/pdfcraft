@@ -146,7 +146,9 @@ impl crate::PdfCraftApp {
                 .last()
                 .and_then(|d| d.key.clone())
                 .or_else(|| self.preferences.is_some().then(|| "preferences".to_string()))
-                .or_else(|| self.shortcuts.is_some().then(|| "shortcuts".to_string())),
+                .or_else(|| self.shortcuts.is_some().then(|| "shortcuts".to_string()))
+                .or_else(|| self.javascripts_open.then(|| "javascripts".to_string())),
+            "javascripts": self.javascripts_draft.state(self.javascripts_open, crate::javascripts_ui::read_only(self)),
             "palette_open": self.palette_open,
             "theme": format!("{:?}", self.root_env(ctx).resolved(ctx).mode),
             "theme_preference": format!("{:?}", self.theme_preference),

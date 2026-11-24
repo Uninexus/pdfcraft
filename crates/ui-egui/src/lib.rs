@@ -121,6 +121,7 @@ pub use dialogs::bookmark_styles_ui;
 use dialogs::comment_props;
 use dialogs::convert_colours_ui;
 use dialogs::hairlines_ui;
+use dialogs::javascripts_ui;
 use dialogs::marks_ui;
 use dialogs::pageboxes;
 use dialogs::printer_marks_ui;
@@ -634,6 +635,10 @@ pub struct PdfCraftApp {
     pub readiness_options: readiness_ui::ReadinessOptions,
     /// What the dialog's three fields hold as typed.
     pub readiness_edit: readiness_ui::ReadinessEdit,
+    /// Edit ▸ JavaScripts is open (`dialogs::javascripts_ui`).
+    pub javascripts_open: bool,
+    /// Its list, filters and the script being edited.
+    pub(crate) javascripts_draft: javascripts_ui::Draft,
     /// The JavaScript console.
     pub js_console: js_ui::JsConsole,
     #[cfg(not(target_arch = "wasm32"))]

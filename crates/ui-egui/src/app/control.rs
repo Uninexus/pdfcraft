@@ -74,6 +74,31 @@ impl PdfCraftApp {
                 let setting = field.parse(value).map_err(|_| field.key_error())?;
                 self.set_readiness_option(field, setting)?;
             }
+            ("javascripts-filter" | "javascripts-kind" | "javascripts-select", _) => {
+                // The JavaScripts window's own controls, for an agent that has opened it.
+                if !self.javascripts_open {
+                    return Err(format!("{key} needs the JavaScripts window: ui.set dialog=javascripts first"));
+                }
+                crate::javascripts_ui::sync(self);
+                let d = &mut self.javascripts_draft;
+                match key {
+                    "javascripts-filter" => d.set_filter(value),
+                    "javascripts-kind" => d.set_kind(match value {
+                        "all" => None,
+                        k => Some(pdfcraft_engine::JavaScriptKind::from_id(k).ok_or(
+                            "javascripts-kind must be all, document, open_action, document_action, field, link, annotation, page or bookmark",
+                        )?),
+                    }),
+                    _ => {
+                        if d.dirty() {
+                            return Err("the editor has unsaved changes: apply them or discard them first (ui.state javascripts.dirty)".into());
+                        }
+                        if !d.select_id(value) {
+                            return Err(format!("no script {value:?} in the list (ui.state javascripts.entries)"));
+                        }
+                    }
+                }
+            }
             ("animation_effects", _) => {
                 // PLAN: assumed `crate::settings::motion_from_name(&str) -> Option<MotionChoice>` and `set_motion(&mut self, MotionChoice)`, which writes the field and the store (pdf-shell-w9).
                 // The control channel and the command line take the names in any case, as before the port.
@@ -518,6 +543,10 @@ impl PdfCraftApp {
             "enhance-scan" => self.open_enhance_scan(ctx),
             "js-console" => crate::js_dialogs::open_console(self),
             "document-js" => crate::js_dialogs::open_document_scripts(self),
+            // Through the command, so it is refused with no document open, as the menu is.
+            "javascripts" => {
+                self.execute(ctx, "tools.javascripts");
+            }
             "preferences" => self.open_preferences(),
             "compare-files" => crate::compare_ui::open_compare_dialog(self, ctx),
             "action-wizard" => crate::actions_ui::open_wizard(self, ctx, None),

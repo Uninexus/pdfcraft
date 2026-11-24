@@ -436,6 +436,8 @@ impl PdfCraftApp {
             compare_ignore_punctuation: false,
             compare: None,
             readiness_open: false,
+            javascripts_open: false,
+            javascripts_draft: Default::default(),
             readiness_report: None,
             readiness_options: Default::default(),
             readiness_edit: Default::default(),
@@ -631,6 +633,7 @@ impl PdfCraftApp {
             || self.cert_viewer.is_some()
             || self.js_dialog.is_some()
             || self.readiness_open
+            || self.javascripts_open
             || self.comment_props.is_some()
             || self.stamp_dialog.is_some()
     }
