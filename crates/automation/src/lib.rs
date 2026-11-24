@@ -16,6 +16,7 @@
 
 mod a11y;
 mod ai;
+mod ai_edit;
 mod batch;
 mod bates;
 mod comments;

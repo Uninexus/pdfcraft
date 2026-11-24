@@ -32,7 +32,7 @@ const MAX_FIGURES: usize = 100;
 const MAX_PAGES: usize = 200;
 
 impl Automation {
-    fn ai_config(&self, a: &Args) -> Result<AiConfig> {
+    pub(crate) fn ai_config(&self, a: &Args) -> Result<AiConfig> {
         let given = |key: &str| -> Result<Option<String>> { Ok(a.opt_str(key)?.map(|s| s.trim().to_owned()).filter(|s| !s.is_empty())) };
         let provider = match given("provider")? {
             Some(p) => pdfcraft_ai::Provider::parse(&p).ok_or_else(|| failed("provider must be \"endpoint\" or \"chatgpt\""))?,
