@@ -226,6 +226,23 @@ fn header_and_footer_dialog_can_shrink_the_page_content() {
 }
 
 #[test]
+fn remove_bates_numbering_takes_the_number_off_and_then_is_unavailable() {
+    use pdfcraft_engine::{Edit, HeaderFooter};
+    let mut h = harness();
+    assert!(!h.execute("edit.bates_remove"), "nothing to remove yet");
+    let mut hf = HeaderFooter::default();
+    hf.text[5] = "<<Bates Number#6#1##>>".into();
+    let ctx = h.ctx.clone();
+    assert!(h.state_mut().apply_edit(&ctx, Edit::AddHeaderFooter { pages: vec![0, 1, 2], settings: hf, replace: false }));
+    h.steps(2);
+    assert_eq!(marks(&h), [MarkKind::Bates], "a Bates number is a mark of its own");
+    assert!(h.execute("edit.bates_remove"));
+    h.steps(2);
+    assert!(marks(&h).is_empty(), "the number is gone");
+    assert!(!h.execute("edit.bates_remove"), "nothing left to remove");
+}
+
+#[test]
 fn watermark_and_background_dialogs() {
     let mut h = harness();
     h.execute("edit.watermark");

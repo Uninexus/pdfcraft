@@ -744,10 +744,11 @@ impl PdfCraftApp {
                 self.open_marks(ctx, pdfcraft_engine::MarkKind::HeaderFooter, false);
             }
             "prepress.marks" => self.open_printer_marks(ctx),
-            "edit.header_footer.remove" | "edit.watermark.remove" | "edit.background.remove" | "prepress.marks.remove" => {
+            "edit.header_footer.remove" | "edit.bates_remove" | "edit.watermark.remove" | "edit.background.remove" | "prepress.marks.remove" => {
                 use pdfcraft_engine::MarkKind as K;
                 let kind = match id {
                     "edit.header_footer.remove" => K::HeaderFooter,
+                    "edit.bates_remove" => K::Bates,
                     "edit.watermark.remove" => K::Watermark,
                     "prepress.marks.remove" => K::PrinterMarks,
                     _ => K::Background,
