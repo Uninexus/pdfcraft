@@ -443,6 +443,11 @@ pub(crate) fn field_parts(
         let is_focused = session.forms.focus.as_ref().is_some_and(|x| x.is_on(f, wi));
         if in_order.contains(&(fi, wi)) || is_focused {
             part = part.focusable();
+            // A press opens a text field's editor, which takes the keys from the part in the next pass: the press
+            // takes the focus to the part, also when it comes from another field's editor.
+            if f.kind == FormFieldKind::Text && usable(f, w, can_fill) {
+                part = part.takes_focus();
+            }
         }
         Some(part)
     };
@@ -499,17 +504,7 @@ pub(crate) fn field_press(
                 }
             }
         }
-        PressPhase::Release { pos, click, .. } => {
-            if *click {
-                clicked(session, doc, info, allowed, (f, w, wi), (press.page, *pos, press.mods), geo);
-            }
-            // A press that leaves an open field's editor releases the key focus at the end of its pass (the part
-            // senses no focus of its own), after this field's part handed it to the editor the press opened: the
-            // editor shows, but the typing reaches nothing. The release hands the keys to it again, as Tab does.
-            if f.kind == FormFieldKind::Text && usable && session.forms.focus.as_ref().is_some_and(|x| x.is_on(f, wi)) {
-                session.forms.refocus = true;
-            }
-        }
+        PressPhase::Release { pos, click: true, .. } => clicked(session, doc, info, allowed, (f, w, wi), (press.page, *pos, press.mods), geo),
         _ => {}
     }
 }
