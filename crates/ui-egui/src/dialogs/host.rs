@@ -90,6 +90,9 @@ fn results(app: &mut PdfCraftApp, ctx: &egui::Context) {
     if let Some(fields) = param_ok(app, "redact.pages") {
         crate::redact_ui::dialogs::finish_pages(ctx, app, &fields);
     }
+    if let Some(fields) = param_ok(app, super::field_copies_ui::KEY) {
+        super::field_copies_ui::finish(ctx, app, &fields);
+    }
     if let Some(fields) = param_ok(app, "form.duplicate_field") {
         super::duplicate_field::finish(ctx, app, &fields);
     }
@@ -99,6 +102,7 @@ fn results(app: &mut PdfCraftApp, ctx: &egui::Context) {
     app.print_pass(ctx);
     app.recognize_text_pass(ctx);
     app.enhance_scan_pass(ctx);
+    app.white_margins_pass(ctx);
     // Workflows.
     crate::optimize_ui::pass(app, ctx);
     crate::create_ui::pass(app);

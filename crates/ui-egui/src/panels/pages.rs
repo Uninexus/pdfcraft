@@ -12,7 +12,7 @@ use craft::ui::style::DataColor;
 /// runs its command on the selected pages (the current page when none is), so it does what Pages ▸ … does.
 pub(super) fn tools_menu(_app: &PdfCraftApp) -> Vec<PanelRow> {
     // The commands are enabled by the catalog's own gate (`doc.allows_assembly()`, no dialog).
-    ["page.insert_blank", "page.insert", "page.rotate_ccw", "page.rotate", "page.extract", "page.delete"]
+    ["page.insert_blank", "page.insert", "page.insert_clipboard", "page.rotate_ccw", "page.rotate", "page.extract", "page.delete"]
         .into_iter()
         .map(|id| PanelRow::Command(CommandRef::new(id)))
         .collect()

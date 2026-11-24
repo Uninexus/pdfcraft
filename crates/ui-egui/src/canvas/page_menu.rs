@@ -55,6 +55,8 @@ pub(crate) struct PageMenuPerms {
 pub(crate) enum FieldMenu {
     Properties,
     Duplicate(String),
+    /// Create Multiple Copies: the field is copied into a grid.
+    Copies(String),
 }
 
 /// What a row of the default menu does when picked.
@@ -266,7 +268,10 @@ fn field_rows(
         pick.field = Some(FieldMenu::Properties);
     }
     if MenuItem::new(tl!("Duplicate…").to_string()).enabled(can_modify).show(ui).ran {
-        pick.field = Some(FieldMenu::Duplicate(name));
+        pick.field = Some(FieldMenu::Duplicate(name.clone()));
+    }
+    if MenuItem::new(tl!("Create Multiple Copies…").to_string()).enabled(can_modify).show(ui).ran {
+        pick.field = Some(FieldMenu::Copies(name));
     }
     Divider::horizontal().show(ui);
     let delete = if view.session.prepare.also.is_empty() { "Delete" } else { "Delete selected fields" };

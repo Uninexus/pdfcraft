@@ -2166,8 +2166,10 @@ fn apply_frame_requests(app: &mut PdfCraftApp, ctx: &egui::Context, index: usize
     if let Some((name, w)) = field_props {
         crate::prepare::dialog::open(app, &name, w, crate::prepare::FieldTab::General);
     }
-    if let Some(FieldMenu::Duplicate(name)) = field_menu {
-        crate::dialogs::duplicate_field::open(app, ctx, name);
+    match field_menu {
+        Some(FieldMenu::Duplicate(name)) => crate::dialogs::duplicate_field::open(app, ctx, name),
+        Some(FieldMenu::Copies(name)) => crate::dialogs::field_copies_ui::open(app, ctx, name),
+        Some(FieldMenu::Properties) | None => {}
     }
     if let Some((page, rect)) = app.views[index].session.links.open_new.take() {
         app.open_link_props(page, Some(rect), None);

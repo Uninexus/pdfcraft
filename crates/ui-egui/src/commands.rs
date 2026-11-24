@@ -671,6 +671,7 @@ impl PdfCraftApp {
                 }
             }
             "page.insert" => self.insert_from_file_dialog(),
+            "page.insert_clipboard" => self.insert_from_clipboard(ctx),
             "page.replace" => self.replace_pages_dialog(),
             "page.copy" => self.copy_pages(ctx, false),
             "page.cut" => self.copy_pages(ctx, true),
@@ -692,6 +693,7 @@ impl PdfCraftApp {
                 self.notify_tr("Drag a rectangle on a page to crop it; double-click a page for Set Page Boxes");
             }
             "page.boxes" => self.open_page_boxes(ctx, false),
+            "page.remove_white_margins" => self.open_white_margins(ctx),
             "page.extract" => self.open_extract(ctx),
             "page.rotate_dialog" => self.open_rotate(ctx),
             "page.split" => self.open_split(ctx, false),

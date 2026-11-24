@@ -195,6 +195,7 @@ use workflows::print_paper;
 use workflows::print_ui;
 use workflows::scan_clean_ui;
 use workflows::web_print;
+use workflows::white_margins_ui;
 
 /// A background job queue of the app, built over the host's jobs and the app's wake.
 type Queue<K, R> = craft::host::queue::JobQueue<K, R>;
@@ -710,6 +711,10 @@ pub struct PdfCraftApp {
     pub scan_clean_draft: scan_clean_ui::ScanCleanDraft,
     pub scan_clean_run: Option<scan_clean_ui::ScanCleanRun>,
     pub(crate) scan_cleans: Queue<DocId, Result<pdfcraft_engine::scan_clean::ScanCleaned, pdfcraft_engine::EditError>>,
+    /// Pages ▸ Remove white margins: the dialog's choices and the running measurement.
+    pub white_margins_draft: white_margins_ui::WhiteMarginsDraft,
+    pub white_margins_run: Option<white_margins_ui::WhiteMarginsRun>,
+    pub(crate) white_margins_jobs: Queue<DocId, Result<pdfcraft_engine::white_margins::WhiteMargins, pdfcraft_engine::EditError>>,
     /// Pages copied or cut in Organize Pages, ready to paste (into any document).
     pub page_clipboard: Option<PageClip>,
     /// Copied comments (XFDF), to paste into this or another document (M14).

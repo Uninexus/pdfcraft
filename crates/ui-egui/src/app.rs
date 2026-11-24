@@ -6,7 +6,7 @@ use super::{APP_INFO, PendingDestination, PendingOpen, UPDATE_APP, open_worker, 
 use super::{
     CommentClip, DocId, DocView, PdfCraftApp, PrintDraft, PropsTab, RedactPrefs, RedactSearchDraft, Session, a11y_ui, actions_ui, canvas, chrome,
     combine_ui, comments, content_ui, dialogs, edit_text_ui, export_ui, fill_sign, i18n, measure_ui, object_ui, ocr_ui, ocr_verify, panes, persist,
-    prepare, print_paper, print_ui, rename_ui, scan_clean_ui, scroll_speed, side_panels, sign_ui, stamps_ui, ui_scale, workflows,
+    prepare, print_paper, print_ui, rename_ui, scan_clean_ui, scroll_speed, side_panels, sign_ui, stamps_ui, ui_scale, white_margins_ui, workflows,
 };
 
 use std::hash::Hash;
@@ -263,6 +263,7 @@ impl PdfCraftApp {
             space_audit_jobs: queue(&host, &wake, "pdfcraft-space-audit"),
             optimize_jobs: queue(&host, &wake, "pdfcraft-optimize"),
             scan_cleans: queue(&host, &wake, "pdfcraft-scan-clean"),
+            white_margins_jobs: queue(&host, &wake, "pdfcraft-white-margins"),
             export_jobs: queue(&host, &wake, "pdfcraft-export"),
             font_scan: queue(&host, &wake, "pdfcraft-font-scan"),
             print_tasks: print_ui::PrintTasks::new(host.jobs_shared().clone(), wake.clone()),
@@ -472,6 +473,8 @@ impl PdfCraftApp {
             optimize_run: None,
             scan_clean_draft: scan_clean_ui::ScanCleanDraft::default(),
             scan_clean_run: None,
+            white_margins_draft: white_margins_ui::WhiteMarginsDraft::default(),
+            white_margins_run: None,
             page_clipboard: None,
             comment_clipboard: None,
             object_clipboard: None,
@@ -836,6 +839,7 @@ impl PdfCraftApp {
         self.poll_ocr(ctx);
         self.poll_optimize();
         self.poll_scan_clean();
+        self.poll_white_margins(ctx);
         self.poll_action();
         // The OCR Verify screen's runs and re-reads may have finished while no frame was drawn.
         let verify = self.verify_jobs.counts();
