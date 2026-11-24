@@ -652,6 +652,8 @@ impl PdfCraftApp {
             "bookmark.add" => self.bookmark_action(ctx, crate::panels::BmAction::New),
             "bookmark.from_structure" => self.bookmark_action(ctx, crate::panels::BmAction::FromStructure),
             "bookmark.from_text_styles" => self.bookmark_action(ctx, crate::panels::BmAction::FromTextStyles),
+            "bookmark.export" => self.bookmark_action(ctx, crate::panels::BmAction::Export(Vec::new())),
+            "bookmark.import" => self.bookmark_action(ctx, crate::panels::BmAction::Import { parent: Vec::new(), index: usize::MAX }),
             "page.organize" => {
                 if let Some(v) = active.and_then(|i| self.views.get_mut(i)) {
                     if v.organize {

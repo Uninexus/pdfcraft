@@ -462,6 +462,9 @@ pub const COMMANDS: &[CommandSpec] = &[
     c("bookmark.from_structure", "New bookmarks from structure", PAGES, None, Assembly, "list"),
     // Bookmarks from the lines set in chosen text styles, for headings that aren't tagged (#1693).
     c("bookmark.from_text_styles", "New bookmarks from text styles…", PAGES, None, Assembly, "list"),
+    // The Bookmarks panel's options menu: the whole tree out as a JSON file, and a bookmark file in at the end.
+    c("bookmark.export", "Export Bookmarks…", None, None, Document, "file-output"),
+    c("bookmark.import", "Import Bookmarks…", None, None, Assembly, "file-input"),
     c("page.rotate", "Rotate pages clockwise", PAGES, None, Assembly, "rotate_cw"),
     c("page.rotate_ccw", "Rotate pages counterclockwise", PAGES, None, Assembly, "rotate_ccw"),
     c("page.delete", "Delete pages", PAGES, None, Assembly, "trash-2"),
