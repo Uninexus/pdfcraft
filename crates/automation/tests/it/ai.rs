@@ -387,43 +387,35 @@ fn open(tag: &str) -> (Automation, u64) {
 #[test]
 fn a_plan_proposes_edits_and_changes_nothing() {
     let (mut a, doc) = open("plan");
-    let reply = r#"Sure: {"message":"Rotating page 1.","calls":[{"tool":"page_rotate","args":{"pages":[1],"degrees":90},"why":"as asked"}]}"#;
+    let reply = r#"Sure: {"message":"Rotating page 1.","calls":[{"tool":"rotate_pages","args":{"pages":[1],"degrees":90},"why":"as asked"}]}"#;
     let (url, reqs) = sequence(vec![reply.into()]);
     let out = json_of(a.call("ai_edit_plan", &json!({ "doc": doc, "instruction": "rotate page 1", "base_url": url, "model": "m" })).unwrap());
-    assert_eq!(out["steps"][0]["tool"], "page_rotate");
+    assert_eq!(out["steps"][0]["tool"], "rotate_pages");
     assert_eq!(out["steps"][0]["args"], json!({ "pages": [1], "degrees": 90 }));
     assert_eq!(out["steps"][0]["why"], "as asked");
+    assert_eq!(out["steps"][0]["destructive"], false);
     let req = reqs.join().unwrap().remove(0);
-    assert!(req.contains("page_rotate") && req.contains("Invoice total 42") && req.contains("rotate page 1"), "{req}");
+    assert!(req.contains("rotate_pages") && req.contains("Invoice total 42") && req.contains("rotate page 1"), "{req}");
     // The model's proposal never touched the document.
     let s = json_of(a.call("doc_list", &json!({})).unwrap());
     assert_eq!(s["documents"][0]["dirty"], false);
 }
 
 #[test]
-fn a_plan_lets_the_model_look_first_and_returns_what_it_saw() {
-    let (mut a, doc) = open("look");
-    let look = r#"{"message":"","calls":[{"tool":"text_find","args":{"query":"Invoice"}}]}"#;
-    let act = r#"{"message":"done","calls":[{"tool":"page_rotate","args":{"pages":[1],"degrees":180}}]}"#;
-    let (url, reqs) = sequence(vec![look.into(), act.into()]);
-    let out = json_of(
-        a.call("ai_edit_plan", &json!({ "doc": doc, "instruction": "turn the invoice page upside down", "base_url": url, "model": "m" })).unwrap(),
-    );
-    assert_eq!(out["steps"].as_array().unwrap().len(), 1);
-    assert_eq!(out["looked_at"][0]["tool"], "text_find");
-    let second = &reqs.join().unwrap()[1];
-    assert!(second.contains("text_find ->"), "the model should get the find result back: {second}");
-}
-
-#[test]
-fn a_plan_refuses_tools_outside_the_allow_list_after_asking_the_model_to_retry() {
+fn a_plan_asks_again_when_the_model_names_a_call_that_is_not_allowed() {
     let (mut a, doc) = open("deny");
     let bad = r#"{"message":"","calls":[{"tool":"doc_save","args":{"path":"x.pdf"}}]}"#;
+    let good = r#"{"message":"I cannot save.","calls":[]}"#;
+    let (url, reqs) = sequence(vec![bad.into(), good.into()]);
+    let out = json_of(a.call("ai_edit_plan", &json!({ "doc": doc, "instruction": "save it", "base_url": url, "model": "m" })).unwrap());
+    assert_eq!(out["steps"], json!([]));
+    let seen = reqs.join().unwrap();
+    assert!(seen[1].contains("could not be used") && seen[1].contains("doc_save"));
+
     let (url, reqs) = sequence(vec![bad.into(), bad.into(), bad.into()]);
     let e = a.call("ai_edit_plan", &json!({ "doc": doc, "instruction": "save it", "base_url": url, "model": "m" })).unwrap_err().to_string();
     assert!(e.contains("doc_save"), "{e}");
-    let seen = reqs.join().unwrap();
-    assert!(seen[1].contains("could not be used") && seen[1].contains("doc_save"));
+    reqs.join().unwrap();
 }
 
 #[test]
@@ -439,7 +431,7 @@ fn a_reply_that_is_only_talk_proposes_no_change() {
 #[test]
 fn apply_runs_the_steps_as_undo_steps_and_undo_takes_them_back() {
     let (mut a, doc) = open("apply");
-    let steps = json!([{ "tool": "page_rotate", "args": { "pages": [1], "degrees": 90 } }, { "tool": "doc_set_info", "args": { "key": "Title", "value": "Hi" } }]);
+    let steps = json!([{ "tool": "rotate_pages", "args": { "pages": [1], "degrees": 90 } }, { "tool": "set_document_info", "args": { "key": "Title", "value": "Hi" } }]);
     let out = json_of(a.call("ai_edit_apply", &json!({ "doc": doc, "steps": steps })).unwrap());
     assert_eq!(out["applied"], 2);
     let n = out["undo_steps"].as_u64().unwrap();
@@ -452,26 +444,12 @@ fn apply_runs_the_steps_as_undo_steps_and_undo_takes_them_back() {
 }
 
 #[test]
-fn apply_checks_every_step_first_and_undoes_earlier_steps_when_one_fails() {
-    let (mut a, doc) = open("fail");
-    // A tool outside the allow-list: nothing runs, even the valid first step.
+fn apply_refuses_the_whole_list_when_one_step_is_not_allowed() {
+    let (mut a, doc) = open("refuse");
     let e = a
-        .call(
-            "ai_edit_apply",
-            &json!({ "doc": doc, "steps": [{ "tool": "page_rotate", "args": { "pages": [1], "degrees": 90 } }, { "tool": "doc_save", "args": {} }] }),
-        )
+        .call("ai_edit_apply", &json!({ "doc": doc, "steps": [{ "tool": "rotate_pages", "args": { "pages": [1], "degrees": 90 } }, { "tool": "doc_save", "args": {} }] }))
         .unwrap_err()
         .to_string();
-    assert!(e.contains("steps[1]") && e.contains("doc_save"), "{e}");
+    assert!(e.contains("step 2") && e.contains("doc_save"), "{e}");
     assert!(a.call("edit_undo", &json!({ "doc": doc })).is_err(), "nothing should have run");
-
-    // A step that fails when it runs: the earlier one is rolled back.
-    let e = a
-        .call("ai_edit_apply", &json!({ "doc": doc, "steps": [{ "tool": "page_rotate", "args": { "pages": [1], "degrees": 90 } }, { "tool": "page_rotate", "args": { "pages": [99], "degrees": 90 } }] }))
-        .unwrap_err()
-        .to_string();
-    assert!(e.contains("step 2") && e.contains("undone"), "{e}");
-    assert!(a.call("edit_undo", &json!({ "doc": doc })).is_err(), "the first step should have been undone");
-    let list = json_of(a.call("doc_list", &json!({})).unwrap());
-    assert_eq!(list["documents"][0]["dirty"], false);
 }

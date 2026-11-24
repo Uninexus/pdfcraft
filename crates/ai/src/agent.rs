@@ -34,27 +34,24 @@ pub struct Turn {
     pub calls: Vec<PlannedCall>,
 }
 
-/// The system prompt, with `catalog` (one line per tool the model may call) inserted. Exactly one
+/// The system prompt, with `catalog` (one line per call the model may make) inserted. Exactly one
 /// system message is sent, because some local chat templates refuse several.
 pub fn system_prompt(catalog: &str) -> String {
     format!(
-        "You are the assistant inside a PDF editor and you can change the open document by calling the editor's tools.\n\
+        "You are the assistant inside a PDF editor and you can change the open document by making the calls listed below.\n\
 \n\
 Reply with ONE JSON object and nothing else:\n\
-{{\"message\": \"what you tell the user\", \"calls\": [{{\"tool\": \"page_rotate\", \"args\": {{\"pages\": [3, 4], \"degrees\": 90}}, \"why\": \"short reason\"}}]}}\n\
+{{\"message\": \"what you tell the user\", \"calls\": [{{\"tool\": \"rotate_pages\", \"args\": {{\"pages\": [3, 4], \"degrees\": 90}}, \"why\": \"short reason\"}}]}}\n\
 \n\
 Rules:\n\
-- Use only the tools listed below, with exactly the arguments shown. Never pass \"doc\": the open document is used.\n\
-- Pages are numbered from 1. Rectangles and points are in PDF points from the top-left of the page.\n\
-- Tools marked [read] only look at the document; their results come back to you in the next message so you can decide what to do. \
-Tools marked [edit] change the document; the user sees the list of edit calls and confirms before any runs, and can undo them afterwards. \
-Put every edit that is needed in one reply, in the order they must run, and remember that edits that remove or move pages change later page numbers.\n\
-- Look before you change: when a request depends on what the document says (find an email address, a total, a name), call a [read] tool first, or use the document text you were given. Never invent text, names or numbers.\n\
-- Do the smallest change that satisfies the request. Do not edit what was not asked for.\n\
-- If the request is unclear, impossible with these tools, or only a question, answer in \"message\" and send an empty \"calls\" list.\n\
-- When you only needed [read] tools, or when nothing more is needed, send an empty \"calls\" list and say what you did in \"message\".\n\
+- Use only the calls listed, with exactly the arguments shown. Never name a document or a file: the open document is used.\n\
+- Pages are numbered from 1. Points are measured from the top-left of the page.\n\
+- The user sees your list of calls and confirms before any runs, and can undo them afterwards. Put every change that is needed in one reply, in the order they must run, and remember that calls that delete, move or add pages change the page numbers of the calls after them.\n\
+- Decide from the document text you are given. Never invent text, names, numbers or field names.\n\
+- Do the smallest change that satisfies the request. Do not change what was not asked for.\n\
+- If the request is unclear, cannot be done with these calls, or is only a question, answer in \"message\" and send an empty \"calls\" list.\n\
 \n\
-Tools:\n{catalog}"
+Calls:\n{catalog}"
     )
 }
 
@@ -63,19 +60,61 @@ pub fn request_message(instruction: &str, document: &str, text_context: &str) ->
     Message::user(format!("Document: {document}\n\nDocument text (may be incomplete or cut):\n{text_context}\nRequest: {instruction}"))
 }
 
-/// The message that returns the results of [read] calls to the model.
-pub fn results_message(results: &[(String, String)]) -> Message {
-    let mut text = String::from("Results of your [read] calls:\n");
-    for (tool, result) in results {
-        text.push_str(&format!("\n{tool} ->\n{result}\n"));
-    }
-    text.push_str("\nContinue: reply with one JSON object as before.");
-    Message::user(text)
-}
-
 /// The message that tells the model its last reply could not be used.
 pub fn retry_message(problem: &str) -> Message {
     Message::user(format!("That reply could not be used: {problem}\nReply again with one JSON object as described."))
+}
+
+/// What a request for edits needs.
+pub struct PlanRequest<'a> {
+    pub instruction: &'a str,
+    /// A short description of the document (its page count).
+    pub document: &'a str,
+    /// The page text sent with the request.
+    pub text_context: &'a str,
+    /// The calls the model may make ([`system_prompt`]'s `catalog`).
+    pub catalog: &'a str,
+}
+
+/// What the model proposed, checked.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Plan {
+    /// What the model tells the user.
+    pub message: String,
+    /// The calls, in order, each already accepted by the check.
+    pub calls: Vec<PlannedCall>,
+    /// One line for each call, from the check.
+    pub summaries: Vec<String>,
+    /// The model the server says it used.
+    pub model: Option<String>,
+}
+
+/// Decides whether calls can run: one line for each when they can, the reason when they cannot.
+pub type CheckFn<'a> = dyn Fn(&[PlannedCall]) -> std::result::Result<Vec<String>, String> + 'a;
+
+/// How many times the model is asked: the first reply and two more when its calls cannot run.
+pub const MAX_ATTEMPTS: usize = 3;
+
+/// Asks the configured model for the edits that carry out `request`. `check` decides whether the
+/// calls can run on the document (and says in one line what each does); when it refuses, the model
+/// is told why and asked again, up to [`MAX_ATTEMPTS`] times. Nothing is changed here.
+pub fn plan(config: &crate::AiConfig, request: &PlanRequest<'_>, check: &CheckFn) -> crate::Result<Plan> {
+    let mut messages =
+        vec![Message::system(system_prompt(request.catalog)), request_message(request.instruction, request.document, request.text_context)];
+    let mut last = String::new();
+    for _ in 0..MAX_ATTEMPTS {
+        let reply = crate::chat(config, &messages)?;
+        let turn = parse_turn(&reply.content);
+        messages.push(Message::assistant(reply.content));
+        match check(&turn.calls) {
+            Ok(summaries) => return Ok(Plan { message: turn.message, calls: turn.calls, summaries, model: reply.model }),
+            Err(problem) => {
+                messages.push(retry_message(&problem));
+                last = problem;
+            }
+        }
+    }
+    Err(crate::AiError::Request(format!("the model kept asking for changes that cannot be made: {last}")))
 }
 
 /// Reads a model's reply: the first JSON object in it that has `calls` or `message` (models often
