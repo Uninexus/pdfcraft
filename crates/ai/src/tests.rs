@@ -318,3 +318,78 @@ mod agent_turns {
         assert_eq!(parse_turn(&many).calls.len(), MAX_CALLS);
     }
 }
+
+mod agent_plan {
+    use super::*;
+    use crate::agent::{PlanRequest, plan};
+
+    fn request() -> PlanRequest<'static> {
+        PlanRequest { instruction: "rotate page 1", document: "2 page(s)", text_context: "--- Page 1 ---\nHello\n", catalog: "- rotate_pages(): x" }
+    }
+
+    #[test]
+    fn a_plan_is_checked_and_the_model_is_told_why_when_it_is_refused() {
+        let first = r#"{"message":"","calls":[{"tool":"nope","args":{}}]}"#;
+        let second = r#"{"message":"ok","calls":[{"tool":"rotate_pages","args":{"degrees":90}}]}"#;
+        let (url, seen) = serve_sequence(vec![first.into(), second.into()]);
+        let check = |calls: &[crate::agent::PlannedCall]| {
+            if calls.iter().any(|c| c.tool == "nope") {
+                Err("nope is not a tool".to_owned())
+            } else {
+                Ok(calls.iter().map(|c| c.tool.clone()).collect())
+            }
+        };
+        let got = plan(&cfg(&url), &request(), &check).expect("plan");
+        assert_eq!(got.calls.len(), 1);
+        assert_eq!(got.summaries, vec!["rotate_pages".to_owned()]);
+        let seen = seen.join().expect("server");
+        assert!(seen[0].contains("Hello") && seen[0].contains("rotate page 1") && seen[0].contains("- rotate_pages(): x"));
+        assert!(seen[1].contains("nope is not a tool"), "the second request carries the reason");
+    }
+
+    #[test]
+    fn a_model_that_keeps_getting_it_wrong_ends_in_an_error_after_a_few_tries() {
+        let bad = r#"{"calls":[{"tool":"nope"}]}"#;
+        let (url, seen) = serve_sequence(vec![bad.into(); crate::agent::MAX_ATTEMPTS]);
+        let e = plan(&cfg(&url), &request(), &|_| Err("no".to_owned())).unwrap_err().to_string();
+        assert!(e.contains("cannot be made"), "{e}");
+        assert_eq!(seen.join().expect("server").len(), crate::agent::MAX_ATTEMPTS);
+    }
+
+    /// Serves one chat reply per connection, in order, and returns the raw requests.
+    fn serve_sequence(replies: Vec<String>) -> (String, std::thread::JoinHandle<Vec<String>>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let url = format!("http://{}/v1", listener.local_addr().expect("addr"));
+        let handle = std::thread::spawn(move || {
+            let mut seen = Vec::new();
+            for content in replies {
+                let (mut s, _) = listener.accept().expect("accept");
+                let (mut req, mut buf) = (Vec::new(), [0u8; 16384]);
+                loop {
+                    let n = s.read(&mut buf).expect("read");
+                    req.extend_from_slice(&buf[..n]);
+                    let text = String::from_utf8_lossy(&req).into_owned();
+                    if let Some(split) = text.find("\r\n\r\n") {
+                        let len = text[..split]
+                            .lines()
+                            .find_map(|l| l.to_ascii_lowercase().strip_prefix("content-length:").and_then(|v| v.trim().parse::<usize>().ok()))
+                            .unwrap_or(0);
+                        if req.len() >= split + 4 + len {
+                            break;
+                        }
+                    }
+                    if n == 0 {
+                        break;
+                    }
+                }
+                let body = serde_json::json!({ "choices": [{ "message": { "content": content } }] }).to_string();
+                let r =
+                    format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+                s.write_all(r.as_bytes()).expect("write");
+                seen.push(String::from_utf8_lossy(&req).into_owned());
+            }
+            seen
+        });
+        (url, handle)
+    }
+}

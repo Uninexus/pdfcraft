@@ -10231,8 +10231,8 @@ milestone = "M13"
 status = "partial"
 commands = []
 tools = ["ai_edit_plan", "ai_edit_apply"]
-evidence = ["crates/automation/tests/it/ai.rs::a_plan_proposes_edits_and_changes_nothing", "crates/automation/tests/it/ai.rs::a_plan_lets_the_model_look_first_and_returns_what_it_saw", "crates/automation/tests/it/ai.rs::a_plan_refuses_tools_outside_the_allow_list_after_asking_the_model_to_retry", "crates/automation/tests/it/ai.rs::apply_runs_the_steps_as_undo_steps_and_undo_takes_them_back", "crates/automation/tests/it/ai.rs::apply_checks_every_step_first_and_undoes_earlier_steps_when_one_fails"]
-notes = "Headless only so far (ai_edit_plan, ai_edit_apply; optional provider, off until an endpoint is set up). The plan call sends the request and page text to the configured model, which may look at the document with read-only tools and proposes edits from a fixed allow-list without changing anything; ai_edit_apply runs a confirmed list in order, all or none, as ordinary undo steps, and saves nothing. No window for it yet."
+evidence = ["crates/engine/tests/it/ai_edit.rs::a_list_changes_the_document_in_order_and_undo_takes_it_all_back", "crates/engine/tests/it/ai_edit.rs::a_list_is_checked_against_the_document_as_earlier_calls_leave_it", "crates/engine/tests/it/ai_edit.rs::calls_outside_the_vocabulary_or_with_odd_arguments_are_refused_before_anything_runs", "crates/engine/tests/it/ai_edit.rs::a_call_that_fails_when_it_runs_undoes_the_ones_before_it", "crates/automation/tests/it/ai.rs::a_plan_proposes_edits_and_changes_nothing", "crates/automation/tests/it/ai.rs::apply_runs_the_steps_as_undo_steps_and_undo_takes_them_back"]
+notes = "Headless only so far (ai_edit_plan, ai_edit_apply; optional provider, off until an endpoint is set up). The plan call sends the request and page text to the configured model, which proposes edits from a fixed list in the engine (pdfcraft_engine::ai_edit) without changing anything; ai_edit_apply runs a confirmed list in order, all or none, as ordinary undo steps, and saves nothing. The app window (Edit with AI) is in progress."
 
 [[feature]]
 id = "misc.ai-presentation"
