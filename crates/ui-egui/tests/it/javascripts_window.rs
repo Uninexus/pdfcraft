@@ -9,7 +9,7 @@ use crate::control::{ControlClient, call, new_app, ok};
 use crate::support::AppHarness as _;
 use egui::accesskit::Role;
 use egui_kittest::Harness;
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT, Queryable};
 use pdfcraft_ui_egui::PdfCraftApp;
 use serde_json::{Value, json};
 
