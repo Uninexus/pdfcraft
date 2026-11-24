@@ -5,7 +5,7 @@
 use crate::support::{AppHarness as _, shown_notice};
 use egui::accesskit::Role;
 use egui_kittest::Harness;
-use egui_kittest::kittest::Queryable};
+use egui_kittest::kittest::Queryable;
 use pdfcraft_engine::signing_plan::{Plan, Role as PlanRole, plan_bytes};
 use pdfcraft_engine::{Edit, NewField, Session};
 use pdfcraft_ui_egui::PdfCraftApp;
