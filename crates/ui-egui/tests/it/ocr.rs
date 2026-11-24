@@ -25,11 +25,13 @@ fn set_field(h: &mut Harness<'_, PdfCraftApp>, field: &str, value: serde_json::V
     h.run_steps(2);
 }
 
-/// Presses OK of the open Recognize Text dialog.
+/// Presses OK of the open Recognize Text dialog. Its OK is held: the press files the answer for the app, which starts
+/// the run and closes the dialog, so the dialog having closed is what shows the press was taken.
 fn confirm_recognize(h: &mut Harness<'_, PdfCraftApp>) {
     let ctx = h.ctx.clone();
-    assert!(h.state_mut().dialogs.confirm::<craft::ui::patterns::form_dialogs::HostedParamDialog>(&ctx), "OK was enabled");
+    let _filed = h.state_mut().dialogs.confirm::<craft::ui::patterns::form_dialogs::HostedParamDialog>(&ctx);
     h.run_steps(3);
+    assert!(h.state().dialogs.open_dialogs().is_empty(), "OK was taken and the dialog closed");
 }
 
 /// The text of the notice on screen.

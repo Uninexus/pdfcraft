@@ -54,7 +54,11 @@ fn harness(answer: Result<Option<&str>, &str>) -> Harness<'static, PdfCraftApp> 
     let source = source(answer);
     Harness::builder().with_size(egui::vec2(1200.0, 800.0)).build_eframe(move |cc| {
         crate::support::install_runtime(&cc.egui_ctx);
-        app_asking(source)
+        // A manual check only: the check at start would find the same release and offer it again once the
+        // check's dialog closes, on a thread whose timing decides whether a test sees it.
+        let mut app = app_asking(source);
+        app.set_option(&egui::Context::default(), "update_check_at_start", "false").unwrap();
+        app
     })
 }
 
