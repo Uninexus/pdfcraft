@@ -5,7 +5,7 @@ use crate::support::AppHarness as _;
 use egui::Pos2;
 use egui::accesskit::Role;
 use egui_kittest::Harness;
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT as _, Queryable};
 use pdfcraft_engine::LinkAction;
 use pdfcraft_ui_egui::PdfCraftApp;
 
@@ -219,7 +219,8 @@ fn a_new_link_offers_the_web_and_page_actions_and_says_why_the_others_wait() {
     let mut h = harness();
     assert!(h.execute("edit.link"));
     h.run_steps(2);
-    drag(&mut h, at(&h, 100.0, 40.0), at(&h, 170.0, 70.0));
+    let (from, to) = (at(&h, 100.0, 40.0), at(&h, 170.0, 70.0));
+    drag(&mut h, from, to);
     h.get_by_role_and_label(Role::Dialog, "Create Link");
     for radio in ["Go to an article thread", "Run a menu item", "Open a PDF file"] {
         assert!(disabled(&h, Role::RadioButton, radio), "{radio} needs a link that exists");
