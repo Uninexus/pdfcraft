@@ -514,6 +514,29 @@ pub(crate) fn show(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
     }
 }
 
+/// The next recipient's turn: record their step (asked first) or start signing as them.
+fn turn(ui: &mut egui::Ui, plan: &Plan, refocus: &mut Option<Refocus>, confirm: &mut Option<Confirm>, command: &mut Option<&'static str>) {
+    if let Some(next) = plan.next().filter(|_| plan.state() == "in_progress") {
+        let who = clean(&next.name, 200);
+        Text::new(tl!("Turn")).role(TypeRole::Heading).show(ui);
+        let done = if next.role == Role::Signer { tl!("Record {who} as signed") } else { tl!("Record {who} as approved") };
+        let email = next.email.to_lowercase();
+        let mut record = Button::new(crate::i18n::fmt(done, &[("who", &who)]));
+        if refocus.take_if(|r| *r == Refocus::Turn).is_some() {
+            record = record.request_focus(FocusRequest::Take);
+        }
+        if clicked(&record.show(ui)) {
+            *confirm = Some(Confirm { command: "sign.plan.record", email: email.clone(), question: question(false, next.role, &who), fresh: true });
+        }
+        if clicked(&Button::new(crate::i18n::fmt(tl!("Record {who} as declined"), &[("who", &who)])).show(ui)) {
+            *confirm = Some(Confirm { command: "sign.plan.decline", email, question: question(true, next.role, &who), fresh: true });
+        }
+        if next.role == Role::Signer && clicked(&Button::new(crate::i18n::fmt(tl!("Sign as {who}…"), &[("who", &who)])).show(ui)) {
+            *command = Some("sign.plan.sign_next");
+        }
+    }
+}
+
 /// The window's content.
 fn body(ui: &mut egui::Ui, d: &mut Draft) {
     Text::new(tl!(
@@ -576,26 +599,7 @@ fn body(ui: &mut egui::Ui, d: &mut Draft) {
                     remove = Some(r.email.clone());
                 }
             }
-            if let Some(next) = plan.next().filter(|_| plan.state() == "in_progress") {
-                let who = clean(&next.name, 200);
-                Text::new(tl!("Turn")).role(TypeRole::Heading).show(ui);
-                let done = if next.role == Role::Signer { tl!("Record {who} as signed") } else { tl!("Record {who} as approved") };
-                let email = next.email.to_lowercase();
-                let mut record = Button::new(crate::i18n::fmt(done, &[("who", &who)]));
-                if d.refocus.take_if(|r| *r == Refocus::Turn).is_some() {
-                    record = record.request_focus(FocusRequest::Take);
-                }
-                if clicked(&record.show(ui)) {
-                    d.confirm =
-                        Some(Confirm { command: "sign.plan.record", email: email.clone(), question: question(false, next.role, &who), fresh: true });
-                }
-                if clicked(&Button::new(crate::i18n::fmt(tl!("Record {who} as declined"), &[("who", &who)])).show(ui)) {
-                    d.confirm = Some(Confirm { command: "sign.plan.decline", email, question: question(true, next.role, &who), fresh: true });
-                }
-                if next.role == Role::Signer && clicked(&Button::new(crate::i18n::fmt(tl!("Sign as {who}…"), &[("who", &who)])).show(ui)) {
-                    d.command = Some("sign.plan.sign_next");
-                }
-            }
+            turn(ui, plan, &mut d.refocus, &mut d.confirm, &mut d.command);
             Text::new(tl!("History")).role(TypeRole::Heading).show(ui);
             for r in &plan.recipients {
                 let steps: Vec<String> = r.history.iter().map(|e| format!("{} {}", status_label(e.status), when(e.at))).collect();
