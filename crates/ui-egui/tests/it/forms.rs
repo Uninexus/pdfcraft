@@ -2613,6 +2613,23 @@ fn auto_complete_offers_nothing_while_off_even_with_saved_entries() {
     assert!(h.query_by_label("Maplewood").is_none(), "no list while Auto-Complete is off");
 }
 
+/// Typing in one field and then clicking straight into another puts what is typed next in the second: the click's
+/// press leaves the first field's editor, and the key focus still reaches the second one's.
+#[test]
+fn typing_after_clicking_straight_into_another_field_goes_into_it() {
+    for on in [false, true] {
+        let mut h = remembered(on);
+        type_in_field(&mut h, "work_city", "zz");
+        click_field(&mut h, "home_city", 0);
+        h.run_steps(3);
+        h.event(egui::Event::Text("ma".into()));
+        h.run_steps(3);
+        assert_eq!(focused(&h), Some(("home_city".into(), 0)), "Auto-Complete on: {on}");
+        assert_eq!(draft(&h), "ma", "the typing reached the second field (Auto-Complete on: {on})");
+        assert_eq!(value(&h, "work_city"), ["zz"], "the first field kept its typing (Auto-Complete on: {on})");
+    }
+}
+
 #[test]
 fn auto_complete_remembers_on_leaving_a_field_and_offers_it_in_another() {
     let mut h = auto_complete_harness();

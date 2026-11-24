@@ -183,6 +183,7 @@ pub(crate) struct PagePart {
     context_only: bool,
     hover_only: bool,
     focusable: bool,
+    takes_focus: bool,
 }
 
 impl PagePart {
@@ -202,6 +203,7 @@ impl PagePart {
             context_only: false,
             hover_only: false,
             focusable: false,
+            takes_focus: false,
         }
     }
 
@@ -266,6 +268,15 @@ impl PagePart {
         self
     }
 
+    /// A press on the part takes the key focus to it, by the framework's press rule (a text field, whose editor a press
+    /// opens). Without it, a press that leaves a focused text stop (another field's editor) releases the focus at the
+    /// end of its pass, after the part has handed it on, and the field opened shows but takes no typing.
+    #[must_use]
+    pub(crate) fn takes_focus(mut self) -> Self {
+        self.takes_focus = true;
+        self
+    }
+
     /// The part senses hover alone (for tips that let presses go straight to the tool beneath).
     #[must_use]
     pub(crate) fn hover_only(mut self) -> Self {
@@ -283,7 +294,8 @@ impl PagePart {
             return Sense::CONTEXT_CLICK;
         }
         let drag = if self.passes_drag { Sense::PASSES_DRAG } else { Sense::DRAG };
-        Sense::CLICK | Sense::CONTEXT_CLICK | drag
+        let focus = if self.takes_focus && self.focusable { Sense::TAKE_FOCUS } else { Sense::empty() };
+        Sense::CLICK | Sense::CONTEXT_CLICK | drag | focus
     }
 }
 
