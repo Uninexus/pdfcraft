@@ -462,6 +462,8 @@ impl PdfCraftApp {
             "help.shortcuts" => self.open_shortcuts(ctx),
             "help.default_app" => self.set_up_default_app(),
             "help.default_app.remove" => self.remove_default_app(),
+            "prefs.forms.forget_entries" => self.forget_form_entries(),
+            "prefs.comment.reset_defaults" => self.reset_comment_defaults(),
             "help.about" => self.open_about(craft::ui::patterns::form_dialogs::AboutTab::default()),
             "help.check_updates" => self.check_for_updates(),
             _ => return None,
@@ -670,6 +672,7 @@ impl PdfCraftApp {
                 }
             }
             "page.insert" => self.insert_from_file_dialog(),
+            "page.insert_clipboard" => self.insert_from_clipboard(ctx),
             "page.replace" => self.replace_pages_dialog(),
             "page.copy" => self.copy_pages(ctx, false),
             "page.cut" => self.copy_pages(ctx, true),
@@ -691,6 +694,7 @@ impl PdfCraftApp {
                 self.notify_tr("Drag a rectangle on a page to crop it; double-click a page for Set Page Boxes");
             }
             "page.boxes" => self.open_page_boxes(ctx, false),
+            "page.remove_white_margins" => self.open_white_margins(ctx),
             "page.extract" => self.open_extract(ctx),
             "page.rotate_dialog" => self.open_rotate(ctx),
             "page.split" => self.open_split(ctx, false),
@@ -802,6 +806,8 @@ impl PdfCraftApp {
                     self.choose_right_panel(Some(crate::RightPanel::Search));
                 }
             }
+            "edit.search_folder" => self.open_folder_search(),
+            "edit.bates_multi" => self.open_bates_multi(ctx),
             "export.all_images" => crate::export_ui::open(self, ctx, crate::export_ui::ExportKind::AllImages),
             "edit.text" => {
                 self.quick_tool = crate::QuickTool::AddText;

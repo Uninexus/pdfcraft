@@ -205,7 +205,7 @@ fn signer_section(ui: &mut egui::Ui, d: &mut FieldDraft) {
         (None, true) => tl!("Signer: a label that is not an address").to_string(),
         (None, false) => tl!("Signer: No one").to_string(),
     };
-    Notice::new(Tone::Info, now).layout(NoticeLayout::Inline).announce(Politeness::Polite).show(ui);
+    Notice::new(Tone::Info, now).layout(NoticeLayout::Inline).announce(Politeness::Polite).id_salt(20usize).show(ui);
     if v.hidden_removed {
         note(ui, tl!("Hidden characters in the stored label are not shown."));
     }
@@ -227,7 +227,7 @@ fn signer_section(ui: &mut egui::Ui, d: &mut FieldDraft) {
         note(ui, tl!("Only a signer or an approver of the plan can be named."));
     } else if let PlanNote::Unreadable(why) = &d.signer_plan {
         let line = crate::i18n::fmt(tl!("The signing plan beside this file cannot be used: {why}"), &[("why", why.as_str())]);
-        Notice::new(Tone::Warn, line).layout(NoticeLayout::Inline).show(ui);
+        Notice::new(Tone::Warn, line).layout(NoticeLayout::Inline).id_salt(21usize).show(ui);
     } else {
         note(ui, tl!("No signing plan is beside this file, so the address is not checked against one."));
     }

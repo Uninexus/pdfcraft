@@ -138,6 +138,7 @@ pub(crate) fn panel(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
         row("hash", "Bates numbering", Some(Act::Command("edit.bates")), true, false, false),
         row("square-dashed-mouse-pointer", "Set page boxes", Some(Act::Command("page.boxes")), true, false, true),
         row("crop", "Crop pages", Some(Act::Command("page.crop")), true, false, false),
+        row("scan", "Remove white margins", Some(Act::Command("page.remove_white_margins")), true, false, false),
         row("presentation", "Page transitions", Some(Act::Command("page.transitions")), true, true, false),
         row("file-text", "Page templates", None, true, true, false),
         row("printer", "Print pages", Some(Act::Command("print.dialog")), true, false, false),
@@ -176,6 +177,7 @@ pub(crate) fn panel(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
             Entry::new(0u8, tl!("Insert a blank page after the selection").to_owned()),
             Entry::new(1u8, tl!("Insert pages from a file…").to_owned()),
             Entry::new(2u8, tl!("Duplicate pages").to_owned()),
+            Entry::new(3u8, tl!("Insert pages from the clipboard").to_owned()),
         ];
         let mut open = true;
         let picked =
@@ -184,6 +186,7 @@ pub(crate) fn panel(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
             Some(0) => act = Some(Act::Edit(Box::new(Edit::InsertBlankPage { at: last.saturating_add(1), width: w, height: h }))),
             Some(1) => act = Some(Act::View(ViewAction::InsertFromFile)),
             Some(2) => act = Some(Act::Command("page.duplicate")),
+            Some(3) => act = Some(Act::Command("page.insert_clipboard")),
             _ => {}
         }
         if !open || picked.is_some() {

@@ -81,15 +81,16 @@ pub(super) fn choice_list(ui: &mut egui::Ui, field: &FormField, rect: Rect, zoom
 /// The id Auto-Complete's list is shown with, so the framework hands the field's list keys to it and the caller can ask
 /// where its highlight is.
 ///
-/// The id holds the typed text: other text lists other entries, and they start with no highlight.
-fn suggestion_id(ui: &egui::Ui, typed: &str) -> egui::Id {
-    ui.scope_id().with(("pdfcraft.suggestion-list", typed))
+/// The id holds the field (its object and widget) and the typed text: another field has its own list, other text lists
+/// other entries, and they start with no highlight.
+fn suggestion_id(ui: &egui::Ui, (field, widget): (&FormField, usize), typed: &str) -> egui::Id {
+    ui.scope_id().with(("pdfcraft.suggestion-list", field.obj, widget, typed))
 }
 
 /// The row of Auto-Complete's list the arrow keys have highlighted, as of the last pass; none until one was pressed and
 /// whenever the row is not among the `shown` entries.
-pub(super) fn suggestion_lead(ui: &egui::Ui, typed: &str, shown: usize) -> Option<usize> {
-    lead_position(ui.ctx(), suggestion_id(ui, typed)).filter(|at| *at < shown)
+pub(super) fn suggestion_lead(ui: &egui::Ui, at_field: (&FormField, usize), typed: &str, shown: usize) -> Option<usize> {
+    lead_position(ui.ctx(), suggestion_id(ui, at_field, typed)).filter(|at| *at < shown)
 }
 
 /// Auto-Complete's list of earlier entries hung from `rect`, the widget's rectangle on screen, open while `open` is
@@ -99,7 +100,7 @@ pub(super) fn suggestion_lead(ui: &egui::Ui, typed: &str, shown: usize) -> Optio
 /// Escape shuts the list. Returns the position of the entry clicked or taken with Tab this pass.
 pub(super) fn suggestion_list(
     ui: &mut egui::Ui,
-    field: &FormField,
+    (field, widget_index): (&FormField, usize),
     rect: Rect,
     zoom: f32,
     (typed, offered): (&str, &[String]),
@@ -109,8 +110,10 @@ pub(super) fn suggestion_list(
     let size = field_text_size(ui.painter(), field, widget, typed) * zoom;
     let names: Vec<&str> = offered.iter().map(String::as_str).collect();
     let source = Names(&names);
-    let list = suggestion_id(ui, typed);
+    let list = suggestion_id(ui, (field, widget_index), typed);
     let shown = PopupList::new(tl!("Suggestions"), Bind::bound(&mut *open))
+        // The popup itself is per field, so what the framework keeps of a popup (its overlay layer, a dismissal) is not shared with the next field.
+        .id_salt((field.obj, widget_index))
         .kind(PopupListKind::Document)
         .overlay(|overlay| {
             let dismiss = overlay.dismiss.focus_left(false);

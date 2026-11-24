@@ -159,6 +159,8 @@ pub struct RecordingClipboard {
 struct Recorded {
     writes: Vec<Vec<Flavor>>,
     held: Option<String>,
+    image: Option<ClipboardImage>,
+    files: Option<Vec<PathBuf>>,
     refused: Option<&'static str>,
 }
 
@@ -167,6 +169,20 @@ impl RecordingClipboard {
     pub fn refusing(mime: &'static str) -> Self {
         let clipboard = Self::default();
         clipboard.lock().refused = Some(mime);
+        clipboard
+    }
+
+    /// A clipboard that holds a picture, as a screenshot is copied.
+    pub fn holding_image(image: ClipboardImage) -> Self {
+        let clipboard = Self::default();
+        clipboard.lock().image = Some(image);
+        clipboard
+    }
+
+    /// A clipboard that holds copied files, as a file manager's Copy leaves them.
+    pub fn holding_files(files: Vec<PathBuf>) -> Self {
+        let clipboard = Self::default();
+        clipboard.lock().files = Some(files);
         clipboard
     }
 
@@ -205,11 +221,11 @@ impl ClipboardBackend for RecordingClipboard {
     }
 
     fn read_image(&mut self, _limit: u64) -> Result<Option<ClipboardImage>, ClipboardError> {
-        Ok(None)
+        Ok(self.lock().image.clone())
     }
 
     fn read_files(&mut self, _limit: usize) -> Result<Option<Vec<PathBuf>>, ClipboardError> {
-        Ok(None)
+        Ok(self.lock().files.clone())
     }
 
     fn has(&mut self, mimes: &[&str]) -> bool {
@@ -321,7 +337,6 @@ pub fn right(app: &PdfCraftApp) -> Option<RightPanel> {
         .find(|panel| format!("{panel:?}") == name)
 }
 
-/// Whether the dialog host holds a dialog.
 /// A folder of its own under the system temp directory, removed when dropped (std only).
 pub struct TempDir(std::path::PathBuf);
 
@@ -346,6 +361,7 @@ impl Drop for TempDir {
     }
 }
 
+/// Whether the dialog host holds a dialog.
 pub fn dialog_open(h: &Harness<'_, PdfCraftApp>) -> bool {
     !h.state().dialogs.is_empty()
 }

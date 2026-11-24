@@ -207,16 +207,49 @@ fn preference_rows_apply_live_and_survive_closing() {
 }
 
 #[test]
-fn remove_all_remembered_entries_forgets_them_and_leaves_the_window_open() {
+fn remove_all_remembered_entries_asks_first_forgets_them_and_leaves_the_window_open() {
     let mut h = harness();
     h.state_mut().session.set_form_entries(pdfcraft_engine::form_entries::FormEntries::restored(["Maplewood", "Oakdale"]));
     h.state_mut().open_preferences();
     h.run_steps(4);
-    let button = egui::accesskit::Role::Button;
-    h.get_by_role_and_label(button, "Remove all remembered entries").scroll_to_me();
-    h.run_steps(3);
-    h.get_by_role_and_label(button, "Remove all remembered entries").click();
-    h.run_steps(3);
-    assert!(h.state().session.form_entries().is_empty(), "the button forgets what was remembered");
+    click(&mut h, "Remove all remembered entries");
+    assert_eq!(h.state().session.form_entries().len(), 2, "asking forgets nothing");
+    assert!(h.query_all_by_label_contains("cannot be taken back").count() > 0, "the window asks first");
+    click(&mut h, "Keep the entries");
+    assert_eq!(h.state().session.form_entries().len(), 2, "keeping them forgets nothing");
+    click(&mut h, "Remove all remembered entries");
+    click(&mut h, "Remove them");
+    assert!(h.state().session.form_entries().is_empty(), "the answer forgets what was remembered");
     assert!(preferences_shown(&h), "and leaves the window open");
+}
+
+#[test]
+fn a_portable_copy_keeps_remembered_entries_out_of_its_settings() {
+    let mut h = harness();
+    h.state_mut().session.set_form_entries(pdfcraft_engine::form_entries::FormEntries::restored(["Maplewood"]));
+    h.state_mut().remember_entries_on_disk = true;
+    let kept = h.state().settings_snapshot().behavior.form_entries;
+    assert!(kept.is_some_and(|text| text.contains("Maplewood")), "an installed copy writes them");
+    h.state_mut().remember_entries_on_disk = false;
+    let saved = h.state().settings_snapshot();
+    assert!(saved.behavior.form_entries.is_none(), "a portable copy writes none");
+    // Entries found in a settings file are not read back either.
+    let mut from_file = saved.clone();
+    from_file.behavior.form_entries = Some("[\"Oakdale\"]".into());
+    h.state_mut().session.clear_form_entries();
+    h.state_mut().apply_settings(&from_file);
+    assert!(h.state().session.form_entries().is_empty(), "nothing is restored from the file in a portable copy");
+}
+
+#[test]
+fn follow_theme_takes_one_colour_back_to_the_theme_and_leaves_the_other() {
+    let mut h = harness();
+    let ctx = egui::Context::default();
+    h.state_mut().set_option(&ctx, "field-highlight-color", "#102030").unwrap();
+    h.state_mut().set_option(&ctx, "required-field-color", "#203040").unwrap();
+    h.state_mut().open_preferences();
+    h.run_steps(4);
+    click(&mut h, "Follow theme: highlight colour");
+    assert!(h.state().field_highlight_color.is_none(), "the highlight follows the theme again");
+    assert!(h.state().required_field_color.is_some(), "the other colour was not reset");
 }

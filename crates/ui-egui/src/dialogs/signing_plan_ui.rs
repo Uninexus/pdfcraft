@@ -7,8 +7,9 @@
 //! a command; the command reads the file again, so what it changes is what is on disk, not what the window last showed.
 //!
 //! It is a record only: nothing is sent, nobody is notified and no signature is collected or checked. Once a recipient has
-//! a status the plan can no longer be edited here; recording a turn and signing as the next recipient are in
-//! `signing_turn_ui`.
+//! a status the plan can no longer be edited here; recording a turn (`sign.plan.record`, `sign.plan.decline`) and
+//! signing as the next recipient (`sign.plan.sign_next`) are in the same window. A step is only recorded after the window
+//! asked for it and named the recipient: the command refuses when the next recipient is no longer that person.
 
 use std::path::{Path, PathBuf};
 
@@ -25,6 +26,7 @@ use craft::ui::list::{List, ListRow, RowEvent, TrailingFace, TrailingPart};
 use craft::ui::notices::{Notice, NoticeLayout};
 use craft::ui::pickers::Select;
 use craft::ui::runtime::env::Label;
+use craft::ui::runtime::focus::FocusRequest;
 use craft::ui::sections::{DialogRole, FooterButton};
 use craft::ui::style::TypeRole;
 use craft::ui::text::TextField;
@@ -73,7 +75,50 @@ pub struct Draft {
     pub result: String,
     pub result_ok: bool,
     /// A step the person asked to record, waiting for them to confirm it: the plan has no undo.
-    pub confirm: Option<&'static str>,
+    pub confirm: Option<Confirm>,
+    /// The address (lower case) of the recipient whose step the person confirmed. A record or decline command is
+    /// refused without it, and when the plan's next recipient is someone else by the time it runs.
+    pub expect: Option<String>,
+    /// Where the focus goes in the next pass, once the control it was on is gone.
+    pub refocus: Option<Refocus>,
+}
+
+/// A step waiting for the person's answer.
+#[derive(Clone, Debug)]
+pub struct Confirm {
+    /// `sign.plan.record` or `sign.plan.decline`.
+    pub command: &'static str,
+    /// The address (lower case) of the recipient the question names.
+    pub email: String,
+    /// The question, naming the step and the person.
+    pub question: String,
+    /// The question was just asked: its Record it button takes the focus once.
+    pub fresh: bool,
+}
+
+/// A control that takes the focus after a change, once.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Refocus {
+    /// The button for the next recipient's turn.
+    Turn,
+    /// The Add recipient button.
+    Add,
+}
+
+/// The question that asks whether to record a step: it names the step and the person.
+fn question(decline: bool, role: Role, who: &str) -> String {
+    let template = match (decline, role) {
+        (true, _) => tl!(
+            "Record {who} as declined? The plan can no longer be edited afterwards and a step cannot be taken back. Only the plan file changes: nothing is signed or sent."
+        ),
+        (false, Role::Signer) => tl!(
+            "Record {who} as signed? The plan can no longer be edited afterwards and a step cannot be taken back. Only the plan file changes: nothing is signed or sent."
+        ),
+        (false, _) => tl!(
+            "Record {who} as approved? The plan can no longer be edited afterwards and a step cannot be taken back. Only the plan file changes: nothing is signed or sent."
+        ),
+    };
+    crate::i18n::fmt(template, &[("who", who)])
 }
 
 /// How a time (seconds since 1970, 0 when the host had no clock) is shown.
@@ -170,6 +215,8 @@ impl PdfCraftApp {
             result: String::new(),
             result_ok: true,
             confirm: None,
+            expect: None,
+            refocus: None,
         });
     }
 
@@ -199,6 +246,15 @@ impl PdfCraftApp {
         let Some(draft) = self.signing_plan.as_mut() else { return };
         draft.remove = None;
         draft.confirm = None;
+        // A confirmation is for one command: whatever came of it, the next step is asked for again.
+        draft.expect = None;
+        if outcome.is_ok() {
+            draft.refocus = match change {
+                Change::Record(_) => Some(Refocus::Turn),
+                Change::Remove => Some(Refocus::Add),
+                Change::Add | Change::Message => None,
+            };
+        }
         // Read it again either way, so the window shows the file as it is: what was written, or what made the command
         // refuse (a plan started elsewhere, a file gone).
         draft.view = view_of(path.as_deref());
@@ -253,8 +309,17 @@ impl PdfCraftApp {
                 (plan, tl!("The message was set. It is kept in the plan file; nothing was sent").to_string())
             }
             Change::Record(decline) => {
+                let expected = draft.expect.as_deref().ok_or_else(|| {
+                    tl!("Confirm the step in the Signing plan window first: choose Record for the next recipient and answer the question").to_string()
+                })?;
                 let mut plan = current.ok_or_else(|| tl!("There is no signing plan to record a step in").to_string())?;
                 let next = plan.next().cloned().ok_or_else(|| tl!("The plan is finished: everyone who signs or approves has done so").to_string())?;
+                if next.email.to_lowercase() != expected {
+                    return Err(crate::i18n::fmt(
+                        tl!("The plan changed after you were asked: the next recipient is now {who}, not {expected}. Nothing was recorded"),
+                        &[("who", &clean(&next.name, 200)), ("expected", &clean(expected, 254))],
+                    ));
+                }
                 let index = plan.turn_of(&next.email.to_lowercase()).map_err(shown)?;
                 let status = if *decline {
                     Status::Declined
@@ -262,10 +327,16 @@ impl PdfCraftApp {
                     Status::done_for(next.role).ok_or_else(|| tl!("That recipient is a viewer, who has no turn").to_string())?
                 };
                 plan.record(index, status, now).map_err(shown)?;
-                let said = crate::i18n::fmt(
-                    tl!("{who} is recorded as {status}. Only the plan file was changed: nothing was signed, sent or checked"),
-                    &[("who", &clean(&next.name, 200)), ("status", &status_label(status).to_lowercase())],
-                );
+                let template = match status {
+                    Status::Declined => {
+                        tl!("{who} is recorded as declined. Only the plan file was changed: nothing was signed, sent or checked")
+                    }
+                    Status::Approved => {
+                        tl!("{who} is recorded as approved. Only the plan file was changed: nothing was signed, sent or checked")
+                    }
+                    _ => tl!("{who} is recorded as signed. Only the plan file was changed: nothing was signed, sent or checked"),
+                };
+                let said = crate::i18n::fmt(template, &[("who", &clean(&next.name, 200))]);
                 (plan, said)
             }
         };
@@ -300,7 +371,7 @@ impl PdfCraftApp {
         }
         let key = next.email.to_lowercase();
         let Some(doc) = self.session.get(id) else { return };
-        let fields: Vec<(String, usize)> = doc
+        let fields: Vec<(String, Option<usize>)> = doc
             .form
             .iter()
             .filter(|f| f.kind == pdfcraft_engine::FormFieldKind::Signature)
@@ -308,10 +379,13 @@ impl PdfCraftApp {
                 let read = doc.field_signer(f.obj);
                 !read.signed && read.email.as_deref().is_some_and(|e| e.to_lowercase() == key)
             })
-            .map(|f| (f.name.clone(), f.widgets.first().and_then(|w| w.page).unwrap_or(0)))
+            .map(|f| (f.name.clone(), f.widgets.first().and_then(|w| w.page)))
             .collect();
         let (name, page) = match fields.as_slice() {
-            [one] => one.clone(),
+            [(name, Some(page))] => (name.clone(), *page),
+            [(name, None)] => {
+                return self.notify_fmt("The signature field {name} is on no page, so it cannot be signed from here", &[("name", &clean(name, 200))]);
+            }
             [] => {
                 return self.notify_fmt(
                     "No unsigned signature field is labelled for {who}: set the signer in the field's properties first",
@@ -326,6 +400,9 @@ impl PdfCraftApp {
         if let Some(view) = self.views.get_mut(index) {
             view.go_to_page(page);
         }
+        // Sign opens as a dialog of its own: the plan window closes first, so two modals never stack. Reopen it with
+        // Sign > Signing plan… to record the step.
+        self.signing_plan = None;
         self.start_signing(ctx, page, None, Some(name), None);
         self.notify_fmt(
             "Signing as {who}. Save the signed file over this document so the plan stays beside it, then record the step in the Signing plan window",
@@ -421,11 +498,17 @@ fn body(ui: &mut egui::Ui, d: &mut Draft) {
                 let who = clean(&next.name, 200);
                 Text::new(tl!("Turn")).role(TypeRole::Heading).show(ui);
                 let done = if next.role == Role::Signer { tl!("Record {who} as signed") } else { tl!("Record {who} as approved") };
-                if clicked(&Button::new(crate::i18n::fmt(done, &[("who", &who)])).show(ui)) {
-                    d.confirm = Some("sign.plan.record");
+                let email = next.email.to_lowercase();
+                let mut record = Button::new(crate::i18n::fmt(done, &[("who", &who)]));
+                if d.refocus.take_if(|r| *r == Refocus::Turn).is_some() {
+                    record = record.request_focus(FocusRequest::Take);
+                }
+                if clicked(&record.show(ui)) {
+                    d.confirm =
+                        Some(Confirm { command: "sign.plan.record", email: email.clone(), question: question(false, next.role, &who), fresh: true });
                 }
                 if clicked(&Button::new(crate::i18n::fmt(tl!("Record {who} as declined"), &[("who", &who)])).show(ui)) {
-                    d.confirm = Some("sign.plan.decline");
+                    d.confirm = Some(Confirm { command: "sign.plan.decline", email, question: question(true, next.role, &who), fresh: true });
                 }
                 if next.role == Role::Signer && clicked(&Button::new(crate::i18n::fmt(tl!("Sign as {who}…"), &[("who", &who)])).show(ui)) {
                     d.command = Some("sign.plan.sign_next");
@@ -460,7 +543,11 @@ fn body(ui: &mut egui::Ui, d: &mut Draft) {
                 d.role = *role;
             }
         });
-        if clicked(&Button::new(tl!("Add recipient")).enabled(editable).show(ui)) {
+        let mut add = Button::new(tl!("Add recipient")).enabled(editable);
+        if editable && d.refocus.take_if(|r| *r == Refocus::Add).is_some() {
+            add = add.request_focus(FocusRequest::Take);
+        }
+        if clicked(&add.show(ui)) {
             d.command = Some("sign.plan.recipient.add");
         }
         Text::new(tl!("Message")).role(TypeRole::Heading).show(ui);
@@ -469,13 +556,15 @@ fn body(ui: &mut egui::Ui, d: &mut Draft) {
             d.command = Some("sign.plan.message.set");
         }
     }
-    if let Some(command) = d.confirm {
-        let question = tl!(
-            "Record this step? The plan can no longer be edited afterwards and a step cannot be taken back. Only the plan file changes: nothing is signed or sent."
-        );
-        Notice::new(Tone::Warn, question).layout(NoticeLayout::Inline).id_salt(14usize).show(ui);
-        if clicked(&Button::new(tl!("Record it")).show(ui)) {
-            d.command = Some(command);
+    if let Some(c) = d.confirm.as_mut() {
+        Notice::new(Tone::Warn, c.question.clone()).layout(NoticeLayout::Inline).announce(Politeness::Polite).id_salt(14usize).show(ui);
+        let mut record = Button::new(tl!("Record it"));
+        if std::mem::take(&mut c.fresh) {
+            record = record.request_focus(FocusRequest::Take);
+        }
+        if clicked(&record.show(ui)) {
+            d.expect = Some(c.email.clone());
+            d.command = Some(c.command);
         }
         if clicked(&Button::new(tl!("Keep the plan as it is")).show(ui)) {
             d.confirm = None;

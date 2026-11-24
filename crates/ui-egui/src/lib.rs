@@ -176,12 +176,14 @@ use tools::stamps_ui;
 use tools::tags_ui;
 use workflows::a11y_ui;
 use workflows::actions_ui;
+use workflows::bates_multi_ui;
 use workflows::combine_grid;
 use workflows::combine_ui;
 use workflows::compare_ui;
 use workflows::create_ui;
 use workflows::export_ui;
 use workflows::files;
+use workflows::folder_search_ui;
 pub(crate) use workflows::job_count::JobCount;
 use workflows::js_dialogs;
 use workflows::js_ui;
@@ -196,6 +198,7 @@ use workflows::print_paper;
 use workflows::print_ui;
 use workflows::scan_clean_ui;
 use workflows::web_print;
+use workflows::white_margins_ui;
 
 /// A background job queue of the app, built over the host's jobs and the app's wake.
 type Queue<K, R> = craft::host::queue::JobQueue<K, R>;
@@ -316,6 +319,9 @@ pub struct PdfCraftApp {
     pub view_defaults: canvas::ViewDefaults,
     /// Preferences ▸ Highlight fields for newly opened forms (saved as `highlight_fields`).
     pub(crate) highlight_fields: bool,
+    /// Whether what Auto-Complete remembered is written to the settings file and read from it. False in a portable
+    /// copy, whose settings sit beside the program: the entries then live for the session only.
+    pub remember_entries_on_disk: bool,
     /// The unit page sizes and margins are shown in (Preferences ▸ Documents and view).
     pub units: units::Unit,
     /// The paper Create ▸ Blank page makes (#5644): the system region's.
@@ -714,6 +720,16 @@ pub struct PdfCraftApp {
     pub scan_clean_draft: scan_clean_ui::ScanCleanDraft,
     pub scan_clean_run: Option<scan_clean_ui::ScanCleanRun>,
     pub(crate) scan_cleans: Queue<DocId, Result<pdfcraft_engine::scan_clean::ScanCleaned, pdfcraft_engine::EditError>>,
+    /// Pages ▸ Remove white margins: the dialog's choices and the running measurement.
+    pub white_margins_draft: white_margins_ui::WhiteMarginsDraft,
+    pub white_margins_run: Option<white_margins_ui::WhiteMarginsRun>,
+    pub(crate) white_margins_jobs: Queue<DocId, Result<pdfcraft_engine::white_margins::WhiteMargins, pdfcraft_engine::EditError>>,
+    /// Edit ▸ Search all PDFs in a folder: the Search panel's Folder scope and its running search.
+    /// Edit ▸ Bates numbering on several files: the running job.
+    pub bates_multi_run: Option<bates_multi_ui::BatesRun>,
+    pub(crate) bates_multi_jobs: Queue<(), bates_multi_ui::BatesOutcome>,
+    pub folder_search: folder_search_ui::FolderSearch,
+    pub(crate) folder_search_jobs: Queue<(), Result<pdfcraft_engine::folder_search::Summary, String>>,
     /// Pages copied or cut in Organize Pages, ready to paste (into any document).
     pub page_clipboard: Option<PageClip>,
     /// Copied comments (XFDF), to paste into this or another document (M14).

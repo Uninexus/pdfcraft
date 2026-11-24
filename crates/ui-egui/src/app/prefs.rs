@@ -97,6 +97,21 @@ impl PdfCraftApp {
         }
     }
 
+    /// Preferences > Forms > Remove all remembered entries (`prefs.forms.forget_entries`): forgets what Auto-Complete
+    /// remembered and writes the settings at once, so a crash cannot leave the entries on disk.
+    pub(crate) fn forget_form_entries(&mut self) {
+        self.session.clear_form_entries();
+        self.save_settings();
+        self.notify_fmt("Remembered entries removed", &[]);
+    }
+
+    /// Preferences > Comment > Reset comment tool colours and sizes (`prefs.comment.reset_defaults`).
+    pub(crate) fn reset_comment_defaults(&mut self) {
+        self.comment_prefs.reset_defaults();
+        self.save_settings();
+        self.notify_fmt("Comment tool defaults reset", &[]);
+    }
+
     /// Hands the preferences to the settings store and writes them if they changed. A write that
     /// fails is logged: the preferences stay in the app and the next save tries again.
     pub(crate) fn save_settings(&mut self) {
@@ -186,7 +201,7 @@ impl PdfCraftApp {
             identity_email: Some(self.identity_email.clone()),
             form_tooltips: Some(self.form_tooltips),
             form_autocomplete: Some(self.session.form_autocomplete()),
-            form_entries: json_text(&self.session.form_entries().entries()),
+            form_entries: self.remember_entries_on_disk.then(|| json_text(&self.session.form_entries().entries())).flatten(),
             field_highlight_color: self.field_highlight_color,
             required_field_color: self.required_field_color,
             comments_panel_closed: Some(self.comments_panel_closed),
@@ -513,7 +528,9 @@ impl PdfCraftApp {
             self.session.set_form_autocomplete(on);
         }
         // Not an array, or not text in it: nothing remembered, never an error (see `FormEntries::restored`).
-        if let Some(list) = parsed(&b.form_entries).as_ref().and_then(serde_json::Value::as_array) {
+        if self.remember_entries_on_disk
+            && let Some(list) = parsed(&b.form_entries).as_ref().and_then(serde_json::Value::as_array)
+        {
             self.session.set_form_entries(pdfcraft_engine::form_entries::FormEntries::restored(list.iter().filter_map(serde_json::Value::as_str)));
         }
         if let Some(colour) = b.field_highlight_color {

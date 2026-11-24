@@ -2112,3 +2112,64 @@ fn with_prepare_open_a_double_click_on_a_field_leaves_the_polygon_unfinished() {
     assert_eq!(polygons, 0, "the polygon is not finished");
     assert!(!s.views[0].session.comments.tool.drawing().is_empty(), "it is still being clicked out");
 }
+
+/// A one-page document whose form holds one text field, `Qty`, near the top left.
+fn one_field_pdf() -> Vec<u8> {
+    use pdfcraft_engine::{Edit, NewField, Session};
+    let mut session = Session::new();
+    let bytes = session.create_blank(300.0, 400.0, 1).unwrap();
+    let id = session.open("one.pdf", None, bytes, None).unwrap();
+    session
+        .apply(id, Edit::AddField { name: Some("Qty".into()), page: 0, rect: [40.0, 320.0, 140.0, 340.0], kind: NewField::Text { multiline: false } })
+        .unwrap();
+    session.save_bytes(id).unwrap().to_vec()
+}
+
+/// Right-clicks `Qty` in Prepare a form and picks Create Multiple Copies….
+fn open_copies_dialog(h: &mut Harness<'static, PdfCraftApp>) {
+    h.execute("form.prepare");
+    h.run_steps(3);
+    let p = {
+        let s = h.state();
+        let doc = s.session.get(s.views[0].id).unwrap();
+        let f = doc.form.iter().find(|f| f.name == "Qty").unwrap();
+        pdfcraft_ui_egui::forms_ui::field_screen_rect(&s.views[0], &doc.info, f, 0).expect("on screen").center()
+    };
+    h.hover_at(p);
+    h.run_steps(1);
+    h.event(egui::Event::PointerButton { pos: p, button: egui::PointerButton::Secondary, pressed: true, modifiers: Default::default() });
+    h.event(egui::Event::PointerButton { pos: p, button: egui::PointerButton::Secondary, pressed: false, modifiers: Default::default() });
+    h.run_steps(3);
+    h.get_by_label("Create Multiple Copies…").click();
+    h.run_steps(2);
+    h.get_by_role_and_label(Role::Dialog, "Create Multiple Copies");
+}
+
+#[test]
+fn create_multiple_copies_fills_a_grid_as_one_undo_step() {
+    let mut h = harness_with("one.pdf", one_field_pdf());
+    open_copies_dialog(&mut h);
+    h.get_by_label("OK").click();
+    h.run_steps(3);
+    let all = names(&h);
+    assert_eq!(all.len(), 4, "a grid of 2 by 2 keeps the field and adds three copies: {all:?}");
+    assert!(all.iter().all(|n| n.starts_with("Qty")));
+    let s = h.state();
+    assert_eq!(s.session.get(s.views[0].id).unwrap().can_undo(), Some("Copy field into a grid"));
+    h.undo();
+    h.run_steps(2);
+    assert_eq!(names(&h), ["Qty"], "one undo takes every copy back");
+}
+
+#[test]
+fn create_multiple_copies_refuses_the_whole_grid_and_says_why() {
+    let mut h = harness_with("one.pdf", one_field_pdf());
+    open_copies_dialog(&mut h);
+    let ctx = h.ctx.clone();
+    h.state_mut().dialogs.set_json_field(&ctx, craft::ui::dialog::dialog_id("form.copy_field_grid"), "pattern", serde_json::json!("a.b")).unwrap();
+    h.run_steps(1);
+    h.get_by_label("OK").click();
+    h.run_steps(3);
+    assert_eq!(names(&h), ["Qty"], "nothing was copied");
+    assert!(crate::support::shown_notice(&h).is_some(), "the refusal is announced");
+}

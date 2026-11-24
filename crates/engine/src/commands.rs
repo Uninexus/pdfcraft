@@ -217,6 +217,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     // takes ⌘H to hide the app, and Ctrl+H is Read mode on Windows and Linux (as in Acrobat).
     c("edit.replace", "Replace…", EDIT, Some(Shortcut::cmd_shift("H")), Modification, "replace"),
     c("edit.advanced_search", "Advanced search…", EDIT, Some(Shortcut::cmd_shift("F")), Document, "search"),
+    c("edit.search_folder", "Search all PDFs in a folder…", EDIT, None, Document, "search"),
     c("view.palette", "Find tools and commands…", VIEW, Some(Shortcut::cmd("K")), Nothing, "search"),
     // Page display: View ▸ Page display and the rail's button list the base layouts as radios and
     // continuous scrolling as a checkbox, so `menu = None` keeps them out of the generated menus.
@@ -358,6 +359,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     c("edit.links_from_urls", "Create links from URLs", None, None, Modification, "link"),
     c("edit.remove_links", "Remove all links", None, None, Modification, "trash-2"),
     c("edit.bates", "Add Bates numbering…", None, None, Modification, "hash"),
+    c("edit.bates_multi", "Bates numbering on several files…", EDIT, None, Nothing, "hash"),
     c("edit.bates_remove", "Remove Bates numbering", None, None, Marks(crate::MarkKind::Bates), "hash"),
     c("edit.image", "Add image…", None, None, Modification, "image-plus"),
     c("redact.mark", "Redact text and images", None, None, Modification, "rectangle"),
@@ -460,7 +462,9 @@ pub const COMMANDS: &[CommandSpec] = &[
     c("page.reverse", "Reverse pages", PAGES, None, Assembly, "swap_vertical"),
     c("page.crop", "Crop pages", PAGES, None, Assembly, "crop"),
     c("page.boxes", "Set page boxes…", PAGES, None, Assembly, "square-dashed-mouse-pointer"),
+    c("page.remove_white_margins", "Remove white margins…", PAGES, None, Assembly, "scan"),
     c("page.insert", "Insert pages from file…", PAGES, None, Assembly, "file-input"),
+    c("page.insert_clipboard", "Insert pages from clipboard", PAGES, None, Assembly, "clipboard-paste"),
     c("page.replace", "Replace pages…", PAGES, None, Assembly, "replace"),
     c("page.extract", "Extract pages…", PAGES, None, PageExtraction, "file-output"),
     c("page.split", "Split document…", PAGES, None, PageExtraction, "scissors"),
@@ -483,6 +487,9 @@ pub const COMMANDS: &[CommandSpec] = &[
     // answer that they are only available on Windows. No menu lists them.
     c("help.default_app", "Set up PdfCraft as a PDF app…", None, None, Nothing, "file-text"),
     c("help.default_app.remove", "Stop offering PdfCraft as a PDF app…", None, None, Nothing, "file-x"),
+    // Preferences > Forms and > Comment: the window asks before it runs them.
+    c("prefs.forms.forget_entries", "Remove all remembered entries", None, None, Nothing, "trash-2"),
+    c("prefs.comment.reset_defaults", "Reset comment tool colours and sizes", None, None, Nothing, "eraser"),
 ];
 
 pub fn command(id: &str) -> Option<&'static CommandSpec> {

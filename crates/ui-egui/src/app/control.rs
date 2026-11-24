@@ -570,6 +570,10 @@ impl PdfCraftApp {
             "split" => self.open_split(ctx, false),
             "protect" => self.open_protect(),
             "page-boxes" => self.open_page_boxes(ctx, false),
+            // Through the command, so it is refused with no document or none whose pages can be changed.
+            "remove-white-margins" => {
+                self.execute(ctx, "page.remove_white_margins");
+            }
             "header-footer" => self.open_marks(ctx, MarkKind::HeaderFooter, false),
             "watermark" => self.open_marks(ctx, MarkKind::Watermark, false),
             "background" => self.open_marks(ctx, MarkKind::Background, false),

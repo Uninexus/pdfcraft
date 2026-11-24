@@ -1505,7 +1505,7 @@ area = "B"
 tier = "P1"
 milestone = "M12"
 status = "partial"
-commands = ["edit.advanced_search"]
+commands = ["edit.advanced_search", "edit.search_folder"]
 tools = ["text_find_folder"]
 evidence = [
     "crates/automation/tests/it/find_folder.rs::matches_across_two_files_with_pages_and_snippets",
@@ -1522,8 +1522,12 @@ evidence = [
     "crates/engine/src/folder_search.rs::cancelling_keeps_the_files_done_and_stops_the_rest",
     "crates/engine/src/folder_search.rs::caps_on_file_size_entries_and_bytes_are_reported",
     "crates/engine/src/folder_search.rs::an_unlistable_subfolder_is_reported_apart_from_skipped_files",
+    "crates/ui-egui/tests/it/folder_search.rs::the_results_are_listed_by_file_and_a_click_opens_the_file_at_its_page",
+    "crates/ui-egui/tests/it/folder_search.rs::stopping_keeps_what_was_found_and_says_the_list_is_incomplete",
+    "crates/ui-egui/tests/it/folder_search.rs::a_search_without_text_is_refused_and_starts_nothing",
+    "crates/ui-egui/tests/it/folder_search.rs::the_edit_menu_lists_it_and_the_panel_leads_back_to_the_document",
 ]
-notes = "Edit > Advanced search has a Search in: This document / Folder scope. Folder searches the .pdf files of a chosen folder (optionally its sub-folders, to 32 levels) on a worker thread with the engine's folder_search, which extracts each page's text and uses the find bar's matcher, so Case-sensitive and Whole words agree. Results are listed by file with the page and context, and a double-click opens the file at that page (a file that is already open comes to the front at that page). Stop keeps what was found and says the list is incomplete. The text_find_folder tool does the same headlessly: folder inside --root, at most 2000 files, 5000 matches and 4 GiB read (the answer says when a cap cut it), a corrupt, password-protected, oversized or linked file is listed as skipped with its reason and never stops the search, links are never followed, and failed or cut pages make complete false. The search reads the text layer only: scanned pages need OCR first, a password-protected file is skipped (there is no per-file password), files are read one after another, and there is no index, so a large folder is read again on every search (a full-text index is view.search-index). In the window up to 1000 matches are listed, and a file whose name is not UTF-8 is listed but cannot be opened from the list. UI to be re-ported onto the craft framework UI after the 0.22.0 sync."
+notes = "Edit > Search all PDFs in a folder… (also the Search all PDFs in a folder… button in the Search panel) switches the Search panel to its Folder scope and asks for a folder; the query and the Whole words and Case-sensitive options are the panel's. It searches the .pdf files of a chosen folder (optionally its sub-folders, to 32 levels) on the host job queue with a progress card and Cancel (also the panel's Stop) with the engine's folder_search, which extracts each page's text and uses the find bar's matcher, so Case-sensitive and Whole words agree. Results are listed by file with the page and context, and a click opens the file at that page (a file that is already open comes to the front at that page). Stop keeps what was found and says the list is incomplete. The text_find_folder tool does the same headlessly: folder inside --root, at most 2000 files, 5000 matches and 4 GiB read (the answer says when a cap cut it), a corrupt, password-protected, oversized or linked file is listed as skipped with its reason and never stops the search, links are never followed, and failed or cut pages make complete false. The search reads the text layer only: scanned pages need OCR first, a password-protected file is skipped (there is no per-file password), files are read one after another, and there is no index, so a large folder is read again on every search (a full-text index is view.search-index). In the window up to 1000 matches are listed, and a file whose name is not UTF-8 is listed but cannot be opened from the list."
 
 [[feature]]
 id = "view.search-boolean"
@@ -2694,10 +2698,10 @@ area = "C"
 tier = "P1"
 milestone = "M7"
 status = "partial"
-commands = []
+commands = ["edit.bates_multi"]
 tools = ["doc_bates_multi"]
-evidence = ["crates/automation/tests/it/automation.rs::bates_numbers_continue_across_files_and_report_preflight_and_permission_failures"]
-notes = "The headless batch tool allocates inclusive intervals in input order and reports per-file failures; it refuses existing output paths. Missing: a GUI batch dialog (Acrobat sets this up from Header & Footer ▸ Add Bates numbering with a file list), so it is reachable only through `doc_bates_multi`."
+evidence = ["crates/automation/tests/it/automation.rs::bates_numbers_continue_across_files_and_report_preflight_and_permission_failures", "crates/ui-egui/tests/it/bates_multi.rs::the_numbers_run_on_from_one_file_to_the_next_and_the_copies_go_to_the_chosen_folder", "crates/ui-egui/tests/it/bates_multi.rs::a_file_that_cannot_be_read_stops_the_run_with_nothing_written", "crates/ui-egui/tests/it/bates_multi.rs::a_name_already_in_the_folder_is_never_replaced", "crates/ui-egui/tests/it/bates_multi.rs::cancelling_before_the_run_starts_writes_nothing_and_says_so", "crates/ui-egui/tests/it/bates_multi.rs::the_edit_menu_lists_it_and_the_dialog_asks_for_files_first"]
+notes = "Edit > Bates numbering on several files… (also under Bates numbering in the Edit a PDF tools) opens a dialog with a file list (Browse, Remove, reorder by drag or Ctrl+] and Ctrl+[, Sort By Name), the first number, the digits and the text before and after the number. After OK it asks for a folder and numbers the files in the listed order on a background worker, the numbers running on from one file to the next, with a progress card and Cancel. Every file is read and counted first, so a file that cannot be used stops the run with nothing written; a numbered copy never replaces a file (a taken name gets (2), (3)), and the originals are not changed. The number goes at the bottom right of every page (the batch tool puts it in the footer centre). A copy that cannot be written is named in the message and its numbers stay unused. Up to 1000 files and 512 MB of input. Also the headless tool doc_bates_multi, which allocates inclusive intervals in input order, reports per-file failures and refuses existing output paths; both share engine::bates_batch. Not in the browser."
 
 [[feature]]
 id = "edit.bates-remove"
@@ -2878,10 +2882,10 @@ area = "D"
 tier = "P1"
 milestone = "M10"
 status = "partial"
-commands = []
+commands = ["page.insert_clipboard"]
 tools = ["page_insert_image"]
-evidence = ["crates/engine/src/tests.rs::planned_insert_puts_pictures_and_files_in_as_one_undoable_step", "crates/automation/tests/it/automation.rs::inserting_pictures_makes_one_undoable_step_and_refuses_other_files"]
-notes = "Headless only after the 0.22.0 sync: the registry command and the dialog that ran it are gone until the UI is re-ported. Edit > Pages > Insert pages from clipboard, the Organize Insert menu and the Pages panel's page tools put a picture on the system clipboard (a screenshot, a picture copied in a browser), or the PDFs, images, .txt and Office files copied in a file manager, after the selection (or the current page) in order, as one undo step, with the inserted pages selected. A copied picture is one page of its own size; copied files are used in order and one that can't be (another type, unreadable, over 256 MB) is named and left out; at most 100 files, 256 MB each and 512 MB together, and the clipboard image size limits as paste. Desktop only: the web build has no clipboard access to read. The page_insert_image tool takes PDF, picture (PNG, JPEG, JPEG 2000, TIFF, GIF, BMP) and .txt files by path, up to 100 and 512 MB together, and also takes Word, Excel, PowerPoint, OpenDocument and RTF files, converted with an installed LibreOffice one after another (see create.from-office), and refuses the whole call, changing nothing, if one is another kind, can't be read or converted, or LibreOffice isn't installed; it can't read the system clipboard. Copied Office files are converted on a worker thread in the app, and the pages go in when they are ready (without LibreOffice, none of the batch). Missing: choosing the position in the app. UI to be re-ported onto the craft framework UI after the 0.22.0 sync."
+evidence = ["crates/engine/src/tests.rs::planned_insert_puts_pictures_and_files_in_as_one_undoable_step", "crates/automation/tests/it/automation.rs::inserting_pictures_makes_one_undoable_step_and_refuses_other_files", "crates/ui-egui/tests/it/insert_clipboard.rs::a_copied_picture_becomes_one_page_after_the_current_page_and_undoes_in_one_step", "crates/ui-egui/tests/it/insert_clipboard.rs::copied_files_go_in_order_and_what_cannot_be_used_is_named", "crates/ui-egui/tests/it/insert_clipboard.rs::nothing_usable_on_the_clipboard_says_what_to_copy_and_changes_nothing", "crates/ui-egui/tests/it/insert_clipboard.rs::the_pages_menu_lists_it"]
+notes = "Edit > Pages > Insert pages from clipboard (also the Organize Insert menu, the Pages panel's page tools and the palette, as page.insert_clipboard) puts a picture on the system clipboard (a screenshot, a picture copied in a browser), or the PDFs, images and .txt files copied in a file manager, after the selection (or the current page) in order, as one undo step, with the inserted pages selected. A copied picture is one page of its own size; copied files are used in order and one that can't be (another type, an Office file, unreadable, over 256 MB) is named and left out; a clipboard with nothing usable says what may be copied. At most 100 files, 256 MB each and 512 MB together, and the clipboard image size limits as paste. Desktop only: the web build has no clipboard access to read, and says so. The page_insert_image tool takes PDF, picture (PNG, JPEG, JPEG 2000, TIFF, GIF, BMP) and .txt files by path, up to 100 and 512 MB together, and also takes Word, Excel, PowerPoint, OpenDocument and RTF files, converted with an installed LibreOffice one after another (see create.from-office), and refuses the whole call, changing nothing, if one is another kind, can't be read or converted, or LibreOffice isn't installed; it can't read the system clipboard. Missing: Office files copied in a file manager are named and left out in the app (not converted), and choosing the position in the app."
 
 [[feature]]
 id = "organize.insert-from-scanner"
@@ -3094,10 +3098,10 @@ area = "D"
 tier = "P2"
 milestone = "M4"
 status = "partial"
-commands = []
+commands = ["page.split"]
 tools = ["doc_split"]
-evidence = ["crates/automation/tests/it/split_name_template.rs::a_template_names_every_part_from_its_placeholders", "crates/automation/tests/it/split_name_template.rs::parts_that_get_the_same_name_stay_distinct_files", "crates/automation/tests/it/split_name_template.rs::a_template_cannot_put_a_part_outside_out_dir", "crates/automation/tests/it/automation.rs::bookmark_split_with_equal_titles_keeps_every_part"]
-notes = "Headless only: doc_split names parts after top-level bookmarks (equal names get -2, -3) or from an optional name_template ({name}, {bookmark}, {n}, {first}, {last}) made safe as a file name. A file already in out_dir with a part's name is replaced, not kept: there is no never-overwrite mode. The split dialog in the app has no name template and is unchanged."
+evidence = ["crates/automation/tests/it/split_name_template.rs::a_template_names_every_part_from_its_placeholders", "crates/automation/tests/it/split_name_template.rs::parts_that_get_the_same_name_stay_distinct_files", "crates/automation/tests/it/split_name_template.rs::a_template_cannot_put_a_part_outside_out_dir", "crates/automation/tests/it/automation.rs::bookmark_split_with_equal_titles_keeps_every_part", "crates/ui-egui/tests/it/split_template.rs::the_preview_shows_the_first_names_the_template_gives", "crates/ui-egui/tests/it/split_template.rs::a_template_that_cannot_be_used_says_why_and_blocks_the_split", "crates/ui-egui/tests/it/split_template.rs::the_parts_are_written_under_the_template_names"]
+notes = "The Split dialog has a File name template row: a hint on the placeholders, the template checked as it is typed (a bad one says why and Split stays off), and the first three file names shown before the split (not for a split by file size). doc_split and the dialog name parts after top-level bookmarks (equal names get -2, -3) or from an optional name_template ({name}, {bookmark}, {n}, {first}, {last}) made safe as a file name. A file already in out_dir with a part's name is replaced, not kept: there is no never-overwrite mode. In the dialog a template that leaves no usable name falls back to the usual name for that part; equal names get -2, -3. The template is not kept between runs of the app."
 
 [[feature]]
 id = "organize.split-multiple-files"
@@ -3322,7 +3326,7 @@ area = "D"
 tier = "P2"
 milestone = "M4"
 status = "partial"
-commands = []
+commands = ["page.remove_white_margins"]
 tools = ["page_remove_white_margins"]
 evidence = [
     "crates/automation/tests/it/white_margins.rs::every_page_is_cropped_to_its_content_and_a_blank_page_is_left_alone",
@@ -3331,8 +3335,14 @@ evidence = [
     "crates/automation/tests/it/white_margins.rs::a_page_that_is_not_a_whole_number_of_points_is_cropped_without_cutting_content",
     "crates/automation/tests/it/white_margins.rs::rotated_pages_with_a_crop_box_origin_and_tiny_content",
     "crates/engine/src/white_margins.rs::crops_the_text_pages_then_undoes_as_one_step",
+    "crates/ui-egui/tests/it/white_margins.rs::the_dialog_crops_the_pages_to_their_content_as_one_undoable_step",
+    "crates/ui-egui/tests/it/white_margins.rs::the_padding_keeps_room_around_the_content_and_the_range_limits_the_pages",
+    "crates/ui-egui/tests/it/white_margins.rs::a_padding_that_is_not_allowed_is_refused_with_the_reason",
+    "crates/ui-egui/tests/it/white_margins.rs::cancelling_changes_nothing_and_says_so",
+    "crates/ui-egui/tests/it/white_margins.rs::a_result_is_refused_when_the_document_was_edited_while_it_ran",
+    "crates/ui-egui/tests/it/white_margins.rs::the_pages_menu_lists_it_and_opens_the_dialog",
 ]
-notes = "Headless only after the 0.22.0 sync: the registry command and the dialog that ran it are gone until the UI is re-ported. Pages menu and palette command Remove white margins… opens a dialog (All / Current page / From–to, and the padding to keep in the Preferences unit, default 0) and measures on a background worker, page by page, with a progress card and Cancel; the result is applied as one undoable step and a toast says how many pages were cropped, blank (left alone) or already tight, and it is refused, changing nothing, if the document was edited or another was brought to the front meanwhile. Also the tool page_remove_white_margins (engine Session::remove_white_margins, or white_margins_job + apply_white_margins) sets each page's crop box to the bounds of what a raster of the page paints (up to 144 dpi, so about half a point; coarser on very large pages), plus an optional padding in points, within the old crop box, rounded outward to 0.01 pt so it never cuts the content, following /Rotate and /UserUnit; judged as the file sets it, not as the view has it (layers at the file's defaults, comments shown); one undoable step through the ordinary crop edit. A pixel is content unless it is transparent or every colour channel is 250 or more; pages with no content are left as they are and reported, as are pages already tight. Limits: judged from the drawn page, not the content stream (a white-painted shape or faint tint under 2% is not content); no odd/even or page-size options and no per-side margins; not yet in the Organize panel list UI to be re-ported onto the craft framework UI after the 0.22.0 sync."
+notes = "Edit > Pages > Remove white margins… (also the Organize pages panel, the Tools pane and the palette) opens a dialog (All / Current page / From–to, and the padding to keep in the Preferences unit, default 0) and measures on a background worker, page by page, with a progress card and Cancel (a result measured while another tab is in front waits for its document); the result is applied as one undoable step and a toast says how many pages were cropped, blank (left alone) or already tight, and it is refused, changing nothing, if the document was edited or another was brought to the front meanwhile. Also the tool page_remove_white_margins (engine Session::remove_white_margins, or white_margins_job + apply_white_margins) sets each page's crop box to the bounds of what a raster of the page paints (up to 144 dpi, so about half a point; coarser on very large pages), plus an optional padding in points, within the old crop box, rounded outward to 0.01 pt so it never cuts the content, following /Rotate and /UserUnit; judged as the file sets it, not as the view has it (layers at the file's defaults, comments shown); one undoable step through the ordinary crop edit. A pixel is content unless it is transparent or every colour channel is 250 or more; pages with no content are left as they are and reported, as are pages already tight. Limits: judged from the drawn page, not the content stream (a white-painted shape or faint tint under 2% is not content); no odd/even or page-size options and no per-side margins; the padding is not kept between runs of the app."
 
 [[feature]]
 id = "organize.change-page-size"
@@ -5348,8 +5358,10 @@ evidence = [
   "crates/engine/src/field_copies.rs::a_grid_of_copies_is_added_and_undone_as_one_step",
   "crates/automation/tests/it/automation.rs::copying_a_field_into_a_grid_through_tools",
   "crates/ui-egui/tests/it/prepare.rs::a_text_field_table_is_drawn_set_up_and_added_in_one_step",
+  "crates/ui-egui/tests/it/prepare.rs::create_multiple_copies_fills_a_grid_as_one_undo_step",
+  "crates/ui-egui/tests/it/prepare.rs::create_multiple_copies_refuses_the_whole_grid_and_says_why",
 ]
-notes = "Prepare a form ▸ Text field table: drag an area, then set rows, columns, spacing, column widths (draggable dividers) and a name pattern per column in a movable window, with the table previewed on the page. Added as one undoable edit, or refused whole with the reason (a cell under 4 pt, a name with a period, a repeated or existing name); form_add_field_table does the same headlessly. Headless: form_copy_field_grid copies an existing field of any type but a radio button into a grid of rows by columns as one undoable edit, the field staying as the first cell and each copy a field of its own with the same type, flags, options, look and actions and an empty value; copies are named field_1, field_2, … or from a pattern, laid out as the page is shown (turned pages too), and refused whole when a copy would run off the page or a name repeats, has a period or exists. Missing: the right-click Create Multiple Copies window with a preview on the page, and copying several fields at once."
+notes = "Prepare a form ▸ Text field table: drag an area, then set rows, columns, spacing, column widths (draggable dividers) and a name pattern per column in a movable window, with the table previewed on the page. Added as one undoable edit, or refused whole with the reason (a cell under 4 pt, a name with a period, a repeated or existing name); form_add_field_table does the same headlessly. In Prepare a form, right-click a field > Create Multiple Copies… opens a dialog (rows, columns, the space between rows and between columns in the Preferences unit, and an optional name pattern); OK adds the copies as one undoable step or refuses the whole grid with the reason. The same is form_copy_field_grid, which copies an existing field of any type but a radio button into a grid of rows by columns as one undoable edit, the field staying as the first cell and each copy a field of its own with the same type, flags, options, look and actions and an empty value; copies are named field_1, field_2, … or from a pattern, laid out as the page is shown (turned pages too), and refused whole when a copy would run off the page or a name repeats, has a period or exists. Missing: a preview of the grid on the page, a registered command (it is reached from the field's menu, as Duplicate is), and copying several fields at once."
 
 [[feature]]
 id = "form.rename-lock-fields"

@@ -14,10 +14,11 @@ use craft::ui::patterns::form_dialogs::{DialogFields, FieldValue, HostedParamDia
 use craft::ui::pickers::Select;
 use craft::ui::runtime::env::Label;
 use craft::ui::runtime::memory::SaveKey;
+use pdfcraft_engine::split_name::Template;
 use pdfcraft_engine::{Edit, LabelStyle, PageOrientation, PageParity};
 
 use crate::i18n::fmt;
-use crate::workflows::files::{ExtractOptions, PickTarget, SplitPlan, pages_to_extract, strip_pdf};
+use crate::workflows::files::{ExtractOptions, PickTarget, SplitPlan, pages_to_extract, split_file_names, strip_pdf, template_error};
 use crate::{PdfCraftApp, dialogs};
 
 const SPLIT: &str = "page.split";
@@ -39,6 +40,9 @@ struct SplitFacts {
     cuts: Vec<usize>,
     /// The first page of each top-level bookmark.
     marks: Vec<usize>,
+    /// The document's name without `.pdf`, and each top-level bookmark's first page and title, for the file names.
+    stem: String,
+    titles: Vec<(usize, String)>,
 }
 
 impl SplitFacts {
@@ -59,6 +63,40 @@ impl SplitFacts {
             SplitPlan::Bookmarks => Some(pdfcraft_engine::split_ranges(self.count, &pdfcraft_engine::SplitBy::Before(self.marks.clone())).len()),
             SplitPlan::Size(_) => None,
         }
+    }
+
+    /// The template typed in the dialog, parsed, or why it can't be used. Empty is no template.
+    fn template(&self, fields: &DialogFields) -> (Option<Template>, Option<String>) {
+        let typed = fields.text("template").unwrap_or_default();
+        if typed.trim().is_empty() {
+            return (None, None);
+        }
+        match Template::parse(typed) {
+            Ok(template) => (Some(template), None),
+            Err(e) => (None, Some(template_error(&e))),
+        }
+    }
+
+    /// The line under the template: the first file names the split writes (with the template, if any), or why the
+    /// template can't be used. Whether it is a problem comes with it.
+    fn name_preview(&self, plan: &SplitPlan, template: Option<&Template>, problem: Option<&str>) -> (String, bool) {
+        if let Some(problem) = problem {
+            return (problem.to_string(), true);
+        }
+        let ranges = match plan {
+            SplitPlan::By(by) => pdfcraft_engine::split_ranges(self.count, by),
+            SplitPlan::Bookmarks => pdfcraft_engine::split_ranges(self.count, &pdfcraft_engine::SplitBy::Before(self.marks.clone())),
+            SplitPlan::Size(_) => return (tl!("The names are not previewed when splitting by file size.").to_string(), false),
+        };
+        let parts: Vec<(usize, usize)> = ranges.into_iter().map(|r| (r.start + 1, r.end)).collect();
+        let titles: &[(usize, String)] = if matches!(plan, SplitPlan::Bookmarks) { &self.titles } else { &[] };
+        let names = split_file_names(&self.stem, &parts, titles, &self.titles, template);
+        let first: Vec<&str> = names.iter().take(3).map(String::as_str).collect();
+        let mut line = fmt(tl!("First files: {names}"), &[("names", &first.join(", "))]);
+        if names.len() > first.len() {
+            line.push_str(" …");
+        }
+        (line, false)
     }
 
     fn dialog<'b>(&self, fields: &'b mut DialogFields) -> ParamDialog<'b> {
@@ -83,6 +121,8 @@ impl SplitFacts {
         if self.cuts.is_empty() {
             unavailable.push("selection");
         }
+        let (template, problem) = self.template(fields);
+        let preview = self.name_preview(&plan, template.as_ref(), problem.as_deref());
         let params = vec![
             Param::new(
                 "mode",
@@ -106,10 +146,22 @@ impl SplitFacts {
             Param::new("size", tl!("At most (MB)"), ParamKind::number(Some(0.05), Some(2000.0), 2.0, 0.1, 2))
                 .enabled_when("mode", "size")
                 .under_option("size"),
+            Param::new("template", tl!("File name template"), ParamKind::text("")).hint(tl!("e.g. {name} part {n}").to_string()),
+            Param::read_only_text(
+                "template-help",
+                "",
+                tl!("Placeholders: {name} is the document's name, {bookmark} the bookmark that starts the part, {n} the part number, {first} and {last} its first and last page. Leave it empty for the usual names."),
+            )
+            .full_width(),
+            Param::custom("template-preview", "", move |ui, _, _| {
+                let text = Text::new(preview.0.clone());
+                if preview.1 { text.tone(Tone::Bad).show(ui) } else { text.show(ui) }
+            })
+            .full_width(),
         ];
         ParamDialog::new(SPLIT, tl!("Split document"), params)
             .ok_label(tl!("Split").into())
-            .ok_enabled(files.is_none_or(|f| f > 1))
+            .ok_enabled(files.is_none_or(|f| f > 1) && problem.is_none())
             .footer_note(note)
             .remember(SaveKey::new("pdfcraft.page_split"))
             .values(Bind::bound(fields))
@@ -353,8 +405,10 @@ impl PdfCraftApp {
         let (i, id) = self.active_ids()?;
         let count = self.session.get(id)?.info.pages.len();
         let cuts = self.views[i].selected.items.iter().copied().filter(|p| *p > 0).collect();
-        let marks = self.session.bookmark_splits(id).into_iter().map(|m| m.0).collect();
-        Some(SplitFacts { count, cuts, marks })
+        let titles = self.session.bookmark_splits(id);
+        let marks = titles.iter().map(|m| m.0).collect();
+        let stem = self.session.get(id).map(|d| strip_pdf(&d.name).to_string()).unwrap_or_else(|| "document".into());
+        Some(SplitFacts { count, cuts, marks, stem, titles })
     }
 
     /// Show Split; `before_selected` opens it on the cuts before the selected pages when there are any.
@@ -436,7 +490,8 @@ impl PdfCraftApp {
             && let Some(facts) = self.split_facts()
         {
             let plan = facts.plan(&result.fields);
-            self.split_active(ctx, &plan);
+            let template = result.fields.text("template").map(str::to_string);
+            self.split_active_named(ctx, &plan, template.as_deref());
         }
         if let Some(result) = self.answered(ctx, EXTRACT) {
             let f = &result.fields;

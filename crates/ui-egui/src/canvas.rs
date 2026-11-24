@@ -1481,8 +1481,19 @@ fn page_body(ui: &mut egui::Ui, body: &PageBody<'_>, callbacks: &mut PageCallbac
         }
     }
     // The focused field's editor, and the Fill & Sign text being typed, over their pages.
-    if let Some(editor) = crate::forms_ui::editor::show(ui, body, session, cx.doc, cx.form, cx.info, cx.today, cx.form_suggestions, cx.geometry(body))
-        && *field_arrived
+    if let Some(editor) = crate::forms_ui::editor::show(
+        ui,
+        body,
+        session,
+        crate::forms_ui::editor::Inputs {
+            doc: cx.doc,
+            form: cx.form,
+            info: cx.info,
+            today: cx.today,
+            suggestions: cx.form_suggestions,
+            pages: cx.geometry(body),
+        },
+    ) && *field_arrived
     {
         // The keys of a field that takes typing are its editor's: it takes the focus over from the field's part.
         focus::request(ui.ctx(), FocusTarget::Id(editor));
@@ -2155,8 +2166,10 @@ fn apply_frame_requests(app: &mut PdfCraftApp, ctx: &egui::Context, index: usize
     if let Some((name, w)) = field_props {
         crate::prepare::dialog::open(app, &name, w, crate::prepare::FieldTab::General);
     }
-    if let Some(FieldMenu::Duplicate(name)) = field_menu {
-        crate::dialogs::duplicate_field::open(app, ctx, name);
+    match field_menu {
+        Some(FieldMenu::Duplicate(name)) => crate::dialogs::duplicate_field::open(app, ctx, name),
+        Some(FieldMenu::Copies(name)) => crate::dialogs::field_copies_ui::open(app, ctx, name),
+        Some(FieldMenu::Properties) | None => {}
     }
     if let Some((page, rect)) = app.views[index].session.links.open_new.take() {
         app.open_link_props(page, Some(rect), None);

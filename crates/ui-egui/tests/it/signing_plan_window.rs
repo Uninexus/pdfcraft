@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use crate::support::{AppHarness as _, shown_notice};
 use egui::accesskit::Role;
 use egui_kittest::Harness;
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT as _, Queryable};
 use pdfcraft_engine::Session;
 use pdfcraft_engine::signing_plan::{Plan, Role as PlanRole, Status, plan_bytes, read_sidecar, sidecar_of};
 use pdfcraft_ui_egui::PdfCraftApp;
@@ -68,6 +68,25 @@ fn result(h: &Harness<'static, PdfCraftApp>) -> String {
     h.state().signing_plan.as_ref().map(|d| d.result.clone()).unwrap_or_default()
 }
 
+/// Asks for a step with `button`, then answers the question with Record it.
+fn confirm(h: &mut Harness<'static, PdfCraftApp>, button: &str) {
+    h.get_by_role_and_label(Role::Button, button).click();
+    h.run_steps(3);
+    h.get_by_role_and_label(Role::Button, "Record it").click();
+    h.run_steps(4);
+}
+
+/// A plan of Ann (signer) and Bob (signer) beside the saved document, with the window open on it.
+fn two_signers() -> (crate::support::TempDir, PathBuf, Harness<'static, PdfCraftApp>) {
+    let (dir, pdf, mut h) = saved();
+    open_window(&mut h);
+    type_into(&mut h, "Ann Author", "ann@example.org", PlanRole::Signer);
+    run(&mut h, "sign.plan.recipient.add");
+    type_into(&mut h, "Bob Boss", "bob@example.org", PlanRole::Signer);
+    run(&mut h, "sign.plan.recipient.add");
+    (dir, pdf, h)
+}
+
 /// Everything in the folder, by name.
 fn files(dir: &Path) -> Vec<String> {
     let mut names: Vec<String> = std::fs::read_dir(dir).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
@@ -91,7 +110,9 @@ fn recipients_and_a_message_are_written_beside_the_pdf_and_the_pdf_is_left_alone
     assert_eq!(plan.recipients[1].role, PlanRole::Approver);
     assert_eq!(plan.message, "Please sign by Friday");
     assert_eq!(std::fs::read(&pdf).unwrap(), before, "the PDF is not touched");
-    assert_eq!(files(dir.path()), ["contract.pdf", "contract.pdf.pdfcraft-sign.json"], "only the plan file was made");
+    let names = files(dir.path());
+    assert_eq!(names.len(), 2, "only the plan file was made: {names:?}");
+    assert!(names.iter().any(|n| n != "contract.pdf" && n.starts_with("contract.pdf")), "the plan file lies beside the PDF: {names:?}");
     // The window shows the file as it is now.
     h.run_steps(3);
     assert!(h.query_all_by_label_contains("Bob Boss").count() > 0, "the recipient is listed");
@@ -207,7 +228,11 @@ fn a_recorded_step_is_asked_for_first_and_then_locks_the_plan() {
     assert_eq!(plan_at(&pdf).unwrap().recipients[0].status, Status::Pending);
     h.get_by_role_and_label(Role::Button, "Record Ann Author as signed").click();
     h.run_steps(3);
-    h.get_by_role_and_label(Role::Button, "Record it").click();
+    let question = h.query_all_by_label_contains("Record Ann Author as signed?").count();
+    assert!(question > 0, "the question names the step and the person");
+    let record_it = h.get_by_role_and_label(Role::Button, "Record it");
+    assert!(record_it.accesskit_node().is_focused(), "the answer takes the keyboard focus");
+    record_it.click();
     h.run_steps(4);
     let plan = plan_at(&pdf).unwrap();
     assert_eq!(plan.recipients[0].status, Status::Signed);
@@ -218,12 +243,43 @@ fn a_recorded_step_is_asked_for_first_and_then_locks_the_plan() {
     run(&mut h, "sign.plan.recipient.add");
     assert_eq!(std::fs::read(sidecar_of(&pdf).unwrap()).unwrap(), written);
     // The approver's turn is approved, not signed, and a decline finishes the plan.
-    run(&mut h, "sign.plan.decline");
+    confirm(&mut h, "Record Bob Boss as declined");
     let plan = plan_at(&pdf).unwrap();
     assert_eq!(plan.recipients[1].status, Status::Declined);
     assert_eq!(plan.state(), "declined");
     run(&mut h, "sign.plan.record");
     assert!(!h.state().signing_plan.as_ref().unwrap().result_ok, "nothing is left to record once the plan is declined");
+}
+
+#[test]
+fn a_step_is_not_recorded_by_a_command_the_window_did_not_ask_for() {
+    let (_dir, pdf, mut h) = two_signers();
+    let written = std::fs::read(sidecar_of(&pdf).unwrap()).unwrap();
+    for command in ["sign.plan.record", "sign.plan.decline"] {
+        run(&mut h, command);
+        assert_eq!(std::fs::read(sidecar_of(&pdf).unwrap()).unwrap(), written, "{command} without the question changed the plan");
+        assert!(!h.state().signing_plan.as_ref().unwrap().result_ok);
+        assert!(result(&h).contains("Confirm the step"), "it says to confirm in the window: {}", result(&h));
+    }
+}
+
+#[test]
+fn a_plan_changed_behind_the_window_refuses_the_step_that_was_confirmed() {
+    let (_dir, pdf, mut h) = two_signers();
+    h.get_by_role_and_label(Role::Button, "Record Ann Author as signed").click();
+    h.run_steps(3);
+    // Another program records Ann's step while the question is on screen: Bob is next now.
+    let mut plan = plan_at(&pdf).unwrap();
+    plan.record(0, Status::Signed, 5).unwrap();
+    std::fs::write(sidecar_of(&pdf).unwrap(), plan_bytes(&plan).unwrap()).unwrap();
+    let behind = std::fs::read(sidecar_of(&pdf).unwrap()).unwrap();
+    h.get_by_role_and_label(Role::Button, "Record it").click();
+    h.run_steps(4);
+    assert_eq!(std::fs::read(sidecar_of(&pdf).unwrap()).unwrap(), behind, "the plan was not written over");
+    assert_eq!(plan_at(&pdf).unwrap().recipients[1].status, Status::Pending, "Bob was not recorded in Ann's place");
+    assert!(!h.state().signing_plan.as_ref().unwrap().result_ok);
+    assert!(result(&h).contains("plan changed"), "it says the plan changed: {}", result(&h));
+    assert!(h.state().signing_plan.as_ref().unwrap().confirm.is_none(), "the question is gone, and must be asked again");
 }
 
 #[test]
@@ -254,8 +310,12 @@ fn signing_as_the_next_recipient_opens_signing_on_the_field_labelled_for_them() 
         }
     });
     crate::support::settle(&mut h);
+    assert!(h.execute("sign.plan.show"));
+    h.run_steps(3);
+    assert!(h.state().signing_plan.is_some());
     assert!(h.execute("sign.plan.sign_next"));
     h.run_steps(3);
+    assert!(h.state().signing_plan.is_none(), "the plan window closes so two dialogs do not stack");
     let draft = h.state().sign_draft.as_ref().expect("Sign with a Digital ID is open");
     assert_eq!(draft.field.as_deref(), Some("Sig1"), "on the field labelled for the recipient");
 }

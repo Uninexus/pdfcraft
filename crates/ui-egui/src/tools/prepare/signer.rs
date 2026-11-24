@@ -110,10 +110,10 @@ impl PdfCraftApp {
     }
 
     /// Keeps the label the open Field Properties shows current, so an undo or a redo is seen. Cheap: it reads the
-    /// document, not the plan file.
+    /// document the dialog was opened on, not the plan file (the plan note is read when the dialog opens).
     pub(crate) fn refresh_signer_view(&mut self) {
-        let Some((_, id)) = self.active_ids() else { return };
-        let Some((field, signature)) = self.dialogs.get::<FieldPropsDialog>().map(|d| (d.signer_field().to_owned(), d.signer_field_is_signature()))
+        let Some((id, field, signature)) =
+            self.dialogs.get::<FieldPropsDialog>().and_then(|d| Some((d.signer_doc()?, d.signer_field().to_owned(), d.signer_field_is_signature())))
         else {
             return;
         };
