@@ -339,6 +339,51 @@ pub(super) fn offset_at(
     laid.hit_box(frame.in_box(at)).0
 }
 
+/// Puts the Auto-Complete entry `entry` in the focused field's draft, cut to the field's limit, with the caret at its
+/// end, and shuts the list until the text changes.
+fn take_suggestion(session: &mut PageSession, f: &FormField, entry: &str) {
+    if let Some(x) = session.forms.focus.as_mut() {
+        x.text = f.max_len.map_or_else(|| entry.to_owned(), |max| entry.chars().take(max).collect());
+        x.selection = TextSelection::caret_at(x.text.chars().count());
+        session.forms.suggest_hidden = Some(x.text.clone());
+        session.forms.suggest_selected = None;
+    }
+}
+
+/// The keys of Auto-Complete's list, taken before the field's editor sees them: Down and Up move the highlight, Enter
+/// takes the highlighted entry (with none highlighted it is the editor's, and commits what was typed) and Escape shuts
+/// the list while the typing stays. Returns the entries to list and the highlighted row; none for a field that is
+/// not a plain one-line text field, or once the list was shut at this text.
+fn suggestion_keys<'a>(ui: &mut egui::Ui, session: &mut PageSession, f: &FormField, suggestions: &'a [String]) -> (&'a [String], Option<usize>) {
+    let typed = session.forms.focus.as_ref().map(|x| x.text.clone()).unwrap_or_default();
+    let usable = f.kind == FormFieldKind::Text && super::autocompletes(f) && session.forms.suggest_hidden.as_deref() != Some(typed.as_str());
+    let shown: &[String] = if usable { suggestions } else { &[] };
+    let Some(last) = shown.len().checked_sub(1) else { return (&[], None) };
+    let mut selected = session.forms.suggest_selected.as_ref().filter(|(text, at)| *text == typed && *at <= last).map(|(_, at)| *at);
+    // Only the plain keys: Shift+Tab goes back a field and Shift+arrows select text.
+    if ui.input(|i| i.modifiers.is_none()) {
+        let mut press = |key: egui::Key| ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, key));
+        if press(egui::Key::Escape) {
+            session.forms.suggest_hidden = Some(typed);
+            session.forms.suggest_selected = None;
+            return (&[], None);
+        }
+        if press(egui::Key::ArrowDown) {
+            selected = Some(selected.map_or(0, |at| (at + 1).min(last)));
+        } else if press(egui::Key::ArrowUp) {
+            selected = selected.filter(|at| *at > 0).map(|at| at - 1);
+        }
+        if let Some(entry) = selected.and_then(|at| shown.get(at))
+            && press(egui::Key::Enter)
+        {
+            take_suggestion(session, f, entry);
+            return (&[], None);
+        }
+    }
+    session.forms.suggest_selected = selected.map(|at| (typed, at));
+    (shown, selected)
+}
+
 /// Show the session of the focused field for this pass: the editor over a Text field or an editable
 /// combo box, the drop-down list of a combo box and the calendar of a date field. The session ends
 /// by queuing its edit in `session.pending_edit` (a commit), by moving to another field, or by
@@ -377,8 +422,12 @@ pub(crate) fn show(
     let types = f.kind == FormFieldKind::Text || (combo && editable_combo(f));
     let mut ended = None;
     let mut shown = None;
+    // What Auto-Complete lists for this pass, and the row the arrow keys are on.
+    let mut offered: &[String] = &[];
+    let mut selected = None;
     if types {
         let room = (f.kind == FormFieldKind::Text && f.has(field_flags::DO_NOT_SCROLL)).then(|| doc.field_text_box(&focus.name, widget)).flatten();
+        (offered, selected) = suggestion_keys(ui, session, f, suggestions);
         let focus = session.forms.focus.as_mut()?;
         let Focus { text, selection, .. } = focus;
         let mut host = FieldHost { ctx: ui.ctx().clone(), view: body.view, field: f, widget: w, geo, room, text, caret: selection.caret, laid: None };
@@ -401,22 +450,16 @@ pub(crate) fn show(
         ended = out.ended;
         shown = Some(out.response.id);
     }
-    // Auto-Complete: the entries remembered earlier that start like the text, in a list under a plain text field.
-    if ended.is_none() && f.kind == FormFieldKind::Text && !suggestions.is_empty() && super::autocompletes(f) {
+    // Auto-Complete's list under a plain text field: a click takes an entry, the caret going to its end.
+    if ended.is_none() && !offered.is_empty() {
         let typed = session.forms.focus.as_ref().map(|x| x.text.clone()).unwrap_or_default();
-        let mut open = session.forms.suggest_hidden.as_deref() != Some(typed.as_str());
-        if open {
-            let picked = super::suggestion_list(ui, f, rect, zoom, &typed, suggestions, &mut open).and_then(|i| suggestions.get(i));
-            if let Some(entry) = picked {
-                if let Some(x) = session.forms.focus.as_mut() {
-                    x.text = f.max_len.map_or_else(|| entry.clone(), |max| entry.chars().take(max).collect());
-                    x.selection = TextSelection::caret_at(x.text.chars().count());
-                    session.forms.suggest_hidden = Some(x.text.clone());
-                }
-            } else if !open {
-                // Dismissed: shut until the text changes.
-                session.forms.suggest_hidden = Some(typed);
-            }
+        let mut open = true;
+        let clicked = super::suggestion_list(ui, f, rect, zoom, (&typed, offered, selected), &mut open).and_then(|i| offered.get(i));
+        if let Some(entry) = clicked {
+            take_suggestion(session, f, entry);
+        } else if !open {
+            // Dismissed: shut until the text changes.
+            session.forms.suggest_hidden = Some(typed);
         }
     }
     match ended {

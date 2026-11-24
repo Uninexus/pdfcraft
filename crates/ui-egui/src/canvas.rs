@@ -1030,7 +1030,15 @@ fn page_parts_of(ui: &mut egui::Ui, body: &PageBody<'_>, session: &mut PageSessi
     if cx.tool == QuickTool::Select && !cx.preparing {
         let can_fill = cx.doc.allows_form_filling();
         for placed in body.pages {
-            parts.extend(crate::forms_ui::field_parts(session, cx.info, cx.doc, placed.page, can_fill, badge_tips, cx.form_tooltips, geo));
+            parts.extend(crate::forms_ui::field_parts(
+                session,
+                cx.info,
+                cx.doc,
+                placed.page,
+                can_fill,
+                crate::forms_ui::Tips { badges: badge_tips, fields: cx.form_tooltips },
+                geo,
+            ));
         }
     }
     // The sign tabs of each page, after the fields: a tab is painted over its field.
