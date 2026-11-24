@@ -2672,6 +2672,7 @@ fn a_list_shut_in_one_field_still_shows_for_the_same_text_in_another() {
     assert!(h.query_by_label("Maplewood").is_none(), "shut in the first field");
     type_in_field(&mut h, "home_city", "ma");
     assert_eq!(focused(&h), Some(("home_city".into(), 0)));
+    assert_eq!(draft(&h), "ma", "the typing reached the second field");
     assert!(h.query_by_label("Maplewood").is_some(), "the same text in another field lists the entry again");
 }
 
