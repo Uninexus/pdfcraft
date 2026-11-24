@@ -82,7 +82,12 @@ fn save_as_pdf_writes_the_report_as_a_pdf() {
     h.run_steps(3);
     h.get_by_role_and_label(Role::Button, "Save as PDF…").click();
     h.run_steps(4);
-    let bytes = files.file(std::path::Path::new("/reports/doc Signature Audit Report.pdf")).expect("the report was written");
+    let written = files.written();
+    assert_eq!(written.len(), 1, "one report file was written");
+    assert_eq!(written[0].parent(), Some(std::path::Path::new("/reports")), "in the folder that was picked");
+    let name = written[0].file_name().and_then(|n| n.to_str()).unwrap_or_default();
+    assert!(name.starts_with("doc") && name.ends_with(".pdf"), "named after the document: {name}");
+    let bytes = files.file(&written[0]).expect("the report was written");
     assert!(bytes.starts_with(b"%PDF"), "as a PDF");
     assert!(h.state().signature_report.is_some(), "the window stays open");
 }
@@ -106,7 +111,10 @@ fn the_signer_labels_report_lists_labels_gaps_and_names_the_plan_does_not_have()
     assert!(text.contains("Sig1: zed@example.org"), "{text}");
     let at = |needle: &str| text.find(needle).unwrap_or_else(|| panic!("{needle:?} in {text}"));
     assert!(at("Signature fields with no signer") < text.rfind("Sig2").unwrap(), "Sig2 has no signer");
-    assert!(at("Labels that name someone who is not in the plan") < text.rfind("zed@example.org").unwrap(), "zed is not in the plan");
+    assert!(
+        at("Labels that name someone who is not a signer or approver in the plan") < text.rfind("zed@example.org").unwrap(),
+        "zed is not in the plan"
+    );
     assert!(at("Plan recipients with no field") < text.rfind("Ann (ann@example.org)").unwrap(), "Ann has no field");
     assert!(text.contains("Bob (bob@example.org)"));
 }

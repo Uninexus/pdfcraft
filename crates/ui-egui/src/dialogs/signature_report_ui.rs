@@ -149,7 +149,7 @@ impl PdfCraftApp {
         };
         part(tl!("Fields with a signer"), &assigned);
         part(tl!("Signature fields with no signer"), &missing);
-        part(tl!("Labels that name someone who is not in the plan"), &outside);
+        part(tl!("Labels that name someone who is not a signer or approver in the plan"), &outside);
         part(tl!("Plan recipients with no field"), &without_field);
         line(String::new());
         line(tl!("A signer is a label stored in the file. It does not restrict who can fill or sign a field, nothing is sent and nobody is notified, and other PDF readers ignore it.").to_string());

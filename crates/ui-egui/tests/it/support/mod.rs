@@ -321,7 +321,6 @@ pub fn right(app: &PdfCraftApp) -> Option<RightPanel> {
         .find(|panel| format!("{panel:?}") == name)
 }
 
-/// Whether the dialog host holds a dialog.
 /// A folder of its own under the system temp directory, removed when dropped (std only).
 pub struct TempDir(std::path::PathBuf);
 
@@ -346,6 +345,7 @@ impl Drop for TempDir {
     }
 }
 
+/// Whether the dialog host holds a dialog.
 pub fn dialog_open(h: &Harness<'_, PdfCraftApp>) -> bool {
     !h.state().dialogs.is_empty()
 }

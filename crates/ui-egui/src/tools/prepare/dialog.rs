@@ -74,7 +74,8 @@ impl FieldPropsDialog {
         &self.draft.signer
     }
 
-    pub(super) fn set_signer_text(&mut self, text: String) {
+    /// Sets the address typed in the Signer entry (the app does it after a Set signer; a test types it for a field that has no entry).
+    pub fn set_signer_text(&mut self, text: String) {
         self.draft.signer = text;
     }
 

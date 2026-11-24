@@ -122,6 +122,11 @@ fn a_text_field_has_no_signer_entry_and_the_command_refuses_it() {
     let mut h = harness(None);
     open_props(&mut h, "Name");
     assert!(h.query_all_by_role_and_label(Role::Button, "Set signer").next().is_none());
+    // Even with an address in the draft, the kind check refuses the set.
+    h.state_mut().dialogs.get_mut::<FieldPropsDialog>().expect("the dialog is open").set_signer_text("ann@example.org".into());
+    assert!(h.execute("form.field.signer.set"));
+    h.run_steps(2);
+    assert_eq!(label(&h, "Name"), None, "a text field takes no signer");
     assert!(h.execute("form.field.signer.clear"));
     h.run_steps(2);
     assert_eq!(label(&h, "Name"), None);
