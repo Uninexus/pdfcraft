@@ -2670,11 +2670,10 @@ fn a_list_shut_in_one_field_still_shows_for_the_same_text_in_another() {
     h.key_press(egui::Key::Escape);
     h.run_steps(3);
     assert!(h.query_by_label("Maplewood").is_none(), "shut in the first field");
-    // The click moves the editor to the second field; the typing follows on a later pass, as a person's would.
-    click_field(&mut h, "home_city", 0);
+    // Enter keeps "ma" in the first field and leaves it; the shut list must not follow into the next field.
+    h.key_press(egui::Key::Enter);
     h.run_steps(3);
-    h.event(egui::Event::Text("ma".into()));
-    h.run_steps(3);
+    type_in_field(&mut h, "home_city", "ma");
     assert_eq!(focused(&h), Some(("home_city".into(), 0)));
     assert_eq!(draft(&h), "ma", "the typing reached the second field");
     assert!(h.query_by_label("Maplewood").is_some(), "the same text in another field lists the entry again");
