@@ -147,3 +147,91 @@ fn replace_changes_the_highlighted_match() {
     let s = h.state();
     assert_eq!(s.session.get(s.views[0].id).unwrap().can_undo(), Some("Edit text"));
 }
+
+/// A PDF of `objs` (object 1 the catalog), numbered from 1.
+fn pdf_of(objs: &[String]) -> Vec<u8> {
+    let mut out = b"%PDF-1.7\n".to_vec();
+    let mut offsets = Vec::new();
+    for (i, o) in objs.iter().enumerate() {
+        offsets.push(out.len());
+        out.extend_from_slice(format!("{} 0 obj\n{o}\nendobj\n", i + 1).as_bytes());
+    }
+    let xref = out.len();
+    out.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1).as_bytes());
+    for o in offsets {
+        out.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+    }
+    out.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objs.len() + 1).as_bytes());
+    out
+}
+
+/// One page: "abab" in a subset of a face no computer has (glyphs for a and b only).
+fn subset_fixture() -> Vec<u8> {
+    let content = "BT /F3 14 Tf 20 150 Td (abab) Tj ET";
+    pdf_of(&[
+        "<< /Type /Catalog /Pages 2 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 300 200] >>".into(),
+        "<< /Type /Page /Parent 2 0 R /Contents 4 0 R /Resources << /Font << /F3 5 0 R >> >> >>".into(),
+        format!("<< /Length {} >>\nstream\n{content}\nendstream", content.len()),
+        "<< /Type /Font /Subtype /TrueType /BaseFont /ABCDEF+NoSuchFace /FirstChar 97 /LastChar 99 /Widths [500 520 0] /Encoding /WinAnsiEncoding >>"
+            .into(),
+    ])
+}
+
+/// The app on `bytes`, the Replace row open, `find` typed and `with` in the Replace field once `count`
+/// matches are listed.
+fn replace_harness(name: &'static str, bytes: Vec<u8>, find: &str, with: &str, count: usize) -> Harness<'static, PdfCraftApp> {
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |cc| {
+        crate::support::install_runtime(&cc.egui_ctx);
+        let mut app = crate::control::new_app();
+        app.set_option(&egui::Context::default(), "language", "en").unwrap();
+        app.open_bytes(&egui::Context::default(), name, None, bytes).expect("opens");
+        app
+    });
+    h.run_steps(4);
+    assert!(h.execute("edit.replace"));
+    h.run_steps(3);
+    h.query_by(|n| n.placeholder() == Some("Find text")).expect("find field").type_text(find);
+    // A background job: wait on a deadline, not a fixed number of polls, so a loaded machine still passes.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while std::time::Instant::now() < deadline {
+        h.run_steps(1);
+        if h.state().views[0].find.as_ref().is_some_and(|f| f.matches.len() == count) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    h.state_mut().views[0].find.as_mut().unwrap().replacement = with.into();
+    h.run_steps(8);
+    h
+}
+
+fn subset_texts(h: &Harness<'static, PdfCraftApp>) -> Vec<String> {
+    let s = h.state();
+    s.session.get(s.views[0].id).unwrap().text_blocks(0).into_iter().map(|b| b.text).collect()
+}
+
+/// A paragraph whose font lacks a letter of the new text is left alone and the notice says the
+/// option exists; with "Use a substitute font if the font lacks letters" ticked under the Replace
+/// row it is replaced and the notice says how many paragraphs used one.
+#[test]
+fn the_replace_row_can_replace_in_a_substitute_font() {
+    let mut h = replace_harness("subset.pdf", subset_fixture(), "ab", "cb", 2);
+    h.get_by_label(&replace_all()).click();
+    h.run_steps(4);
+    assert_eq!(subset_texts(&h), ["abab"], "{:?}", support::shown_notice(&h));
+    let note = support::shown_notice(&h).unwrap_or_default();
+    assert!(note.contains("the font can't draw it") && note.contains("\"Use a substitute font if the font lacks letters\""), "{note}");
+
+    // Tick the option under the Replace row.
+    h.get_by_label("Use a substitute font if the font lacks letters").click();
+    h.run_steps(3);
+    assert!(h.state().views[0].find.as_ref().is_some_and(|f| f.substitute_font));
+    h.get_by_label(&replace_all()).click();
+    h.run_steps(4);
+    assert_eq!(subset_texts(&h), ["cbcb"], "{:?}", support::shown_notice(&h));
+    let note = support::shown_notice(&h).unwrap_or_default();
+    assert!(note.contains("Replaced 2 on 1 page") && note.contains("1 paragraph rewritten in a substitute font ("), "{note}");
+    let s = h.state();
+    assert_eq!(s.session.get(s.views[0].id).unwrap().can_undo(), Some("Replace all"));
+}

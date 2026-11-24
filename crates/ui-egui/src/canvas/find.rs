@@ -5,6 +5,9 @@ use craft::pages::ui::TextMark;
 use craft::text::find::{FindMatches, FindOptions};
 use craft::text::ui::find::{FindBar, FindBarState, FindRequest};
 use craft::ui::canvas_controls::TaskBar;
+use craft::ui::choice::Checkbox;
+use craft::ui::contract::{Bind, Props as _, Show as _};
+use craft::ui::layout_components::Row;
 
 use super::{DocView, Rect, ViewAction};
 
@@ -25,6 +28,9 @@ pub struct Find {
     /// Find and replace (in Edit text mode): the Replace row shows, with what replaces a match.
     pub replacing: bool,
     pub replacement: String,
+    /// Replace also where the paragraph's font lacks a letter of the new text, in a substitute
+    /// font (off: such a match is left alone and counted).
+    pub substitute_font: bool,
 }
 
 impl Find {
@@ -185,12 +191,26 @@ pub(super) fn find_bar(view: &mut DocView, pages: usize, area: Rect, editing: bo
     let shown = ui
         .push_id(("find-bar", key), |ui| {
             TaskBar::at_edge(tl!("Find"), Align::End).show(ui, area.shrink2(egui::vec2(6.0, 12.0)), |ui, _cx| {
-                let Find { query, options, matches, bar, replacement, replacing, .. } = &mut *find;
+                let Find { query, options, matches, bar, replacement, replacing, substitute_font, .. } = &mut *find;
                 let mut find_bar = FindBar::new(query, options, matches).state(bar).progress(searched, pages);
                 if editing {
                     find_bar = find_bar.replace(replacement, replacing);
                 }
-                find_bar.show(ui)
+                ui.vertical(|ui| {
+                    let out = find_bar.show(ui);
+                    // The bar's options menu is the framework's, so the Replace-only option sits under
+                    // the Replace row: off, a paragraph whose font lacks a letter of the new text is
+                    // left alone and counted.
+                    if editing && *replacing {
+                        Row::new().show(ui, |ui, _| {
+                            Checkbox::new(Bind::bound(&mut *substitute_font))
+                                .label(tl!("Use a substitute font if the font lacks letters").to_string())
+                                .show(ui);
+                        });
+                    }
+                    out
+                })
+                .inner
             })
         })
         .inner;
