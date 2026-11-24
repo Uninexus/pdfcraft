@@ -293,7 +293,7 @@ impl PdfCraftApp {
                         pdfcraft_engine::EditNotice::RedactionIdentification(id) => {
                             crate::redact_ui::identification_note(id).unwrap_or_else(|| n.to_string())
                         }
-                        pdfcraft_engine::EditNotice::SubstituteFont { .. } => n.to_string(),
+                        pdfcraft_engine::EditNotice::SubstituteFont { fonts, missing } => substitute_font_message(fonts, missing),
                     });
                 }
                 let out = self.session.take_js_output(id);
@@ -1401,6 +1401,19 @@ fn step_typing(
     *selection = if stepped { None } else { now.selection };
     *aligns = now.aligns;
     stepped
+}
+
+/// After Edit text drew a paragraph in a stand-in font, because the paragraph's own (usually a
+/// subset holding only the letters the document used) lacked letters of the new text: which
+/// letters, which font, and what to do. Never left silent.
+pub(crate) fn substitute_font_message(fonts: &[String], missing: &[char]) -> String {
+    let letters = missing.iter().map(|c| format!("{c} (U+{:04X})", u32::from(*c))).collect::<Vec<_>>().join(", ");
+    crate::i18n::fmt(
+        tl!(
+            "A font lacks {letters}: they (and, where the font can't be mixed with the stand-in, the rest of the paragraph) were drawn in {font}. Undo to restore the original, or choose a font that has the letters."
+        ),
+        &[("letters", &letters), ("font", &fonts.join(", "))],
+    )
 }
 
 #[cfg(test)]

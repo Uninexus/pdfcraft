@@ -267,3 +267,48 @@ fn recolouring_print_ink_text_in_its_box_drops_the_ink_without_an_empty_step() {
     let finished = finish(&mut app);
     assert!(finished.is_none(), "an empty Undo step: {finished:?}");
 }
+
+/// A one-page PDF whose paragraph "ab" is set in a subset (glyphs for a and b only) of a face no
+/// computer has.
+fn subset_pdf() -> Vec<u8> {
+    let content = "BT /F1 12 Tf 72 700 Td (ab) Tj ET";
+    let objs = [
+        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>".to_string(),
+        format!("<< /Length {} >>\nstream\n{content}\nendstream", content.len()),
+        "<< /Type /Font /Subtype /TrueType /BaseFont /ABCDEF+NoSuchFace /FirstChar 97 /LastChar 99 /Widths [500 520 0] /Encoding /WinAnsiEncoding >>"
+            .to_string(),
+    ];
+    let mut out = b"%PDF-1.7\n".to_vec();
+    let mut offsets = Vec::new();
+    for (i, o) in objs.iter().enumerate() {
+        offsets.push(out.len());
+        out.extend_from_slice(format!("{} 0 obj\n{o}\nendobj\n", i + 1).as_bytes());
+    }
+    let xref = out.len();
+    out.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1).as_bytes());
+    for o in offsets {
+        out.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+    }
+    out.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objs.len() + 1).as_bytes());
+    out
+}
+
+/// Retyping a word with a letter the subset lacks redraws the paragraph in a stand-in font, and
+/// the interface says which letter and what to do (never silent); text the subset can draw says
+/// nothing.
+#[test]
+fn a_stand_in_font_is_named_in_the_notice() {
+    let ctx = egui::Context::default();
+    let mut app = crate::PdfCraftApp::for_unit_tests();
+    app.set_option(&ctx, "language", "en").unwrap();
+    app.open_bytes(&ctx, "subset.pdf", None, subset_pdf()).unwrap();
+    app.active = Some(0);
+    let edit = |text: &str| pdfcraft_engine::Edit::EditTextBlock { page: 0, block: 0, text: text.into(), style: Default::default() };
+    assert!(app.apply_edit(&ctx, edit("ba")));
+    assert!(app.posted_notices.is_empty(), "{:?}", app.posted_notices);
+    assert!(app.apply_edit(&ctx, edit("abc")));
+    let said = format!("{:?}", app.posted_notices);
+    assert!(said.contains("c (U+0063)") && said.contains("Undo"), "{said}");
+}
