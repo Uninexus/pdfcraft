@@ -6,4 +6,5 @@
 
 pub mod crypto_env;
 pub mod desktop_theme;
+pub mod file_types;
 pub mod zone;

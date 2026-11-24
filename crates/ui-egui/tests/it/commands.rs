@@ -15,7 +15,7 @@ use egui::{Key, Modifiers};
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
 use pdfcraft_engine::commands::COMMANDS;
-use pdfcraft_ui_egui::PdfCraftApp;
+use pdfcraft_ui_egui::{DefaultAppHooks, PdfCraftApp};
 use serde_json::json;
 
 fn fixture(n: usize) -> Vec<u8> {
@@ -126,6 +126,8 @@ fn every_registered_command_is_implemented() {
         // as a cancel, which is what a service with nothing queued does.
         let mut app = app_with_files(Arc::new(ScriptedFiles::new()));
         app.set_option(&egui::Context::default(), "language", "en").unwrap();
+        // The PDF-app commands must never write the registry or open Settings of the PC running the tests.
+        app.default_app_hooks = DefaultAppHooks { available: true, register: |_| Ok(()), open_settings: || Ok(()), unregister: || Ok(()) };
         if spec.id.starts_with("form.") || spec.id == "comment.flatten" {
             app.open_bytes(&egui::Context::default(), "form.pdf", None, include_bytes!("../data/form.pdf").to_vec()).unwrap();
         } else if spec.id == "protect.unlock" {

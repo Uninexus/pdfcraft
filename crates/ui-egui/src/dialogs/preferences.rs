@@ -8,6 +8,7 @@ use craft::theme::selection::MotionChoice;
 use craft::theme::variant::Tone;
 use craft::theme_store::SelectionChange;
 use craft::theme_store::ui::AppearancePage;
+use craft::ui::buttons::Button;
 use craft::ui::contract::{Bind, Entry, SaveKey, Show as _};
 use craft::ui::dialog::DialogHost;
 use craft::ui::notices::{Notice, NoticeLayout};
@@ -485,6 +486,20 @@ impl PreferencesModel for Prefs<'_> {
     }
 
     fn custom_row(&mut self, ui: &mut Ui, key: &str) -> bool {
+        if key == "general.pdf_app" {
+            // The buttons run the registered commands; nothing here is part of the draft.
+            ui.horizontal(|ui| {
+                for (label, command) in [
+                    (tl!("Set up PdfCraft as a PDF app…"), "help.default_app"),
+                    (tl!("Stop offering PdfCraft as a PDF app…"), "help.default_app.remove"),
+                ] {
+                    if Button::new(label).show(ui).clicked() {
+                        self.app.execute(self.ctx, command);
+                    }
+                }
+            });
+            return false;
+        }
         if key != "fill.date_pattern" {
             return false;
         }
@@ -714,6 +729,15 @@ impl Prefs<'_> {
         rows.push(
             RowSpec::new("general.recent", tl!("Recent files to keep"), RowKind::int(d.recent_limit as i64, 0..=crate::RECENT_FILES_MAX as i64))
                 .help(tl!("Lowering this forgets the oldest files. At 0 there is no list.")),
+        );
+        // The portable build has no installer to offer it under Windows Settings, Default apps.
+        #[cfg(not(target_arch = "wasm32"))]
+        rows.push(
+            RowSpec::new("general.pdf_app", tl!("PDF app"), RowKind::Custom)
+                .help(tl!(
+                    "Lists PdfCraft under Windows Settings > Default apps for this user; you choose it there. Before stopping, choose another app for .pdf there, or Windows keeps pointing PDF files at the removed program."
+                ))
+                .visible(self.app.default_app_hooks.available),
         );
         rows.push(
             RowSpec::new("general.title_bar", tl!("Use system title bar"), RowKind::Bool(d.system_title_bar))

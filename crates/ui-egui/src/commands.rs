@@ -450,6 +450,8 @@ impl PdfCraftApp {
             "create.clipboard" => self.create_from_clipboard(),
             "optimize.reduce" => self.reduce_file_size(ctx),
             "help.shortcuts" => self.open_shortcuts(ctx),
+            "help.default_app" => self.set_up_default_app(),
+            "help.default_app.remove" => self.remove_default_app(),
             "help.about" => self.open_about(craft::ui::patterns::form_dialogs::AboutTab::default()),
             "help.check_updates" => self.check_for_updates(),
             _ => return None,

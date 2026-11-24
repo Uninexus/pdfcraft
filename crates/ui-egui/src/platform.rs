@@ -1,3 +1,4 @@
+pub(super) mod default_app;
 #[cfg(target_os = "macos")]
 pub(super) mod macos_association;
 #[cfg(not(target_arch = "wasm32"))]

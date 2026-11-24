@@ -2079,3 +2079,87 @@ fn home_recent_context_menu_reveals_the_target_without_opening_or_removing_it() 
     assert_eq!(h.state().recent[1].path, expected);
     assert!(!posted_notices(&h).is_empty(), "the selected path is checked and the reveal error is shown");
 }
+
+thread_local! {
+    /// What the stand-in PDF-app hooks were asked, in order, on this thread.
+    static OS_CALLS: std::cell::RefCell<Vec<&'static str>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+fn os_calls() -> Vec<&'static str> {
+    OS_CALLS.with(|c| c.borrow().clone())
+}
+
+/// Stand-ins that record and change nothing: running the PDF-app commands in a test must not write
+/// the registry or open Windows Settings of the PC it runs on.
+fn recording_hooks() -> pdfcraft_ui_egui::DefaultAppHooks {
+    fn note(what: &'static str) {
+        OS_CALLS.with(|c| c.borrow_mut().push(what));
+    }
+    pdfcraft_ui_egui::DefaultAppHooks {
+        available: true,
+        register: |exe| {
+            note("register");
+            assert!(exe.is_absolute(), "the program's own path is passed: {exe:?}");
+            Ok(())
+        },
+        open_settings: || {
+            note("open_settings");
+            Ok(())
+        },
+        unregister: || {
+            note("unregister");
+            Ok(())
+        },
+    }
+}
+
+/// The PDF-app commands go through `PdfCraftApp::default_app_hooks` and nothing else: with stand-ins
+/// they are asked to register, open Settings after it, and unregister, and the notices say so.
+#[test]
+fn the_pdf_app_commands_use_only_the_installed_hooks() {
+    OS_CALLS.with(|c| c.borrow_mut().clear());
+    let mut h = harness(|app| app.default_app_hooks = recording_hooks());
+    run_command(&mut h, "help.default_app");
+    h.run_steps(2);
+    assert_eq!(os_calls(), ["register", "open_settings"], "Settings opens only after the registration");
+    assert!(posted_notices(&h).join("; ").contains("can now be chosen"), "{:?}", posted_notices(&h));
+    run_command(&mut h, "help.default_app.remove");
+    h.run_steps(2);
+    assert_eq!(os_calls(), ["register", "open_settings", "unregister"]);
+    assert!(posted_notices(&h).join("; ").contains("no longer offered"), "{:?}", posted_notices(&h));
+}
+
+/// A registration that fails is reported with the error's own text and Settings is not opened.
+#[test]
+fn a_failed_pdf_app_registration_opens_no_settings() {
+    OS_CALLS.with(|c| c.borrow_mut().clear());
+    let mut h = harness(|app| {
+        app.default_app_hooks = pdfcraft_ui_egui::DefaultAppHooks {
+            register: |_| {
+                OS_CALLS.with(|c| c.borrow_mut().push("register"));
+                Err(pdfcraft_platform::file_types::FileTypeError::OnlyOnWindows)
+            },
+            ..recording_hooks()
+        };
+    });
+    run_command(&mut h, "help.default_app");
+    h.run_steps(2);
+    assert_eq!(os_calls(), ["register"]);
+    let notices = posted_notices(&h).join("; ");
+    assert!(notices.contains(&pdfcraft_platform::file_types::FileTypeError::OnlyOnWindows.to_string()), "{notices:?}");
+    assert!(!notices.contains("can now be chosen"), "{notices:?}");
+}
+
+/// Where the PDF-app commands cannot act (anywhere but Windows), they say so and touch nothing.
+#[test]
+fn the_pdf_app_commands_say_when_they_are_unavailable() {
+    OS_CALLS.with(|c| c.borrow_mut().clear());
+    let mut h = harness(|app| {
+        app.default_app_hooks = pdfcraft_ui_egui::DefaultAppHooks { available: false, ..recording_hooks() };
+    });
+    run_command(&mut h, "help.default_app");
+    run_command(&mut h, "help.default_app.remove");
+    h.run_steps(2);
+    assert!(os_calls().is_empty(), "nothing was asked of the system: {:?}", os_calls());
+    assert!(posted_notices(&h).join("; ").contains("only available on Windows"), "{:?}", posted_notices(&h));
+}

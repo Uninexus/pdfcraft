@@ -19,8 +19,8 @@
 //!
 //! The work is split so it can be tested everywhere: [`registration_plan`] is a pure function of
 //! the executable's path, and only the Windows executor runs `reg.exe` (by its full path under
-//! `%SystemRoot%\System32`, with arguments rather than a shell string, as `owner_only` does for
-//! the other tools Windows ships, without a console window; the registry API itself would need `unsafe`). It does not
+//! `%SystemRoot%\System32`, with arguments rather than a shell string and without a console window; the registry API itself
+//! would need `unsafe`). It does not
 //! broadcast `SHChangeNotify`, which needs the Windows API, so Explorer may show a new icon or an
 //! "Open with" entry only after it is restarted or the user signs in again.
 
@@ -223,11 +223,23 @@ mod imp {
     use super::{FileTypeError, Plan, check_plan, deletion_settled};
     use std::process::Stdio;
 
+    /// A Windows tool by its full path under `%SystemRoot%\System32`, never found through the search
+    /// path, and without the console window a console program would otherwise get from this
+    /// windowed app (`CREATE_NO_WINDOW`; the pipes `output()` reads are not affected).
+    fn system_tool(relative: &str) -> std::process::Command {
+        use std::os::windows::process::CommandExt as _;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let root = std::env::var_os("SystemRoot").map_or_else(|| std::path::PathBuf::from(r"C:\Windows"), std::path::PathBuf::from);
+        let mut command = std::process::Command::new(root.join("System32").join(relative));
+        command.creation_flags(CREATE_NO_WINDOW);
+        command
+    }
+
     /// Runs `reg.exe` with `args`, without a console window and by its full path, and says
     /// whether it succeeded with the start of its error text (at most 300 characters). Standard
     /// output is discarded: nothing here needs it.
     fn reg(args: &[&str]) -> Result<(bool, String), FileTypeError> {
-        let output = crate::owner_only::system_tool("reg.exe")
+        let output = system_tool("reg.exe")
             .args(args)
             .stdin(Stdio::null())
             .stdout(Stdio::null())

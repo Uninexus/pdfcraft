@@ -219,6 +219,33 @@ struct PendingDestination {
     name: String,
 }
 
+/// What "Set up PdfCraft as a PDF app..." and its undo do to the machine: write or delete the
+/// current user's registry keys and open Windows Settings. The default is the real thing
+/// (`pdfcraft_platform::file_types`); tests replace it so that running these commands never
+/// changes the registry or opens a window of the PC the tests run on.
+#[derive(Clone, Copy)]
+pub struct DefaultAppHooks {
+    /// Whether the commands act at all; false elsewhere than Windows, where they only say so.
+    pub available: bool,
+    /// Offer the program at this path as a PDF app for the current user.
+    pub register: fn(&std::path::Path) -> Result<(), pdfcraft_platform::file_types::FileTypeError>,
+    /// Open Windows Settings, Default apps.
+    pub open_settings: fn() -> Result<(), pdfcraft_platform::file_types::FileTypeError>,
+    /// Remove what `register` wrote.
+    pub unregister: fn() -> Result<(), pdfcraft_platform::file_types::FileTypeError>,
+}
+
+impl Default for DefaultAppHooks {
+    fn default() -> Self {
+        Self {
+            available: cfg!(windows),
+            register: pdfcraft_platform::file_types::register_current_user,
+            open_settings: pdfcraft_platform::file_types::open_default_apps_settings,
+            unregister: pdfcraft_platform::file_types::unregister_current_user,
+        }
+    }
+}
+
 pub struct PdfCraftApp {
     /// The app's services: jobs, files, settings sections, commands. Every queue is built from it.
     pub(crate) host: std::sync::Arc<craft::host::Host>,
@@ -342,6 +369,8 @@ pub struct PdfCraftApp {
     /// unmodified Z picks Marquee zoom and G picks Snapshot, through the catalog's chords, so a
     /// text field or dialog that has the keyboard keeps its letters. V and H work with it off.
     pub single_key_accelerators: bool,
+    /// How the PDF-app commands reach the registry and Windows Settings; tests replace it.
+    pub default_app_hooks: DefaultAppHooks,
     /// Preferences ▸ Animation effects: on, off, or as the system's animation setting says.
     pub animation_effects: craft::theme::MotionChoice,
     /// Preferences ▸ Esc leaves full screen (on by default). Off, only ⌘L / Ctrl+L leaves it, as

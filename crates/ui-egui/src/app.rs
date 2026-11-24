@@ -322,6 +322,7 @@ impl PdfCraftApp {
             scroll_speed: scroll_speed::ScrollSpeed::default(),
             invert_middle_drag: false,
             single_key_accelerators: false,
+            default_app_hooks: Default::default(),
             animation_effects: craft::theme::MotionChoice::System,
             full_screen_escape_exits: true,
             full_screen_fill: true,
