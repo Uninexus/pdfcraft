@@ -18,7 +18,8 @@ use serde_json::Value;
 
 use crate::PdfCraftApp;
 use crate::properties_session::{
-    Context, LAYOUTS, MAGNIFICATIONS, NAVIGATIONS, PERCENTS, Values, custom_json, custom_pairs, description_key, percent_id,
+    Context, DUPLEXES, KEPT, LAYOUTS, MAGNIFICATIONS, NAVIGATIONS, PERCENTS, SCALINGS, TRAYS, Values, custom_json, custom_pairs, description_key,
+    percent_id,
 };
 
 /// The host key of the Properties dialog.
@@ -408,6 +409,7 @@ impl PdfCraftApp {
         rows.push(reading(PropertyRow::field(
             Param::new("base_url", tl!("Base URL").to_string(), ParamKind::text("")).hint(tl!("e.g. https://example.com/docs/").to_string()),
         )));
+        rows.extend(print_preset_rows(doc, editable));
         // What was repaired while reading a damaged file (fidelity: never silent).
         let repairs = doc.repair_log();
         rows.push(value("Repairs", if repairs.is_empty() { tl!("None").to_string() } else { repairs.len().to_string() }));
@@ -416,6 +418,53 @@ impl PdfCraftApp {
         }
         rows
     }
+}
+
+/// The options of a choice from a table of field id, value and English label.
+fn table_options<T>(table: &[(&str, T, &str)]) -> Vec<(String, Label)> {
+    table.iter().map(|(id, _, name)| ((*id).to_owned(), Label::from(tl!(name).to_string()))).collect()
+}
+
+/// A Print Dialog Presets choice. An entry the file holds that cannot be read is shown as such and kept
+/// unless another value is picked; `writable` is false when the presets cannot be changed at all.
+fn print_choice(unreadable: &[&str], writable: bool, key: &str, label: &str, setting: &str, mut options: Vec<(String, Label)>) -> PropertyRow {
+    if unreadable.contains(&setting) {
+        options.insert(0, (KEPT.to_owned(), Label::from(tl!("Unreadable value in the file (kept)").to_string())));
+    }
+    let param = Param::new(key, tl!(label).to_string(), ParamKind::choice(options, None));
+    PropertyRow::field(if writable { param } else { param.disabled() })
+}
+
+/// Advanced ▸ Print Dialog Presets: what the Print dialog starts with for this document. The presets
+/// are read when the dialog opens and OK writes the changed ones with the dialog's other changes.
+fn print_preset_rows(doc: &Document, editable: bool) -> Vec<PropertyRow> {
+    let (_, unreadable) = doc.print_presets();
+    let blocked = unreadable.contains(&"viewer_preferences");
+    let writable = editable && !blocked;
+    let copies = std::iter::once(("default".to_owned(), Label::from(tl!("Default").to_string())))
+        .chain((pdfcraft_engine::MIN_PRINT_COPIES..=pdfcraft_engine::MAX_PRINT_COPIES).map(|c| (c.to_string(), Label::from(c.to_string()))))
+        .collect();
+    let ranges_hint = if unreadable.contains(&"page_ranges") {
+        tl!("Unreadable value in the file (kept unless you enter ranges)")
+    } else {
+        tl!("e.g. 1-3, 7 (empty: all pages)")
+    };
+    let ranges = Param::new("print_ranges", tl!("Page ranges to print").to_string(), ParamKind::text("")).hint(ranges_hint.to_string());
+    let mut rows = vec![PropertyRow::heading(tl!("Print Dialog Presets").to_string())];
+    if blocked {
+        rows.push(PropertyRow::value(
+            tl!("Print Dialog Presets").to_string(),
+            tl!("The file's viewer preferences cannot be read, so these are left as they are").to_string(),
+        ));
+    }
+    rows.extend([
+        print_choice(&unreadable, writable, "print_scaling", "Page scaling", "scaling", table_options(&SCALINGS)),
+        print_choice(&unreadable, writable, "print_duplex", "Duplex", "duplex", table_options(&DUPLEXES)),
+        print_choice(&unreadable, writable, "print_pick_tray", "Choose paper source by PDF page size", "pick_tray_by_size", table_options(&TRAYS)),
+        PropertyRow::field(if writable { ranges } else { ranges.disabled() }),
+        print_choice(&unreadable, writable, "print_copies", "Number of copies", "copies", copies),
+    ]);
+    rows
 }
 
 fn initial_view_rows(doc: &Document) -> Vec<PropertyRow> {

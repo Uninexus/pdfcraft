@@ -2,7 +2,10 @@
 
 use craft::ui::patterns::form_dialogs::{DialogFields, FieldValue};
 use edit_session::EditSession;
-use pdfcraft_engine::{DocId, Document, Edit, InitialLayout, InitialView, Magnification, Navigation};
+use pdfcraft_engine::{
+    DocId, Document, Duplex, Edit, InitialLayout, InitialView, MAX_PRINT_COPIES, MAX_PRINT_RANGES, MIN_PRINT_COPIES, Magnification, Navigation,
+    PrintPresets, PrintScaling,
+};
 use serde_json::{Value, json};
 
 use crate::PdfCraftApp;
@@ -39,6 +42,47 @@ pub(crate) const MAGNIFICATIONS: [(&str, Magnification, &str); 6] = [
     ("fit-height", Magnification::FitHeight, "Fit Height"),
     ("fit-visible", Magnification::FitVisible, "Fit Visible"),
 ];
+
+/// The field id of the choice that keeps a Print Dialog Presets entry the file holds but the dialog cannot read.
+pub(crate) const KEPT: &str = "unreadable";
+
+/// The page scaling choices: field id, value and English label.
+pub(crate) const SCALINGS: [(&str, PrintScaling, &str); 2] = [("default", PrintScaling::AppDefault, "Default"), ("none", PrintScaling::None, "None")];
+
+/// The duplex choices: field id, value (`None`: no entry) and English label.
+pub(crate) const DUPLEXES: [(&str, Option<Duplex>, &str); 4] = [
+    ("default", None, "Default"),
+    ("simplex", Some(Duplex::Simplex), "Simplex (one side)"),
+    ("flip_short_edge", Some(Duplex::FlipShortEdge), "Both sides, flip on short edge"),
+    ("flip_long_edge", Some(Duplex::FlipLongEdge), "Both sides, flip on long edge"),
+];
+
+/// The paper source by PDF page size choices: field id, value (`None`: no entry) and English label.
+pub(crate) const TRAYS: [(&str, Option<bool>, &str); 3] = [("default", None, "Default"), ("yes", Some(true), "Yes"), ("no", Some(false), "No")];
+
+/// The page ranges as the dialog writes them: `1-3, 7`.
+pub(crate) fn ranges_text(ranges: &[(usize, usize)]) -> String {
+    ranges.iter().map(|(a, b)| if a == b { a.to_string() } else { format!("{a}-{b}") }).collect::<Vec<_>>().join(", ")
+}
+
+/// The ranges `text` holds (empty: every page), or `None` when it is not a list of `first-last` or single pages.
+fn parse_ranges(text: &str) -> Option<Vec<(usize, usize)>> {
+    let mut out = Vec::new();
+    for part in text.split(',').map(str::trim).filter(|part| !part.is_empty()) {
+        let (first, last): (usize, usize) = match part.split_once('-') {
+            Some((a, b)) => (a.trim().parse().ok()?, b.trim().parse().ok()?),
+            None => {
+                let page = part.parse().ok()?;
+                (page, page)
+            }
+        };
+        if first < 1 || first > last || out.len() >= MAX_PRINT_RANGES {
+            return None;
+        }
+        out.push((first, last));
+    }
+    Some(out)
+}
 
 /// The percentages the magnification choice offers besides the named ones.
 pub(crate) const PERCENTS: [f64; 7] = [25.0, 50.0, 75.0, 100.0, 125.0, 150.0, 200.0];
@@ -87,6 +131,9 @@ pub(crate) struct Values {
     custom: Vec<(String, String)>,
     /// The base address relative links resolve against (empty: none), written as the catalog's `/URI` `/Base`.
     base_url: String,
+    /// What the Print dialog starts with, and the settings whose entry the file holds but cannot be read.
+    print: PrintPresets,
+    print_unreadable: Vec<&'static str>,
 }
 
 impl PartialEq for Values {
@@ -97,6 +144,7 @@ impl PartialEq for Values {
         self.description.iter().zip(&other.description).all(|(a, b)| a.trim() == b.trim())
             && self.view == other.view
             && self.base_url.trim() == other.base_url.trim()
+            && self.print == other.print
             && self.custom.len() == other.custom.len()
             && self.custom.iter().all(|entry| other.custom.contains(entry))
     }
@@ -105,11 +153,14 @@ impl PartialEq for Values {
 impl Values {
     /// Snapshot the editable values; PDF bytes and undo history remain owned by the engine.
     pub(crate) fn read(doc: &Document) -> Self {
+        let (print, print_unreadable) = doc.print_presets();
         Self {
             description: INFO_KEYS.map(|key| doc.info_value(key).unwrap_or_default()),
             view: doc.initial_view(),
             custom: doc.custom_info(),
             base_url: doc.base_url().0.unwrap_or_default(),
+            print,
+            print_unreadable,
         }
     }
 
@@ -135,11 +186,54 @@ impl Values {
         fields.set("binding", if v.right_to_left { "right" } else { "left" });
         fields.set("language", v.language.clone().unwrap_or_default());
         fields.set("base_url", self.base_url.clone());
+        self.print_to_fields(&mut fields);
         fields.set("custom", custom_json(&self.custom));
         fields.set("custom.name", "");
         fields.set("custom.value", "");
         fields.set("custom.unlisted", false);
         fields
+    }
+
+    /// The Print Dialog Presets rows: each shows the stored value, or the kept choice for an entry that cannot be read.
+    fn print_to_fields(&self, fields: &mut DialogFields) {
+        let p = &self.print;
+        let shown = |setting: &str, id: &str| if self.print_unreadable.contains(&setting) { KEPT.to_owned() } else { id.to_owned() };
+        let found = |id: Option<&&str>| id.copied().unwrap_or("default").to_owned();
+        fields.set("print_scaling", shown("scaling", &found(SCALINGS.iter().find(|(_, s, _)| *s == p.scaling).map(|(id, ..)| id))));
+        fields.set("print_duplex", shown("duplex", &found(DUPLEXES.iter().find(|(_, d, _)| *d == p.duplex).map(|(id, ..)| id))));
+        fields
+            .set("print_pick_tray", shown("pick_tray_by_size", &found(TRAYS.iter().find(|(_, t, _)| *t == p.pick_tray_by_size).map(|(id, ..)| id))));
+        fields.set("print_copies", shown("copies", &p.copies.map_or_else(|| "default".to_owned(), |c| c.to_string())));
+        fields.set("print_ranges", ranges_text(&p.page_ranges));
+    }
+
+    /// The presets `fields` hold over `base`: a kept choice, or no field, leaves that setting as it is stored.
+    /// `None` when a setting is not one the dialog can write.
+    fn print_from_fields(fields: &DialogFields, base: &Self) -> Option<PrintPresets> {
+        let mut p = base.print.clone();
+        let choice = |key: &str| fields.text(key).filter(|id| *id != KEPT);
+        if let Some(found) = choice("print_scaling").and_then(|id| SCALINGS.iter().find(|(named, ..)| *named == id)) {
+            p.scaling = found.1;
+        }
+        if let Some(found) = choice("print_duplex").and_then(|id| DUPLEXES.iter().find(|(named, ..)| *named == id)) {
+            p.duplex = found.1;
+        }
+        if let Some(found) = choice("print_pick_tray").and_then(|id| TRAYS.iter().find(|(named, ..)| *named == id)) {
+            p.pick_tray_by_size = found.1;
+        }
+        if let Some(id) = choice("print_copies") {
+            p.copies =
+                if id == "default" { None } else { Some(id.parse::<u8>().ok().filter(|c| (MIN_PRINT_COPIES..=MAX_PRINT_COPIES).contains(c))?) };
+        }
+        if let Some(text) = fields.text("print_ranges") {
+            // Empty text over an unreadable entry, or the text the stored ranges give, is no change.
+            let unchanged =
+                text.trim() == ranges_text(&base.print.page_ranges) || (text.trim().is_empty() && base.print_unreadable.contains(&"page_ranges"));
+            if !unchanged {
+                p.page_ranges = parse_ranges(text)?;
+            }
+        }
+        Some(p)
     }
 
     /// The values `fields` hold, over `base` for what the dialog does not carry (the view's non-full-screen panel).
@@ -196,6 +290,8 @@ impl Values {
             view,
             custom: custom_pairs(fields).unwrap_or_else(|| base.custom.clone()),
             base_url,
+            print: Self::print_from_fields(fields, base)?,
+            print_unreadable: base.print_unreadable.clone(),
         })
     }
 
@@ -213,6 +309,9 @@ impl Values {
         if self.base_url.trim() != after.base_url.trim() {
             let base = after.base_url.trim();
             edits.push(Edit::SetBaseUrl((!base.is_empty()).then(|| base.to_owned())));
+        }
+        if self.print != after.print {
+            edits.push(Edit::SetPrintPresets(Box::new(after.print.clone())));
         }
         for (key, _) in self.custom.iter().filter(|(key, _)| !after.custom.iter().any(|(name, _)| name == key)) {
             edits.push(Edit::SetInfo { key: key.clone(), value: String::new() });
