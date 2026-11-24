@@ -1420,8 +1420,7 @@ fn page_body(ui: &mut egui::Ui, body: &PageBody<'_>, callbacks: &mut PageCallbac
     let view_picked = session.picked_image;
     let kept = session.area_pick.filter(|_| !session.box_drag.is_active());
     for (page, xf, page_tabs) in &tabs {
-        let mut overlays =
-            PageOverlays::new(*page, *xf, cx.doc, page_tabs, &session.compare_marks, &mut session.flash)
+        let mut overlays = PageOverlays::new(*page, *xf, cx.doc, page_tabs, &session.compare_marks, &mut session.flash)
             .highlight_fields(session.highlight_fields)
             .guides(cx.guides);
         if let Some(picked) = view_picked.filter(|p| p.page == *page) {
