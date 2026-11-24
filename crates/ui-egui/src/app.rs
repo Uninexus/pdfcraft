@@ -294,6 +294,7 @@ impl PdfCraftApp {
             default_mode: Mode::AllTools,
             view_defaults: Default::default(),
             highlight_fields: true,
+            remember_entries_on_disk: settings::entries_persist(),
             units: Default::default(),
             blank_paper: crate::paper::Paper::system(),
             mode_override: None,

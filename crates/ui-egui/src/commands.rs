@@ -461,6 +461,8 @@ impl PdfCraftApp {
             "help.shortcuts" => self.open_shortcuts(ctx),
             "help.default_app" => self.set_up_default_app(),
             "help.default_app.remove" => self.remove_default_app(),
+            "prefs.forms.forget_entries" => self.forget_form_entries(),
+            "prefs.comment.reset_defaults" => self.reset_comment_defaults(),
             "help.about" => self.open_about(craft::ui::patterns::form_dialogs::AboutTab::default()),
             "help.check_updates" => self.check_for_updates(),
             _ => return None,

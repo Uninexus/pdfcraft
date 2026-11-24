@@ -19,6 +19,7 @@ use egui::{Align, Color32, CornerRadius, FontId, Pos2, Rect, pos2, vec2};
 use pdfcraft_engine::{Document, FormField, FormFieldKind, FormWidget, field_flags, form_appearance};
 use pdfcraft_render::DocInfo;
 
+use super::SuggestHidden;
 use super::{FIELD_FILL, FOCUS_BLUE, Focus, TextFrame, commit, editable_combo, field_screen_font, focused_field, list_pick_edit, widget_rect};
 use crate::canvas::{PageGeometry, PageSession};
 
@@ -345,8 +346,26 @@ fn take_suggestion(session: &mut PageSession, f: &FormField, entry: &str) {
     if let Some(x) = session.forms.focus.as_mut() {
         x.text = f.max_len.map_or_else(|| entry.to_owned(), |max| entry.chars().take(max).collect());
         x.selection = TextSelection::caret_at(x.text.chars().count());
-        session.forms.suggest_hidden = Some(x.text.clone());
+        session.forms.suggest_hidden = Some(SuggestHidden { name: x.name.clone(), widget: x.widget, text: x.text.clone() });
     }
+}
+
+/// Shuts Auto-Complete's list in the focused field at the text `typed`, until the text changes.
+fn hide_suggestions(session: &mut PageSession, typed: &str) {
+    let hidden = session.forms.focus.as_ref().map(|x| SuggestHidden { name: x.name.clone(), widget: x.widget, text: typed.to_owned() });
+    session.forms.suggest_hidden = hidden;
+}
+
+/// What the session reads of the document, the form and the pages for one pass.
+pub(crate) struct Inputs<'a> {
+    pub(crate) doc: &'a Document,
+    pub(crate) form: &'a [FormField],
+    pub(crate) info: &'a DocInfo,
+    /// Today as (year, month, day).
+    pub(crate) today: (i64, u32, u32),
+    /// What Auto-Complete offers for the text of the focused field.
+    pub(crate) suggestions: &'a [String],
+    pub(crate) pages: PageGeometry<'a>,
 }
 
 /// Show the session of the focused field for this pass: the editor over a Text field or an editable
@@ -356,18 +375,8 @@ fn take_suggestion(session: &mut PageSession, f: &FormField, entry: &str) {
 ///
 /// Returns the editor's id when one was shown: it takes the key focus over when the focus arrives on
 /// the field's page part (Tab, a click or a focus request), so the keys and typing reach the text.
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn show(
-    ui: &mut egui::Ui,
-    body: &PageBody<'_>,
-    session: &mut PageSession,
-    doc: &Document,
-    form: &[FormField],
-    info: &DocInfo,
-    today: (i64, u32, u32),
-    suggestions: &[String],
-    pages: PageGeometry<'_>,
-) -> Option<egui::Id> {
+pub(crate) fn show(ui: &mut egui::Ui, body: &PageBody<'_>, session: &mut PageSession, inputs: Inputs<'_>) -> Option<egui::Id> {
+    let Inputs { doc, form, info, today, suggestions, pages } = inputs;
     let focus = session.forms.focus.as_ref()?;
     let Some(f) = focused_field(focus, form) else {
         session.forms.focus = None;
@@ -389,10 +398,15 @@ pub(crate) fn show(
     let mut shown = None;
     // What Auto-Complete lists for this pass: only under a plain text field, and not once the list was shut at this text.
     let typed = session.forms.focus.as_ref().map(|x| x.text.clone()).unwrap_or_default();
-    let usable = f.kind == FormFieldKind::Text && super::autocompletes(f) && session.forms.suggest_hidden.as_deref() != Some(typed.as_str());
+    // A list shut in another field is forgotten, so the same text typed here still shows it.
+    if session.forms.suggest_hidden.as_ref().is_some_and(|h| h.name != f.name || h.widget != widget) {
+        session.forms.suggest_hidden = None;
+    }
+    let shut = session.forms.suggest_hidden.as_ref().is_some_and(|h| h.text == typed);
+    let usable = f.kind == FormFieldKind::Text && super::autocompletes(f) && !shut;
     let offered: &[String] = if usable { suggestions } else { &[] };
     // The row the arrow keys highlighted, as of the last pass; the editor's Enter takes it instead of committing.
-    let lead = super::suggestion_lead(ui, &typed, offered.len());
+    let lead = super::suggestion_lead(ui, (f, widget), &typed, offered.len());
     if types {
         let room = (f.kind == FormFieldKind::Text && f.has(field_flags::DO_NOT_SCROLL)).then(|| doc.field_text_box(&focus.name, widget)).flatten();
         let focus = session.forms.focus.as_mut()?;
@@ -428,19 +442,19 @@ pub(crate) fn show(
             stay = true;
         }
         (Some(EditorEnd::Cancel), _) if !offered.is_empty() => {
-            session.forms.suggest_hidden = Some(typed.clone());
+            hide_suggestions(session, &typed);
             stay = true;
         }
         _ => {}
     }
     if !stay && ended.is_none() && !offered.is_empty() {
         let mut open = true;
-        let clicked = super::suggestion_list(ui, f, rect, zoom, (&typed, offered), &mut open).and_then(|i| offered.get(i));
+        let clicked = super::suggestion_list(ui, (f, widget), rect, zoom, (&typed, offered), &mut open).and_then(|i| offered.get(i));
         if clicked.is_some() {
             taken = clicked;
         } else if !open {
             // Dismissed: shut until the text changes.
-            session.forms.suggest_hidden = Some(typed);
+            hide_suggestions(session, &typed);
         }
     }
     if let Some(entry) = taken {

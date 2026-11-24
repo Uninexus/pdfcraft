@@ -315,6 +315,9 @@ pub struct PdfCraftApp {
     pub view_defaults: canvas::ViewDefaults,
     /// Preferences ▸ Highlight fields for newly opened forms (saved as `highlight_fields`).
     pub(crate) highlight_fields: bool,
+    /// Whether what Auto-Complete remembered is written to the settings file and read from it. False in a portable
+    /// copy, whose settings sit beside the program: the entries then live for the session only.
+    pub remember_entries_on_disk: bool,
     /// The unit page sizes and margins are shown in (Preferences ▸ Documents and view).
     pub units: units::Unit,
     /// The paper Create ▸ Blank page makes (#5644): the system region's.

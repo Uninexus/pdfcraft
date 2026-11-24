@@ -62,11 +62,20 @@ pub struct Focus {
     pub calendar_open: bool,
 }
 
+/// A field's Auto-Complete list that was shut, and the text it was shut at.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct SuggestHidden {
+    pub(crate) name: String,
+    pub(crate) widget: usize,
+    pub(crate) text: String,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct FormView {
     pub focus: Option<Focus>,
-    /// The text Auto-Complete's list was dismissed at (Escape, or an entry taken): it stays shut until the text changes.
-    pub(crate) suggest_hidden: Option<String>,
+    /// Where Auto-Complete's list was dismissed (Escape, or an entry taken): it stays shut in that field until its text
+    /// changes, and is forgotten when the focus moves to another field.
+    pub(crate) suggest_hidden: Option<SuggestHidden>,
     /// The draft whose edit is queued (`DocView::pending_edit`): if the field refuses the value,
     /// the editor reopens with it rather than losing the typing.
     pub(crate) committed: Option<Focus>,

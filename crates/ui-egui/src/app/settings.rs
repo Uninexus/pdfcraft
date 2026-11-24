@@ -296,6 +296,12 @@ pub fn portable_dir() -> Option<PathBuf> {
     }
 }
 
+/// Whether what Auto-Complete remembered may be written to the settings file. A portable copy keeps its settings beside
+/// the program, where they travel with it to other computers, so it keeps the entries for the session only.
+pub fn entries_persist() -> bool {
+    portable_dir().is_none()
+}
+
 /// Opens the settings store at the folder [`resolution`] chose (in memory when it chose none),
 /// importing the last release's `app.ron` on first run; on the web, over the browser's storage.
 pub fn open() -> Store {

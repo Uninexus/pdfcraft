@@ -479,6 +479,9 @@ pub const COMMANDS: &[CommandSpec] = &[
     // answer that they are only available on Windows. No menu lists them.
     c("help.default_app", "Set up PdfCraft as a PDF app…", None, None, Nothing, "file-text"),
     c("help.default_app.remove", "Stop offering PdfCraft as a PDF app…", None, None, Nothing, "file-x"),
+    // Preferences > Forms and > Comment: the window asks before it runs them.
+    c("prefs.forms.forget_entries", "Remove all remembered entries", None, None, Nothing, "trash-2"),
+    c("prefs.comment.reset_defaults", "Reset comment tool colours and sizes", None, None, Nothing, "eraser"),
 ];
 
 pub fn command(id: &str) -> Option<&'static CommandSpec> {

@@ -9,7 +9,7 @@ use craft::theme::variant::Tone;
 use craft::theme_store::SelectionChange;
 use craft::theme_store::ui::AppearancePage;
 use craft::ui::buttons::Button;
-use craft::ui::contract::{Bind, Entry, SaveKey, Show as _};
+use craft::ui::contract::{Bind, Entry, Politeness, Props as _, SaveKey, Show as _};
 use craft::ui::dialog::DialogHost;
 use craft::ui::notices::{Notice, NoticeLayout};
 use craft::ui::patterns::preferences::{
@@ -17,6 +17,7 @@ use craft::ui::patterns::preferences::{
     RowKind, RowSpec,
 };
 use craft::ui::runtime::env::Label;
+use craft::ui::runtime::focus::FocusRequest;
 use craft::ui::text::TextField;
 use craft::window::policy::TitleBarPref;
 use egui::Ui;
@@ -40,6 +41,27 @@ pub struct PreferencesSession {
     host: DialogHost,
     /// The colours the picker answered, waiting for `Prefs::nested` to write them into the draft.
     answers: Answers,
+    /// The button that asked "are you sure?" and is waiting for the answer.
+    confirm: Option<Confirming>,
+}
+
+/// A Preferences button that acts at once and has asked for confirmation first.
+struct Confirming {
+    /// The row key of the button.
+    key: &'static str,
+    /// The question was just asked: its yes button takes the focus once.
+    fresh: bool,
+}
+
+/// A button of the Preferences window that asks before it runs a registered command.
+struct Ask {
+    /// The row key.
+    key: &'static str,
+    button: &'static str,
+    question: &'static str,
+    yes: &'static str,
+    keep: &'static str,
+    command: &'static str,
 }
 
 /// Colour answers by row key, filled by the picker's `then` and drained in the same window's pass.
@@ -53,6 +75,7 @@ impl PreferencesSession {
             selection: SelectionChange::default(),
             host: DialogHost::new(),
             answers: Answers::default(),
+            confirm: None,
         }
     }
 }
@@ -217,10 +240,18 @@ impl PdfCraftApp {
         let Some(mut session) = self.preferences.take() else {
             return;
         };
-        let PreferencesSession { state, draft, selection, host, answers } = &mut session;
+        let PreferencesSession { state, draft, selection, host, answers, confirm } = &mut session;
         let ctx = ui.ctx().clone();
         let output = {
-            let mut prefs = Prefs::new(self, draft, selection, host, answers, &ctx);
+            let mut prefs = Prefs::new(self, draft, selection, host, answers, confirm, &ctx);
+            // The colours Highlight fields and Required field border show while they follow the theme.
+            let (field_theme, required_theme) = {
+                let env = craft::ui::runtime::env::Env::of(ui);
+                let bytes = |c: Rgba| [c.0[0], c.0[1], c.0[2]];
+                (bytes(env.tokens.color.status.info.solid), bytes(env.tokens.color.status.bad.solid))
+            };
+            prefs.texts.field_theme = field_theme;
+            prefs.texts.required_theme = required_theme;
             PreferencesWindow::new(Bind::bound(state))
                 .mode(PreferencesMode::Live)
                 .layout(PreferencesLayout::Cards)
@@ -254,6 +285,10 @@ struct Texts {
     unwritable: String,
     date_help: String,
     date_custom_id: &'static str,
+    /// What the Highlight fields colour is while it follows the theme (the status colour the page overlay draws).
+    field_theme: [u8; 3],
+    /// The same for the border of a required field.
+    required_theme: [u8; 3],
 }
 
 impl Texts {
@@ -289,6 +324,8 @@ impl Texts {
                 &[("escape", "\\")],
             ),
             date_custom_id: "custom",
+            field_theme: crate::FIELD_HIGHLIGHT_DEFAULT,
+            required_theme: crate::REQUIRED_FIELD_DEFAULT,
         }
     }
 }
@@ -305,6 +342,7 @@ struct Prefs<'a> {
     selection: &'a mut SelectionChange,
     host: &'a mut DialogHost,
     answers: &'a Answers,
+    confirm: &'a mut Option<Confirming>,
     ctx: &'a egui::Context,
     texts: Texts,
 }
@@ -316,10 +354,11 @@ impl<'a> Prefs<'a> {
         selection: &'a mut SelectionChange,
         host: &'a mut DialogHost,
         answers: &'a Answers,
+        confirm: &'a mut Option<Confirming>,
         ctx: &'a egui::Context,
     ) -> Self {
         let texts = Texts::new(app, draft, ctx);
-        Self { app, draft, selection, host, answers, ctx, texts }
+        Self { app, draft, selection, host, answers, confirm, ctx, texts }
     }
 }
 
@@ -530,6 +569,32 @@ impl PreferencesModel for Prefs<'_> {
         }
     }
 
+    /// A button that asks first: the question, with the answer that runs `ask.command` and the one that keeps things as
+    /// they are. The question is announced and the yes answer takes the focus once.
+    fn ask(&mut self, ui: &mut Ui, enabled: bool, ask: &Ask) {
+        let asking = self.confirm.as_ref().is_some_and(|c| c.key == ask.key);
+        if !asking {
+            ui.add_enabled_ui(enabled, |ui| {
+                if Button::new(ask.button).show(ui).clicked() {
+                    *self.confirm = Some(Confirming { key: ask.key, fresh: true });
+                }
+            });
+            return;
+        }
+        Notice::new(Tone::Warn, ask.question).layout(NoticeLayout::Inline).announce(Politeness::Polite).id_salt(ask.key).show(ui);
+        let mut yes = Button::new(ask.yes);
+        if self.confirm.as_mut().is_some_and(|c| std::mem::take(&mut c.fresh)) {
+            yes = yes.request_focus(FocusRequest::Take);
+        }
+        if yes.show(ui).clicked() {
+            *self.confirm = None;
+            self.app.execute(self.ctx, ask.command);
+        }
+        if Button::new(ask.keep).show(ui).clicked() {
+            *self.confirm = None;
+        }
+    }
+
     fn custom_row(&mut self, ui: &mut Ui, key: &str) -> bool {
         if key == "general.pdf_app" {
             // The buttons run the registered commands; nothing here is part of the draft.
@@ -546,22 +611,51 @@ impl PreferencesModel for Prefs<'_> {
             return false;
         }
         if key == "forms.entries" {
-            // Acts on what was remembered at once, like the buttons above; nothing here is part of the draft.
+            // Acts on what was remembered at once, like the buttons above, once the question is answered; nothing here
+            // is part of the draft.
+            let ask = Ask {
+                key: "forms.entries",
+                button: tl!("Remove all remembered entries"),
+                question: tl!("Remove all remembered entries? Every text Auto-Complete remembered is forgotten, and this cannot be taken back."),
+                yes: tl!("Remove them"),
+                keep: tl!("Keep the entries"),
+                command: "prefs.forms.forget_entries",
+            };
             let any = !self.app.session.form_entries().is_empty();
-            ui.add_enabled_ui(any, |ui| {
-                if Button::new(tl!("Remove all remembered entries")).show(ui).clicked() {
-                    self.app.session.clear_form_entries();
-                    self.app.notify_fmt("Remembered entries removed", &[]);
-                }
-            });
+            self.ask(ui, any, &ask);
             return false;
         }
+        if key == "forms.follow" || key == "forms.required_follow" {
+            // Takes one colour back to the theme without resetting the page.
+            let (label, slot) = if key == "forms.follow" {
+                (tl!("Follow theme: highlight colour"), &mut self.draft.field_highlight_color)
+            } else {
+                (tl!("Follow theme: required border"), &mut self.draft.required_field_color)
+            };
+            let own = slot.is_some();
+            let mut changed = false;
+            ui.add_enabled_ui(own, |ui| {
+                if Button::new(label).show(ui).clicked() {
+                    *slot = None;
+                    changed = true;
+                }
+            });
+            return changed;
+        }
         if key == "comment.reset" {
-            // Acts on the saved defaults at once, like the buttons above; the draft keeps the name, the pin and the hover choice.
-            if Button::new(tl!("Reset comment tool colours and sizes")).show(ui).clicked() {
-                self.app.comment_prefs.reset_defaults();
-                self.app.notify_fmt("Comment tool defaults reset", &[]);
-            }
+            // Acts on the saved defaults at once, like the buttons above, once the question is answered; the draft
+            // keeps the name, the pin and the hover choice.
+            let ask = Ask {
+                key: "comment.reset",
+                button: tl!("Reset comment tool colours and sizes"),
+                question: tl!(
+                    "Reset the colours, opacities, widths and font sizes of the comment tools? What was saved with Make Current Properties Default is forgotten, and this cannot be taken back."
+                ),
+                yes: tl!("Reset them"),
+                keep: tl!("Keep the defaults"),
+                command: "prefs.comment.reset_defaults",
+            };
+            self.ask(ui, true, &ask);
             return false;
         }
         if key != "fill.date_pattern" {
@@ -901,25 +995,35 @@ impl Prefs<'_> {
 
     fn forms_page(&self) -> PageSpec<'_> {
         let d = &*self.draft;
+        // Where the remembered entries go depends on how PdfCraft was installed: a portable copy never writes them to its settings.
+        let autocomplete_help = if self.app.remember_entries_on_disk {
+            tl!(
+                "Offers what you typed into other text fields before, as you type. Passwords, signatures, dates, numbers, multi-line and read-only fields are never remembered. Entries are kept in your user settings on this computer. Turning this off keeps the saved list until you remove it."
+            )
+        } else {
+            tl!(
+                "Offers what you typed into other text fields before, as you type. Passwords, signatures, dates, numbers, multi-line and read-only fields are never remembered. This is a portable copy, so entries are kept only until you close PdfCraft and are never written to its settings. Turning this off keeps the list for this session until you remove it."
+            )
+        };
         let rows = vec![
             RowSpec::new("forms.highlight", tl!("Highlight fields"), RowKind::Bool(d.highlight_fields))
                 .help(tl!("The same setting as the toggle in the form bar. It applies to documents opened from now on.")),
             RowSpec::new(
                 "forms.highlight_color",
                 tl!("Highlight colour"),
-                RowKind::Color(rgb(d.field_highlight_color.unwrap_or(crate::FIELD_HIGHLIGHT_DEFAULT))),
+                RowKind::Color(rgb(d.field_highlight_color.unwrap_or(self.texts.field_theme))),
             )
-            .help(tl!("Drawn over fields you can fill in. Reset this page to follow the theme again.")),
+            .help(tl!("Drawn over fields you can fill in. Follow theme, or Reset this page, takes it back to the theme's colour.")),
+            RowSpec::new("forms.follow", tl!("Highlight colour from the theme"), RowKind::Custom),
             RowSpec::new(
                 "forms.required_color",
                 tl!("Required field border"),
-                RowKind::Color(rgb(d.required_field_color.unwrap_or(crate::REQUIRED_FIELD_DEFAULT))),
+                RowKind::Color(rgb(d.required_field_color.unwrap_or(self.texts.required_theme))),
             )
-            .help(tl!("Fields marked required get a thicker border in this colour (red unless changed).")),
+            .help(tl!("Fields marked required get a thicker border in this colour (the theme's red unless changed).")),
+            RowSpec::new("forms.required_follow", tl!("Required border from the theme"), RowKind::Custom),
             RowSpec::new("forms.tooltips", tl!("Show a field's tooltip when the pointer rests on it"), RowKind::Bool(d.form_tooltips)),
-            choice_row("forms.autocomplete", tl!("Auto-Complete"), d.form_autocomplete, &autocomplete_table()).help(tl!(
-                "Offers what you typed into other text fields before, as you type. Passwords, signatures, dates, numbers, multi-line and read-only fields are never remembered. Entries stay on this computer. Turning this off keeps the saved list until you remove it."
-            )),
+            choice_row("forms.autocomplete", tl!("Auto-Complete"), d.form_autocomplete, &autocomplete_table()).help(autocomplete_help),
             RowSpec::new("forms.entries", tl!("Remembered entries"), RowKind::Custom),
         ];
         PageSpec::new("forms", tl!("Forms"), rows)

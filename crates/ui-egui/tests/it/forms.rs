@@ -2663,6 +2663,19 @@ fn the_arrow_keys_and_enter_take_a_suggestion_and_escape_hides_the_list() {
 }
 
 #[test]
+fn a_list_shut_in_one_field_still_shows_for_the_same_text_in_another() {
+    let mut h = remembered(true);
+    type_in_field(&mut h, "work_city", "ma");
+    h.get_by_label("Maplewood");
+    h.key_press(egui::Key::Escape);
+    h.run_steps(3);
+    assert!(h.query_by_label("Maplewood").is_none(), "shut in the first field");
+    type_in_field(&mut h, "home_city", "ma");
+    assert_eq!(focused(&h), Some(("home_city".into(), 0)));
+    assert!(h.query_by_label("Maplewood").is_some(), "the same text in another field lists the entry again");
+}
+
+#[test]
 fn a_password_field_shows_no_list_and_a_check_box_is_never_remembered() {
     let mut h = remembered(true);
     type_in_field(&mut h, "secret", "ma");

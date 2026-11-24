@@ -1481,8 +1481,19 @@ fn page_body(ui: &mut egui::Ui, body: &PageBody<'_>, callbacks: &mut PageCallbac
         }
     }
     // The focused field's editor, and the Fill & Sign text being typed, over their pages.
-    if let Some(editor) = crate::forms_ui::editor::show(ui, body, session, cx.doc, cx.form, cx.info, cx.today, cx.form_suggestions, cx.geometry(body))
-        && *field_arrived
+    if let Some(editor) = crate::forms_ui::editor::show(
+        ui,
+        body,
+        session,
+        crate::forms_ui::editor::Inputs {
+            doc: cx.doc,
+            form: cx.form,
+            info: cx.info,
+            today: cx.today,
+            suggestions: cx.form_suggestions,
+            pages: cx.geometry(body),
+        },
+    ) && *field_arrived
     {
         // The keys of a field that takes typing are its editor's: it takes the focus over from the field's part.
         focus::request(ui.ctx(), FocusTarget::Id(editor));
