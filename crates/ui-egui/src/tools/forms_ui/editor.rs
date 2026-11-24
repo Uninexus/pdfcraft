@@ -353,20 +353,27 @@ fn take_suggestion(session: &mut PageSession, f: &FormField, entry: &str) {
 /// The keys of Auto-Complete's list, taken before the field's editor sees them: Down and Up move the highlight, Enter
 /// takes the highlighted entry (with none highlighted it is the editor's, and commits what was typed) and Escape shuts
 /// the list while the typing stays. Returns the entries to list and the highlighted row; none for a field that is
-/// not a plain one-line text field, or once the list was shut at this text.
-fn suggestion_keys<'a>(ui: &mut egui::Ui, session: &mut PageSession, f: &FormField, suggestions: &'a [String]) -> (&'a [String], Option<usize>) {
+/// not a plain one-line text field, or once the list was shut at this text. The last value says a key of the list
+/// was taken this pass: the editor may have read the same Enter or Escape from the pass's input, and its end is then
+/// ignored, so the field stays open.
+fn suggestion_keys<'a>(
+    ui: &mut egui::Ui,
+    session: &mut PageSession,
+    f: &FormField,
+    suggestions: &'a [String],
+) -> (&'a [String], Option<usize>, bool) {
     let typed = session.forms.focus.as_ref().map(|x| x.text.clone()).unwrap_or_default();
     let usable = f.kind == FormFieldKind::Text && super::autocompletes(f) && session.forms.suggest_hidden.as_deref() != Some(typed.as_str());
     let shown: &[String] = if usable { suggestions } else { &[] };
-    let Some(last) = shown.len().checked_sub(1) else { return (&[], None) };
+    let Some(last) = shown.len().checked_sub(1) else { return (&[], None, false) };
     let mut selected = session.forms.suggest_selected.as_ref().filter(|(text, at)| *text == typed && *at <= last).map(|(_, at)| *at);
     // Only the plain keys: Shift+Tab goes back a field and Shift+arrows select text.
     if ui.input(|i| i.modifiers.is_none()) {
-        let mut press = |key: egui::Key| ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, key));
+        let press = |key: egui::Key| ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, key));
         if press(egui::Key::Escape) {
             session.forms.suggest_hidden = Some(typed);
             session.forms.suggest_selected = None;
-            return (&[], None);
+            return (&[], None, true);
         }
         if press(egui::Key::ArrowDown) {
             selected = Some(selected.map_or(0, |at| (at + 1).min(last)));
@@ -377,11 +384,11 @@ fn suggestion_keys<'a>(ui: &mut egui::Ui, session: &mut PageSession, f: &FormFie
             && press(egui::Key::Enter)
         {
             take_suggestion(session, f, entry);
-            return (&[], None);
+            return (&[], None, true);
         }
     }
     session.forms.suggest_selected = selected.map(|at| (typed, at));
-    (shown, selected)
+    (shown, selected, false)
 }
 
 /// Show the session of the focused field for this pass: the editor over a Text field or an editable
@@ -425,9 +432,10 @@ pub(crate) fn show(
     // What Auto-Complete lists for this pass, and the row the arrow keys are on.
     let mut offered: &[String] = &[];
     let mut selected = None;
+    let mut stay = false;
     if types {
         let room = (f.kind == FormFieldKind::Text && f.has(field_flags::DO_NOT_SCROLL)).then(|| doc.field_text_box(&focus.name, widget)).flatten();
-        (offered, selected) = suggestion_keys(ui, session, f, suggestions);
+        (offered, selected, stay) = suggestion_keys(ui, session, f, suggestions);
         let focus = session.forms.focus.as_mut()?;
         let Focus { text, selection, .. } = focus;
         let mut host = FieldHost { ctx: ui.ctx().clone(), view: body.view, field: f, widget: w, geo, room, text, caret: selection.caret, laid: None };
@@ -463,6 +471,7 @@ pub(crate) fn show(
         }
     }
     match ended {
+        Some(EditorEnd::Commit | EditorEnd::Cancel) if stay => {}
         Some(EditorEnd::Commit) => commit(session, form),
         Some(EditorEnd::Next) => {
             session.pending_edit = super::tab_to_next_field(session, info, form, f, widget, true, pages);
