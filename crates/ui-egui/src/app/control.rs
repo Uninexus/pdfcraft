@@ -138,6 +138,11 @@ impl PdfCraftApp {
                 };
                 self.set_active_page_gaps(show);
             }
+            ("guides", Some(v)) => match value {
+                "on" => v.show_guides = true,
+                "off" => v.show_guides = false,
+                _ => return Err("guides must be on or off".into()),
+            },
             ("full-screen-escape", _) => {
                 self.full_screen_escape_exits = match value {
                     "on" => true,

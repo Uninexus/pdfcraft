@@ -1973,3 +1973,87 @@ fn format_text_size_field_keeps_room_for_its_value() {
     let align = h.get_by_label_contains("Alignment").rect();
     assert!(align.max.x <= 330.0, "the alignment menu stays inside the pane: {align:?}");
 }
+
+/// The two-point lines in the last frame, as screen end points. A guide is a thin line across the page, the one
+/// kind of open two-point path the page canvas draws.
+fn guide_lines(h: &Harness<'static, PdfCraftApp>) -> Vec<[egui::Pos2; 2]> {
+    fn walk(shape: &egui::Shape, out: &mut Vec<[egui::Pos2; 2]>) {
+        match shape {
+            egui::Shape::LineSegment { points, .. } => out.push(*points),
+            egui::Shape::Path(p) if !p.closed && p.points.len() == 2 => out.push([p.points[0], p.points[1]]),
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|s| walk(s, out)),
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    h.output().shapes.iter().for_each(|clipped| walk(&clipped.shape, &mut out));
+    out
+}
+
+#[test]
+fn show_guides_is_a_command_and_an_observable_per_view_setting() {
+    let (mut h, c) = harness();
+    let state = ok(&mut h, &c, "ui.state", json!({}));
+    assert_eq!((state["active"]["show_guides"].clone(), state["active"]["guides"].clone()), (json!(false), json!(0)));
+    let id = h.state().views[0].id;
+    h.state_mut().session.add_guide(id, 0, pdfcraft_engine::guides::GuideAxis::Vertical, 50.0).unwrap();
+    h.state_mut().session.add_guide(id, 0, pdfcraft_engine::guides::GuideAxis::Horizontal, 100.0).unwrap();
+    assert_eq!(ok(&mut h, &c, "ui.state", json!({}))["active"]["guides"], 2);
+
+    ok(&mut h, &c, "ui.set", json!({ "key": "guides", "value": "on" }));
+    assert_eq!(ok(&mut h, &c, "ui.state", json!({}))["active"]["show_guides"], true);
+    ok(&mut h, &c, "ui.command", json!({ "id": "view.show_guides" }));
+    assert_eq!(ok(&mut h, &c, "ui.state", json!({}))["active"]["show_guides"], false, "the command toggles");
+    ok(&mut h, &c, "ui.command", json!({ "id": "view.show_guides" }));
+    assert_eq!(ok(&mut h, &c, "ui.state", json!({}))["active"]["show_guides"], true);
+    for value in ["true", "1", "", "ON"] {
+        assert!(call(&mut h, &c, "ui.set", json!({ "key": "guides", "value": value })).is_err(), "{value:?}");
+    }
+    assert_eq!(ok(&mut h, &c, "ui.state", json!({}))["active"]["show_guides"], true, "a refused value changes nothing");
+    assert!(!h.state().session.get(id).unwrap().dirty, "guides are view state, not an edit");
+
+    // Clear guides removes the document's guides, and not the setting.
+    ok(&mut h, &c, "ui.command", json!({ "id": "view.clear_guides" }));
+    let state = ok(&mut h, &c, "ui.state", json!({}));
+    assert_eq!((state["active"]["guides"].clone(), state["active"]["show_guides"].clone()), (json!(0), json!(true)));
+    assert!(h.state().session.guides(id, None).unwrap().is_empty());
+    assert!(!h.state().session.get(id).unwrap().dirty);
+    // With none left it says so and is not an error.
+    ok(&mut h, &c, "ui.command", json!({ "id": "view.clear_guides" }));
+}
+
+#[test]
+fn shown_guides_are_drawn_over_the_page_at_their_position_and_hidden_ones_are_not() {
+    let (mut h, c) = harness();
+    let id = h.state().views[0].id;
+    h.state_mut().session.add_guide(id, 0, pdfcraft_engine::guides::GuideAxis::Vertical, 50.0).unwrap();
+    h.state_mut().session.add_guide(id, 0, pdfcraft_engine::guides::GuideAxis::Horizontal, 100.0).unwrap();
+    // The fixture's pages are 200 x 300 pt.
+    h.run_steps(3);
+    let before = guide_lines(&h);
+    ok(&mut h, &c, "ui.set", json!({ "key": "guides", "value": "on" }));
+    h.run_steps(3);
+    let page = ok(&mut h, &c, "ui.state", json!({}))["active"]["pages_on_screen"][0]["rect"].clone();
+    let r: Vec<f32> = page.as_array().unwrap().iter().map(|v| v.as_f64().unwrap() as f32).collect();
+    let (w, hgt) = (r[2] - r[0], r[3] - r[1]);
+    let near = |a: f32, b: f32| (a - b).abs() < 1.0;
+    let is_vertical = |l: &[egui::Pos2; 2]| {
+        near(l[0].x, l[1].x) && near(l[0].x, r[0] + w * 0.25) && near(l[0].y.min(l[1].y), r[1]) && near(l[0].y.max(l[1].y), r[3])
+    };
+    let is_horizontal = |l: &[egui::Pos2; 2]| {
+        near(l[0].y, l[1].y) && near(l[0].y, r[1] + hgt * (100.0 / 300.0)) && near(l[0].x.min(l[1].x), r[0]) && near(l[0].x.max(l[1].x), r[2])
+    };
+    let shown = guide_lines(&h);
+    assert!(shown.iter().any(is_vertical), "a vertical guide over the page: {shown:?}");
+    assert!(shown.iter().any(is_horizontal), "a horizontal guide over the page: {shown:?}");
+    assert!(!before.iter().any(is_vertical) && !before.iter().any(is_horizontal), "hidden by default: {before:?}");
+    ok(&mut h, &c, "ui.set", json!({ "key": "guides", "value": "off" }));
+    h.run_steps(3);
+    let hidden = guide_lines(&h);
+    assert!(!hidden.iter().any(is_vertical) && !hidden.iter().any(is_horizontal), "hidden again: {hidden:?}");
+    ok(&mut h, &c, "ui.set", json!({ "key": "guides", "value": "on" }));
+    ok(&mut h, &c, "ui.command", json!({ "id": "view.clear_guides" }));
+    h.run_steps(3);
+    let cleared = guide_lines(&h);
+    assert!(!cleared.iter().any(is_vertical) && !cleared.iter().any(is_horizontal), "cleared guides are gone from the page: {cleared:?}");
+}

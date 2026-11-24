@@ -36,6 +36,8 @@
 //!   `theme=light|dark|system` changes the saved theme preference; `ui.state.theme_preference`
 //!   reports the choice and `ui.state.theme` reports the resolved light/dark colours.
 //!   `show_page_edge_shadows=true|false` controls page decoration app-wide.
+//!   `guides=on|off` shows or hides the active tab's ruler guides (View > Guides > Show Guides,
+//!   `view.show_guides`); `ui.state.active.show_guides` and `.guides` (how many the document has) report it.
 //!   `comment-tool-pinned=true|false` remembers the annotation quick bar's pin across restarts.
 //!   `folder-collapsed=<folder>=on|off` folds a pinned folder on Home down to its heading or
 //!   opens it again; `ui.state.pinned_folders` lists each pinned folder and whether it is.

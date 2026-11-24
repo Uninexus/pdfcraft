@@ -16,6 +16,7 @@ use craft::ui::contract::{Access, Animate as _, Common, Component, Cx, MeasureCx
 use craft::ui::primitives::{Draw, IconSpec, PaintShape, StrokeWidth, TextRun};
 use craft::ui::style::{ComponentStyle, DataColor, Metrics, StyleColor, StyleCx, TypeRole};
 use egui::{Color32, CornerRadius, Rect, Response, Vec2, pos2};
+use pdfcraft_engine::guides::Guide;
 use pdfcraft_engine::{Document, FormFieldKind, LinkItem};
 use pdfcraft_render::{DocInfo, Link, LinkTarget};
 
@@ -438,6 +439,8 @@ pub struct PageOverlaysStyle {
     required_edge: StyleColor,
     /// The flash round a jumped-to rectangle.
     flash: StyleColor,
+    /// A ruler guide's line.
+    guide: StyleColor,
     /// The sign tab's chip.
     tab_fill: StyleColor,
     /// The sign tab's icon and label.
@@ -461,8 +464,8 @@ impl PageOverlaysStyle {
     }
 }
 
-/// What a page shows over its content, painted in this order: the form-field highlights, the compare marks,
-/// the flash, the sign tabs and the validation badges. Paint only: the parts that take presses are
+/// What a page shows over its content, painted in this order: the form-field highlights, the ruler guides,
+/// the compare marks, the flash, the sign tabs and the validation badges. Paint only: the parts that take presses are
 /// registered by `PageParts` (a signed field's own part carries its verdict as its tip).
 // `unregistered`: it needs a live document, so the suite has no sample of it.
 #[derive(craft::ui::contract::Component, Props)]
@@ -476,6 +479,8 @@ pub(crate) struct PageOverlays<'a> {
     tabs: &'a [SignTab],
     compare: &'a [(usize, [f32; 4], Color32)],
     flash: &'a mut Option<(usize, [f32; 4], f64)>,
+    /// The ruler guides of the document (all pages; this page's are drawn), empty unless they are shown.
+    guides: &'a [Guide],
     /// Acrobat's "Highlight existing fields".
     #[prop]
     highlight_fields: bool,
@@ -499,7 +504,25 @@ impl<'a> PageOverlays<'a> {
         compare: &'a [(usize, [f32; 4], Color32)],
         flash: &'a mut Option<(usize, [f32; 4], f64)>,
     ) -> Self {
-        PageOverlays { common: Common::new(), page, xf, doc, tabs, compare, flash, highlight_fields: false, kept_area: None, picked: None }
+        PageOverlays {
+            common: Common::new(),
+            page,
+            xf,
+            doc,
+            tabs,
+            compare,
+            flash,
+            guides: &[],
+            highlight_fields: false,
+            kept_area: None,
+            picked: None,
+        }
+    }
+
+    /// The ruler guides to draw over the page: a guide that is not on this page, or lies past its edge, is skipped.
+    pub(crate) fn guides(mut self, guides: &'a [Guide]) -> Self {
+        self.guides = guides;
+        self
     }
 }
 
@@ -525,6 +548,7 @@ impl Component for PageOverlays<'_> {
             field_edge: cx.color(colors.status.info.solid),
             required_edge: cx.color(colors.status.bad.solid),
             flash: cx.color(colors.accent.solid),
+            guide: cx.color(colors.status.info.solid),
             tab_fill: cx.color(colors.accent.solid),
             tab_ink: cx.color(colors.text.on_accent),
             tones,
@@ -549,6 +573,7 @@ impl Component for PageOverlays<'_> {
         if self.highlight_fields {
             self.paint_field_highlights(&draw, style);
         }
+        self.paint_guides(&draw, style);
         self.paint_compare_marks(&draw, style);
         self.paint_flash(&draw, cx);
         if let Some(rect) = self.picked {
@@ -606,6 +631,15 @@ impl PageOverlays<'_> {
                 };
                 draw.faded(48.0 / 255.0, |draw| draw.fill(&shape, style.field_fill));
                 draw.stroke(&outline, width, edge);
+            }
+        }
+    }
+
+    /// The ruler guides of this page, as thin lines over it. Drawn only: no input, never in an export or print.
+    fn paint_guides(&self, draw: &Draw<'_>, style: &PageOverlaysStyle) {
+        for guide in self.guides.iter().filter(|g| g.page == self.page) {
+            if let Some(points) = super::guides::line(&self.xf, guide) {
+                draw.stroke(&PaintShape::Path(points.to_vec()), StrokeWidth::Thin, style.guide);
             }
         }
     }

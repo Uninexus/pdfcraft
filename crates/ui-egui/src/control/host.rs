@@ -67,6 +67,8 @@ impl crate::PdfCraftApp {
                 "layout": format!("{:?}", v.view.display),
                 "continuous": v.view.continuous,
                 "page_gaps": v.view.page_gaps,
+                "show_guides": v.show_guides,
+                "guides": self.session.guides(v.id, None).map(|g| g.len()).unwrap_or(0),
                 "organize": v.organize,
                 "grid_zoom": self.organize_zoom,
                 "thumbnail_zoom": v.thumbnail_zoom(),

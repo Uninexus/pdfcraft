@@ -35,6 +35,7 @@ pub(crate) mod bars;
 mod cache;
 pub(super) mod crop;
 mod find;
+mod guides;
 pub(super) mod image_pick;
 mod navigation;
 pub(crate) mod organize;
@@ -184,6 +185,9 @@ pub struct DocView {
     canvas: Option<CanvasView>,
     /// A latched or held middle-button scroll ran in the last pass (written by [`document_area_at`]).
     middle_scrolling: bool,
+    /// View > Guides > Show Guides: draw this document's ruler guides over its pages. View state: never
+    /// saved, and not part of an edit; off when a tab opens.
+    pub show_guides: bool,
     pub organize: bool,
     pub page_input: String,
     /// Text was typed into the page box since it last showed a page's label: while the box keeps the focus,
@@ -594,6 +598,7 @@ impl DocView {
             viewport: Rect::NOTHING,
             canvas: None,
             middle_scrolling: false,
+            show_guides: false,
             organize: false,
             page_input: "1".into(),
             page_input_draft: false,
@@ -677,6 +682,7 @@ impl DocView {
         // Display, page and scroll offset: the reader's place.
         fresh.view = self.view.clone();
         fresh.organize = self.organize;
+        fresh.show_guides = self.show_guides;
         fresh.thumbnail_zoom = self.thumbnail_zoom;
         fresh.notice_dismissed = self.notice_dismissed;
         fresh.cut_notice_dismissed = std::mem::take(&mut self.cut_notice_dismissed);
@@ -717,6 +723,7 @@ impl DocView {
         v.view = self.view.clone();
         v.view.go_to(self.view.current);
         v.page_input = self.page_input.clone();
+        v.show_guides = self.show_guides;
         v.notice_dismissed = self.notice_dismissed;
         v.scripts_off_noted = self.scripts_off_noted;
         v.full_screen_fill = self.full_screen_fill;
@@ -903,6 +910,8 @@ struct PageBodyCx<'a> {
     today: (i64, u32, u32),
     units: crate::units::Unit,
     find_marks: &'a [TextMark],
+    /// The ruler guides to draw (none unless View > Guides > Show Guides is on).
+    guides: &'a [pdfcraft_engine::guides::Guide],
     table_preview: Option<&'a crate::field_table_ui::Preview>,
 }
 
@@ -1412,7 +1421,9 @@ fn page_body(ui: &mut egui::Ui, body: &PageBody<'_>, callbacks: &mut PageCallbac
     let kept = session.area_pick.filter(|_| !session.box_drag.is_active());
     for (page, xf, page_tabs) in &tabs {
         let mut overlays =
-            PageOverlays::new(*page, *xf, cx.doc, page_tabs, &session.compare_marks, &mut session.flash).highlight_fields(session.highlight_fields);
+            PageOverlays::new(*page, *xf, cx.doc, page_tabs, &session.compare_marks, &mut session.flash)
+            .highlight_fields(session.highlight_fields)
+            .guides(cx.guides);
         if let Some(picked) = view_picked.filter(|p| p.page == *page) {
             overlays = overlays.picked(picked.rect);
         }
@@ -1687,6 +1698,7 @@ pub fn document_area_at(app: &mut PdfCraftApp, index: usize, rect: Rect, ui: &mu
     let allowed = doc.allows_annotation();
     let can_modify = doc.allows_modification();
     let form = doc.form.clone();
+    let guides = if app.views[index].show_guides { app.session.guides(doc_id, None).unwrap_or_default() } else { Vec::new() };
     let paper = app.session.reading_colors(doc_id).and_then(|c| c.params).map_or(Color32::WHITE, |p| {
         let [r, g, b] = p.background;
         Color32::from_rgb(r, g, b)
@@ -1819,6 +1831,7 @@ pub fn document_area_at(app: &mut PdfCraftApp, index: usize, rect: Rect, ui: &mu
         today: app.session.today(),
         units: app.units,
         find_marks: &find_marks,
+        guides: &guides,
         table_preview: table_preview.as_ref(),
     };
     let source = DocPages::new(&app.session, doc_id).rotated(state.rotation).revisions(revisions).reports(reports);

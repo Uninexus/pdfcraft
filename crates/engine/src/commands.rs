@@ -221,6 +221,10 @@ pub const COMMANDS: &[CommandSpec] = &[
     c("view.layout.two_up", "Two-page view", None, None, Document, "columns-2"),
     c("view.continuous", "Continuous scrolling", None, None, Document, "swap_vertical"),
     c("view.page_gaps", "Show gaps between pages", None, None, Document, "swap_vertical"),
+    // View > Guides > Show Guides and Clear Guides: ruler guides (view state, never saved or printed)
+    // drawn over the pages. The View menu lists them in a submenu of its own, so `menu = None`.
+    c("view.show_guides", "Show Guides", None, None, Document, "ruler"),
+    c("view.clear_guides", "Clear Guides", None, None, Document, "eraser"),
     c("view.layout.cover", "Show cover page in two-page view", None, None, TwoPageView, "bookmark"),
     // Acrobat's view modes, a page display and a zoom at once (the rail's Page display menu).
     c("view.fit_width_scrolling", "Fit to width scrolling", None, None, Document, "swap_horizontal"),
@@ -530,6 +534,18 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn the_guide_commands_are_registered_for_the_palette_and_need_a_document() {
+        for id in ["view.show_guides", "view.clear_guides"] {
+            let spec = command(id).unwrap_or_else(|| panic!("{id} is not registered"));
+            assert!(matches!(spec.needs, Needs::Document), "{id}");
+        }
+        let s = Session::new();
+        assert!(!is_enabled(command("view.show_guides").unwrap(), &s, None));
+        assert_eq!(command("view.show_guides").unwrap().label, "Show Guides");
+        assert_eq!(command("view.clear_guides").unwrap().label, "Clear Guides");
     }
 
     #[test]
