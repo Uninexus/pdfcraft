@@ -65,6 +65,7 @@ pub(crate) const PANELS: &[(RightPanel, &str, &str)] = &[
     (RightPanel::Tags, "tags", "Tags"),
     (RightPanel::Search, "search", "Search"),
     (RightPanel::Compare, "compare", "Compare"),
+    (RightPanel::Destinations, "destinations", "Destinations"),
 ];
 
 /// The English titles of the menus and submenus, for the bar's mnemonics in languages whose

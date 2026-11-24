@@ -40,6 +40,7 @@ mod content;
 mod control;
 mod create;
 mod date_format;
+mod destinations_panel;
 mod dialog_chrome;
 mod document_links;
 mod editing;

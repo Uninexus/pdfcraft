@@ -20,6 +20,8 @@ pub(crate) struct PanelResult {
     pub layer: Option<(usize, bool)>,
     /// A command to run, by id.
     pub command: Option<&'static str>,
+    /// A notice to show, an English key.
+    pub notice: Option<&'static str>,
 }
 
 /// Draw the body of side panel `panel` and apply its navigation, layer, bookmark or edit actions. The dock shows the
@@ -36,6 +38,7 @@ pub fn panel_body(app: &mut PdfCraftApp, ui: &mut egui::Ui, cx: &mut BodyCx<'_>,
         RightPanel::Attachments => super::attachments::show(app, ui, cx),
         RightPanel::Fields => super::fields::show(app, ui),
         RightPanel::Search => super::search_ui::show(app, ui),
+        RightPanel::Destinations => super::destinations::show(app, ui, cx),
         _ => PanelResult::default(),
     };
     let mut sig_action: Option<crate::sign_ui::PanelAction> = None;
@@ -113,6 +116,9 @@ pub fn panel_body(app: &mut PdfCraftApp, ui: &mut egui::Ui, cx: &mut BodyCx<'_>,
     }
     if let Some(text) = app.views.get_mut(index).and_then(|v| v.session.comments.copy_text_request.take()) {
         app.put_text(&text);
+    }
+    if let Some(notice) = result.notice {
+        app.notify_tr(notice);
     }
     if let Some(command) = result.command {
         app.run_command(&ctx, command);

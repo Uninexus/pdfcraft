@@ -1,4 +1,4 @@
-//! The dock around the page: the Tools panel, the toolbar rail and the eleven side panels
+//! The dock around the page: the Tools panel, the toolbar rail and the twelve side panels
 //! ([`crate::RightPanel`]) as panels of one [`Workspace`], shown by a [`DockArea`].
 //!
 //! The workspace is the one record of which panels are open and where they sit. Settings written
@@ -61,10 +61,12 @@ pub enum PanelId {
     Search,
     /// [`RightPanel::Compare`].
     Compare,
+    /// [`RightPanel::Destinations`].
+    Destinations,
 }
 
 /// The side panels, in the order the rail lists them.
-const SIDE: [PanelId; 11] = [
+const SIDE: [PanelId; 12] = [
     PanelId::Comments,
     PanelId::Bookmarks,
     PanelId::Pages,
@@ -76,6 +78,7 @@ const SIDE: [PanelId; 11] = [
     PanelId::Tags,
     PanelId::Search,
     PanelId::Compare,
+    PanelId::Destinations,
 ];
 
 impl PanelId {
@@ -96,6 +99,7 @@ impl PanelId {
             Self::Tags => "tags",
             Self::Search => "search",
             Self::Compare => "compare",
+            Self::Destinations => "destinations",
         }
     }
 
@@ -118,6 +122,7 @@ impl PanelId {
             Self::Tags => RightPanel::Tags,
             Self::Search => RightPanel::Search,
             Self::Compare => RightPanel::Compare,
+            Self::Destinations => RightPanel::Destinations,
             Self::Tools | Self::Toolbar | Self::Document => return None,
         })
     }
@@ -138,6 +143,7 @@ impl From<RightPanel> for PanelId {
             RightPanel::Tags => Self::Tags,
             RightPanel::Search => Self::Search,
             RightPanel::Compare => Self::Compare,
+            RightPanel::Destinations => Self::Destinations,
         }
     }
 }
@@ -197,6 +203,23 @@ pub fn default_workspace(rail_side: DockSide) -> Workspace<PanelId> {
     let rect = egui::Rect::from_min_size(egui::pos2(TOOLS_WIDTH + TOOLBAR_INSET, 14.0), egui::vec2(48.0, 400.0));
     let floating = Floating::new(1, toolbar, rect);
     Workspace::new(Layout::new(Some(root), vec![floating]))
+}
+
+/// A saved workspace fitted to the panels this build has: a side panel added since it was saved joins the rail at its
+/// default place, so a saved layout does not keep it out (the dock refuses to show a panel it has no place for).
+/// The side panel that showed stays the one that shows: the panel placed at its default place does not take its turn.
+pub(crate) fn fit_saved(workspace: &mut Workspace<PanelId>, rail_side: DockSide) {
+    let shown = open_side(workspace);
+    workspace.reconcile(|_| true, permissions, &default_workspace(rail_side));
+    let now = open_side(workspace);
+    if now != shown {
+        // A refusal leaves the fitted layout as it is, which still opens every panel.
+        let _kept = match (shown, now) {
+            (Some(panel), _) => set_shown(workspace, panel, true),
+            (None, Some(panel)) => set_shown(workspace, panel, false),
+            (None, None) => Ok(()),
+        };
+    }
 }
 
 /// The floating quick toolbar sits in the left margin of the page area, as production's does. The page area starts where
@@ -329,6 +352,7 @@ fn side_label(panel: RightPanel) -> String {
         RightPanel::Tags => "Tags",
         RightPanel::Search => "Search",
         RightPanel::Compare => "Compare",
+        RightPanel::Destinations => "Destinations",
     };
     crate::i18n::t(title).to_owned()
 }
@@ -347,6 +371,7 @@ fn side_icon(panel: RightPanel) -> &'static str {
         RightPanel::Tags => "tag",
         RightPanel::Search => "search",
         RightPanel::Compare => "git-compare",
+        RightPanel::Destinations => "pin",
     }
 }
 
@@ -565,7 +590,7 @@ pub(crate) fn rail_anchor(app: &PdfCraftApp) -> Option<PanelId> {
         SIDE.contains(panel)
             && match panel {
                 PanelId::Accessibility => checked || open == Some(*panel),
-                PanelId::Search | PanelId::Compare => open == Some(*panel),
+                PanelId::Search | PanelId::Compare | PanelId::Destinations => open == Some(*panel),
                 _ => true,
             }
     })
@@ -596,7 +621,7 @@ pub fn dock(app: &mut PdfCraftApp, ui: &mut Ui) {
     let checked = app.active_ids().is_some_and(|(_, id)| app.a11y.report.as_ref().is_some_and(|(d, _)| *d == id));
     let listed = |panel: &PanelId| match panel {
         PanelId::Accessibility => checked || open == Some(*panel),
-        PanelId::Search | PanelId::Compare => open == Some(*panel),
+        PanelId::Search | PanelId::Compare | PanelId::Destinations => open == Some(*panel),
         _ => true,
     };
     let inset = app.notice_inset;
@@ -1231,5 +1256,33 @@ mod tests {
         let snapshot = moved.state().settings_snapshot();
         let restored = harness(move |app| app.apply_settings(&snapshot));
         assert!(tools_x(&restored) > 700.0);
+    }
+
+    /// A layout saved before a side panel existed: the panel is nowhere in it, neither shown nor hidden.
+    fn without(panel: PanelId, workspace: &Workspace<PanelId>) -> Workspace<PanelId> {
+        fn strip(value: &mut Value, name: &Value) {
+            match value {
+                Value::Array(items) => {
+                    items.retain(|item| item != name);
+                    items.iter_mut().for_each(|item| strip(item, name));
+                }
+                Value::Object(fields) => fields.values_mut().for_each(|field| strip(field, name)),
+                _ => {}
+            }
+        }
+        let mut value = serde_json::to_value(workspace).unwrap();
+        strip(&mut value, &serde_json::to_value(panel).unwrap());
+        serde_json::from_value(value).unwrap()
+    }
+
+    #[test]
+    fn a_side_panel_newer_than_the_saved_layout_can_still_be_shown() {
+        let mut saved = without(PanelId::Destinations, &default_workspace(DockSide::End));
+        assert!(!saved.layout().contains(&PanelId::Destinations));
+        set_shown(&mut saved, PanelId::Bookmarks, true).unwrap();
+        fit_saved(&mut saved, DockSide::End);
+        assert_eq!(open_side(&saved), Some(PanelId::Bookmarks), "the panel that showed still shows");
+        assert!(set_shown(&mut saved, PanelId::Destinations, true).is_ok(), "the dock has a place for it");
+        assert_eq!(open_side(&saved), Some(PanelId::Destinations));
     }
 }
