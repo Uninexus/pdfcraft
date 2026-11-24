@@ -449,8 +449,11 @@ pub(crate) fn field_parts(
         if in_order.contains(&(fi, wi)) || is_focused {
             part = part.focusable();
             // A press opens a text field's editor, which takes the keys from the part in the next pass: the press
-            // takes the focus to the part, also when it comes from another field's editor.
-            if f.kind == FormFieldKind::Text && usable(f, w, can_fill) {
+            // takes the focus to the part, also when it comes from another field's editor. A field whose click runs
+            // its Mouse Up script closes its editor for the script instead, which may open a dialog over the part: a
+            // part holding the focus the dialog hands back was no longer hit by the pointer after it, so the next click
+            // on the field did nothing.
+            if f.kind == FormFieldKind::Text && usable(f, w, can_fill) && w.mouse_up_script.is_none() {
                 part = part.takes_focus();
             }
         }

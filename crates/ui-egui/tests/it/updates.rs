@@ -54,11 +54,7 @@ fn harness(answer: Result<Option<&str>, &str>) -> Harness<'static, PdfCraftApp> 
     let source = source(answer);
     Harness::builder().with_size(egui::vec2(1200.0, 800.0)).build_eframe(move |cc| {
         crate::support::install_runtime(&cc.egui_ctx);
-        // A manual check only: the check at start would find the same release and offer it again once the
-        // check's dialog closes, on a thread whose timing decides whether a test sees it.
-        let mut app = app_asking(source);
-        app.set_option(&egui::Context::default(), "update_check_at_start", "false").unwrap();
-        app
+        app_asking(source)
     })
 }
 
@@ -114,9 +110,13 @@ fn a_newer_release_is_offered_for_download() {
     assert!(h.execute("help.check_updates"));
     settle(&mut h);
     assert!(update_dialog_open(&h), "the found release is offered in a dialog");
-    h.key_press(egui::Key::Escape);
-    h.run_steps(3);
-    assert!(!update_dialog_open(&h), "Escape closes the dialog");
+    // The check's window closes first; the offer it found waits behind it as the update prompt, which a second
+    // Escape closes.
+    for _ in 0..2 {
+        h.key_press(egui::Key::Escape);
+        h.run_steps(3);
+    }
+    assert!(!update_dialog_open(&h), "Escape closes the dialogs");
 }
 
 /// The desktop app's start, with `settings` applied, and the count of what the source was asked.
