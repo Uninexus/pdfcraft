@@ -180,6 +180,7 @@ impl PdfCraftApp {
             full_screen_fill: Some(self.full_screen_fill),
             full_screen_escape_exits: Some(self.full_screen_escape_exits),
             units: Some(self.units),
+            blank_paper: Some(self.blank_paper.token().to_string()),
             always_default_view: Some(self.always_default_view),
             highlight_fields: Some(self.highlight_fields),
             comments_panel_closed: Some(self.comments_panel_closed),
@@ -484,6 +485,10 @@ impl PdfCraftApp {
         }
         if let Some(units) = b.units {
             self.units = units;
+        }
+        // Settings are untrusted: a name that is neither paper keeps the current one.
+        if let Some(paper) = b.blank_paper.as_deref().and_then(crate::paper::Paper::from_token) {
+            self.blank_paper = paper;
         }
         if let Some(on) = b.always_default_view {
             self.always_default_view = on;

@@ -2291,6 +2291,47 @@ fn the_scroll_speed_preference_scales_mouse_wheel_notches() {
 }
 
 #[test]
+fn the_units_and_blank_paper_are_set_reported_and_kept_in_the_settings() {
+    use pdfcraft_ui_egui::paper::Paper;
+    use pdfcraft_ui_egui::units::Unit;
+    let ctx = egui::Context::default();
+    let mut app = crate::control::new_app();
+    app.set_option(&ctx, "units", "MM").unwrap();
+    app.set_option(&ctx, "blank-paper", "letter").unwrap();
+    assert_eq!((app.units, app.blank_paper), (Unit::Millimetres, Paper::Letter));
+    assert!(app.set_option(&ctx, "units", "feet").unwrap_err().contains("in, mm, cm or pt"));
+    assert!(app.set_option(&ctx, "blank-paper", "a3").unwrap_err().contains("letter or a4"));
+    assert_eq!((app.units, app.blank_paper), (Unit::Millimetres, Paper::Letter), "a refused value changes nothing");
+    let mut again = crate::control::new_app();
+    again.units = Unit::Points;
+    again.blank_paper = Paper::A4;
+    again.apply_settings(&app.settings_snapshot());
+    assert_eq!((again.units, again.blank_paper), (Unit::Millimetres, Paper::Letter), "both survive a restart");
+    // A saved name that is neither paper keeps the current one.
+    again.apply_settings(&pdfcraft_ui_egui::settings::import_json(r#"{"blank_paper": "folio"}"#).0);
+    assert_eq!(again.blank_paper, Paper::Letter);
+    again.apply_settings(&pdfcraft_ui_egui::settings::import_json(r#"{"blank_paper": "a4"}"#).0);
+    assert_eq!(again.blank_paper, Paper::A4, "the last release's key is read too");
+}
+
+#[test]
+fn resetting_the_comment_tool_defaults_forgets_the_colours_and_keeps_the_name_and_the_pin() {
+    use pdfcraft_ui_egui::comments::CommentTool;
+    let ctx = egui::Context::default();
+    let mut app = crate::control::new_app();
+    let fresh = app.comment_prefs.style(CommentTool::Ink).color;
+    app.comment_prefs.set_color(CommentTool::Ink, [0.1, 0.6, 0.2]);
+    app.set_option(&ctx, "author", "Ada").unwrap();
+    app.set_option(&ctx, "comment-tool-pinned", "true").unwrap();
+    assert!(app.set_option(&ctx, "reset-comment-defaults", "false").unwrap_err().contains("must be true"));
+    assert_ne!(app.comment_prefs.style(CommentTool::Ink).color, fresh, "a refused call changes nothing");
+    app.set_option(&ctx, "reset-comment-defaults", "true").unwrap();
+    assert_eq!(app.comment_prefs.style(CommentTool::Ink).color, fresh);
+    assert_eq!(app.comment_prefs.author, "Ada");
+    assert!(app.comment_prefs.pinned);
+}
+
+#[test]
 fn the_invert_middle_drag_preference_is_off_by_default_and_kept_in_the_settings() {
     let mut app = crate::control::new_app();
     assert!(!app.invert_middle_drag, "the middle button keeps its direction unless asked");

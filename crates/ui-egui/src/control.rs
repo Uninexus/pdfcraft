@@ -39,6 +39,11 @@
 //!   `guides=on|off` shows or hides the active tab's ruler guides (View > Guides > Show Guides,
 //!   `view.show_guides`); `ui.state.active.show_guides` and `.guides` (how many the document has) report it.
 //!   `comment-tool-pinned=true|false` remembers the annotation quick bar's pin across restarts.
+//!   `units=in|mm|cm|pt` and `blank-paper=letter|a4` set Preferences > Documents and view > Units
+//!   (the unit page sizes and margins are shown in) and Paper for new blank pages (what Create >
+//!   Blank page uses); `ui.state.units` and `ui.state.blank_paper` report them.
+//!   `reset-comment-defaults=true` forgets every comment tool's remembered colour, opacity, width
+//!   and font size (Preferences > Comment).
 //!   `compare-ignore-case=true|false` and `compare-ignore-punctuation=true|false` set the Compare
 //!   dialog's Ignore checkboxes, which persist; `ui.state.compare_ignore` reports `case` and
 //!   `punctuation`.

@@ -57,6 +57,20 @@ impl PdfCraftApp {
             ("single_key_accelerators", _) => {
                 self.single_key_accelerators = value.parse::<bool>().map_err(|_| "single_key_accelerators must be true or false")?;
             }
+            // Preferences > Documents and view: the unit lengths are shown in and the paper Create > Blank page uses.
+            ("units", _) => {
+                self.units = crate::units::Unit::from_token(value).ok_or("units must be in, mm, cm or pt")?;
+            }
+            ("blank-paper", _) => {
+                self.blank_paper = crate::paper::Paper::from_token(value).ok_or("blank-paper must be letter or a4")?;
+            }
+            // Preferences > Comment: forgets every comment tool's remembered colour, opacity, width and font size.
+            ("reset-comment-defaults", _) => {
+                if value != "true" {
+                    return Err("reset-comment-defaults must be true".into());
+                }
+                self.comment_prefs.reset_defaults();
+            }
             // The Compare dialog's Ignore checkboxes (saved with the other settings).
             ("compare-ignore-case", _) => {
                 self.compare_ignore_case = value.parse::<bool>().map_err(|_| "compare-ignore-case must be true or false")?;

@@ -82,11 +82,13 @@ struct PrefsDraft {
     always_default_view: bool,
     text_links: bool,
     units: Unit,
+    blank_paper: crate::paper::Paper,
     scroll_speed: ScrollSpeed,
     invert_middle_drag: bool,
     single_key_accelerators: bool,
     author: String,
     hide_empty_highlight_hover: bool,
+    comment_tool_pinned: bool,
     flatten_fill_sign_on_save: bool,
     ask_to_lock_signatures: bool,
     date_format: String,
@@ -119,11 +121,13 @@ impl PrefsDraft {
             always_default_view: app.always_default_view,
             text_links: app.text_links,
             units: app.units,
+            blank_paper: app.blank_paper,
             scroll_speed: app.scroll_speed,
             invert_middle_drag: app.invert_middle_drag,
             single_key_accelerators: app.single_key_accelerators,
             author: app.comment_prefs.author.clone(),
             hide_empty_highlight_hover: app.comment_prefs.hide_empty_highlight_hover,
+            comment_tool_pinned: app.comment_prefs.pinned,
             flatten_fill_sign_on_save: app.flatten_fill_sign_on_save,
             ask_to_lock_signatures: app.ask_to_lock_signatures,
             date_format: app.session.date_format().to_string(),
@@ -161,11 +165,13 @@ impl PrefsDraft {
             always_default_view: false,
             text_links: true,
             units: Unit::default(),
+            blank_paper: crate::paper::Paper::system(),
             scroll_speed: ScrollSpeed::default(),
             invert_middle_drag: false,
             single_key_accelerators: false,
             author: prefs.author,
             hide_empty_highlight_hover: prefs.hide_empty_highlight_hover,
+            comment_tool_pinned: prefs.pinned,
             flatten_fill_sign_on_save: false,
             ask_to_lock_signatures: true,
             date_format: engine.date_format().to_string(),
@@ -354,6 +360,10 @@ fn unit_table<'a>() -> Table<'a, Unit> {
     ]
 }
 
+fn paper_table<'a>() -> Table<'a, crate::paper::Paper> {
+    vec![(crate::paper::Paper::Letter, "letter", tl!("US Letter")), (crate::paper::Paper::A4, "a4", tl!("A4"))]
+}
+
 fn speed_table<'a>() -> Table<'a, ScrollSpeed> {
     vec![
         (ScrollSpeed::Slow, "slow", tl_ctx!("scroll speed", ScrollSpeed::Slow.label())),
@@ -467,11 +477,13 @@ impl PreferencesModel for Prefs<'_> {
             ("view.always", PrefValue::Bool(v)) => d.always_default_view = v,
             ("view.text_links", PrefValue::Bool(v)) => d.text_links = v,
             ("view.units", PrefValue::Choice(id)) => d.units = lookup(&unit_table(), &id).unwrap_or(d.units),
+            ("view.paper", PrefValue::Choice(id)) => d.blank_paper = lookup(&paper_table(), &id).unwrap_or(d.blank_paper),
             ("view.scroll_speed", PrefValue::Choice(id)) => d.scroll_speed = lookup(&speed_table(), &id).unwrap_or(d.scroll_speed),
             ("view.invert_middle", PrefValue::Bool(v)) => d.invert_middle_drag = v,
             ("view.single_key", PrefValue::Bool(v)) => d.single_key_accelerators = v,
             ("comment.author", PrefValue::Text(v)) => d.author = v.chars().take(crate::MAX_AUTHOR_CHARS).collect(),
             ("comment.hide_hover", PrefValue::Bool(v)) => d.hide_empty_highlight_hover = v,
+            ("comment.pinned", PrefValue::Bool(v)) => d.comment_tool_pinned = v,
             ("fill.flatten", PrefValue::Bool(v)) => d.flatten_fill_sign_on_save = v,
             ("fill.ask_lock", PrefValue::Bool(v)) => d.ask_to_lock_signatures = v,
             ("fill.date_preset", PrefValue::Choice(id)) => {
@@ -498,6 +510,14 @@ impl PreferencesModel for Prefs<'_> {
                     }
                 }
             });
+            return false;
+        }
+        if key == "comment.reset" {
+            // Acts on the saved defaults at once, like the buttons above; the draft keeps the name, the pin and the hover choice.
+            if Button::new(tl!("Reset comment tool colours and sizes")).show(ui).clicked() {
+                self.app.comment_prefs.reset_defaults();
+                self.app.notify_fmt("Comment tool defaults reset", &[]);
+            }
             return false;
         }
         if key != "fill.date_pattern" {
@@ -573,6 +593,7 @@ impl PreferencesModel for Prefs<'_> {
                 d.always_default_view = fresh.always_default_view;
                 d.text_links = fresh.text_links;
                 d.units = fresh.units;
+                d.blank_paper = fresh.blank_paper;
                 d.scroll_speed = fresh.scroll_speed;
                 d.invert_middle_drag = fresh.invert_middle_drag;
                 d.single_key_accelerators = fresh.single_key_accelerators;
@@ -580,6 +601,7 @@ impl PreferencesModel for Prefs<'_> {
             "comment" => {
                 d.author = fresh.author;
                 d.hide_empty_highlight_hover = fresh.hide_empty_highlight_hover;
+                d.comment_tool_pinned = fresh.comment_tool_pinned;
             }
             "fill" => {
                 d.flatten_fill_sign_on_save = fresh.flatten_fill_sign_on_save;
@@ -657,6 +679,8 @@ impl PreferencesDraft for Prefs<'_> {
         self.app.single_key_accelerators = d.single_key_accelerators;
         self.app.comment_prefs.author = d.author;
         self.app.comment_prefs.hide_empty_highlight_hover = d.hide_empty_highlight_hover;
+        self.app.comment_prefs.pinned = d.comment_tool_pinned;
+        self.app.blank_paper = d.blank_paper;
         self.app.flatten_fill_sign_on_save = d.flatten_fill_sign_on_save;
         self.app.ask_to_lock_signatures = d.ask_to_lock_signatures;
 
@@ -798,6 +822,8 @@ impl Prefs<'_> {
             RowSpec::new("view.text_links", tl!("Open web and email addresses written in the page text"), RowKind::Bool(d.text_links))
                 .help(tl!("Only web (http, https) and email addresses open, and PdfCraft asks first, as for other links.")),
             choice_row("view.units", tl!("Units"), d.units, &unit_table()).help(tl!("For page sizes and margins.")),
+            choice_row("view.paper", tl!("Paper for new blank pages"), d.blank_paper, &paper_table())
+                .help(tl!("Used by Create > Blank page. It starts as the paper of the system's region.")),
             choice_row("view.scroll_speed", tl!("Scroll speed (mouse wheel and arrow keys)"), d.scroll_speed, &speed_table()),
             RowSpec::new("view.invert_middle", tl!("Invert middle-button drag"), RowKind::Bool(d.invert_middle_drag))
                 .help(tl!("Panning or auto-scrolling with the middle (wheel) button moves the page the other way.")),
@@ -816,6 +842,11 @@ impl Prefs<'_> {
                 tl!("Hide hover previews for highlights without comment text"),
                 RowKind::Bool(d.hide_empty_highlight_hover),
             ),
+            RowSpec::new("comment.pinned", tl!("Keep the selected comment tool selected after use"), RowKind::Bool(d.comment_tool_pinned))
+                .help(tl!("The same as the pin on the comment toolbar.")),
+            RowSpec::new("comment.reset", tl!("Comment tool defaults"), RowKind::Custom).help(tl!(
+                "Forgets the colours, opacities, widths and font sizes saved with Make Current Properties Default. Fill & Sign text defaults are not changed."
+            )),
         ];
         PageSpec::new("comment", tl!("Comment"), rows)
     }

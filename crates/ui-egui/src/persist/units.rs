@@ -51,6 +51,14 @@ impl Unit {
         }
     }
 
+    /// The unit a typed name stands for: its label (`in`, `mm`, `cm`, `pt`) or its saved name
+    /// (`inches`, `millimetres`, ...), in any case; `None` for anything else.
+    pub fn from_token(name: &str) -> Option<Unit> {
+        let name = name.trim().to_ascii_lowercase();
+        let saved = |u: Unit| serde_json::to_value(u).ok().and_then(|v| v.as_str().map(str::to_string));
+        Unit::ALL.into_iter().find(|u| u.label() == name || saved(*u).is_some_and(|s| s == name))
+    }
+
     /// The unit the system's region measures in: inches in the United States, Liberia and
     /// Myanmar, millimetres everywhere else; inches when the region can't be told. Used on first
     /// start, before the user picks one in Preferences.
@@ -88,6 +96,18 @@ mod tests {
                 let back = shown.parse::<f64>().unwrap() / unit.per_point();
                 assert!((back - points).abs() <= tolerance, "{text}: {back} pt is not {points} pt");
             }
+        }
+    }
+
+    #[test]
+    fn typed_names_find_their_unit() {
+        for u in Unit::ALL {
+            assert_eq!(Unit::from_token(u.label()), Some(u));
+            let saved = serde_json::to_value(u).unwrap().as_str().unwrap().to_uppercase();
+            assert_eq!(Unit::from_token(&saved), Some(u));
+        }
+        for bad in ["", "feet", "px", "in ches"] {
+            assert_eq!(Unit::from_token(bad), None, "{bad:?}");
         }
     }
 

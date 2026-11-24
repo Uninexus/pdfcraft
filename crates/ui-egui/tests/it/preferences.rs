@@ -113,6 +113,18 @@ fn cases() -> Vec<Case> {
             applied: |a| a.units == Unit::Millimetres,
         },
         Case {
+            name: "paper for new blank pages",
+            page: "Documents and view",
+            edit: |h| choose(h, "Paper for new blank pages", "A4"),
+            applied: |a| a.blank_paper == pdfcraft_ui_egui::paper::Paper::A4,
+        },
+        Case {
+            name: "keep the comment tool selected",
+            page: "Comment",
+            edit: |h| click(h, "Keep the selected comment tool selected after use"),
+            applied: |a| a.comment_prefs.pinned,
+        },
+        Case {
             name: "tools side and rail side",
             page: "General & Interface",
             edit: |h| {

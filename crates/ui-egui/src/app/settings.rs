@@ -85,6 +85,8 @@ pub struct Behavior {
     /// Esc leaves full screen (off leaves it to ⌘L / Ctrl+L only).
     pub full_screen_escape_exits: Option<bool>,
     pub units: Option<crate::units::Unit>,
+    /// The paper Create > Blank page makes: `letter` or `a4`.
+    pub blank_paper: Option<String>,
     pub always_default_view: Option<bool>,
     pub highlight_fields: Option<bool>,
     pub comments_panel_closed: Option<bool>,
@@ -594,6 +596,7 @@ pub fn import_json(text: &str) -> (PdfCraftSettings, Vec<SectionError>) {
             full_screen_fill: r.bool("full_screen_fill"),
             full_screen_escape_exits: r.bool("full_screen_escape_exits"),
             units: r.typed("units"),
+            blank_paper: r.string("blank_paper"),
             always_default_view: r.bool("always_default_view"),
             highlight_fields: r.bool("highlight_fields"),
             comments_panel_closed: r.bool("comments_panel_closed"),

@@ -10525,11 +10525,11 @@ title = "Preferences: commenting"
 area = "N"
 tier = "P1"
 milestone = "M14"
-status = "planned"
+status = "partial"
 commands = []
 tools = []
-evidence = []
-notes = "Preferences ▸ Comment (the name on comments is in Identity): Keep the selected comment tool selected after use (the same persisted setting as the comment toolbar pin) and Reset comment tool colours and sizes, which forgets every colour, opacity, width and font size saved with Make Current Properties Default (typed-text Fill & Sign defaults are not touched; also ui.set reset-comment-defaults=true). Missing: Acrobat's pop-up behaviours, pop-up font and size, comment-list options and the other Commenting preferences. UI to be re-ported onto the craft framework UI after the 0.22.0 sync."
+evidence = ["crates/ui-egui/tests/it/preferences.rs::preference_rows_apply_live_and_survive_closing", "crates/ui-egui/tests/it/viewer.rs::resetting_the_comment_tool_defaults_forgets_the_colours_and_keeps_the_name_and_the_pin"]
+notes = "Preferences ▸ Comment (the name on comments is in Identity): Keep the selected comment tool selected after use (the same persisted setting as the comment toolbar pin) and Reset comment tool colours and sizes, which forgets every colour, opacity, width and font size saved with Make Current Properties Default (typed-text Fill & Sign defaults are not touched; also ui.set reset-comment-defaults=true). Missing: Acrobat's pop-up behaviours, pop-up font and size, comment-list options and the other Commenting preferences."
 
 [[feature]]
 id = "misc.prefs-forms"
@@ -10702,8 +10702,8 @@ milestone = "M14"
 status = "partial"
 commands = []
 tools = ["grid_preferences"]
-evidence = ["crates/automation/tests/it/guides.rs::grid_preferences_are_set_read_cleared_and_fill_in_what_doc_grid_snap_is_not_given"]
-notes = "Preferences ▸ Units and paper: the unit page sizes and margins are shown in (in, mm, cm, pt) and the paper Create ▸ Blank page uses (US Letter or A4, starting as the system region's paper), both remembered and applied at once; bad saved values keep the current choice. Reachable as ui.set units=in|mm|cm|pt and blank-paper=letter|a4, reported in ui.state. Headless only: the grid_preferences tool stores a grid (spacing, subdivisions, offsets) for one tool session, which doc_grid_snap uses for what a call leaves out; the desktop app has no grid and no grid Preferences, and nothing here is kept between runs. Missing: Acrobat's separate page and ruler units, and grid and guide Preferences in the app, which has no rulers or grid. UI to be re-ported onto the craft framework UI after the 0.22.0 sync."
+evidence = ["crates/automation/tests/it/guides.rs::grid_preferences_are_set_read_cleared_and_fill_in_what_doc_grid_snap_is_not_given", "crates/ui-egui/tests/it/viewer.rs::the_units_and_blank_paper_are_set_reported_and_kept_in_the_settings", "crates/ui-egui/tests/it/preferences.rs::preference_rows_apply_live_and_survive_closing"]
+notes = "Preferences ▸ Documents and view: Units, the unit page sizes and margins are shown in (in, mm, cm, pt) and Paper for new blank pages, the paper Create ▸ Blank page uses (US Letter or A4, starting as the system region's paper), both remembered and applied at once; bad saved values keep the current choice. Reachable as ui.set units=in|mm|cm|pt and blank-paper=letter|a4, reported in ui.state. Headless only: the grid_preferences tool stores a grid (spacing, subdivisions, offsets) for one tool session, which doc_grid_snap uses for what a call leaves out; the desktop app has no grid and no grid Preferences, and nothing here is kept between runs. Missing: Acrobat's separate page and ruler units, and grid and guide Preferences in the app, which has no rulers or grid."
 
 [[feature]]
 id = "misc.prefs-content-editing"
