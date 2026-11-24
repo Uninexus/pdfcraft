@@ -461,8 +461,9 @@ pub const COMMANDS: &[CommandSpec] = &[
     c("help.website", "ArtCraft website", HELP, None, Nothing, "open"),
     c("help.check_updates", "Check for updates…", HELP, None, Nothing, "cloud"),
     c("help.about", "About PdfCraft", HELP, None, Nothing, "info"),
-    // Windows only (per-user registration so the app can be picked under Settings > Default apps);
-    // in Preferences and the palette rather than a menu, which would list it on every system.
+    // For Windows (per-user registration so the app can be picked under Settings > Default apps). In
+    // Preferences (Windows only) and the palette, which lists them on every system: elsewhere they
+    // answer that they are only available on Windows. No menu lists them.
     c("help.default_app", "Set up PdfCraft as a PDF app…", None, None, Nothing, "file-text"),
     c("help.default_app.remove", "Stop offering PdfCraft as a PDF app…", None, None, Nothing, "file-x"),
 ];

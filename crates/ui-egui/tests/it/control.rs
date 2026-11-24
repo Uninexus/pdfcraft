@@ -47,7 +47,12 @@ pub(crate) fn services_asking(update_source: Option<craft::update::updater::Chec
 
 /// An app on `host`.
 pub(crate) fn app_on(host: Host) -> PdfCraftApp {
-    PdfCraftApp::with_host(Arc::new(host), services())
+    let mut app = PdfCraftApp::with_host(Arc::new(host), services());
+    // Inert by default: a test must never write the registry or open Windows Settings of the PC it runs on.
+    // A test that wants to see the calls installs its own hooks.
+    app.default_app_hooks =
+        pdfcraft_ui_egui::DefaultAppHooks { available: cfg!(windows), register: |_| Ok(()), open_settings: || Ok(()), unregister: || Ok(()) };
+    app
 }
 
 /// An app on the default host: threads run its jobs and every picker answers Cancelled.
