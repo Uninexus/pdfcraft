@@ -14,6 +14,7 @@
 
 pub mod actions;
 pub mod autotag;
+pub mod bates_batch;
 mod bookmarks;
 pub mod build_info;
 pub mod camera;

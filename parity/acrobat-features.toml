@@ -2698,10 +2698,10 @@ area = "C"
 tier = "P1"
 milestone = "M7"
 status = "partial"
-commands = []
+commands = ["edit.bates_multi"]
 tools = ["doc_bates_multi"]
-evidence = ["crates/automation/tests/it/automation.rs::bates_numbers_continue_across_files_and_report_preflight_and_permission_failures"]
-notes = "The headless batch tool allocates inclusive intervals in input order and reports per-file failures; it refuses existing output paths. Missing: a GUI batch dialog (Acrobat sets this up from Header & Footer ▸ Add Bates numbering with a file list), so it is reachable only through `doc_bates_multi`."
+evidence = ["crates/automation/tests/it/automation.rs::bates_numbers_continue_across_files_and_report_preflight_and_permission_failures", "crates/ui-egui/tests/it/bates_multi.rs::the_numbers_run_on_from_one_file_to_the_next_and_the_copies_go_to_the_chosen_folder", "crates/ui-egui/tests/it/bates_multi.rs::a_file_that_cannot_be_read_stops_the_run_with_nothing_written", "crates/ui-egui/tests/it/bates_multi.rs::a_name_already_in_the_folder_is_never_replaced", "crates/ui-egui/tests/it/bates_multi.rs::cancelling_before_the_run_starts_writes_nothing_and_says_so", "crates/ui-egui/tests/it/bates_multi.rs::the_edit_menu_lists_it_and_the_dialog_asks_for_files_first"]
+notes = "Edit > Bates numbering on several files… (also under Bates numbering in the Edit a PDF tools) opens a dialog with a file list (Browse, Remove, reorder by drag or Ctrl+] and Ctrl+[, Sort By Name), the first number, the digits and the text before and after the number. After OK it asks for a folder and numbers the files in the listed order on a background worker, the numbers running on from one file to the next, with a progress card and Cancel. Every file is read and counted first, so a file that cannot be used stops the run with nothing written; a numbered copy never replaces a file (a taken name gets (2), (3)), and the originals are not changed. The number goes at the bottom right of every page (the batch tool puts it in the footer centre). A copy that cannot be written is named in the message and its numbers stay unused. Up to 1000 files and 512 MB of input. Also the headless tool doc_bates_multi, which allocates inclusive intervals in input order, reports per-file failures and refuses existing output paths; both share engine::bates_batch. Not in the browser."
 
 [[feature]]
 id = "edit.bates-remove"

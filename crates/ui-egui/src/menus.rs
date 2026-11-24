@@ -147,6 +147,7 @@ const EDIT: &[&str] = &[
     "edit.attach",
     "form.clear",
     "tools.javascripts",
+    "edit.bates_multi",
     SEP,
     "app.preferences",
 ];
