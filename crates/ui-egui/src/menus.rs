@@ -219,6 +219,7 @@ const SIGN: &[&str] = &[
     "sign.panel",
     SEP,
     "sign.plan.show",
+    "sign.plan.sign_next",
     "form.signer_report",
     "sign.audit_report",
 ];

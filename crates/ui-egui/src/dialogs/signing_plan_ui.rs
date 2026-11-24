@@ -72,6 +72,8 @@ pub struct Draft {
     /// What the last command did, in words (a live region), and whether it worked.
     pub result: String,
     pub result_ok: bool,
+    /// A step the person asked to record, waiting for them to confirm it: the plan has no undo.
+    pub confirm: Option<&'static str>,
 }
 
 /// How a time (seconds since 1970, 0 when the host had no clock) is shown.
@@ -141,6 +143,8 @@ enum Change {
     Add,
     Remove,
     Message,
+    /// The next recipient's step is written down: their turn done (`false`) or declined (`true`).
+    Record(bool),
 }
 
 impl PdfCraftApp {
@@ -165,6 +169,7 @@ impl PdfCraftApp {
             view,
             result: String::new(),
             result_ok: true,
+            confirm: None,
         });
     }
 
@@ -179,6 +184,8 @@ impl PdfCraftApp {
         let change = match command {
             "sign.plan.recipient.add" => Change::Add,
             "sign.plan.recipient.remove" => Change::Remove,
+            "sign.plan.record" => Change::Record(false),
+            "sign.plan.decline" => Change::Record(true),
             _ => Change::Message,
         };
         if self.signing_plan.as_ref().is_some_and(|d| d.doc != id) {
@@ -191,6 +198,7 @@ impl PdfCraftApp {
         let path = self.session.get(id).and_then(|d| d.path.clone());
         let Some(draft) = self.signing_plan.as_mut() else { return };
         draft.remove = None;
+        draft.confirm = None;
         // Read it again either way, so the window shows the file as it is: what was written, or what made the command
         // refuse (a plan started elsewhere, a file gone).
         draft.view = view_of(path.as_deref());
@@ -244,11 +252,84 @@ impl PdfCraftApp {
                 plan.set_message(&draft.message).map_err(shown)?;
                 (plan, tl!("The message was set. It is kept in the plan file; nothing was sent").to_string())
             }
+            Change::Record(decline) => {
+                let mut plan = current.ok_or_else(|| tl!("There is no signing plan to record a step in").to_string())?;
+                let next = plan.next().cloned().ok_or_else(|| tl!("The plan is finished: everyone who signs or approves has done so").to_string())?;
+                let index = plan.turn_of(&next.email.to_lowercase()).map_err(shown)?;
+                let status = if *decline {
+                    Status::Declined
+                } else {
+                    Status::done_for(next.role).ok_or_else(|| tl!("That recipient is a viewer, who has no turn").to_string())?
+                };
+                plan.record(index, status, now).map_err(shown)?;
+                let said = crate::i18n::fmt(
+                    tl!("{who} is recorded as {status}. Only the plan file was changed: nothing was signed, sent or checked"),
+                    &[("who", &clean(&next.name, 200)), ("status", &status_label(status).to_lowercase())],
+                );
+                (plan, said)
+            }
         };
         let bytes = plan_rules::plan_bytes(&plan).map_err(shown)?;
         craft::atomic::atomic_write(&path, &bytes)
             .map_err(|e| crate::i18n::fmt(tl!("Couldn't write the signing plan: {e}"), &[("e", &clean(&e.to_string(), SHOWN_ERROR_CHARS))]))?;
         Ok(said)
+    }
+}
+
+impl PdfCraftApp {
+    /// `sign.plan.sign_next`: start signing as the plan's next recipient. It finds the one unsigned signature field
+    /// labelled for them, turns to its page and opens Sign with a Digital ID on it. The plan is only a record: once the
+    /// signed file is saved, the step is written down with Record (a signature cannot be told from outside who made it).
+    pub fn sign_as_next_recipient(&mut self, ctx: &egui::Context) {
+        let Some((index, id)) = self.active_ids() else { return };
+        let sidecar = match self.plan_sidecar(id) {
+            Ok(p) => p,
+            Err(why) => return self.notify(clean(&why, SHOWN_ERROR_CHARS)),
+        };
+        let plan = match plan_rules::read_sidecar(&sidecar) {
+            Ok(Some(plan)) => plan,
+            Ok(None) => return self.notify_tr("There is no signing plan beside this document: add a recipient in Sign > Signing plan… first"),
+            Err(e) => return self.notify(clean(&e.0, SHOWN_ERROR_CHARS)),
+        };
+        let Some(next) = plan.next().filter(|_| plan.state() == "in_progress").cloned() else {
+            return self.notify_tr("The signing plan has no one left to sign");
+        };
+        let who = clean(&next.name, 200);
+        if next.role != Role::Signer {
+            return self.notify_fmt("{who} approves rather than signs: record the step in the Signing plan window", &[("who", &who)]);
+        }
+        let key = next.email.to_lowercase();
+        let Some(doc) = self.session.get(id) else { return };
+        let fields: Vec<(String, usize)> = doc
+            .form
+            .iter()
+            .filter(|f| f.kind == pdfcraft_engine::FormFieldKind::Signature)
+            .filter(|f| {
+                let read = doc.field_signer(f.obj);
+                !read.signed && read.email.as_deref().is_some_and(|e| e.to_lowercase() == key)
+            })
+            .map(|f| (f.name.clone(), f.widgets.first().and_then(|w| w.page).unwrap_or(0)))
+            .collect();
+        let (name, page) = match fields.as_slice() {
+            [one] => one.clone(),
+            [] => {
+                return self.notify_fmt(
+                    "No unsigned signature field is labelled for {who}: set the signer in the field's properties first",
+                    &[("who", &who)],
+                );
+            }
+            _ => {
+                return self.notify_fmt("More than one unsigned signature field is labelled for {who}: only one can be signed here", &[("who", &who)]);
+            }
+        };
+        if let Some(view) = self.views.get_mut(index) {
+            view.go_to_page(page);
+        }
+        self.start_signing(ctx, page, None, Some(name), None);
+        self.notify_fmt(
+            "Signing as {who}. Save the signed file over this document so the plan stays beside it, then record the step in the Signing plan window",
+            &[("who", &who)],
+        );
     }
 }
 
@@ -335,6 +416,20 @@ fn body(ui: &mut egui::Ui, d: &mut Draft) {
                     remove = Some(r.email.clone());
                 }
             }
+            if let Some(next) = plan.next().filter(|_| plan.state() == "in_progress") {
+                let who = clean(&next.name, 200);
+                Text::new(tl!("Turn")).role(TypeRole::Heading).show(ui);
+                let done = if next.role == Role::Signer { tl!("Record {who} as signed") } else { tl!("Record {who} as approved") };
+                if clicked(&Button::new(crate::i18n::fmt(done, &[("who", &who)])).show(ui)) {
+                    d.confirm = Some("sign.plan.record");
+                }
+                if clicked(&Button::new(crate::i18n::fmt(tl!("Record {who} as declined"), &[("who", &who)])).show(ui)) {
+                    d.confirm = Some("sign.plan.decline");
+                }
+                if next.role == Role::Signer && clicked(&Button::new(crate::i18n::fmt(tl!("Sign as {who}…"), &[("who", &who)])).show(ui)) {
+                    d.command = Some("sign.plan.sign_next");
+                }
+            }
             Text::new(tl!("History")).role(TypeRole::Heading).show(ui);
             for r in &plan.recipients {
                 let steps: Vec<String> = r.history.iter().map(|e| format!("{} {}", status_label(e.status), when(e.at))).collect();
@@ -371,6 +466,18 @@ fn body(ui: &mut egui::Ui, d: &mut Draft) {
         TextField::new(tl!("Message to recipients"), Bind::bound(&mut d.message)).lines(3).limit(MAX_MESSAGE_CHARS).enabled(editable).show(ui);
         if clicked(&Button::new(tl!("Set message")).enabled(editable).show(ui)) {
             d.command = Some("sign.plan.message.set");
+        }
+    }
+    if let Some(command) = d.confirm {
+        let question = tl!(
+            "Record this step? The plan can no longer be edited afterwards and a step cannot be taken back. Only the plan file changes: nothing is signed or sent."
+        );
+        Notice::new(Tone::Warn, question).layout(NoticeLayout::Inline).id_salt(14usize).show(ui);
+        if clicked(&Button::new(tl!("Record it")).show(ui)) {
+            d.command = Some(command);
+        }
+        if clicked(&Button::new(tl!("Keep the plan as it is")).show(ui)) {
+            d.confirm = None;
         }
     }
     // A live region: what the last command did or why it did not. It stays until the next command.

@@ -189,3 +189,73 @@ fn a_file_that_is_not_a_plan_is_shown_as_unusable_and_left_alone() {
     assert_eq!(std::fs::read(sidecar_of(&pdf).unwrap()).unwrap(), junk, "it is not written over");
     assert!(h.query_all_by_label_contains("cannot be used").count() > 0, "and the window says so");
 }
+
+#[test]
+fn a_recorded_step_is_asked_for_first_and_then_locks_the_plan() {
+    let (_dir, pdf, mut h) = saved();
+    open_window(&mut h);
+    type_into(&mut h, "Ann Author", "ann@example.org", PlanRole::Signer);
+    run(&mut h, "sign.plan.recipient.add");
+    type_into(&mut h, "Bob Boss", "bob@example.org", PlanRole::Approver);
+    run(&mut h, "sign.plan.recipient.add");
+    h.get_by_role_and_label(Role::Button, "Record Ann Author as signed").click();
+    h.run_steps(3);
+    assert_eq!(plan_at(&pdf).unwrap().recipients[0].status, Status::Pending, "asking is not recording");
+    assert!(h.query_all_by_label_contains("cannot be taken back").count() > 0, "the window warns first");
+    h.get_by_role_and_label(Role::Button, "Keep the plan as it is").click();
+    h.run_steps(3);
+    assert_eq!(plan_at(&pdf).unwrap().recipients[0].status, Status::Pending);
+    h.get_by_role_and_label(Role::Button, "Record Ann Author as signed").click();
+    h.run_steps(3);
+    h.get_by_role_and_label(Role::Button, "Record it").click();
+    h.run_steps(4);
+    let plan = plan_at(&pdf).unwrap();
+    assert_eq!(plan.recipients[0].status, Status::Signed);
+    assert_eq!(plan.next().map(|r| r.email.as_str()), Some("bob@example.org"), "the approver is next");
+    // The plan is a record that has started: it can no longer be edited.
+    let written = std::fs::read(sidecar_of(&pdf).unwrap()).unwrap();
+    type_into(&mut h, "Cy", "cy@example.org", PlanRole::Signer);
+    run(&mut h, "sign.plan.recipient.add");
+    assert_eq!(std::fs::read(sidecar_of(&pdf).unwrap()).unwrap(), written);
+    // The approver's turn is approved, not signed, and a decline finishes the plan.
+    run(&mut h, "sign.plan.decline");
+    let plan = plan_at(&pdf).unwrap();
+    assert_eq!(plan.recipients[1].status, Status::Declined);
+    assert_eq!(plan.state(), "declined");
+    run(&mut h, "sign.plan.record");
+    assert!(!h.state().signing_plan.as_ref().unwrap().result_ok, "nothing is left to record once the plan is declined");
+}
+
+#[test]
+fn signing_as_the_next_recipient_opens_signing_on_the_field_labelled_for_them() {
+    use pdfcraft_engine::{Edit, NewField};
+    let dir = tempfile::tempdir().unwrap();
+    let pdf = dir.path().join("contract.pdf");
+    let mut session = Session::new();
+    let bytes = session.create_blank(300.0, 400.0, 1).unwrap();
+    let id = session.open("contract.pdf", None, bytes, None).unwrap();
+    session.apply(id, Edit::AddField { name: Some("Sig1".into()), page: 0, rect: [40.0, 290.0, 220.0, 326.0], kind: NewField::Signature }).unwrap();
+    let obj = session.get(id).unwrap().form[0].obj;
+    session.apply(id, Edit::SetFieldSigner { field: obj, email: Some("ann@example.org".into()) }).unwrap();
+    std::fs::write(&pdf, session.save_bytes(id).unwrap().as_ref()).unwrap();
+    let mut plan = Plan::empty(1);
+    plan.add_recipient("Ann Author", "ann@example.org", PlanRole::Signer, 1).unwrap();
+    std::fs::write(sidecar_of(&pdf).unwrap(), plan_bytes(&plan).unwrap()).unwrap();
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 1000.0)).build_eframe({
+        let (path, bytes) = (pdf.to_string_lossy().into_owned(), std::fs::read(&pdf).unwrap());
+        move |cc| {
+            crate::support::install_runtime(&cc.egui_ctx);
+            {
+                let mut app = crate::control::new_app();
+                app.set_option(&egui::Context::default(), "language", "en").unwrap();
+                app.open_bytes(&egui::Context::default(), "contract.pdf", Some(path), bytes).unwrap();
+                app
+            }
+        }
+    });
+    crate::support::settle(&mut h);
+    assert!(h.execute("sign.plan.sign_next"));
+    h.run_steps(3);
+    let draft = h.state().sign_draft.as_ref().expect("Sign with a Digital ID is open");
+    assert_eq!(draft.field.as_deref(), Some("Sig1"), "on the field labelled for the recipient");
+}
