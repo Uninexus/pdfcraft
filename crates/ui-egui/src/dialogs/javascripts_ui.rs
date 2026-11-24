@@ -35,7 +35,7 @@ const SEARCH_CODE: usize = 4096;
 /// Longest filter text, in characters.
 pub(crate) const FILTER_CHARS: usize = 200;
 /// Rows of the list shown before it scrolls.
-const LIST_ROWS: usize = 8;
+const LIST_ROWS: u16 = 8;
 /// Lines the editor grows to before its text scrolls inside it.
 const EDITOR_LINES: usize = 16;
 
