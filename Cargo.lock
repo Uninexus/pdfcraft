@@ -6525,12 +6525,14 @@ version = "0.22.0"
 name = "pdfcraft-organize"
 version = "0.22.0"
 dependencies = [
+ "craft-zip",
  "hayro-syntax",
  "pdfcraft-content",
  "pdfcraft-cos",
  "pdfcraft-oracle",
  "serde",
  "serde_json",
+ "sha2",
  "thiserror 2.0.21",
 ]
 
