@@ -128,6 +128,16 @@ pub struct FieldDraft {
     pub chained: Vec<(pdfcraft_engine::FieldTrigger, usize)>,
     /// Actions tab: why the last Add or Update was refused; cleared by the next edit or a commit.
     pub action_error: Option<String>,
+    /// General tab of a signature field: the address typed for its signer label.
+    pub signer: String,
+    /// What the field holds now, read again every pass the dialog is open (so an undo shows).
+    pub signer_view: super::signer::SignerView,
+    /// The signing plan beside the document's file, read when the dialog opens and after each signer command.
+    pub signer_plan: super::signer::PlanNote,
+    /// The document the dialog was opened on: the signer commands refuse any other.
+    pub doc: Option<pdfcraft_engine::DocId>,
+    /// The registered command a Signer button asked for, run by the app after the pass.
+    pub signer_command: Option<&'static str>,
     pub(super) original: Box<Option<FieldDraft>>,
 }
 
@@ -195,6 +205,11 @@ impl Default for FieldDraft {
             editing: None,
             chained: Vec::new(),
             action_error: None,
+            signer: String::new(),
+            signer_view: Default::default(),
+            signer_plan: Default::default(),
+            doc: None,
+            signer_command: None,
             original: Box::new(None),
         }
     }
@@ -265,6 +280,11 @@ impl FieldDraft {
             editing: None,
             chained: Vec::new(),
             action_error: None,
+            signer: String::new(),
+            signer_view: Default::default(),
+            signer_plan: Default::default(),
+            doc: None,
+            signer_command: None,
             original: Box::new(None),
         };
         d.original = Box::new(Some(d.clone()));

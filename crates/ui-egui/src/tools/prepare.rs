@@ -18,6 +18,7 @@ use crate::canvas::{DocView, PageBoxDrag, PageSession, PageXform};
 pub(crate) mod dialog;
 mod draft;
 mod properties;
+pub(crate) mod signer;
 mod tabs;
 pub(crate) mod tool;
 pub use dialog::FieldPropsDialog;

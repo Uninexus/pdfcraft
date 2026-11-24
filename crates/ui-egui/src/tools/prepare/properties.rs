@@ -5,8 +5,11 @@ use std::ops::RangeInclusive;
 
 use craft::behavior::{SelectionChange, Value, keyed};
 use craft::theme::variant::Tone;
+use craft::ui::buttons::Button;
 use craft::ui::choice::Checkbox;
-use craft::ui::contract::{Bind, CollectionEvent, Entry, Props as _, SelectMode, Show as _, ShowCollection as _, ShowContainer as _, Sizing};
+use craft::ui::contract::{
+    Bind, CollectionEvent, Entry, Politeness, Props as _, SelectMode, Show as _, ShowCollection as _, ShowContainer as _, Sizing, clicked,
+};
 use craft::ui::display::{Shade, Text};
 use craft::ui::form::{Field, FieldGroup};
 use craft::ui::layout_components::Stack;
@@ -184,6 +187,64 @@ fn general_tab(ui: &mut egui::Ui, d: &mut FieldDraft) {
     Text::new(tl!("Common Properties")).show(ui);
     check(ui, tl!("Read Only"), &mut d.read_only, true);
     check(ui, tl!("Required"), &mut d.required, true);
+    if d.kind == FormFieldKind::Signature {
+        signer_section(ui, d);
+    }
+}
+
+/// General tab of a signature field: who it is meant for, as a label in the file. The buttons ask for the registered
+/// commands `form.field.signer.set` and `form.field.signer.clear`; the app runs them after the pass, so this panel
+/// never changes the document itself.
+fn signer_section(ui: &mut egui::Ui, d: &mut FieldDraft) {
+    use super::signer::PlanNote;
+    Text::new(tl!("Signer")).show(ui);
+    // A live region: the label the field holds now, which Set signer, No one or an undo changes.
+    let v = &d.signer_view;
+    let now = match (&v.label, v.has_entry) {
+        (Some(who), _) => crate::i18n::fmt(tl!("Signer: {who}"), &[("who", who.as_str())]),
+        (None, true) => tl!("Signer: a label that is not an address").to_string(),
+        (None, false) => tl!("Signer: No one").to_string(),
+    };
+    Notice::new(Tone::Info, now).layout(NoticeLayout::Inline).announce(Politeness::Polite).show(ui);
+    if v.hidden_removed {
+        note(ui, tl!("Hidden characters in the stored label are not shown."));
+    }
+    if v.cut {
+        note(ui, tl!("The stored label is longer than can be read; only its start is shown."));
+    }
+    // With a signing plan beside the file the signer is picked from its recipients.
+    if let PlanNote::Found(people) = &d.signer_plan {
+        let mut entries: Vec<Entry<String>> = vec![Entry::new(String::new(), tl!("(type an address)").to_string())];
+        entries.extend(people.iter().map(|(name, email)| Entry::new(email.clone(), format!("{name} ({email})"))));
+        let current = d.signer.clone();
+        let mut picked = None;
+        Field::new(tl!("From the signing plan:")).id_salt("signer-plan").show(ui, |ui, _| {
+            picked = Select::new(tl!("From the signing plan:"), Bind::given(current.clone()), &entries).show(ui).value().cloned();
+        });
+        if let Some(email) = picked.filter(|e| !e.is_empty() && *e != current) {
+            d.signer = email;
+        }
+        note(ui, tl!("Only a signer or an approver of the plan can be named."));
+    } else if let PlanNote::Unreadable(why) = &d.signer_plan {
+        let line = crate::i18n::fmt(tl!("The signing plan beside this file cannot be used: {why}"), &[("why", why.as_str())]);
+        Notice::new(Tone::Warn, line).layout(NoticeLayout::Inline).show(ui);
+    } else {
+        note(ui, tl!("No signing plan is beside this file, so the address is not checked against one."));
+    }
+    text_row(ui, "signer-email", tl!("Signer email:"), &mut d.signer);
+    let set = clicked(&Button::new(tl!("Set signer")).show(ui));
+    let clear = clicked(&Button::new(tl!("No one (clear signer)")).enabled(d.signer_view.has_entry).show(ui));
+    if set {
+        d.signer_command = Some("form.field.signer.set");
+    } else if clear {
+        d.signer_command = Some("form.field.signer.clear");
+    }
+    note(
+        ui,
+        tl!(
+            "Set signer and No one change the file at once; Undo in the Edit menu takes them back, and Cancel does not. The signer is a label stored in this file. It does not restrict who can fill or sign the field, nothing is sent, and other PDF readers ignore it. The address travels with every copy of the file."
+        ),
+    );
 }
 
 /// A colour row's request for the colour picker is kept for the dialog's owner to open.

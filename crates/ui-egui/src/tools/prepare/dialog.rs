@@ -53,6 +53,40 @@ impl FieldPropsDialog {
     }
 }
 
+impl FieldPropsDialog {
+    /// The field being edited.
+    pub(super) fn signer_field(&self) -> &str {
+        &self.draft.field
+    }
+
+    /// Whether the field is a digital signature field.
+    pub(super) fn signer_field_is_signature(&self) -> bool {
+        self.draft.kind == super::FormFieldKind::Signature
+    }
+
+    /// The document the dialog was opened on.
+    pub(super) fn signer_doc(&self) -> Option<pdfcraft_engine::DocId> {
+        self.draft.doc
+    }
+
+    /// The address typed in the Signer entry.
+    pub(super) fn signer_typed(&self) -> &str {
+        &self.draft.signer
+    }
+
+    pub(super) fn set_signer_text(&mut self, text: String) {
+        self.draft.signer = text;
+    }
+
+    pub(super) fn set_signer_view(&mut self, view: super::signer::SignerView) {
+        self.draft.signer_view = view;
+    }
+
+    pub(super) fn set_signer_plan(&mut self, plan: super::signer::PlanNote) {
+        self.draft.signer_plan = plan;
+    }
+}
+
 /// Open Field Properties for a field of the active document, on `tab`. When several fields are selected and
 /// this one is among them, the dialog edits them together.
 pub(crate) fn open(app: &mut PdfCraftApp, name: &str, widget: usize, tab: FieldTab) {
@@ -87,18 +121,30 @@ pub(crate) fn open(app: &mut PdfCraftApp, name: &str, widget: usize, tab: FieldT
         o.others = others;
         o.actions = d.actions.clone();
     }
+    d.doc = Some(id);
+    let signature = d.kind == pdfcraft_engine::FormFieldKind::Signature;
     let dialog = FieldPropsDialog::new(d, app.recent_colours.clone());
     host::open(app, dialog);
+    if signature {
+        app.load_signer_entry(id);
+        // Start from the label the field holds.
+        let typed = app.dialogs.get::<FieldPropsDialog>().map(|d| d.draft.signer_view.label.clone().unwrap_or_default());
+        if let (Some(typed), Some(dialog)) = (typed, app.dialogs.get_mut::<FieldPropsDialog>()) {
+            dialog.draft.signer = typed;
+        }
+    }
 }
 
 /// Runs once per pass for the open Field Properties dialog: opens the colour picker a colour row asked for,
 /// applies the properties OK filed, and answers the held OK with what the app did.
 pub(crate) fn finish(ctx: &egui::Context, app: &mut PdfCraftApp) {
     let recent = app.recent_colours.clone();
+    app.refresh_signer_view();
     let Some(dialog) = app.dialogs.get_mut::<FieldPropsDialog>() else { return };
     dialog.recent = recent;
     let request = dialog.pending_colour.take();
     let filed = dialog.held.take();
+    let signer_command = dialog.draft.signer_command.take();
     let (field, widget, typed) = (dialog.draft.field.clone(), dialog.draft.widget, dialog.draft.name.trim().to_string());
     if let Some(request) = request {
         let key = request.key.clone();
@@ -107,6 +153,10 @@ pub(crate) fn finish(ctx: &egui::Context, app: &mut PdfCraftApp) {
                 dialog.set_colour(&key, crate::comments::colours::to_rgb(colour));
             }
         });
+    }
+    // A Signer button asked for a registered command: it runs here, once the dialog is drawn.
+    if let Some(command) = signer_command {
+        app.execute(ctx, command);
     }
     let Some(props) = filed else { return };
 

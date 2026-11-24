@@ -929,6 +929,8 @@ impl PdfCraftApp {
                     crate::prepare::dialog::open(self, &name, w, crate::prepare::FieldTab::General);
                 }
             }
+            "form.field.signer.set" => self.set_field_signer(ctx, false),
+            "form.field.signer.clear" => self.set_field_signer(ctx, true),
             field if crate::prepare::FieldTool::from_command(field).is_some() => {
                 let Some(tool) = crate::prepare::FieldTool::from_command(field) else { return Some(false) };
                 self.quick_tool = crate::QuickTool::Field(tool);
