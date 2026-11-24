@@ -499,7 +499,17 @@ pub(crate) fn field_press(
                 }
             }
         }
-        PressPhase::Release { pos, click: true, .. } => clicked(session, doc, info, allowed, (f, w, wi), (press.page, *pos, press.mods), geo),
+        PressPhase::Release { pos, click, .. } => {
+            if *click {
+                clicked(session, doc, info, allowed, (f, w, wi), (press.page, *pos, press.mods), geo);
+            }
+            // A press that leaves an open field's editor releases the key focus at the end of its pass (the part
+            // senses no focus of its own), after this field's part handed it to the editor the press opened: the
+            // editor shows, but the typing reaches nothing. The release hands the keys to it again, as Tab does.
+            if f.kind == FormFieldKind::Text && usable && session.forms.focus.as_ref().is_some_and(|x| x.is_on(f, wi)) {
+                session.forms.refocus = true;
+            }
+        }
         _ => {}
     }
 }
