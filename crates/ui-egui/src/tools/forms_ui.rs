@@ -82,6 +82,11 @@ pub struct FormView {
     /// The editor handed the keys on (Tab, Shift+Tab): the field the session moved to takes the key focus in the
     /// next pass, from its page part, as Tab onto the part would give it.
     pub(crate) refocus: bool,
+    /// The text field a press opened, as (field, widget) in the form, and the frame of the press. The press takes the
+    /// key focus to the field's part (`PagePart::takes_focus`), and the arrival that reports in the next frame is the
+    /// press's own: it hands the keys to the editor and opens nothing again (a refused value the press committed has
+    /// reopened its own field by then, and opening the pressed one would commit and validate it a second time).
+    pub(crate) pressed: Option<(usize, usize, u64)>,
     /// Fields modified by the user whose appearance stream has not been rasterized by the render worker yet.
     /// Tracked as (field_name, page_index) so committed edits stay immediately visible without flicker.
     pub unbaked: HashSet<(String, usize)>,
@@ -486,6 +491,7 @@ pub(crate) fn field_press(
                 session.forms.triggers.push((widget_ref(f, wi), pdfcraft_engine::FieldTrigger::MouseDown));
             }
             if f.kind == FormFieldKind::Text && usable {
+                session.forms.pressed = Some((field, wi, ctx.cumulative_frame_nr()));
                 if session.forms.focus.as_ref().is_none_or(|x| !x.is_on(f, wi)) {
                     commit(session, form);
                     session.forms.focus = Some(open_focus(f, wi));

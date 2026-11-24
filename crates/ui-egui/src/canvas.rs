@@ -1331,8 +1331,14 @@ fn page_before(ui: &mut egui::Ui, body: &PageBody<'_>, callbacks: &mut PageCallb
     }
     // Focus arrived on a field (Tab, a request or a click): the field opens, a text field with its text selected.
     let field_arrived = match &parts_out.focused {
-        Some((owner @ Owner::Field { .. }, _)) => {
-            crate::forms_ui::field_focused(session, cx.form, owner);
+        Some((owner @ Owner::Field { field, widget }, _)) => {
+            // The arrival a press on a text field brings, in its own frame or the next, is the press's: the press opened
+            // the field already (`forms_ui::field_press`), and only the keys go on to its editor.
+            let frame = ui.ctx().cumulative_frame_nr();
+            let by_press = session.forms.pressed.is_some_and(|(f, w, at)| (f, w) == (*field, *widget) && frame <= at + 1);
+            if !by_press {
+                crate::forms_ui::field_focused(session, cx.form, owner);
+            }
             true
         }
         _ => false,
