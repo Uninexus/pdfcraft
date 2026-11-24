@@ -136,6 +136,7 @@ use panels::comments_panel;
 use panels::format_text_ui;
 use panels::organize_panel;
 pub use panels::side_panels;
+pub use persist::ai as ai_settings;
 pub use persist::last_session;
 pub use persist::last_view;
 pub use persist::paper;
@@ -625,6 +626,12 @@ pub struct PdfCraftApp {
     pub compare_ignore_case: bool,
     pub compare_ignore_punctuation: bool,
     pub compare: Option<compare_ui::CompareState>,
+    /// The AI Assistant window is open (`dialogs::ai_ui`).
+    pub ai_open: bool,
+    /// The AI assistant's settings (Preferences ▸ AI Assistant) and the requests that use them.
+    pub(crate) ai: ai_settings::AiSettings,
+    /// The window's own fields.
+    pub(crate) ai_draft: dialogs::ai_ui::Draft,
     /// Print production ▸ Print readiness is open (`dialogs::readiness_ui`).
     pub readiness_open: bool,
     /// The report it shows, measured when it opened; nothing is kept once it closes.

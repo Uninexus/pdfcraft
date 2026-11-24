@@ -400,7 +400,15 @@ fn date_language_picker_name(ctx: &egui::Context, l: &pdfcraft_engine::dates::Da
 
 impl PreferencesModel for Prefs<'_> {
     fn pages(&self) -> Vec<PageSpec<'_>> {
-        vec![self.general_page(), self.appearance_page(), self.documents_page(), self.comment_page(), self.fill_sign_page(), self.javascript_page()]
+        vec![
+            self.general_page(),
+            self.appearance_page(),
+            self.documents_page(),
+            self.comment_page(),
+            self.fill_sign_page(),
+            self.javascript_page(),
+            self.ai_page(),
+        ]
     }
 
     fn set(&mut self, key: &str, value: PrefValue) {
@@ -486,6 +494,11 @@ impl PreferencesModel for Prefs<'_> {
     }
 
     fn custom_row(&mut self, ui: &mut Ui, key: &str) -> bool {
+        if key == "ai.panel" {
+            // The AI settings are kept in `ai.json`, not in the draft: each field is applied as it is typed.
+            crate::dialogs::ai_prefs::panel(ui, self.app);
+            return false;
+        }
         if key == "general.pdf_app" {
             // The buttons run the registered commands; nothing here is part of the draft.
             ui.horizontal(|ui| {
@@ -844,6 +857,14 @@ impl Prefs<'_> {
             RowSpec::new("fill.date_language", tl!("Language"), RowKind::choice(language, languages)).keywords(tl!("Date format")),
         ];
         PageSpec::new("fill", tl!("Fill & Sign"), rows)
+    }
+
+    fn ai_page(&self) -> PageSpec<'_> {
+        PageSpec::new(
+            "ai",
+            tl!("AI Assistant"),
+            vec![RowSpec::new("ai.panel", tl!("AI Assistant"), RowKind::CustomRows).keywords(tl!("model server ChatGPT"))],
+        )
     }
 
     fn javascript_page(&self) -> PageSpec<'_> {

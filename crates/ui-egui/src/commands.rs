@@ -424,6 +424,7 @@ impl PdfCraftApp {
             "prepress.convert_colors" => self.open_convert_colours(ctx),
             "prepress.hairlines" => self.open_fix_hairlines(ctx),
             "prepress.readiness" => self.open_print_readiness(),
+            "ai.ask" | "ai.summary" | "ai.translate" | "ai.edit" => self.open_ai_for(id),
             "protect.remove" => {
                 if self.apply_edit(ctx, Edit::RemoveProtection) {
                     self.notify_tr("Security will be removed when you save");

@@ -386,6 +386,10 @@ fn native_options(integrated: bool, renderer: eframe::Renderer) -> eframe::Nativ
             viewport.with_decorations(false)
         };
     }
+    // The AI assistant keeps its endpoint and key in `ai.json` beside `app.ron`, never in `app.ron`.
+    if let Some(dir) = settings_dir() {
+        pdfcraft_ui_egui::ai_settings::set_settings_dir(dir);
+    }
     let persistence_path = settings_dir().map(|d| d.join("app.ron"));
     // Set explicitly, so the renderer never depends on which one eframe defaults to.
     let mut native = eframe::NativeOptions { viewport, persistence_path, renderer, ..Default::default() };

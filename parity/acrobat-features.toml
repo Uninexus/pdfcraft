@@ -7736,7 +7736,7 @@ status = "partial"
 commands = []
 tools = ["ai_translate"]
 evidence = ["crates/automation/tests/it/ai.rs::summarize_and_translate_send_their_instruction_with_the_page_text", "crates/ai/src/tests.rs::translate_question_names_the_language_and_refuses_junk"]
-notes = "Headless only after the 0.22.0 sync: the registry commands and the dialog that ran them are gone until the UI is re-ported. File > Translate with AI Assistant… and ai_translate send the page text and a target language to the endpoint set in Preferences > AI Assistant (your own model, never Adobe's cloud) and show the translation as text. Missing: writing the translation back into a new PDF with the original layout."
+notes = "File > Translate with AI Assistant… and ai_translate send the page text and a target language to the endpoint set in Preferences > AI Assistant (your own model, never Adobe's cloud) and show the translation as text. Missing: writing the translation back into a new PDF with the original layout."
 
 [[feature]]
 id = "create.cloud-office-conversion"
@@ -10184,7 +10184,7 @@ evidence = [
     "crates/ai/src/chatgpt/tests.rs::the_stream_is_read_until_it_completes",
     "crates/ai/src/chatgpt/tests.rs::first_sign_in_registers_and_later_ones_reuse_the_client",
 ]
-notes = "Headless only after the 0.22.0 sync: the registry commands and the dialog that ran them are gone until the UI is re-ported. pdfcraft-ai talks to any OpenAI-compatible chat endpoint (a local server such as Ollama or LM Studio, or a hosted API with a bearer key). Off by default: no endpoint or key is built in, nothing is sent until ai_ask is called. Settings from tool arguments, a JSON config file or PDFCRAFT_AI_BASE_URL, PDFCRAFT_AI_MODEL and PDFCRAFT_AI_API_KEY. In the app: Preferences has an AI Assistant card (base URL, model, API key, Ollama / LM Studio / OpenAI presets, Test connection on a background thread) saved to ai.json in the settings folder (owner-only, never in app.ron), and File has Ask AI Assistant… (all pages or the current page, answered on a background thread, selectable and copyable, with a pointer to Preferences when not set up). ui.set ai-base-url, ai-model and ai-api-key and ui.state.ai reach the settings from the control channel. Preferences can instead use My ChatGPT plan (Sign in with ChatGPT: OAuth with PKCE in the system browser and a loopback listener, then OpenAI's /v1/responses with the plan's allowance, no API key and no API billing; tokens kept in chatgpt.json, owner-only; the tools take provider chatgpt and chatgpt_session). The ChatGPT route follows OpenAI's published docs and has not yet been run against a live ChatGPT account. Page citations in an answer, such as (p. 20) or pages 3 and 5, are links that jump to that page. Missing: conversation history, signing in without the app. UI to be re-ported onto the craft framework UI after the 0.22.0 sync."
+notes = "pdfcraft-ai talks to any OpenAI-compatible chat endpoint (a local server such as Ollama or LM Studio, or a hosted API with a bearer key). Off by default: no endpoint or key is built in, nothing is sent until ai_ask is called. Settings from tool arguments, a JSON config file or PDFCRAFT_AI_BASE_URL, PDFCRAFT_AI_MODEL and PDFCRAFT_AI_API_KEY. In the app: Preferences has an AI Assistant card (base URL, model, API key, Ollama / LM Studio / OpenAI presets, Test connection on a background thread) saved to ai.json in the settings folder (owner-only, never in app.ron), and File has Ask AI Assistant… (all pages or the current page, answered on a background thread, selectable and copyable, with a pointer to Preferences when not set up). Preferences can instead use My ChatGPT plan (Sign in with ChatGPT: OAuth with PKCE in the system browser and a loopback listener, then OpenAI's /v1/responses with the plan's allowance, no API key and no API billing; tokens kept in chatgpt.json, owner-only; the tools take provider chatgpt and chatgpt_session). The ChatGPT route follows OpenAI's published docs and has not yet been run against a live ChatGPT account. Page citations in an answer, such as (p. 20) or pages 3 and 5, are links that jump to that page. Missing: conversation history, signing in without the app."
 
 [[feature]]
 id = "misc.ai-summary"
@@ -10196,7 +10196,7 @@ status = "partial"
 commands = []
 tools = ["ai_summarize"]
 evidence = ["crates/automation/tests/it/ai.rs::summarize_and_translate_send_their_instruction_with_the_page_text"]
-notes = "Headless only after the 0.22.0 sync: the registry commands and the dialog that ran them are gone until the UI is re-ported. File > Summarize with AI Assistant… (the Summarize tab of the AI Assistant dialog) and ai_summarize send the page text to the endpoint set in Preferences > AI Assistant and show a short summary with key points and page numbers. Missing: summaries by section, adjustable length, streaming. UI to be re-ported onto the craft framework UI after the 0.22.0 sync."
+notes = "File > Summarize with AI Assistant… (the Summarize tab of the AI Assistant dialog) and ai_summarize send the page text to the endpoint set in Preferences > AI Assistant and show a short summary with key points and page numbers. Missing: summaries by section, adjustable length, streaming."
 
 [[feature]]
 id = "misc.ai-ask"
@@ -10208,7 +10208,7 @@ status = "partial"
 commands = []
 tools = ["ai_ask"]
 evidence = ["crates/automation/tests/it/ai.rs::ask_sends_the_page_text_and_returns_the_answer"]
-notes = "Headless only after the 0.22.0 sync: the registry commands and the dialog that ran them are gone until the UI is re-ported. File > Ask AI Assistant… and ai_ask answer a question from the page text; the model is asked to cite pages like (p. 3), and those references in the answer are clickable and jump to the page (v0.21.6). Missing: conversation history."
+notes = "File > Ask AI Assistant… and ai_ask answer a question from the page text; the model is asked to cite pages like (p. 3), and those references in the answer are clickable and jump to the page (v0.21.6). Missing: conversation history."
 
 [[feature]]
 id = "misc.ai-redaction-suggest"
@@ -10229,10 +10229,10 @@ area = "N"
 tier = "P3"
 milestone = "M13"
 status = "partial"
-commands = []
+commands = ["ai.edit"]
 tools = ["ai_edit_plan", "ai_edit_apply"]
-evidence = ["crates/engine/tests/it/ai_edit.rs::a_list_changes_the_document_in_order_and_undo_takes_it_all_back", "crates/engine/tests/it/ai_edit.rs::a_list_is_checked_against_the_document_as_earlier_calls_leave_it", "crates/engine/tests/it/ai_edit.rs::calls_outside_the_vocabulary_or_with_odd_arguments_are_refused_before_anything_runs", "crates/engine/tests/it/ai_edit.rs::a_call_that_fails_when_it_runs_undoes_the_ones_before_it", "crates/automation/tests/it/ai.rs::a_plan_proposes_edits_and_changes_nothing", "crates/automation/tests/it/ai.rs::apply_runs_the_steps_as_undo_steps_and_undo_takes_them_back"]
-notes = "Headless only so far (ai_edit_plan, ai_edit_apply; optional provider, off until an endpoint is set up). The plan call sends the request and page text to the configured model, which proposes edits from a fixed list in the engine (pdfcraft_engine::ai_edit) without changing anything; ai_edit_apply runs a confirmed list in order, all or none, as ordinary undo steps, and saves nothing. The app window (Edit with AI) is in progress."
+evidence = ["crates/engine/tests/it/ai_edit.rs::a_list_changes_the_document_in_order_and_undo_takes_it_all_back", "crates/engine/tests/it/ai_edit.rs::a_list_is_checked_against_the_document_as_earlier_calls_leave_it", "crates/engine/tests/it/ai_edit.rs::calls_outside_the_vocabulary_or_with_odd_arguments_are_refused_before_anything_runs", "crates/engine/tests/it/ai_edit.rs::a_call_that_fails_when_it_runs_undoes_the_ones_before_it", "crates/automation/tests/it/ai.rs::a_plan_proposes_edits_and_changes_nothing", "crates/automation/tests/it/ai.rs::apply_runs_the_steps_as_undo_steps_and_undo_takes_them_back", "crates/ui-egui/tests/it/ai.rs::a_proposed_edit_is_made_as_undo_steps_and_taken_back", "crates/ui-egui/tests/it/ai.rs::a_proposal_the_document_no_longer_fits_is_refused_and_changes_nothing"]
+notes = "In the app: File > Edit with AI Assistant… (the Edit tab of the AI Assistant window) takes a typed request, shows the model's proposed changes as a numbered list with a warning when any remove content, and makes them only when Make these changes is pressed; Undo these changes takes them back. Also the tools ai_edit_plan and ai_edit_apply (optional provider, off until an endpoint is set up). The model is asked for plain JSON, so it works with an endpoint model and with My ChatGPT plan; if its list cannot run on the document it is told why and asked again, up to three times. The plan call sends the request and page text to the configured model, which proposes edits from a fixed list in the engine (pdfcraft_engine::ai_edit) without changing anything; ai_edit_apply runs a confirmed list in order, all or none, as ordinary undo steps, and saves nothing. Vocabulary: rotate, delete, move, reverse, duplicate and insert blank pages, document Title/Author/Subject/Keywords, fill and reset form fields, add text. Not yet: redaction, stamps, anything that needs the model to look at the page image. The window's look has not been checked in a screenshot on the PC."
 
 [[feature]]
 id = "misc.ai-presentation"
