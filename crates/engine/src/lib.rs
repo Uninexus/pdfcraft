@@ -62,6 +62,7 @@ pub mod scan_clean;
 mod scan_colours;
 mod scan_fields;
 mod session;
+pub mod plan_audit;
 pub mod signature_audit;
 pub mod signature_image;
 pub mod signature_scan;
