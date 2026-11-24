@@ -440,6 +440,7 @@ impl PdfCraftApp {
             compare_ignore_punctuation: false,
             compare: None,
             readiness_open: false,
+            signing_plan: None,
             javascripts_open: false,
             javascripts_draft: Default::default(),
             readiness_report: None,
@@ -638,6 +639,7 @@ impl PdfCraftApp {
             || self.js_dialog.is_some()
             || self.readiness_open
             || self.javascripts_open
+            || self.signing_plan.is_some()
             || self.comment_props.is_some()
             || self.stamp_dialog.is_some()
     }

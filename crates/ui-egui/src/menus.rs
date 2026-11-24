@@ -217,6 +217,8 @@ const SIGN: &[&str] = &[
     SEP,
     "sign.validate",
     "sign.panel",
+    SEP,
+    "sign.plan.show",
 ];
 const WINDOW: &[&str] = &["view.next_tab", "view.previous_tab"];
 const HELP: &[&str] =

@@ -90,6 +90,7 @@ mod script_noop;
 mod search_position;
 mod side_panels;
 mod signing;
+mod signing_plan_window;
 mod snapshot_tabs;
 mod split_view;
 mod split_view_edits;

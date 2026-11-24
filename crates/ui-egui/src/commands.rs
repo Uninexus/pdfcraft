@@ -425,6 +425,8 @@ impl PdfCraftApp {
             "prepress.hairlines" => self.open_fix_hairlines(ctx),
             "prepress.readiness" => self.open_print_readiness(),
             "tools.javascripts" => crate::javascripts_ui::open(self),
+            "sign.plan.show" => self.show_signing_plan(),
+            "sign.plan.recipient.add" | "sign.plan.recipient.remove" | "sign.plan.message.set" => self.change_signing_plan(id),
             "protect.remove" => {
                 if self.apply_edit(ctx, Edit::RemoveProtection) {
                     self.notify_tr("Security will be removed when you save");

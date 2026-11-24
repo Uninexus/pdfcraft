@@ -26,6 +26,7 @@ pub(super) mod readiness_ui;
 pub(crate) mod rename_ui;
 pub(crate) mod shortcuts;
 pub(crate) mod signature;
+pub(super) mod signing_plan_ui;
 pub(super) mod standards_ui;
 pub(crate) mod summarize;
 pub(super) mod word_count_ui;

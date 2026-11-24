@@ -587,6 +587,10 @@ impl PdfCraftApp {
             "javascripts" => {
                 self.execute(ctx, "tools.javascripts");
             }
+            // Through the command, so it is refused with no document open, as the menu is.
+            "signing-plan" => {
+                self.execute(ctx, "sign.plan.show");
+            }
             "preferences" => self.open_preferences(),
             "compare-files" => crate::compare_ui::open_compare_dialog(self, ctx),
             "action-wizard" => crate::actions_ui::open_wizard(self, ctx, None),
