@@ -128,7 +128,12 @@ fn button_disabled(h: &Harness<'static, PdfCraftApp>, label: &str) -> bool {
 fn type_into_editor(h: &mut Harness<'static, PdfCraftApp>, text: &str) {
     // The window may show other multi-line text; the editor is the one named for its code, else the last one.
     let all: Vec<_> = h.query_all_by_role(Role::MultilineTextInput).collect();
-    let editor = all.iter().rev().find(|n| n.label().is_some_and(|l| l.starts_with("Script code"))).or(all.last()).expect("the script editor");
+    let editor = all
+        .iter()
+        .rev()
+        .find(|n| n.accesskit_node().label().is_some_and(|l| l.starts_with("Script code")))
+        .or(all.last())
+        .expect("the script editor");
     editor.focus();
     editor.type_text(text);
     h.run_steps(2);
