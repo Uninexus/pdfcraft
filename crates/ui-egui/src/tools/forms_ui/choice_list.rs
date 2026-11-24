@@ -112,6 +112,8 @@ pub(super) fn suggestion_list(
     let source = Names(&names);
     let list = suggestion_id(ui, (field, widget_index), typed);
     let shown = PopupList::new(tl!("Suggestions"), Bind::bound(&mut *open))
+        // The popup itself is per field, so what the framework keeps of a popup (its overlay layer, a dismissal) is not shared with the next field.
+        .id_salt((field.obj, widget_index))
         .kind(PopupListKind::Document)
         .overlay(|overlay| {
             let dismiss = overlay.dismiss.focus_left(false);
