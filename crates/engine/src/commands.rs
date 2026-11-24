@@ -206,9 +206,6 @@ pub const COMMANDS: &[CommandSpec] = &[
     c("print.dialog", "Print…", FILE, Some(Shortcut::cmd("P")), Printing, "printer"),
     c("file.properties", "Document properties…", FILE, Some(Shortcut::cmd("D")), Document, "info"),
     c("file.word_count", "Word count…", FILE, None, Copying, "hash"),
-    c("ai.ask", "Ask AI Assistant…", FILE, None, Copying, "sparkles"),
-    c("ai.summary", "Summarize with AI Assistant…", FILE, None, Copying, "sparkles"),
-    c("ai.translate", "Translate with AI Assistant…", FILE, None, Copying, "languages"),
     ct("edit.undo", "Undo", EDIT, Some(Shortcut::cmd("Z")), Undo, "undo"),
     ct("edit.redo", "Redo", EDIT, Some(Shortcut::cmd_shift("Z")), Redo, "redo"),
     c("edit.find", "Find…", EDIT, Some(Shortcut::cmd("F")), Document, "search"),
@@ -224,10 +221,6 @@ pub const COMMANDS: &[CommandSpec] = &[
     c("view.layout.two_up", "Two-page view", None, None, Document, "columns-2"),
     c("view.continuous", "Continuous scrolling", None, None, Document, "swap_vertical"),
     c("view.page_gaps", "Show gaps between pages", None, None, Document, "swap_vertical"),
-    // View ▸ Show Guides and Clear Guides: ruler guides (view state, never saved or printed) drawn
-    // over the pages. The View menu lists them itself, so `menu = None`; the palette still runs them.
-    c("view.show_guides", "Show Guides", None, None, Document, "ruler"),
-    c("view.clear_guides", "Clear Guides", None, None, Document, "eraser"),
     c("view.layout.cover", "Show cover page in two-page view", None, None, TwoPageView, "bookmark"),
     // Acrobat's view modes, a page display and a zoom at once (the rail's Page display menu).
     c("view.fit_width_scrolling", "Fit to width scrolling", None, None, Document, "swap_horizontal"),
@@ -357,7 +350,6 @@ pub const COMMANDS: &[CommandSpec] = &[
     c("edit.links_from_urls", "Create links from URLs", None, None, Modification, "link"),
     c("edit.remove_links", "Remove all links", None, None, Modification, "trash-2"),
     c("edit.bates", "Add Bates numbering…", None, None, Modification, "hash"),
-    c("edit.bates_remove", "Remove Bates numbering", None, None, Marks(crate::MarkKind::Bates), "hash"),
     c("edit.image", "Add image…", None, None, Modification, "image-plus"),
     c("redact.mark", "Redact text and images", None, None, Modification, "rectangle"),
     c("redact.pages", "Redact pages…", None, None, Modification, "file-x"),
@@ -368,8 +360,6 @@ pub const COMMANDS: &[CommandSpec] = &[
     c("protect.remove_hidden", "Remove hidden information…", None, None, Modification, "eye_off"),
     c("redact.sanitize", "Sanitize document…", None, None, Modification, "sparkles"),
     c("form.field.properties", "Field properties…", None, None, HasFields, "settings-2"),
-    c("form.field.signer.set", "Set the signer of a signature field", None, None, HasFields, "signature"),
-    c("form.field.signer.clear", "Clear the signer of a signature field", None, None, HasFields, "eraser"),
     c("form.add.text", "Add a text field", None, None, Modification, "text-cursor-input"),
     c("form.add.text_table", "Add text field table", None, None, Modification, "grid"),
     c("form.add.checkbox", "Add a checkbox", None, None, Modification, "check-circle-2"),
@@ -385,10 +375,6 @@ pub const COMMANDS: &[CommandSpec] = &[
     c("sign.certify_invisible", "Certify (invisible signature)", None, None, Document, "badge-check"),
     c("sign.validate", "Validate all signatures", None, None, Document, "badge-check"),
     c("sign.panel", "Signatures panel", VIEW, None, Document, "signature"),
-    c("sign.plan.show", "Signing plan…", None, None, Document, "signature"),
-    c("sign.plan.recipient.add", "Add a recipient to the signing plan", None, None, Document, "plus"),
-    c("sign.plan.recipient.remove", "Remove a recipient from the signing plan", None, None, Document, "eraser"),
-    c("sign.plan.message.set", "Set the signing plan's message", None, None, Document, "signature"),
     c("sign.fill.text", "Fill & Sign: add text", None, None, Annotate, "type"),
     c("sign.fill.check", "Fill & Sign: checkmark", None, None, Annotate, "check"),
     c("sign.fill.cross", "Fill & Sign: cross", None, None, Annotate, "close"),
@@ -411,7 +397,6 @@ pub const COMMANDS: &[CommandSpec] = &[
     c("export.rtf", "Export to RTF…", FILE, None, Copying, "file-text"),
     c("app.preferences", "Preferences…", EDIT, Some(Shortcut::cmd(",")), Nothing, "settings"),
     c("tools.js_console", "JavaScript console…", None, Some(Shortcut::cmd("J")), Document, "square-terminal"),
-    c("tools.javascripts", "JavaScripts…", EDIT, None, Document, "file-code"),
     c("tools.document_js", "Document JavaScripts…", None, None, Modification, "file-code"),
     c("ocr.recognize", "Recognize text…", None, None, Modification, "scan-text"),
     c("ocr.enhance_camera", "Enhance camera image", None, None, Modification, "camera"),
@@ -454,9 +439,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     c("page.reverse", "Reverse pages", PAGES, None, Assembly, "swap_vertical"),
     c("page.crop", "Crop pages", PAGES, None, Assembly, "crop"),
     c("page.boxes", "Set page boxes…", PAGES, None, Assembly, "square-dashed-mouse-pointer"),
-    c("page.remove_white_margins", "Remove white margins…", PAGES, None, Assembly, "scan"),
     c("page.insert", "Insert pages from file…", PAGES, None, Assembly, "file-input"),
-    c("page.insert_clipboard", "Insert pages from clipboard", PAGES, None, Assembly, "clipboard-paste"),
     c("page.replace", "Replace pages…", PAGES, None, Assembly, "replace"),
     c("page.extract", "Extract pages…", PAGES, None, PageExtraction, "file-output"),
     c("page.split", "Split document…", PAGES, None, PageExtraction, "scissors"),
@@ -465,7 +448,6 @@ pub const COMMANDS: &[CommandSpec] = &[
     c("prepress.marks.remove", "Remove printer marks", None, None, Marks(crate::MarkKind::PrinterMarks), "ruler"),
     c("prepress.convert_colors", "Convert colours…", None, None, Modification, "palette"),
     c("prepress.hairlines", "Fix hairlines…", None, None, Modification, "minus"),
-    c("prepress.readiness", "Print readiness…", None, None, Document, "file-check"),
     c("page.properties", "Page properties…", PAGES, None, Modification, "info"),
     c("help.shortcuts", "Keyboard shortcuts", HELP, None, Nothing, "circle-help"),
     c("help.discord", "Join the ArtCraft Discord", HELP, None, Nothing, "messages-square"),
@@ -474,10 +456,6 @@ pub const COMMANDS: &[CommandSpec] = &[
     c("help.website", "ArtCraft website", HELP, None, Nothing, "open"),
     c("help.check_updates", "Check for updates…", HELP, None, Nothing, "cloud"),
     c("help.about", "About PdfCraft", HELP, None, Nothing, "info"),
-    // Windows only (per-user registration so the app can be picked under Settings ▸ Default apps);
-    // in Preferences and, on Windows, the palette, rather than a menu, which lists it everywhere.
-    c("help.default_app", "Set up PdfCraft as a PDF app…", None, None, Nothing, "file-text"),
-    c("help.default_app.remove", "Stop offering PdfCraft as a PDF app…", None, None, Nothing, "file-x"),
 ];
 
 pub fn command(id: &str) -> Option<&'static CommandSpec> {
@@ -551,18 +529,6 @@ mod tests {
                 }
             }
         }
-    }
-
-    #[test]
-    fn the_guide_commands_are_registered_for_the_palette_and_need_a_document() {
-        for id in ["view.show_guides", "view.clear_guides"] {
-            let spec = command(id).unwrap_or_else(|| panic!("{id} is not registered"));
-            assert!(matches!(spec.needs, Needs::Document), "{id}");
-        }
-        let s = Session::new();
-        assert!(!is_enabled(command("view.show_guides").unwrap(), &s, None));
-        assert_eq!(command("view.show_guides").unwrap().label, "Show Guides");
-        assert_eq!(command("view.clear_guides").unwrap().label, "Clear Guides");
     }
 
     #[test]
