@@ -188,6 +188,7 @@ impl PdfCraftApp {
             form_autocomplete: Some(self.session.form_autocomplete()),
             form_entries: json_text(&self.session.form_entries().entries()),
             field_highlight_color: self.field_highlight_color,
+            required_field_color: self.required_field_color,
             comments_panel_closed: Some(self.comments_panel_closed),
             right_panel_closed: Some(self.right_panel_closed),
             ocr: json_text(&self.ocr_draft.to_pref()),
@@ -517,6 +518,10 @@ impl PdfCraftApp {
         }
         if let Some(colour) = b.field_highlight_color {
             self.field_highlight_color = Some(colour);
+        }
+        // A missing or mistyped colour keeps the current one.
+        if let Some(colour) = b.required_field_color {
+            self.required_field_color = Some(colour);
         }
         if let Some(closed) = b.comments_panel_closed {
             self.comments_panel_closed = closed;

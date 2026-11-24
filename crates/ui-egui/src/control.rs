@@ -41,9 +41,10 @@
 //!   `comment-tool-pinned=true|false` remembers the annotation quick bar's pin across restarts.
 //!   `identity-email=<address>` sets Preferences > Identity > Email (the contact information of new
 //!   digital signatures), `form-tooltips=true|false` shows or hides a field's tooltip, and
-//!   `field-highlight-color=#RRGGBB|default` sets the colour Highlight fields draws (`default`
-//!   follows the theme); `ui.state` reports `identity_email`, `form_tooltips` and
-//!   `field_highlight_color` (null while it follows the theme). `form-autocomplete=off|basic` sets
+//!   `field-highlight-color=#RRGGBB|default` sets the colour Highlight fields draws and
+//!   `required-field-color=#RRGGBB|default` the border of a required field (`default` follows the
+//!   theme); `ui.state` reports `identity_email`, `form_tooltips`, `field_highlight_color` and
+//!   `required_field_color` (null while one follows the theme). `form-autocomplete=off|basic` sets
 //!   Preferences > Forms > Auto-Complete; `ui.state` reports `form_autocomplete` and
 //!   `form_entry_count`.
 //!   `units=in|mm|cm|pt` and `blank-paper=letter|a4` set Preferences > Documents and view > Units

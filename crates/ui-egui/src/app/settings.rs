@@ -99,6 +99,8 @@ pub struct Behavior {
     pub form_entries: Option<String>,
     /// Preferences > Forms: the Highlight fields colour; absent follows the theme (TOML has no null).
     pub field_highlight_color: Option<[u8; 3]>,
+    /// Preferences > Forms: the border colour of a required field; absent follows the theme.
+    pub required_field_color: Option<[u8; 3]>,
     pub comments_panel_closed: Option<bool>,
     pub right_panel_closed: Option<bool>,
     /// JSON text: the Scan & OCR choices.
@@ -614,6 +616,7 @@ pub fn import_json(text: &str) -> (PdfCraftSettings, Vec<SectionError>) {
             form_autocomplete: r.bool("form_autocomplete"),
             form_entries: r.text("form_entries"),
             field_highlight_color: r.typed("field_highlight_color"),
+            required_field_color: r.typed("required_field_color"),
             comments_panel_closed: r.bool("comments_panel_closed"),
             right_panel_closed: r.bool("right_panel_closed"),
             ocr: r.text("ocr"),

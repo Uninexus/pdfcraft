@@ -371,6 +371,7 @@ impl PdfCraftApp {
             identity_email: String::new(),
             form_tooltips: true,
             field_highlight_color: None,
+            required_field_color: None,
             always_default_view: false,
             #[cfg(not(target_arch = "wasm32"))]
             watch,

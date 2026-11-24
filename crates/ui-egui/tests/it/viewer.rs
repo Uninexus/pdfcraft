@@ -2302,17 +2302,32 @@ fn the_forms_preferences_are_set_kept_and_read_from_the_last_release() {
         assert!(app.set_option(&ctx, "field-highlight-color", bad).unwrap_err().contains("#RRGGBB"), "{bad}");
     }
     assert_eq!(app.field_highlight_color, Some([0x10, 0x20, 0x30]), "a refused colour changes nothing");
+    assert!(app.required_field_color.is_none(), "the required field border is its own setting");
+    app.set_option(&ctx, "required-field-color", "#00FF80").unwrap();
+    for bad in ["00FF80", "#00FF", "#GG0000", "", "green"] {
+        let error = app.set_option(&ctx, "required-field-color", bad).unwrap_err();
+        assert!(error.contains("required-field-color"), "{error}");
+    }
+    assert_eq!(app.required_field_color, Some([0, 255, 128]));
+    assert_eq!(app.field_highlight_color, Some([0x10, 0x20, 0x30]), "the highlight colour is not touched");
     let mut again = crate::control::new_app();
     again.apply_settings(&app.settings_snapshot());
     assert!(!again.form_tooltips);
     assert_eq!(again.field_highlight_color, Some([0x10, 0x20, 0x30]), "both survive a restart");
+    assert_eq!(again.required_field_color, Some([0, 255, 128]));
     again.set_option(&ctx, "field-highlight-color", "default").unwrap();
     assert!(again.field_highlight_color.is_none());
     // The last release kept the colour as three whole numbers; anything else keeps the current one.
-    let read = pdfcraft_ui_egui::settings::import_json(r#"{"field_highlight_color": [1, 2, 3], "form_tooltips": false}"#).0;
+    let read =
+        pdfcraft_ui_egui::settings::import_json(r#"{"field_highlight_color": [1, 2, 3], "required_field_color": [4, 5, 6], "form_tooltips": false}"#)
+            .0;
     let mut next = crate::control::new_app();
     next.apply_settings(&read);
-    assert_eq!((next.field_highlight_color, next.form_tooltips), (Some([1, 2, 3]), false));
+    assert_eq!((next.field_highlight_color, next.required_field_color, next.form_tooltips), (Some([1, 2, 3]), Some([4, 5, 6]), false));
+    for hostile in [r#"[1,2]"#, r#"[1,2,300]"#, r#"[1,2,-3]"#, r#"[1.5,2,3]"#, r##""#ff0000""##, r#"["a","b","c"]"#] {
+        next.apply_settings(&pdfcraft_ui_egui::settings::import_json(&format!(r#"{{"required_field_color": {hostile}}}"#)).0);
+        assert_eq!(next.required_field_color, Some([4, 5, 6]), "{hostile}");
+    }
     for hostile in [r#"{"field_highlight_color": [1, 2]}"#, r#"{"field_highlight_color": [1, 2, 300]}"#, r#"{"field_highlight_color": "red"}"#] {
         next.apply_settings(&pdfcraft_ui_egui::settings::import_json(hostile).0);
         assert_eq!(next.field_highlight_color, Some([1, 2, 3]), "{hostile}");

@@ -77,6 +77,12 @@ impl PdfCraftApp {
                     hex => Some(hex_colour(hex).ok_or("field-highlight-color must be #RRGGBB or default")?),
                 };
             }
+            ("required-field-color", _) => {
+                self.required_field_color = match value {
+                    "default" => None,
+                    hex => Some(hex_colour(hex).ok_or("required-field-color must be #RRGGBB or default")?),
+                };
+            }
             // Preferences > Documents and view: the unit lengths are shown in and the paper Create > Blank page uses.
             ("units", _) => {
                 self.units = crate::units::Unit::from_token(value).ok_or("units must be in, mm, cm or pt")?;

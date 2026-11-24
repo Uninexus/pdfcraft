@@ -155,6 +155,7 @@ impl crate::PdfCraftApp {
             "show_page_edge_shadows": self.show_page_edge_shadows,
             "single_key_accelerators": self.single_key_accelerators,
             "identity_email": self.identity_email,
+            "required_field_color": self.required_field_color.map(|[r, g, b]| format!("#{r:02X}{g:02X}{b:02X}")),
             "form_tooltips": self.form_tooltips,
             // What is remembered is the person's own typing: only its count is reported.
             "form_autocomplete": if self.session.form_autocomplete() { "basic" } else { "off" },

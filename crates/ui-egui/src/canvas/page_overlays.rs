@@ -487,6 +487,9 @@ pub(crate) struct PageOverlays<'a> {
     /// Preferences > Forms > Highlight colour, a data colour the user chose; `None` follows the theme.
     #[prop]
     field_color: Option<[u8; 3]>,
+    /// Preferences > Forms > Required field border, a data colour the user chose; `None` follows the theme.
+    #[prop]
+    required_color: Option<[u8; 3]>,
     /// Snapshot's kept area on this page (view space): outlined until another tool or drag replaces it.
     #[prop]
     kept_area: Option<[f32; 4]>,
@@ -518,6 +521,7 @@ impl<'a> PageOverlays<'a> {
             guides: &[],
             highlight_fields: false,
             field_color: None,
+            required_color: None,
             kept_area: None,
             picked: None,
         }
@@ -613,12 +617,16 @@ impl PageOverlays<'_> {
     /// is marked: a push button holds no value (the frames and controls of a LaTeX `animate` animation are
     /// push buttons), and a read-only widget is left as it is drawn.
     fn paint_field_highlights(&self, draw: &Draw<'_>, style: &PageOverlaysStyle) {
-        // The colour the user chose is data, not a theme role; it marks a field that isn't required.
+        // The colours the user chose are data, not theme roles: the first marks a field that isn't required, and tints
+        // every field; the second is a required field's border.
         let chosen = self.field_color.map(|[r, g, b]| DataColor::new(Color32::from_rgb(r, g, b)));
+        let required_edge = self
+            .required_color
+            .map_or(StrokeColor::Theme(style.required_edge), |[r, g, b]| StrokeColor::Data(DataColor::new(Color32::from_rgb(r, g, b))));
         for field in self.doc.form.iter().filter(|f| f.kind != FormFieldKind::PushButton) {
             let required = field.has(pdfcraft_engine::field_flags::REQUIRED);
             let (width, line, edge) = if required {
-                (StrokeWidth::Thick, style.outline, StrokeColor::Theme(style.required_edge))
+                (StrokeWidth::Thick, style.outline, required_edge)
             } else {
                 (StrokeWidth::Thin, style.field_line, chosen.map_or(StrokeColor::Theme(style.field_edge), StrokeColor::Data))
             };

@@ -897,6 +897,8 @@ struct PageBodyCx<'a> {
     form_tooltips: bool,
     /// Preferences > Forms: the Highlight fields colour; `None` follows the theme.
     field_highlight_color: Option<[u8; 3]>,
+    /// Preferences > Forms: the border colour of a required field; `None` follows the theme.
+    required_field_color: Option<[u8; 3]>,
     /// Preferences > Forms > Auto-Complete: the remembered entries the focused plain text field's text could be
     /// completed to (none while the preference is off).
     form_suggestions: &'a [String],
@@ -1433,6 +1435,9 @@ fn page_body(ui: &mut egui::Ui, body: &PageBody<'_>, callbacks: &mut PageCallbac
         if let Some(colour) = cx.field_highlight_color {
             overlays = overlays.field_color(colour);
         }
+        if let Some(colour) = cx.required_field_color {
+            overlays = overlays.required_color(colour);
+        }
         if let Some(picked) = view_picked.filter(|p| p.page == *page) {
             overlays = overlays.picked(picked.rect);
         }
@@ -1844,6 +1849,7 @@ pub fn document_area_at(app: &mut PdfCraftApp, index: usize, rect: Rect, ui: &mu
         text_links: app.text_links,
         form_tooltips: app.form_tooltips,
         field_highlight_color: app.field_highlight_color,
+        required_field_color: app.required_field_color,
         form_suggestions: &form_suggestions,
         unobstructed,
         prefs: &app.comment_prefs,

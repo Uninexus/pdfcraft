@@ -252,6 +252,9 @@ impl Default for DefaultAppHooks {
 /// The colour Highlight fields shows in Preferences > Forms while it follows the theme.
 pub(crate) const FIELD_HIGHLIGHT_DEFAULT: [u8; 3] = [0x6E, 0x8E, 0xF5];
 
+/// The colour a required field's border shows in Preferences > Forms while it follows the theme.
+pub(crate) const REQUIRED_FIELD_DEFAULT: [u8; 3] = [0xE3, 0x22, 0x22];
+
 pub struct PdfCraftApp {
     /// The app's services: jobs, files, settings sections, commands. Every queue is built from it.
     pub(crate) host: std::sync::Arc<craft::host::Host>,
@@ -487,6 +490,8 @@ pub struct PdfCraftApp {
     pub form_tooltips: bool,
     /// Preferences > Forms: the colour Highlight fields draws over fillable fields; `None` follows the theme.
     pub field_highlight_color: Option<[u8; 3]>,
+    /// Preferences > Forms: the border colour of a required field; `None` follows the theme.
+    pub required_field_color: Option<[u8; 3]>,
     /// Preferences: open every document at Default zoom and Default page display, whatever
     /// layout or zoom it asks for (#1618).
     pub always_default_view: bool,

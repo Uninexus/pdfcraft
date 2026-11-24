@@ -91,6 +91,7 @@ struct PrefsDraft {
     form_tooltips: bool,
     form_autocomplete: bool,
     field_highlight_color: Option<[u8; 3]>,
+    required_field_color: Option<[u8; 3]>,
     hide_empty_highlight_hover: bool,
     comment_tool_pinned: bool,
     flatten_fill_sign_on_save: bool,
@@ -134,6 +135,7 @@ impl PrefsDraft {
             form_tooltips: app.form_tooltips,
             form_autocomplete: app.session.form_autocomplete(),
             field_highlight_color: app.field_highlight_color,
+            required_field_color: app.required_field_color,
             hide_empty_highlight_hover: app.comment_prefs.hide_empty_highlight_hover,
             comment_tool_pinned: app.comment_prefs.pinned,
             flatten_fill_sign_on_save: app.flatten_fill_sign_on_save,
@@ -182,6 +184,7 @@ impl PrefsDraft {
             form_tooltips: true,
             form_autocomplete: engine.form_autocomplete(),
             field_highlight_color: None,
+            required_field_color: None,
             hide_empty_highlight_hover: prefs.hide_empty_highlight_hover,
             comment_tool_pinned: prefs.pinned,
             flatten_fill_sign_on_save: false,
@@ -509,6 +512,7 @@ impl PreferencesModel for Prefs<'_> {
             ("identity.email", PrefValue::Text(v)) => d.identity_email = v.chars().take(crate::MAX_AUTHOR_CHARS).collect(),
             ("forms.highlight", PrefValue::Bool(v)) => d.highlight_fields = v,
             ("forms.highlight_color", PrefValue::Color(c)) => d.field_highlight_color = Some([c.0[0], c.0[1], c.0[2]]),
+            ("forms.required_color", PrefValue::Color(c)) => d.required_field_color = Some([c.0[0], c.0[1], c.0[2]]),
             ("forms.tooltips", PrefValue::Bool(v)) => d.form_tooltips = v,
             ("forms.autocomplete", PrefValue::Choice(id)) => d.form_autocomplete = lookup(&autocomplete_table(), &id).unwrap_or(d.form_autocomplete),
             ("comment.hide_hover", PrefValue::Bool(v)) => d.hide_empty_highlight_hover = v,
@@ -644,6 +648,7 @@ impl PreferencesModel for Prefs<'_> {
             "forms" => {
                 d.highlight_fields = fresh.highlight_fields;
                 d.field_highlight_color = fresh.field_highlight_color;
+                d.required_field_color = fresh.required_field_color;
                 d.form_tooltips = fresh.form_tooltips;
                 d.form_autocomplete = fresh.form_autocomplete;
             }
@@ -730,6 +735,7 @@ impl PreferencesDraft for Prefs<'_> {
         self.app.form_tooltips = d.form_tooltips;
         self.app.session.set_form_autocomplete(d.form_autocomplete);
         self.app.field_highlight_color = d.field_highlight_color;
+        self.app.required_field_color = d.required_field_color;
         self.app.comment_prefs.hide_empty_highlight_hover = d.hide_empty_highlight_hover;
         self.app.comment_prefs.pinned = d.comment_tool_pinned;
         self.app.blank_paper = d.blank_paper;
@@ -904,6 +910,12 @@ impl Prefs<'_> {
                 RowKind::Color(rgb(d.field_highlight_color.unwrap_or(crate::FIELD_HIGHLIGHT_DEFAULT))),
             )
             .help(tl!("Drawn over fields you can fill in. Reset this page to follow the theme again.")),
+            RowSpec::new(
+                "forms.required_color",
+                tl!("Required field border"),
+                RowKind::Color(rgb(d.required_field_color.unwrap_or(crate::REQUIRED_FIELD_DEFAULT))),
+            )
+            .help(tl!("Fields marked required get a thicker border in this colour (red unless changed).")),
             RowSpec::new("forms.tooltips", tl!("Show a field's tooltip when the pointer rests on it"), RowKind::Bool(d.form_tooltips)),
             choice_row("forms.autocomplete", tl!("Auto-Complete"), d.form_autocomplete, &autocomplete_table()).help(tl!(
                 "Offers what you typed into other text fields before, as you type. Passwords, signatures, dates, numbers, multi-line and read-only fields are never remembered. Entries stay on this computer. Turning this off keeps the saved list until you remove it."
