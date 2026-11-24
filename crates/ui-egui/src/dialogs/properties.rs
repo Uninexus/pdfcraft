@@ -405,6 +405,9 @@ impl PdfCraftApp {
         rows.push(reading(PropertyRow::field(
             Param::new("language", tl!("Language").to_string(), ParamKind::text("")).hint(tl!("e.g. en-US").to_string()),
         )));
+        rows.push(reading(PropertyRow::field(
+            Param::new("base_url", tl!("Base URL").to_string(), ParamKind::text("")).hint(tl!("e.g. https://example.com/docs/").to_string()),
+        )));
         // What was repaired while reading a damaged file (fidelity: never silent).
         let repairs = doc.repair_log();
         rows.push(value("Repairs", if repairs.is_empty() { tl!("None").to_string() } else { repairs.len().to_string() }));

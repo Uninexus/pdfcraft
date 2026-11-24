@@ -25,7 +25,7 @@ pub(crate) mod tool;
 pub use dialog::FieldPropsDialog;
 
 pub use draft::{ACTION_KINDS, ActionDraft, FieldDraft, FieldTab};
-pub(crate) use draft::{da_font, da_size};
+pub(crate) use draft::{da_font, da_size, menu_item_label};
 
 /// The Add form components tools.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

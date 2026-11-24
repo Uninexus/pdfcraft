@@ -130,3 +130,33 @@ fn properties_session_clean_inspection_tab_follows_a_newer_edit() {
     assert_eq!(title.as_deref(), Some("Newer title"), "the draft is reseeded from the newer revision");
     assert_eq!(h.state().session.get(id).unwrap().edit_generation(), generation, "refreshing issues no edit");
 }
+
+#[test]
+fn the_base_url_for_relative_links_is_set_on_the_advanced_tab_in_the_one_undo_step() {
+    let mut h = harness();
+    set_field(&mut h, "base_url", json!("https://example.com/docs/"));
+    h.run_steps(2);
+    h.get_by_label("OK").click();
+    h.run_steps(3);
+    let id = h.state().views[0].id;
+    let doc = |h: &Harness<'static, PdfCraftApp>| {
+        let d = h.state().session.get(id).unwrap();
+        (d.base_url().0, d.info_value("Title"))
+    };
+    assert_eq!(doc(&h), (Some("https://example.com/docs/".to_string()), Some("Old draft".to_string())));
+    h.undo();
+    h.run_steps(3);
+    assert_eq!(doc(&h), (None, None), "the base and the title the dialog changed come back together");
+}
+
+#[test]
+fn a_base_url_the_file_cannot_hold_is_refused_and_the_dialog_stays_open() {
+    let mut h = harness();
+    set_field(&mut h, "base_url", json!("ftp://example.com/"));
+    h.run_steps(2);
+    h.get_by_label("OK").click();
+    h.run_steps(3);
+    let id = h.state().views[0].id;
+    assert_eq!(h.state().session.get(id).unwrap().base_url().0, None, "nothing was written");
+    assert!(!h.state().dialogs.is_empty(), "the dialog is still there to correct the address");
+}

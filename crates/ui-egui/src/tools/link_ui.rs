@@ -8,7 +8,7 @@ use craft::pages::ui::{PageBody, PlacedPage};
 use craft::theme::Srgba;
 use craft::ui::canvas::{CanvasTool, ToolAction, ToolClaims, ToolContext, ToolKey, ToolPath, ToolPointer};
 use craft::ui::canvas_controls::SelectionOutline;
-use craft::ui::choice::{Radio, RadioGroup};
+use craft::ui::choice::{Checkbox, Radio, RadioGroup};
 use craft::ui::contract::{Bind, Entry, Props as _, Show as _, ShowContainer as _};
 use craft::ui::dialog::{DialogId, DialogResult, DialogStack, StackDialog, dialog_id};
 use craft::ui::display::{Shade, Text};
@@ -20,7 +20,8 @@ use craft::ui::primitives::Draw;
 use craft::ui::runtime::requests::ColorRequest;
 use craft::ui::text::{NumberField, TextField};
 use egui::{Pos2, Rect};
-use pdfcraft_engine::{Edit, LinkAction, LinkHighlight, LinkItem, LinkStyle, LinkZoom};
+use pdfcraft_cos::ObjRef;
+use pdfcraft_engine::{Edit, LaunchTarget, LinkAction, LinkHighlight, LinkItem, LinkStyle, LinkZoom, NamedTarget, SAFE_MENU_NAMES, ThreadTarget};
 use pdfcraft_render::{DocInfo, LinkTarget};
 
 use crate::PdfCraftApp;
@@ -48,6 +49,22 @@ pub struct LinkView {
     pub open_existing: Option<(usize, usize)>,
 }
 
+/// What a link does, as Link Properties' Link Action group offers it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum LinkKind {
+    /// Open a web page.
+    #[default]
+    Web,
+    /// Go to a page view.
+    Page,
+    /// Go to an article thread (and a bead of it).
+    Thread,
+    /// Run a menu item from the safe list.
+    Menu,
+    /// Open another PDF file by a relative path.
+    File,
+}
+
 /// Link Properties' working copy.
 #[derive(Clone, Debug, PartialEq)]
 pub struct LinkDraft {
@@ -55,18 +72,42 @@ pub struct LinkDraft {
     pub rect: [f64; 4],
     /// `None` for a new link.
     pub index: Option<usize>,
+    /// The link's object, for the actions that are set on an object (article, menu item, file).
+    /// `None` for a new link and for an inline one.
+    pub obj: Option<ObjRef>,
     /// Keep an existing action that Link Properties cannot edit.
     pub preserve_action: bool,
-    pub web: bool,
+    pub kind: LinkKind,
     pub url: String,
     /// 1-based target page.
     pub target: usize,
     /// How the target page is shown.
     pub zoom: LinkZoom,
+    /// The article thread's position in the catalog's `/Threads`, counting from 0.
+    pub thread: usize,
+    /// The bead of that thread: 0 for the thread as a whole, else the bead's position counting from 1.
+    pub bead: usize,
+    /// The menu item, as a position in `SAFE_MENU_NAMES`.
+    pub menu: usize,
+    /// The file to open, a relative path to a PDF.
+    pub file: String,
+    /// Whether the file opens in a new window.
+    pub new_window: bool,
     /// The link's action when the dialog opened (`None` for a new link). OK rewrites the action
     /// only when it changed, so an appearance edit keeps a destination's position and kind
     /// (`/XYZ left top`, `/FitR`…) that the dialog doesn't show.
     pub current: Option<LinkAction>,
+    /// The article action the link had when the dialog opened: its thread and bead (counting from 0).
+    pub current_thread: Option<(usize, Option<usize>)>,
+    /// The menu item the link had when the dialog opened, as a position in `SAFE_MENU_NAMES`.
+    pub current_menu: Option<usize>,
+    /// The file the link opened when the dialog opened, and whether in a new window.
+    pub current_file: Option<(String, bool)>,
+    /// The kind of sound, movie, rendition or rich-media action the link has, which the dialog can
+    /// take out but not write.
+    pub media: Option<&'static str>,
+    /// Take that action out when OK is pressed.
+    pub remove_media: bool,
     pub style: LinkStyle,
 }
 
@@ -77,15 +118,37 @@ impl Default for LinkDraft {
             page: 0,
             rect: [0.0; 4],
             index: None,
+            obj: None,
             preserve_action: false,
-            web: true,
+            kind: LinkKind::Web,
             url: "https://".into(),
             target: 1,
             zoom: LinkZoom::FitPage,
+            thread: 0,
+            bead: 0,
+            menu: 0,
+            file: String::new(),
+            new_window: false,
             current: None,
+            current_thread: None,
+            current_menu: None,
+            current_file: None,
+            media: None,
+            remove_media: false,
             style: LinkStyle::default(),
         }
     }
+}
+
+/// One article thread the Link Action group offers.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ThreadChoice {
+    /// Position in the catalog's `/Threads`, counting from 0.
+    pub index: usize,
+    /// Its title, or a number when it has none.
+    pub label: String,
+    /// How many beads it has.
+    pub beads: usize,
 }
 
 /// The zooms Link Properties offers for a page view.
@@ -287,6 +350,8 @@ pub(crate) struct LinkPropsDialog {
     draft: LinkDraft,
     /// The document's page count, which bounds the Go to a page view target.
     pages: usize,
+    /// The document's article threads, which the Go to an article thread action chooses among.
+    threads: Vec<ThreadChoice>,
     /// Whether the dialog is open: bound to the form's open state, so the host's dialog closes with it.
     open: bool,
     /// The custom-colour request the Color row raised, for the app to open the colour picker.
@@ -296,9 +361,9 @@ pub(crate) struct LinkPropsDialog {
 }
 
 impl LinkPropsDialog {
-    /// The dialog editing `draft` in a document of `pages` pages.
-    pub(crate) fn new(draft: LinkDraft, pages: usize, recent: RecentColours) -> Self {
-        LinkPropsDialog { id: dialog_id("linkProps"), draft, pages, open: true, colour_request: None, recent }
+    /// The dialog editing `draft` in a document of `pages` pages and these article threads.
+    pub(crate) fn new(draft: LinkDraft, pages: usize, threads: Vec<ThreadChoice>, recent: RecentColours) -> Self {
+        LinkPropsDialog { id: dialog_id("linkProps"), draft, pages, threads, open: true, colour_request: None, recent }
     }
 
     /// Sets the link's colour: the colour picker's answer.
@@ -312,9 +377,25 @@ impl LinkPropsDialog {
     }
 }
 
-/// Whether a draft can be accepted: a web link needs an address.
-fn draft_ok(d: &LinkDraft) -> bool {
-    d.preserve_action || !d.web || (d.url.trim().len() > 3 && d.url.trim() != "https://")
+/// Whether a draft can be accepted: a web link needs an address, an article action a thread to go
+/// to and a file action a path `LaunchTarget` takes.
+fn draft_ok(d: &LinkDraft, has_threads: bool) -> bool {
+    d.preserve_action
+        || match d.kind {
+            LinkKind::Web => draft_ok_url(&d.url),
+            LinkKind::Page | LinkKind::Menu => true,
+            LinkKind::Thread => has_threads,
+            LinkKind::File => LaunchTarget::new(d.file.trim(), None).is_ok(),
+        }
+}
+
+/// Why OK is not available, for the kind of action the draft has.
+fn ok_reason(d: &LinkDraft, has_threads: bool) -> String {
+    match d.kind {
+        LinkKind::Thread if !has_threads => tl!("This document has no article threads.").to_string(),
+        LinkKind::File => tl!("Type a relative path to a PDF file, such as folder/other.pdf.").to_string(),
+        _ => tl!("Type the web address.").to_string(),
+    }
 }
 
 fn entries<T: Clone + PartialEq + std::fmt::Debug + Send + Sync + 'static>(rows: impl IntoIterator<Item = (T, String)>) -> Vec<Entry<T>> {
@@ -328,10 +409,21 @@ fn pick<T: Clone + PartialEq + std::fmt::Debug + Send + Sync + 'static>(
     current: T,
     rows: Vec<(T, String)>,
 ) -> Option<T> {
+    select_row(ui, label, current, rows, true)
+}
+
+/// [`pick`] that can be switched off, with the row's own field.
+fn select_row<T: Clone + PartialEq + std::fmt::Debug + Send + Sync + 'static>(
+    ui: &mut egui::Ui,
+    label: String,
+    current: T,
+    rows: Vec<(T, String)>,
+    on: bool,
+) -> Option<T> {
     let list = entries(rows);
     let mut picked = None;
-    Field::new(label.clone()).show(ui, |ui, _| {
-        picked = Select::new(label.clone(), Bind::given(current.clone()), &list).show(ui).value().cloned();
+    Field::new(label.clone()).enabled(on).show(ui, |ui, _| {
+        picked = Select::new(label.clone(), Bind::given(current.clone()), &list).enabled(on).show(ui).value().cloned();
     });
     picked.filter(|p| *p != current)
 }
@@ -385,56 +477,144 @@ fn appearance(ui: &mut egui::Ui, d: &mut LinkDraft, request: &mut Option<ColorRe
     });
 }
 
+/// What the Link Action group needs besides the draft.
+struct ActionCx<'a> {
+    /// The document's page count.
+    pages: usize,
+    /// The document's article threads.
+    threads: &'a [ThreadChoice],
+}
+
 /// The Link Action group.
-fn action(ui: &mut egui::Ui, d: &mut LinkDraft, pages: usize) {
+fn action(ui: &mut egui::Ui, d: &mut LinkDraft, cx: &ActionCx<'_>) {
     FieldGroup::new(tl!("Link Action").to_string()).show(ui, |ui, _| {
         Text::new(tl!("Link Action").to_uppercase()).shade(Shade::Muted).show(ui);
         if d.preserve_action {
             Field::new(tl!("Action").to_string())
                 .help(Help::Text(tl!("The existing action will be preserved.").to_string().into()))
                 .show(ui, |_, _| {});
+            if d.media.is_some() {
+                Checkbox::new(Bind::bound(&mut d.remove_media)).label(tl!("Remove this action").to_owned()).show(ui);
+            }
             return;
         }
-        let web = d.web;
-        RadioGroup::new(tl!("Link Action").to_string(), Bind::bound(&mut d.web)).show(ui, |ui, _| {
-            Radio::new(true).label(tl!("Open a web page").to_string()).show(ui);
-            let mut field = Field::new(tl!("Link URL").to_string());
-            if web && !draft_ok_url(&d.url) {
-                field = field.help(Help::Text(tl!("Type the web address.").to_string().into()));
+        let kind = d.kind;
+        // The article, menu item and file actions are set on the link's object, which a new link has not got yet.
+        let existing = d.obj.is_some();
+        RadioGroup::new(tl!("Link Action").to_string(), Bind::bound(&mut d.kind)).show(ui, |ui, _| {
+            Radio::new(LinkKind::Web).label(tl!("Open a web page").to_string()).show(ui);
+            web_rows(ui, &mut d.url, kind == LinkKind::Web);
+            Radio::new(LinkKind::Page).label(tl!("Go to a page view").to_string()).show(ui);
+            page_rows(ui, &mut d.target, &mut d.zoom, cx.pages, kind == LinkKind::Page);
+            Radio::new(LinkKind::Thread).label(tl!("Go to an article thread").to_string()).enabled(existing).show(ui);
+            thread_rows(ui, &mut d.thread, &mut d.bead, cx.threads, kind == LinkKind::Thread && existing);
+            Radio::new(LinkKind::Menu).label(tl!("Run a menu item").to_string()).enabled(existing).show(ui);
+            menu_rows(ui, &mut d.menu, kind == LinkKind::Menu && existing);
+            Radio::new(LinkKind::File).label(tl!("Open a PDF file").to_string()).enabled(existing).show(ui);
+            file_rows(ui, &mut d.file, &mut d.new_window, kind == LinkKind::File && existing);
+        });
+        if !existing {
+            Text::new(tl!("An article, menu item or file action can be set once the link exists: create it, then open its properties.").to_string())
+                .shade(Shade::Muted)
+                .show(ui);
+        }
+    });
+}
+
+/// The web address row of the Link Action group.
+fn web_rows(ui: &mut egui::Ui, url: &mut String, on: bool) {
+    let mut field = Field::new(tl!("Link URL").to_string());
+    if on && !draft_ok_url(url) {
+        field = field.help(Help::Text(tl!("Type the web address.").to_string().into()));
+    }
+    field.show(ui, |ui, _| {
+        TextField::new(tl!("Link URL").to_string(), Bind::bound(&mut *url)).placeholder("https://example.org").enabled(on).show(ui);
+    });
+}
+
+/// The page and zoom rows of the Link Action group.
+fn page_rows(ui: &mut egui::Ui, target: &mut usize, zoom: &mut LinkZoom, pages: usize, on: bool) {
+    Field::new(tl!("Page").to_string()).show(ui, |ui, _| {
+        Row::new().show(ui, |ui, _| {
+            let page = NumberField::new(tl!("Page").to_string(), Bind::given(Some(*target as f64)))
+                .range(1.0..=pages.max(1) as f64)
+                .step(1.0)
+                .enabled(on)
+                .show(ui);
+            if let Some(n) = page.edit.events.landed().cloned().flatten() {
+                *target = (n.round().max(1.0) as usize).min(pages.max(1));
             }
-            field.show(ui, |ui, _| {
-                TextField::new(tl!("Link URL").to_string(), Bind::bound(&mut d.url)).placeholder("https://example.org").enabled(web).show(ui);
-            });
-            Radio::new(false).label(tl!("Go to a page view").to_string()).show(ui);
-            Field::new(tl!("Page").to_string()).show(ui, |ui, _| {
-                Row::new().show(ui, |ui, _| {
-                    let page = NumberField::new(tl!("Page").to_string(), Bind::given(Some(d.target as f64)))
-                        .range(1.0..=pages.max(1) as f64)
-                        .step(1.0)
-                        .enabled(!web)
-                        .show(ui);
-                    if let Some(n) = page.edit.events.landed().cloned().flatten() {
-                        d.target = (n.round().max(1.0) as usize).min(pages.max(1));
-                    }
-                    Text::new(crate::i18n::fmt(tl!("of {pages}"), &[("pages", &pages.max(1).to_string())]).to_string()).shade(Shade::Muted).show(ui);
-                });
-            });
-            // The destination's own zoom, past what the dialog offers, stays a choice.
-            let mut zooms = ZOOMS.to_vec();
-            if !zooms.contains(&d.zoom) {
-                zooms.push(d.zoom);
-            }
-            let current = zooms.iter().position(|z| *z == d.zoom).unwrap_or(0);
-            let rows: Vec<(usize, String)> = zooms.iter().enumerate().map(|(i, z)| (i, zoom_label(*z))).collect();
-            let list = entries::<usize>(rows);
-            Field::new(tl!("Zoom").to_string()).show(ui, |ui, _| {
-                let picked = Select::new(tl!("Zoom").to_string(), Bind::given(current), &list).enabled(!web).show(ui).value().copied();
-                if let Some(z) = picked.and_then(|i| zooms.get(i)) {
-                    d.zoom = *z;
-                }
-            });
+            Text::new(crate::i18n::fmt(tl!("of {pages}"), &[("pages", &pages.max(1).to_string())]).to_string()).shade(Shade::Muted).show(ui);
         });
     });
+    // The destination's own zoom, past what the dialog offers, stays a choice.
+    let mut zooms = ZOOMS.to_vec();
+    if !zooms.contains(&*zoom) {
+        zooms.push(*zoom);
+    }
+    let current = zooms.iter().position(|z| z == &*zoom).unwrap_or(0);
+    let rows: Vec<(usize, String)> = zooms.iter().enumerate().map(|(i, z)| (i, zoom_label(*z))).collect();
+    let list = entries::<usize>(rows);
+    Field::new(tl!("Zoom").to_string()).show(ui, |ui, _| {
+        let picked = Select::new(tl!("Zoom").to_string(), Bind::given(current), &list).enabled(on).show(ui).value().copied();
+        if let Some(z) = picked.and_then(|i| zooms.get(i)) {
+            *zoom = *z;
+        }
+    });
+}
+
+/// The article thread and bead rows of the Link Action group.
+fn thread_rows(ui: &mut egui::Ui, thread: &mut usize, bead: &mut usize, threads: &[ThreadChoice], on: bool) {
+    if threads.is_empty() {
+        Field::new(tl!("Article").to_string()).help(Help::Text(tl!("This document has no article threads.").to_string().into())).show(ui, |_, _| {});
+        return;
+    }
+    let rows = threads.iter().map(|t| (t.index, t.label.clone())).collect();
+    if let Some(t) = select_row(ui, tl!("Article").to_string(), *thread, rows, on) {
+        *thread = t;
+        *bead = 0;
+    }
+    let beads = threads.iter().find(|t| t.index == *thread).map_or(0, |t| t.beads).min(pdfcraft_engine::MAX_ACTION_BEADS);
+    *bead = (*bead).min(beads);
+    let can_pick = on && beads > 0;
+    Field::new(tl!("Bead").to_string()).help(Help::Text(tl!("0 goes to the whole article.").to_string().into())).enabled(can_pick).show(
+        ui,
+        |ui, _| {
+            let edit = NumberField::new(tl!("Bead").to_string(), Bind::given(Some(*bead as f64)))
+                .range(0.0..=beads as f64)
+                .step(1.0)
+                .enabled(can_pick)
+                .show(ui);
+            if let Some(n) = edit.edit.events.landed().cloned().flatten() {
+                *bead = (n.round().max(0.0) as usize).min(beads);
+            }
+        },
+    );
+}
+
+/// The menu item row of the Link Action group: the safe list, nothing typed.
+fn menu_rows(ui: &mut egui::Ui, menu: &mut usize, on: bool) {
+    let rows = SAFE_MENU_NAMES
+        .iter()
+        .copied()
+        .enumerate()
+        .map(|(i, name)| (i, tl!(crate::prepare::menu_item_label(name).unwrap_or(name)).to_string()))
+        .collect();
+    if let Some(m) = select_row(ui, tl!("Menu item").to_string(), *menu, rows, on) {
+        *menu = m;
+    }
+}
+
+/// The file and window rows of the Link Action group.
+fn file_rows(ui: &mut egui::Ui, file: &mut String, new_window: &mut bool, on: bool) {
+    let mut field = Field::new(tl!("File to open").to_string());
+    if on && LaunchTarget::new(file.trim(), None).is_err() {
+        field = field.help(Help::Text(tl!("Type a relative path to a PDF file, such as folder/other.pdf.").to_string().into()));
+    }
+    field.show(ui, |ui, _| {
+        TextField::new(tl!("File to open").to_string(), Bind::bound(&mut *file)).placeholder("other.pdf").enabled(on).show(ui);
+    });
+    Checkbox::new(Bind::bound(&mut *new_window)).label(tl!("Open in a new window").to_owned()).enabled(on).show(ui);
 }
 
 /// Whether a typed web address is one a link can take.
@@ -451,14 +631,15 @@ impl StackDialog for LinkPropsDialog {
 
     fn show(&mut self, ui: &mut egui::Ui, _: &DialogStack) -> Option<DialogResult<Edit>> {
         let title = if self.draft.index.is_some() { tl!("Link Properties") } else { tl!("Create Link") };
-        let LinkPropsDialog { draft, pages, open, colour_request, recent, .. } = self;
-        let form = FormDialog::new(title.to_string(), Bind::bound(&mut *draft))
-            .opened(Bind::bound(open))
-            .ok_reason(tl!("Type the web address.").to_string());
+        let LinkPropsDialog { draft, pages, threads, open, colour_request, recent, .. } = self;
+        let has_threads = !threads.is_empty();
+        let reason = ok_reason(draft, has_threads);
+        let form = FormDialog::new(title.to_string(), Bind::bound(&mut *draft)).opened(Bind::bound(open)).ok_reason(reason);
+        let cx = ActionCx { pages: *pages, threads: threads.as_slice() };
         let shown = form.show(ui, |ui, _, d| {
             appearance(ui, d, colour_request, recent);
-            action(ui, d, *pages);
-            draft_ok(d)
+            action(ui, d, &cx);
+            draft_ok(d, has_threads)
         });
         match (shown.accepted, shown.closed) {
             (Some(d), _) => Some(DialogResult::Ok(edit_for(&d))),
@@ -477,32 +658,12 @@ impl PdfCraftApp {
     pub(crate) fn open_link_props(&mut self, page: usize, rect: Option<[f64; 4]>, index: Option<usize>) {
         let Some((_, id)) = self.active_ids() else { return };
         let existing = index.and_then(|i| self.session.get(id).and_then(|d| d.links().iter().find(|l| l.page == page && l.index == i).cloned()));
-        let draft = match existing {
-            Some(l) => LinkDraft {
-                page,
-                rect: l.rect,
-                index,
-                preserve_action: matches!(l.action, LinkAction::Other(_)),
-                web: matches!(l.action, LinkAction::Uri(_)),
-                url: match &l.action {
-                    LinkAction::Uri(u) => u.clone(),
-                    _ => "https://".into(),
-                },
-                target: match l.action {
-                    LinkAction::Page { page, .. } => page + 1,
-                    _ => 1,
-                },
-                zoom: match l.action {
-                    LinkAction::Page { zoom, .. } => zoom,
-                    _ => LinkZoom::FitPage,
-                },
-                current: Some(l.action.clone()),
-                style: l.style,
-            },
-            None => LinkDraft { page, rect: rect.unwrap_or_default(), ..LinkDraft::default() },
+        let draft = match (existing, self.session.get(id)) {
+            (Some(l), Some(doc)) => existing_draft(doc, &l, page, index),
+            _ => LinkDraft { page, rect: rect.unwrap_or_default(), ..LinkDraft::default() },
         };
-        let pages = self.session.get(id).map_or(1, |d| d.info.pages.len());
-        crate::dialogs::host::open(self, LinkPropsDialog::new(draft, pages, self.recent_colours.clone()));
+        let (pages, threads) = self.session.get(id).map_or((1, Vec::new()), |d| (d.info.pages.len(), thread_choices(d)));
+        crate::dialogs::host::open(self, LinkPropsDialog::new(draft, pages, threads, self.recent_colours.clone()));
     }
 
     /// One pass of Link Properties for the app: opens the colour picker the Color row asked for, and
@@ -557,42 +718,171 @@ impl PdfCraftApp {
     }
 }
 
-/// The action a confirmed draft sets.
-fn action_for(d: &LinkDraft) -> LinkAction {
-    if d.web { LinkAction::Uri(d.url.trim().to_string()) } else { LinkAction::Page { page: d.target.saturating_sub(1), zoom: d.zoom } }
+/// The article threads of `doc`, for the Link Action group to choose among.
+fn thread_choices(doc: &pdfcraft_engine::Document) -> Vec<ThreadChoice> {
+    doc.article_threads()
+        .threads
+        .into_iter()
+        .map(|t| ThreadChoice {
+            label: t
+                .title
+                .filter(|title| !title.trim().is_empty())
+                .unwrap_or_else(|| crate::i18n::fmt(tl!("Article {n}"), &[("n", &(t.index + 1).to_string())])),
+            index: t.index,
+            beads: t.beads,
+        })
+        .collect()
 }
 
-/// The edit for a confirmed draft.
+/// The draft of an existing link: its page or web address, and, for an article, menu item or file
+/// action the dialog edits, that action. Any other action is kept as it is.
+fn existing_draft(doc: &pdfcraft_engine::Document, l: &LinkItem, page: usize, index: Option<usize>) -> LinkDraft {
+    let mut d = LinkDraft {
+        page,
+        rect: l.rect,
+        index,
+        obj: l.obj,
+        preserve_action: matches!(l.action, LinkAction::Other(_)),
+        kind: if matches!(l.action, LinkAction::Uri(_)) { LinkKind::Web } else { LinkKind::Page },
+        url: match &l.action {
+            LinkAction::Uri(u) => u.clone(),
+            _ => "https://".into(),
+        },
+        target: match l.action {
+            LinkAction::Page { page, .. } => page + 1,
+            _ => 1,
+        },
+        zoom: match l.action {
+            LinkAction::Page { zoom, .. } => zoom,
+            _ => LinkZoom::FitPage,
+        },
+        current: Some(l.action.clone()),
+        style: l.style,
+        ..LinkDraft::default()
+    };
+    if let (LinkAction::Other(name), Some(obj)) = (&l.action, l.obj) {
+        read_object_action(doc, obj, name, &mut d);
+    }
+    d
+}
+
+/// Takes the link's article, menu item or file action (`name` is its `/S`) into the draft, when the
+/// dialog can edit it as it stands; otherwise the draft keeps the action as it is.
+fn read_object_action(doc: &pdfcraft_engine::Document, obj: ObjRef, name: &str, d: &mut LinkDraft) {
+    match name {
+        "Thread" => {
+            let read = doc.link_thread_action(obj);
+            if let (true, false, Some(thread)) = (read.settable, read.remote, read.thread) {
+                d.preserve_action = false;
+                d.kind = LinkKind::Thread;
+                d.thread = thread;
+                d.bead = read.bead.map_or(0, |b| b + 1);
+                d.current_thread = Some((thread, read.bead));
+            }
+        }
+        "Named" => {
+            let read = doc.link_named_action(obj);
+            let at = read.name.as_deref().and_then(|n| SAFE_MENU_NAMES.iter().position(|safe| *safe == n));
+            if let (true, true, Some(at)) = (read.settable, read.safe, at) {
+                d.preserve_action = false;
+                d.kind = LinkKind::Menu;
+                d.menu = at;
+                d.current_menu = Some(at);
+            }
+        }
+        "Sound" | "Movie" | "Rendition" | "RichMediaExecute" => {
+            let read = doc.link_media_action(obj);
+            if let (true, true, Some(kind)) = (read.settable, read.is_media, read.kind) {
+                d.media = Some(kind);
+            }
+        }
+        "Launch" => {
+            let read = doc.link_launch_action(obj);
+            if let (true, false, Some(file)) = (read.settable, read.url, read.file.clone())
+                && LaunchTarget::new(&file, None).is_ok()
+            {
+                let new_window = read.new_window.unwrap_or(false);
+                d.preserve_action = false;
+                d.kind = LinkKind::File;
+                d.current_file = Some((file.clone(), new_window));
+                d.file = file;
+                d.new_window = new_window;
+            }
+        }
+        _ => {}
+    }
+}
+
+/// The action a confirmed web or page draft sets.
+fn action_for(d: &LinkDraft) -> LinkAction {
+    if d.kind == LinkKind::Web {
+        LinkAction::Uri(d.url.trim().to_string())
+    } else {
+        LinkAction::Page { page: d.target.saturating_sub(1), zoom: d.zoom }
+    }
+}
+
+/// The edit that sets the article, menu item or file action a confirmed draft of an existing link
+/// has, with the name of its undo step, when it differs from the one the link had.
+fn object_action_edit(d: &LinkDraft) -> Option<(&'static str, Edit)> {
+    let link = d.obj?;
+    if d.preserve_action {
+        return (d.media.is_some() && d.remove_media).then_some(("Remove link media action", Edit::RemoveLinkMediaAction { link }));
+    }
+    match d.kind {
+        LinkKind::Web | LinkKind::Page => None,
+        LinkKind::Thread => {
+            let target = ThreadTarget::new(d.thread, d.bead.checked_sub(1)).ok()?;
+            (d.current_thread != Some((target.thread(), target.bead())))
+                .then_some(("Set link article action", Edit::SetLinkThreadAction { link, target: Some(target) }))
+        }
+        LinkKind::Menu => {
+            let target = NamedTarget::new(SAFE_MENU_NAMES.get(d.menu)?).ok()?;
+            (d.current_menu != Some(d.menu)).then_some(("Set link menu action", Edit::SetLinkNamedAction { link, target: Some(target) }))
+        }
+        LinkKind::File => {
+            let file = d.file.trim();
+            let target = LaunchTarget::new(file, Some(d.new_window)).ok()?;
+            (d.current_file.as_ref() != Some(&(file.to_string(), d.new_window)))
+                .then_some(("Set link file action", Edit::SetLinkLaunchAction { link, target: Some(target) }))
+        }
+    }
+}
+
+/// The edit for a confirmed draft: one undo step, whatever it changes of the link.
 pub(crate) fn edit_for(d: &LinkDraft) -> Edit {
     match d.index {
         None => Edit::AddLink { page: d.page, rect: d.rect, action: action_for(d), style: d.style },
-        Some(index) => Edit::SetLink {
-            page: d.page,
-            index,
-            rect: None,
-            action: (!d.preserve_action).then(|| action_for(d)).filter(|a| d.current.as_ref() != Some(a)),
-            style: Some(d.style),
-        },
+        Some(index) => {
+            let by_value = matches!(d.kind, LinkKind::Web | LinkKind::Page) && !d.preserve_action;
+            let set = Edit::SetLink {
+                page: d.page,
+                index,
+                rect: None,
+                action: by_value.then(|| action_for(d)).filter(|a| d.current.as_ref() != Some(a)),
+                style: Some(d.style),
+            };
+            match object_action_edit(d) {
+                Some((label, edit)) => Edit::Batch { label: label.into(), edits: vec![set, edit] },
+                None => set,
+            }
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{LinkDraft, edit_for, zoom_label};
+    use super::{LinkDraft, LinkKind, edit_for, zoom_label};
     use pdfcraft_engine::{Edit, LinkAction, LinkStyle, LinkZoom};
 
     fn draft(current: LinkAction) -> LinkDraft {
         LinkDraft {
-            page: 0,
-            rect: [0.0; 4],
             index: Some(3),
             preserve_action: matches!(current, LinkAction::Other(_)),
-            web: false,
+            kind: LinkKind::Page,
             url: String::new(),
-            target: 1,
-            zoom: LinkZoom::FitPage,
             current: Some(current),
-            style: LinkStyle::default(),
+            ..LinkDraft::default()
         }
     }
 
@@ -614,6 +904,98 @@ mod tests {
         d.zoom = LinkZoom::Percent(200.0);
         d.target = 2;
         assert!(matches!(edit_for(&d), Edit::SetLink { action: Some(LinkAction::Page { page: 1, .. }), .. }));
+    }
+
+    fn with_object(kind: LinkKind) -> LinkDraft {
+        LinkDraft {
+            index: Some(0),
+            obj: Some(pdfcraft_cos::ObjRef::new(9, 0)),
+            kind,
+            current: Some(LinkAction::Uri("http://x.test".into())),
+            ..LinkDraft::default()
+        }
+    }
+
+    /// The edits of the one undo step a confirmed draft makes: the link's own, then the object action.
+    fn steps(d: &LinkDraft) -> Vec<Edit> {
+        match edit_for(d) {
+            Edit::Batch { edits, .. } => edits,
+            one => vec![one],
+        }
+    }
+
+    #[test]
+    fn an_article_action_is_one_step_with_the_link_and_names_its_bead_from_one() {
+        let mut d = with_object(LinkKind::Thread);
+        d.thread = 1;
+        d.bead = 2;
+        let edits = steps(&d);
+        assert!(matches!(edits[0], Edit::SetLink { action: None, .. }), "the web address is left for the article action to replace");
+        let Some(Edit::SetLinkThreadAction { target: Some(t), .. }) = edits.get(1) else { panic!("{edits:?}") };
+        assert_eq!((t.thread(), t.bead()), (1, Some(1)), "the dialog counts beads from 1, the file from 0");
+        d.bead = 0;
+        let edits = steps(&d);
+        let Some(Edit::SetLinkThreadAction { target: Some(t), .. }) = edits.get(1) else { panic!("{edits:?}") };
+        assert_eq!(t.bead(), None, "0 is the whole article");
+        // An article action left as it was is not written again.
+        d.current_thread = Some((1, None));
+        assert!(matches!(edit_for(&d), Edit::SetLink { .. }));
+    }
+
+    #[test]
+    fn a_menu_item_is_taken_from_the_safe_list_and_written_once() {
+        let mut d = with_object(LinkKind::Menu);
+        d.menu = 3;
+        let edits = steps(&d);
+        let Some(Edit::SetLinkNamedAction { target: Some(t), .. }) = edits.get(1) else { panic!("{edits:?}") };
+        assert_eq!(t.name(), pdfcraft_engine::SAFE_MENU_NAMES[3]);
+        d.current_menu = Some(3);
+        assert!(matches!(edit_for(&d), Edit::SetLink { .. }), "unchanged: not written again");
+        d.menu = 99;
+        assert!(matches!(edit_for(&d), Edit::SetLink { .. }), "a position past the list writes nothing");
+    }
+
+    #[test]
+    fn a_file_to_open_is_written_only_when_it_is_a_relative_pdf_path() {
+        let mut d = with_object(LinkKind::File);
+        d.file = " docs/other.pdf ".into();
+        d.new_window = true;
+        let edits = steps(&d);
+        let Some(Edit::SetLinkLaunchAction { target: Some(_), .. }) = edits.get(1) else { panic!("{edits:?}") };
+        for bad in ["", "/etc/passwd", "..\\x.pdf", "a.exe", "http://x.test/a.pdf"] {
+            d.file = bad.into();
+            assert!(matches!(edit_for(&d), Edit::SetLink { .. }), "{bad:?} is not written");
+            assert!(!super::draft_ok(&d, true), "{bad:?} is not accepted");
+        }
+    }
+
+    #[test]
+    fn a_new_link_and_an_inline_link_have_no_object_to_hold_an_action() {
+        let mut d = with_object(LinkKind::Menu);
+        d.obj = None;
+        assert!(matches!(edit_for(&d), Edit::SetLink { .. }));
+        d.index = None;
+        assert!(matches!(edit_for(&d), Edit::AddLink { .. }));
+    }
+
+    #[test]
+    fn an_article_action_needs_a_thread_to_go_to() {
+        let d = with_object(LinkKind::Thread);
+        assert!(!super::draft_ok(&d, false));
+        assert!(super::draft_ok(&d, true));
+    }
+
+    #[test]
+    fn a_media_action_is_taken_out_only_when_asked_and_never_written() {
+        let mut d = draft(LinkAction::Other("Sound".into()));
+        d.obj = Some(pdfcraft_cos::ObjRef::new(9, 0));
+        d.media = Some("sound");
+        assert!(matches!(edit_for(&d), Edit::SetLink { action: None, .. }), "kept as it is");
+        d.remove_media = true;
+        let edits = steps(&d);
+        assert!(matches!(edits.get(1), Some(Edit::RemoveLinkMediaAction { .. })), "{edits:?}");
+        d.media = None;
+        assert!(matches!(edit_for(&d), Edit::SetLink { .. }), "an action that is not media is not taken out by this");
     }
 
     #[test]

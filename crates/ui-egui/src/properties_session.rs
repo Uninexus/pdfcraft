@@ -85,6 +85,8 @@ pub(crate) struct Values {
     description: [String; 4],
     view: InitialView,
     custom: Vec<(String, String)>,
+    /// The base address relative links resolve against (empty: none), written as the catalog's `/URI` `/Base`.
+    base_url: String,
 }
 
 impl PartialEq for Values {
@@ -94,6 +96,7 @@ impl PartialEq for Values {
         // from the text widgets while the user types. Custom row order is not a PDF edit.
         self.description.iter().zip(&other.description).all(|(a, b)| a.trim() == b.trim())
             && self.view == other.view
+            && self.base_url.trim() == other.base_url.trim()
             && self.custom.len() == other.custom.len()
             && self.custom.iter().all(|entry| other.custom.contains(entry))
     }
@@ -102,7 +105,12 @@ impl PartialEq for Values {
 impl Values {
     /// Snapshot the editable values; PDF bytes and undo history remain owned by the engine.
     pub(crate) fn read(doc: &Document) -> Self {
-        Self { description: INFO_KEYS.map(|key| doc.info_value(key).unwrap_or_default()), view: doc.initial_view(), custom: doc.custom_info() }
+        Self {
+            description: INFO_KEYS.map(|key| doc.info_value(key).unwrap_or_default()),
+            view: doc.initial_view(),
+            custom: doc.custom_info(),
+            base_url: doc.base_url().0.unwrap_or_default(),
+        }
     }
 
     /// The dialog's fields for these values, with the Custom tab's input boxes empty.
@@ -126,6 +134,7 @@ impl Values {
         fields.set("hide_window_ui", v.hide_window_ui);
         fields.set("binding", if v.right_to_left { "right" } else { "left" });
         fields.set("language", v.language.clone().unwrap_or_default());
+        fields.set("base_url", self.base_url.clone());
         fields.set("custom", custom_json(&self.custom));
         fields.set("custom.name", "");
         fields.set("custom.value", "");
@@ -176,10 +185,17 @@ impl Values {
         if let Some(language) = choice("language") {
             view.language = (!language.trim().is_empty()).then(|| language.trim().to_owned());
         }
+        // A new base the engine would refuse is no value: OK is refused until it is corrected. One the file
+        // already holds is kept as it is, whatever it is.
+        let base_url = fields.text("base_url").map_or_else(|| base.base_url.clone(), |text| text.trim().to_owned());
+        if base_url != base.base_url.trim() && !base_url.is_empty() && pdfcraft_engine::check_base_url(&base_url).is_err() {
+            return None;
+        }
         Some(Self {
             description: <[String; 4]>::try_from(description).ok()?,
             view,
             custom: custom_pairs(fields).unwrap_or_else(|| base.custom.clone()),
+            base_url,
         })
     }
 
@@ -193,6 +209,10 @@ impl Values {
             .collect();
         if self.view != after.view {
             edits.push(Edit::SetInitialView(Box::new(after.view.clone())));
+        }
+        if self.base_url.trim() != after.base_url.trim() {
+            let base = after.base_url.trim();
+            edits.push(Edit::SetBaseUrl((!base.is_empty()).then(|| base.to_owned())));
         }
         for (key, _) in self.custom.iter().filter(|(key, _)| !after.custom.iter().any(|(name, _)| name == key)) {
             edits.push(Edit::SetInfo { key: key.clone(), value: String::new() });
