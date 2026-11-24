@@ -89,7 +89,7 @@ fn save_as_pdf_writes_the_report_as_a_pdf() {
 
 #[test]
 fn the_signer_labels_report_lists_labels_gaps_and_names_the_plan_does_not_have() {
-    let dir = crate::support::TempDir::new().unwrap();
+    let dir = crate::support::TempDir::new();
     let pdf = dir.path().join("doc.pdf");
     std::fs::write(&pdf, fixture()).unwrap();
     let mut plan = Plan::empty(1);

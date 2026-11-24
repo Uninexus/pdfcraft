@@ -34,7 +34,7 @@ fn harness(path: Option<String>) -> Harness<'static, PdfCraftApp> {
 
 /// A saved document in its own folder, and the window open on it.
 fn saved() -> (crate::support::TempDir, PathBuf, Harness<'static, PdfCraftApp>) {
-    let dir = crate::support::TempDir::new().unwrap();
+    let dir = crate::support::TempDir::new();
     let pdf = dir.path().join("contract.pdf");
     std::fs::write(&pdf, fixture()).unwrap();
     let h = harness(Some(pdf.to_string_lossy().into_owned()));
@@ -229,7 +229,7 @@ fn a_recorded_step_is_asked_for_first_and_then_locks_the_plan() {
 #[test]
 fn signing_as_the_next_recipient_opens_signing_on_the_field_labelled_for_them() {
     use pdfcraft_engine::{Edit, NewField};
-    let dir = crate::support::TempDir::new().unwrap();
+    let dir = crate::support::TempDir::new();
     let pdf = dir.path().join("contract.pdf");
     let mut session = Session::new();
     let bytes = session.create_blank(300.0, 400.0, 1).unwrap();

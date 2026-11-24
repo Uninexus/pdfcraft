@@ -41,7 +41,7 @@ fn harness(path: Option<String>) -> Harness<'static, PdfCraftApp> {
 
 /// The document with a signing plan of Ann (signer), Bob (viewer) beside its file.
 fn with_plan() -> (crate::support::TempDir, Harness<'static, PdfCraftApp>) {
-    let dir = crate::support::TempDir::new().unwrap();
+    let dir = crate::support::TempDir::new();
     let pdf = dir.path().join("signer.pdf");
     std::fs::write(&pdf, fixture()).unwrap();
     let mut plan = Plan::empty(1);
