@@ -135,7 +135,7 @@ impl PdfCraftApp {
     }
 
     /// Search the chosen folder for the Search panel's query, on a worker. Nothing starts while another search runs.
-    pub(crate) fn start_folder_search(&mut self) {
+    pub fn start_folder_search(&mut self) {
         if self.folder_search.running() {
             self.notify_tr("A folder search is already running");
             return;
