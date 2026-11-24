@@ -213,6 +213,16 @@ fn offered(printer: Option<&str>, printers: &[craft::print::ui::Printer]) -> boo
     printer.is_none_or(|name| printers.iter().any(|p| p.name == name))
 }
 
+/// Said when Include a summary of the comments found no comments on the printed pages.
+fn no_summary_notice() -> String {
+    tl!("The printed pages have no comments, so no summary was added.").to_string()
+}
+
+/// `text`, followed by the notice that no summary was added when Include a summary of the comments found no comments.
+fn with_summary_notice(text: String, no_summary: bool) -> String {
+    if no_summary { format!("{text} {}", no_summary_notice()) } else { text }
+}
+
 /// What a started print left to do for the dialog's held OK.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PrintStart {
@@ -535,6 +545,8 @@ impl PdfCraftApp {
             return Err(tl!("A form field has text that can't be kept yet.").to_string());
         }
         let Some((_, id)) = self.active_ids() else { return Err(tl!("There is no document to print.").to_string()) };
+        // A comment summary that can't be added is refused before the Will Print script runs.
+        self.print_draft.comment_summary_refusal()?;
         // A form's Will Print script runs first: what it changes is printed.
         if self.session.get(id).is_some_and(|d| d.allows_printing()) {
             let before = self.session.get(id).map(|d| d.edit_generation());
@@ -550,7 +562,7 @@ impl PdfCraftApp {
         // `settings` words its errors for the person already.
         let settings = self.print_draft.settings(doc.info.pages.len(), &labels)?;
         let name = doc.name.clone();
-        let bytes = self.session.print_pdf(id, &settings).map_err(|e| e.to_string())?;
+        let (bytes, no_summary) = self.print_pdf_for_draft(id, &settings)?;
         let to_printer = self.print_draft.printer.is_some();
         let sent = match self.print_draft.printer.clone() {
             #[cfg(target_arch = "wasm32")]
@@ -569,13 +581,34 @@ impl PdfCraftApp {
                 }
                 self.send_to_printer(printer, bytes, job)
             }
-            None => self.save_print_pdf(&name, bytes),
+            None => self.save_print_pdf(&name, bytes, no_summary),
         }?;
+        self.after_print(to_printer, no_summary);
+        Ok(sent)
+    }
+
+    /// The print-ready PDF for `settings`, with the summary of the comments when the draft asks for one and can have it,
+    /// and whether the summary found no comments to add.
+    fn print_pdf_for_draft(&self, id: pdfcraft_engine::DocId, settings: &print::Settings) -> Result<(Vec<u8>, bool), String> {
+        if self.print_draft.comment_summary_wanted() {
+            let (bytes, summary) =
+                self.session.print_pdf_with_comment_summary(id, settings, pdfcraft_engine::SummarySort::Page).map_err(|e| e.to_string())?;
+            Ok((bytes, summary == pdfcraft_engine::CommentSummary::NoComments))
+        } else {
+            self.session.print_pdf(id, settings).map(|bytes| (bytes, false)).map_err(|e| e.to_string())
+        }
+    }
+
+    /// What follows a print that started. The notice that no summary was added is told only when a job was handed to a
+    /// printer: Save as PDF says it when the file is written, which may be after the save picker closes.
+    fn after_print(&mut self, to_printer: bool, no_summary: bool) {
+        if no_summary && to_printer {
+            self.notify(no_summary_notice());
+        }
         // What this printer printed with is what it starts with next time (#2001).
         if to_printer {
             self.print_draft.remember_setup();
         }
-        Ok(sent)
     }
 
     /// Spool a job off the UI thread: on Windows every sheet is rendered at the printer's
@@ -687,7 +720,7 @@ impl PdfCraftApp {
     /// Print ▸ Save as PDF on the desktop: ask where, and write on a later frame. The write
     /// answers the dialog's held OK; a cancelled pick gives the OK back with the settings kept.
     #[cfg(not(target_arch = "wasm32"))]
-    fn save_print_pdf(&mut self, name: &str, bytes: Vec<u8>) -> Result<PrintStart, String> {
+    fn save_print_pdf(&mut self, name: &str, bytes: Vec<u8>, no_summary: bool) -> Result<PrintStart, String> {
         let stem = name.trim_end_matches(".pdf").trim_end_matches(".PDF");
         let request = craft::host::PickRequest::save("print").file_name(format!("{stem} (print).pdf")).filter("PDF", &["pdf"]);
         self.pick_file(request, None, move |app, _, picked| {
@@ -703,7 +736,8 @@ impl PdfCraftApp {
                     }
                     Some(path) => match app.host.files().write(&path, &bytes, craft::host::WriteIntent::SaveAs) {
                         Ok(_) => {
-                            app.notify_fmt("Saved the print-ready PDF to {path}", &[("path", &path.display().to_string())]);
+                            let saved = crate::i18n::fmt(tl!("Saved the print-ready PDF to {path}"), &[("path", &path.display().to_string())]);
+                            app.notify(with_summary_notice(saved, no_summary));
                             Ok(())
                         }
                         Err(e) => {
@@ -724,14 +758,15 @@ impl PdfCraftApp {
     /// Print ▸ Save as PDF in a browser: download it, as Save does (#170). There is no folder to
     /// choose and no file system to write to.
     #[cfg(target_arch = "wasm32")]
-    fn save_print_pdf(&mut self, name: &str, bytes: Vec<u8>) -> Result<PrintStart, String> {
+    fn save_print_pdf(&mut self, name: &str, bytes: Vec<u8>, no_summary: bool) -> Result<PrintStart, String> {
         let stem = name.trim_end_matches(".pdf").trim_end_matches(".PDF");
         let file = format!("{stem} (print).pdf");
         match self.host.files().write(std::path::Path::new(&file), &bytes, craft::host::WriteIntent::SaveAs) {
             Ok(taken_by_host) => {
                 // Only a browser download is announced here; a host page that took the bytes says its own.
                 if !taken_by_host {
-                    self.notify_fmt("Downloaded {name}", &[("name", &file)]);
+                    let downloaded = crate::i18n::fmt(tl!("Downloaded {name}"), &[("name", &file)]);
+                    self.notify(with_summary_notice(downloaded, no_summary));
                 }
                 Ok(PrintStart::Sent)
             }

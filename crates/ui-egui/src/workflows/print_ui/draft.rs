@@ -70,6 +70,15 @@ pub struct PrintDraft {
     pub cut_marks: bool,
     pub orientation: Orientation,
     pub content: Content,
+    /// Include a summary of the comments: summary pages for the comments on the printed pages
+    /// follow the sheets (off by default, and per job; not with Booklet, Poster, Label or a
+    /// selected area).
+    pub comment_summary: bool,
+    /// The open document withholds copying, which the summary needs; read when the dialog opens.
+    pub comment_summary_no_copying: bool,
+    /// The open document allows only low-resolution printing, whose pages are pictures; read when
+    /// the dialog opens.
+    pub comment_summary_low_resolution: bool,
     /// Print as image (Acrobat's Advanced Print Setup) at `dpi`.
     pub as_image: bool,
     pub dpi: f64,
@@ -149,6 +158,9 @@ impl Default for PrintDraft {
             cut_marks: true,
             orientation: Orientation::Auto,
             content: Content::DocumentAndMarkups,
+            comment_summary: false,
+            comment_summary_no_copying: false,
+            comment_summary_low_resolution: false,
             as_image: false,
             dpi: 300.0,
             paper: 0,
@@ -560,5 +572,51 @@ impl PrintDraft {
             .collect(),
             driver_settings: None,
         }
+    }
+}
+
+impl PrintDraft {
+    /// Why the summary of the comments can't join this job, when it can't: the document's
+    /// permissions, a layout whose sheets have no place for the summary pages (Booklet, Poster,
+    /// Label, a selected area), Print as image (pictures), or, in a browser, the browser's own print
+    /// dialog, which is handed the document's sheets only.
+    pub fn comment_summary_blocked(&self) -> Option<String> {
+        if self.comment_summary_no_copying {
+            return Some(tl!("The document's security settings don't allow copying, which the summary needs.").to_string());
+        }
+        if self.comment_summary_low_resolution {
+            return Some(tl!("The document only allows low-resolution printing, whose pages are pictures.").to_string());
+        }
+        if self.which == Which::Area || !matches!(self.handling, Handling::Size | Handling::Multiple) {
+            return Some(tl!("Not available with Booklet, Poster, Label or a selected area.").to_string());
+        }
+        if self.as_image {
+            return Some(tl!("Not available with Print as image, which prints pictures.").to_string());
+        }
+        #[cfg(target_arch = "wasm32")]
+        if self.printer.as_deref() == Some(crate::web_print::BROWSER_PRINTER) {
+            return Some(tl!("Not available when printing from the browser; use Save as PDF.").to_string());
+        }
+        None
+    }
+
+    /// The reason Print refuses this draft when it asks for a summary that can't join the job.
+    pub fn comment_summary_refusal(&self) -> Result<(), String> {
+        match self.comment_summary_blocked() {
+            Some(reason) if self.comment_summary => Err(reason),
+            _ => Ok(()),
+        }
+    }
+
+    /// Unticks the summary when it can't join the job, so a greyed-out ticked box never applies.
+    pub fn drop_blocked_comment_summary(&mut self) {
+        if self.comment_summary_blocked().is_some() {
+            self.comment_summary = false;
+        }
+    }
+
+    /// Whether the job asks for a summary and none of [`Self::comment_summary_blocked`]'s reasons applies.
+    pub fn comment_summary_wanted(&self) -> bool {
+        self.comment_summary && self.comment_summary_blocked().is_none()
     }
 }

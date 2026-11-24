@@ -82,6 +82,7 @@ impl PdfCraftApp {
         // grayscale, collate, sizing, Comments & forms, a booklet's binding) carry over, and are remembered across
         // restarts (#2001).
         let fresh = PrintDraft::default();
+        let (no_copying, low_resolution) = self.summary_permissions(id);
         self.print_draft = PrintDraft {
             copies: fresh.copies,
             range: fresh.range,
@@ -112,6 +113,11 @@ impl PdfCraftApp {
             which,
             area: None,
             custom_new: None,
+            // Per job, like copies and the layout: a summary is asked for each time, never carried over from the last
+            // job or another document, and the document decides whether it can take one.
+            comment_summary: false,
+            comment_summary_no_copying: no_copying,
+            comment_summary_low_resolution: low_resolution,
             ..keep
         };
         if changed {
@@ -141,6 +147,13 @@ impl PdfCraftApp {
         dialog.set_printer_search(true);
         // PLAN: assumed `dialogs::host::open<D: StackDialog>(app: &mut PdfCraftApp, dialog: D)` (pdf-dialogs-w4).
         crate::dialogs::host::open(self, dialog);
+    }
+
+    /// What the document's permissions stop Include a summary of the comments from: it withholds copying, or allows only
+    /// low-resolution printing.
+    fn summary_permissions(&self, id: pdfcraft_engine::DocId) -> (bool, bool) {
+        let Some(doc) = self.session.get(id) else { return (false, false) };
+        (!doc.allows_copying(), doc.permissions().is_some_and(|p| !p.print_high_quality()))
     }
 
     /// The printers the spooler lists right now, recorded as the last list.
@@ -229,6 +242,7 @@ impl PdfCraftApp {
             d.printer_picked = true;
         }
         body::draft_from_fields(d, &fields, &edited);
+        d.drop_blocked_comment_summary();
         let printer_changed = chosen.is_some() && d.printer != before;
         if printer_changed {
             d.show_driver_options = false;

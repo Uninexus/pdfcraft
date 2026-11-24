@@ -1740,3 +1740,111 @@ fn each_printer_keeps_what_it_last_printed_with_across_a_restart() {
     gone.settle();
     assert_eq!(setup(&gone), office);
 }
+
+/// A comment on the first page, as the Comments panel adds one.
+fn add_note(h: &mut Rig, text: &str) {
+    let shape = pdfcraft_engine::Shape::Note { at: [100.0, 100.0], icon: pdfcraft_engine::NoteIcon::Comment };
+    let ctx = h.ctx.clone();
+    assert!(h.state_mut().apply_edit(
+        &ctx,
+        pdfcraft_engine::Edit::AddAnnotation(pdfcraft_engine::NewAnnotation {
+            page: 0,
+            style: pdfcraft_engine::Style::default_for(&shape),
+            shape,
+            contents: text.into(),
+            author: "Tester".into(),
+        })
+    ));
+}
+
+/// "Include a summary of the comments" is off until asked for. Ticked, a comment on a printed
+/// page adds summary pages after the sheets; without comments the print is as before and the
+/// notice says no summary was added, once the file is written.
+#[test]
+fn comment_summary_adds_pages_after_the_sheets_and_says_when_there_is_nothing_to_add() {
+    let mut h = harness_saving(None, 2);
+    add_note(&mut h, "Summarise me please");
+    h.open();
+    h.settle();
+    assert!(!h.state().print_draft.comment_summary, "off by default");
+    h.pick(None);
+    h.ok();
+    let plain = pdfcraft_cos::Document::open(h.saved(0)).unwrap();
+    assert_eq!(pdfcraft_model::pages(&plain).len(), 1, "off: the document's sheet alone");
+
+    h.open();
+    h.settle();
+    h.set("comment_summary", json!(true));
+    assert!(h.state().print_draft.comment_summary);
+    h.pick(None);
+    h.ok();
+    let summed = pdfcraft_cos::Document::open(h.saved(1)).unwrap();
+    assert!(pdfcraft_model::pages(&summed).len() >= 2, "the summary's pages follow the sheet");
+
+    // No comments on the printed page: nothing added, and the notice says so after the write.
+    let mut h = harness();
+    h.open();
+    h.settle();
+    h.set("comment_summary", json!(true));
+    h.pick(None);
+    h.ok();
+    let none = pdfcraft_cos::Document::open(h.saved(0)).unwrap();
+    assert_eq!(pdfcraft_model::pages(&none).len(), 1);
+    h.run_steps(3);
+    let notice = crate::support::shown_notice(&h).unwrap_or_default();
+    assert!(notice.contains("The printed pages have no comments, so no summary was added."), "{notice:?}");
+}
+
+/// The choice greys out, unticked and with its reason, where the summary can't join the job
+/// (Booklet here); it is per job, so the next time the dialog opens it is off again.
+#[test]
+fn comment_summary_is_unavailable_in_a_booklet_and_starts_off_each_job() {
+    let mut h = harness();
+    h.open();
+    h.settle();
+    h.set("comment_summary", json!(true));
+    assert!(h.state().print_draft.comment_summary);
+    assert!(!h.has_note("note.comment_summary"), "nothing to explain while it can join the job");
+    h.set("handling", json!("booklet"));
+    assert!(!h.state().print_draft.comment_summary, "a greyed-out ticked box can't apply");
+    assert!(h.state().print_draft.comment_summary_blocked().is_some_and(|r| r.contains("Booklet")));
+    assert!(h.has_note("note.comment_summary"), "the reason is shown");
+    assert!(
+        h.query_by(|n| n.label().as_deref() == Some("Include a summary of the comments") && n.is_disabled()).is_some(),
+        "no place for it in a booklet"
+    );
+    // Back to a layout it fits, ticked again, then the dialog is opened afresh.
+    h.set("handling", json!("size"));
+    h.set("comment_summary", json!(true));
+    assert!(h.state().print_draft.comment_summary);
+    h.reopen();
+    assert!(!h.state().print_draft.comment_summary, "a summary is asked for per job");
+}
+
+/// A document that withholds copying can't take the summary: the choice says why, and Print refuses
+/// a draft that asks for one before running anything.
+#[test]
+fn comment_summary_is_unavailable_for_a_document_that_withholds_copying() {
+    let mut cos = pdfcraft_cos::Document::open(Arc::new(include_bytes!("../data/form.pdf").to_vec())).unwrap();
+    cos.set_encryption(&pdfcraft_cos::NewEncryption {
+        algorithm: pdfcraft_cos::Algorithm::Aes256,
+        user_password: "",
+        owner_password: "boss",
+        permissions: -1 ^ 0b1_0000,
+        encrypt_metadata: true,
+        seed: [2; 32],
+    })
+    .unwrap();
+    let bytes = pdfcraft_cos::write_full(&cos, &Default::default()).unwrap();
+    let mut h = rig_on(saves(1), move |app| {
+        app.open_bytes(&egui::Context::default(), "locked.pdf", None, bytes).unwrap();
+    });
+    h.open();
+    h.settle();
+    assert!(h.state().print_draft.comment_summary_blocked().is_some_and(|r| r.contains("copying")));
+    assert!(h.has_note("note.comment_summary"));
+    h.state_mut().print_draft.comment_summary = true;
+    let ctx = h.ctx.clone();
+    let refused = h.state_mut().print_now(&ctx).expect_err("refused up front");
+    assert!(refused.contains("copying"), "{refused:?}");
+}

@@ -167,9 +167,28 @@ pub(super) fn build(d: &PrintDraft, sizes: &[(f64, f64)], units: Unit, has_area:
     }
     sections.push(pages_section(d, sizes.len(), units, has_area));
     sections.push(sizing_section(d));
-    sections.push(PrintSection::new(lbl(tl!("Comments & Forms")), vec![content_row(d)]));
+    sections.push(PrintSection::new(lbl(tl!("Comments & Forms")), comments_rows(d)));
     sections.push(advanced_section(d));
     sections
+}
+
+/// The Comments & Forms rows: what the sheets show, and whether a summary of the comments follows them. A summary that
+/// cannot join this job is shown off, with the reason as the row's tooltip and as a note.
+fn comments_rows(d: &PrintDraft) -> Vec<Param> {
+    let mut rows = vec![content_row(d)];
+    let mut summary = check("comment_summary", lbl(tl!("Include a summary of the comments")), d.comment_summary);
+    match d.comment_summary_blocked() {
+        Some(reason) => {
+            summary = summary.disabled().tooltip(lbl(&reason));
+            rows.push(summary);
+            rows.push(note("note.comment_summary", reason));
+        }
+        None => {
+            summary = summary.tooltip(lbl(tl!("Adds pages listing the comments on the printed pages after the document's pages.")));
+            rows.push(summary);
+        }
+    }
+    rows
 }
 
 fn content_row(d: &PrintDraft) -> Param {
@@ -464,6 +483,7 @@ pub(super) fn fields_from_draft(d: &PrintDraft) -> DialogFields {
     f.set("label_flip", d.label_flip);
     f.set("orientation", id_of(&ORIENTATION, d.orientation));
     f.set("content", id_of(&CONTENT, d.content));
+    f.set("comment_summary", d.comment_summary);
     f.set("as_image", d.as_image);
     f.set("dpi", (d.dpi.round() as u32).to_string());
     f.set("paper", d.paper_name());
@@ -626,6 +646,11 @@ pub(super) fn draft_from_fields(d: &mut PrintDraft, f: &DialogFields, edited: &[
         && let Some(v) = text("content").and_then(|t| value_of(&CONTENT, t))
     {
         d.content = v;
+    }
+    if on("comment_summary")
+        && let Some(v) = f.bool("comment_summary")
+    {
+        d.comment_summary = v;
     }
     if on("as_image")
         && let Some(v) = f.bool("as_image")
