@@ -2062,3 +2062,15 @@ fn shown_guides_are_drawn_over_the_page_at_their_position_and_hidden_ones_are_no
     let cleared = guide_lines(&h);
     assert!(!cleared.iter().any(is_vertical) && !cleared.iter().any(is_horizontal), "cleared guides are gone from the page: {cleared:?}");
 }
+
+#[test]
+fn compare_ignore_options_are_set_and_reported_through_the_control_channel() {
+    let (mut h, c) = harness();
+    assert_eq!(ok(&mut h, &c, "ui.state", json!({}))["compare_ignore"], json!({"case": false, "punctuation": false}));
+    ok(&mut h, &c, "ui.set", json!({"key":"compare-ignore-punctuation","value":true}));
+    assert_eq!(ok(&mut h, &c, "ui.state", json!({}))["compare_ignore"], json!({"case": false, "punctuation": true}));
+    for invalid in [json!(1), json!(null), json!([]), json!("nonsense")] {
+        assert!(call(&mut h, &c, "ui.set", json!({"key":"compare-ignore-case","value":invalid})).is_err(), "{invalid}");
+    }
+    assert_eq!(ok(&mut h, &c, "ui.state", json!({}))["compare_ignore"], json!({"case": false, "punctuation": true}));
+}

@@ -519,6 +519,52 @@ fn compare_dialog_ignore_checkboxes_leave_out_case_and_punctuation_changes() {
     assert!(text.contains("five") && !text.contains("Returns,"), "{text}");
 }
 
+/// The Ignore options are set with `ui.set`, refused when they are not true or false, and kept with
+/// the other settings, each on its own.
+#[test]
+fn the_compare_ignore_options_are_set_refused_and_remembered() {
+    let ctx = egui::Context::default();
+    let mut app = crate::control::new_app();
+    assert!(!app.compare_ignore_case && !app.compare_ignore_punctuation, "both start off");
+    app.set_option(&ctx, "compare-ignore-case", "true").unwrap();
+    let mut next = crate::control::new_app();
+    next.apply_settings(&app.settings_snapshot());
+    assert!(next.compare_ignore_case && !next.compare_ignore_punctuation, "only the one set is remembered");
+    app.set_option(&ctx, "compare-ignore-punctuation", "true").unwrap();
+    app.set_option(&ctx, "compare-ignore-case", "false").unwrap();
+    next.apply_settings(&app.settings_snapshot());
+    assert!(!next.compare_ignore_case && next.compare_ignore_punctuation, "and turning one off is remembered");
+    for (key, bad) in [("compare-ignore-case", "yes"), ("compare-ignore-case", ""), ("compare-ignore-punctuation", "1")] {
+        assert!(app.set_option(&ctx, key, bad).is_err(), "{key}={bad}");
+    }
+    assert!(!app.compare_ignore_case && app.compare_ignore_punctuation, "a refused value changes nothing");
+}
+
+/// A saved value that is missing or not a boolean keeps the current choice, whichever form the
+/// settings came in (the fork's `compare_ignore` object included).
+#[test]
+fn corrupt_saved_compare_ignore_options_keep_the_current_choice() {
+    let mut app = crate::control::new_app();
+    app.compare_ignore_case = true;
+    for json in [
+        "",
+        "not json",
+        "[]",
+        r#"{"compare_ignore": null}"#,
+        r#"{"compare_ignore": 7}"#,
+        r#"{"compare_ignore": "case"}"#,
+        r#"{"compare_ignore": [true, true]}"#,
+        r#"{"compare_ignore": {"case": "false", "punctuation": 1}}"#,
+        r#"{"compare_ignore": {"case": null}}"#,
+        r#"{"compare_ignore_case": "no", "compare_ignore_punctuation": 3}"#,
+    ] {
+        app.apply_settings(&pdfcraft_ui_egui::settings::import_json(json).0);
+        assert!(app.compare_ignore_case && !app.compare_ignore_punctuation, "{json:?}");
+    }
+    app.apply_settings(&pdfcraft_ui_egui::settings::import_json(r#"{"compare_ignore": {"punctuation": true}}"#).0);
+    assert!(app.compare_ignore_case && app.compare_ignore_punctuation, "a missing key leaves the other alone");
+}
+
 #[test]
 fn pdfa_dialog_verifies_and_converts() {
     let doc = Session::new().create_from_text("t", "Keep forever").unwrap().to_vec();

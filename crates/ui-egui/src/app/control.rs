@@ -57,6 +57,13 @@ impl PdfCraftApp {
             ("single_key_accelerators", _) => {
                 self.single_key_accelerators = value.parse::<bool>().map_err(|_| "single_key_accelerators must be true or false")?;
             }
+            // The Compare dialog's Ignore checkboxes (saved with the other settings).
+            ("compare-ignore-case", _) => {
+                self.compare_ignore_case = value.parse::<bool>().map_err(|_| "compare-ignore-case must be true or false")?;
+            }
+            ("compare-ignore-punctuation", _) => {
+                self.compare_ignore_punctuation = value.parse::<bool>().map_err(|_| "compare-ignore-punctuation must be true or false")?;
+            }
             ("animation_effects", _) => {
                 // PLAN: assumed `crate::settings::motion_from_name(&str) -> Option<MotionChoice>` and `set_motion(&mut self, MotionChoice)`, which writes the field and the store (pdf-shell-w9).
                 // The control channel and the command line take the names in any case, as before the port.

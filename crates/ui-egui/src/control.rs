@@ -39,6 +39,9 @@
 //!   `guides=on|off` shows or hides the active tab's ruler guides (View > Guides > Show Guides,
 //!   `view.show_guides`); `ui.state.active.show_guides` and `.guides` (how many the document has) report it.
 //!   `comment-tool-pinned=true|false` remembers the annotation quick bar's pin across restarts.
+//!   `compare-ignore-case=true|false` and `compare-ignore-punctuation=true|false` set the Compare
+//!   dialog's Ignore checkboxes, which persist; `ui.state.compare_ignore` reports `case` and
+//!   `punctuation`.
 //!   `folder-collapsed=<folder>=on|off` folds a pinned folder on Home down to its heading or
 //!   opens it again; `ui.state.pinned_folders` lists each pinned folder and whether it is.
 //! - `ui.open {path}`: open a file. A file whose tab is already open focuses it

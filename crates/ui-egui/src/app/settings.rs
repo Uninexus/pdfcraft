@@ -104,6 +104,9 @@ pub struct Behavior {
     pub fill_text_border_color: Option<[f64; 3]>,
     /// JSON text: the Redact defaults.
     pub redact_prefs: Option<String>,
+    /// The Compare Files dialog's Ignore checkboxes.
+    pub compare_ignore_case: Option<bool>,
+    pub compare_ignore_punctuation: Option<bool>,
 }
 
 impl Behavior {
@@ -577,6 +580,8 @@ pub fn import_json(text: &str) -> (PdfCraftSettings, Vec<SectionError>) {
     };
 
     let behavior = {
+        // The fork's releases kept the Compare Ignore checkboxes as `compare_ignore: { case, punctuation }`.
+        let ignore = |key: &str| root.get("compare_ignore").and_then(|v| v.get(key)).and_then(Value::as_bool);
         let mut r = Reader::new(&root, Behavior::KEY, &mut errors);
         Behavior {
             default_page_gaps: r.bool("default_page_gaps"),
@@ -599,6 +604,8 @@ pub fn import_json(text: &str) -> (PdfCraftSettings, Vec<SectionError>) {
             fill_text_border_shape: r.string("fill_text_border_shape"),
             fill_text_border_color: r.typed("fill_text_border_color"),
             redact_prefs: r.text("redact_prefs"),
+            compare_ignore_case: r.bool("compare_ignore_case").or_else(|| ignore("case")),
+            compare_ignore_punctuation: r.bool("compare_ignore_punctuation").or_else(|| ignore("punctuation")),
         }
     };
 

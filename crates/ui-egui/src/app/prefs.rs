@@ -197,6 +197,8 @@ impl PdfCraftApp {
             // Absent is "the text's colour": TOML has no null.
             fill_text_border_color: self.fill_text_default.color,
             redact_prefs: json_text(&self.redact_defaults.to_json()),
+            compare_ignore_case: Some(self.compare_ignore_case),
+            compare_ignore_punctuation: Some(self.compare_ignore_punctuation),
         };
         let view = settings::View {
             reading_colors: Some(self.reading_colors),
@@ -527,6 +529,14 @@ impl PdfCraftApp {
         self.fill_text_border = self.fill_text_default.width;
         self.fill_text_border_color = self.fill_text_default.color;
         self.fill_text_border_shape = self.fill_text_default.shape;
+        // The Compare dialog's Ignore checkboxes; each one is read alone, so a missing value keeps
+        // the current choice.
+        if let Some(on) = b.compare_ignore_case {
+            self.compare_ignore_case = on;
+        }
+        if let Some(on) = b.compare_ignore_punctuation {
+            self.compare_ignore_punctuation = on;
+        }
         if let Some(prefs) = parsed(&b.redact_prefs).and_then(|v| RedactPrefs::from_json(&v)) {
             self.redact_prefs = prefs.clone();
             self.redact_defaults = prefs;
