@@ -3,14 +3,13 @@
 //! offers a report or the differences as comments.
 
 use craft::behavior::{IconId, Selection, keyed};
-use craft::pages::ui::{Lead, PageRangeField, SyncedViews, SyncedViewsState};
-use craft::pages::{format_pages, parse_pages};
+use craft::pages::ui::{Lead, SyncedViews, SyncedViewsState};
 use craft::theme::variant::Tone;
 use craft::ui::buttons::Button;
 use craft::ui::choice::{Checkbox, Segmented};
 use craft::ui::contract::{Bind, Entry, Pad, Props as _, SelectMode, Show as _, ShowCollection as _, ShowContainer as _};
 use craft::ui::dialog::{DialogResult, dialog_id};
-use craft::ui::display::Text;
+use craft::ui::display::{Shade, Text};
 use craft::ui::layout_components::{Row, Stack};
 use craft::ui::list::{HueTarget, List, ListRow};
 use craft::ui::notices::Notice;
@@ -19,7 +18,7 @@ use craft::ui::primitives::IconSpec;
 use craft::ui::style::DataColor;
 use egui::Color32;
 use pdfcraft_engine::DocId;
-use pdfcraft_engine::compare::{Comparison, Kind};
+use pdfcraft_engine::compare::{Comparison, Kind, PageRange};
 
 use crate::{PdfCraftApp, RightPanel};
 
@@ -31,10 +30,14 @@ pub struct CompareState {
     pub old: DocId,
     pub new: DocId,
     pub result: Comparison,
-    /// The pages of the new file this comparison covers (0-based; empty: every page).
-    pub pages: Vec<usize>,
-    /// Regions that look different (page, user-space box), page n against page n.
-    pub visual: Vec<(usize, [f64; 4])>,
+    /// The pages of the old file this comparison covers (1-based, inclusive; `None`: every page).
+    pub old_range: Option<PageRange>,
+    /// The pages of the new file this comparison covers (`None`: every page).
+    pub new_range: Option<PageRange>,
+    /// Regions that look different (old page, new page, user-space box; pages 0-based and each
+    /// document's own). Without ranges page n is against page n; with ranges the pages of the two
+    /// ranges are paired by position.
+    pub visual: Vec<(usize, usize, [f64; 4])>,
     pub selected: Option<usize>,
     /// Side by side: the old file on the left, the new on the right, scrolled and zoomed
     /// together.
@@ -71,44 +74,56 @@ fn option_key(id: DocId) -> String {
 }
 
 /// Opens the Compare Files dialog: the older version among the other open documents, the active file
-/// as the new one, and the pages to compare.
+/// as the new one, and a range of pages for each file.
 pub(crate) fn open_compare_dialog(app: &mut PdfCraftApp, ctx: &egui::Context) {
-    let Some((active_i, new)) = app.active_ids() else { return };
-    let others: Vec<(String, String)> =
-        app.views.iter().filter(|v| v.id != new).filter_map(|v| app.session.get(v.id).map(|d| (option_key(d.id), d.name.clone()))).collect();
-    let old = app.compare_old.map(option_key).filter(|key| others.iter().any(|(k, _)| k == key)).or_else(|| others.first().map(|(k, _)| k.clone()));
+    let Some((_, new)) = app.active_ids() else { return };
+    let others: Vec<(DocId, String, usize)> =
+        app.views.iter().filter(|v| v.id != new).filter_map(|v| app.session.get(v.id).map(|d| (d.id, d.name.clone(), d.info.pages.len()))).collect();
+    let old = app.compare_old.filter(|o| others.iter().any(|(id, _, _)| id == o)).or_else(|| others.first().map(|(id, _, _)| *id));
     let new_name = app.session.get(new).map(|d| d.name.clone()).unwrap_or_default();
-    let count = app.views.get(active_i).map_or(0, |v| v.page_count());
-    let fields = DialogFields::from_pairs([("old", old.unwrap_or_default()), ("pages", app.compare_pages.clone())]);
+    let new_count = app.session.get(new).map_or(0, |d| d.info.pages.len());
+    // The Pages fields belong to this pair of files: another pair starts empty.
+    let (old_pages, pages) = if app.compare_fields_for == Some((new, old)) {
+        (app.compare_old_pages.clone(), app.compare_pages.clone())
+    } else {
+        (String::new(), String::new())
+    };
+    let others: Vec<(String, String, usize)> = others.into_iter().map(|(id, name, count)| (option_key(id), name, count)).collect();
+    let fields = DialogFields::from_pairs([("old", old.map(option_key).unwrap_or_default()), ("old_pages", old_pages), ("pages", pages)]);
     // Passed inline: a closure made apart from the call gets one lifetime for its argument and result.
     let dialog = HostedParamDialog::new(ctx, DIALOG_KEY, fields, move |fields: &mut DialogFields| {
         let chosen = fields.text("old").filter(|o| !o.is_empty()).map(str::to_owned);
-        let pages_ok = parse_pages(fields.text("pages").unwrap_or_default(), count).is_ok();
-        let options = others.iter().map(|(key, name)| (key.clone(), name.clone().into())).collect();
-        let pages = Param::custom("pages", tl!("Pages").to_string(), move |ui, fields, _| {
-            let mut shown = parse_pages(fields.text("pages").unwrap_or_default(), count).unwrap_or_default();
-            if shown.is_empty() {
-                // An empty entry compares every page, so the field shows them all (1-3).
-                shown = (0..count).collect();
-            }
-            let out = PageRangeField::new(tl!("Pages").to_string(), &shown, count, 0).show(ui);
-            if let Some(picked) = out.picked {
-                fields.set("pages", format_pages(&picked));
-            }
-            out.response
-        })
-        .opens_with(String::new());
+        let old_count = chosen.as_ref().and_then(|c| others.iter().find(|(key, _, _)| key == c)).map_or(0, |(_, _, count)| *count);
+        let (_, errors) = field_ranges(fields.text("old_pages").unwrap_or_default(), old_count, fields.text("pages").unwrap_or_default(), new_count);
+        let problems = range_messages(errors);
+        let options = others.iter().map(|(key, name, _)| (key.clone(), name.clone().into())).collect();
         let params = vec![
             Param::new("old", tl!("Old file:").to_string(), ParamKind::choice(options, chosen.clone())),
+            Param::new("old_pages", tl!("Old file pages:").to_string(), ParamKind::text(String::new()))
+                .hint(whole_document_hint(old_count, tl!("Choose the old file first"))),
             Param::read_only_text("new", tl!("New file:").to_string(), new_name.clone()),
-            pages,
+            Param::new("pages", tl!("New file pages:").to_string(), ParamKind::text(String::new())).hint(whole_document_hint(new_count, "")),
         ];
-        let reason = if chosen.is_none() { tl!("Open the older version first") } else { tl!("Enter valid page numbers") };
+        let reason = match problems.first() {
+            Some(problem) => problem.clone(),
+            None => tl!("Open the older version first").to_string(),
+        };
         ParamDialog::new(DIALOG_KEY, tl!("Compare Files").to_string(), params)
+            .values(Bind::bound(fields))
             .ok_label(tl!("Compare").into())
-            .ok_enabled(chosen.is_some() && pages_ok)
+            .ok_enabled(chosen.is_some() && problems.is_empty())
             .ok_reason(reason.into())
             .footer_note(tl!("Text is compared word by word; the differences are shown on the new file.").to_string())
+            .below(move |ui, _| {
+                for problem in &problems {
+                    Text::new(problem.clone()).tone(Tone::Bad).show(ui);
+                }
+                Text::new(tl!(
+                    "Leave both fields empty to compare the whole files. Give one range for each file, such as 2-5 or 3; the pages of the two ranges are compared with each other. With a range for one file only, the same pages of the other file are used."
+                ))
+                .shade(Shade::Muted)
+                .show(ui);
+            })
     });
     crate::dialogs::host::open(app, dialog);
 }
@@ -119,7 +134,9 @@ pub(crate) fn pass(app: &mut PdfCraftApp, ctx: &egui::Context) {
     let chosen = result.fields.text("old").unwrap_or_default();
     let Some(old) = app.views.iter().map(|v| v.id).find(|id| option_key(*id) == chosen) else { return };
     app.compare_old = Some(old);
+    app.compare_old_pages = result.fields.text("old_pages").unwrap_or_default().to_owned();
     app.compare_pages = result.fields.text("pages").unwrap_or_default().to_owned();
+    app.compare_fields_for = app.active_ids().map(|(_, new)| (new, Some(old)));
     app.run_compare(ctx);
 }
 
@@ -163,6 +180,19 @@ pub(crate) fn panel(ui: &mut egui::Ui, state: &Option<CompareState>, id: DocId) 
             count_row(ui, colour(k), c.count(k), &kind_label(k));
         }
         count_row(ui, VISUAL, s.visual.len(), tl!("Visual"));
+        let ranged = s.old_range.is_some() || s.new_range.is_some();
+        if ranged {
+            let show = |range: Option<PageRange>| match range {
+                None => tl!("all").to_string(),
+                Some(r) if r.from == r.to => r.from.to_string(),
+                Some(r) => format!("{}-{}", r.from, r.to),
+            };
+            let text = crate::i18n::fmt(
+                tl!("Compared pages: old file {old}, new file {new}"),
+                &[("old", show(s.old_range).as_str()), ("new", show(s.new_range).as_str())],
+            );
+            Text::new(text).shade(Shade::Muted).show(ui);
+        }
         Row::new().show(ui, |ui, _| {
             Text::new(tl!("Show:").to_string()).show(ui);
             let (mut text, mut visual) = (s.show_text, s.show_visual);
@@ -197,8 +227,17 @@ pub(crate) fn panel(ui: &mut egui::Ui, state: &Option<CompareState>, id: DocId) 
             &rows,
             &mut |key, item| {
                 let Some(ch) = c.changes.get(*key) else { return ListRow::new(String::new()) };
-                let detail =
-                    crate::i18n::fmt(tl!("{kind} · page {p}"), &[("kind", kind_label(ch.kind).as_str()), ("p", &(ch.new.page + 1).to_string())]);
+                let kind = kind_label(ch.kind);
+                let page = (ch.new.page + 1).to_string();
+                // With different ranges the two files' pages differ: name both.
+                let detail = if ranged && ch.old.page != ch.new.page {
+                    crate::i18n::fmt(
+                        tl!("{kind} · page {p} (old file page {o})"),
+                        &[("kind", kind.as_str()), ("p", page.as_str()), ("o", (ch.old.page + 1).to_string().as_str())],
+                    )
+                } else {
+                    crate::i18n::fmt(tl!("{kind} · page {p}"), &[("kind", kind.as_str()), ("p", page.as_str())])
+                };
                 ListRow::new(change_text(ch))
                     .detail(detail)
                     .hue(DataColor::new(colour(ch.kind)), HueTarget::Icon)
@@ -211,6 +250,110 @@ pub(crate) fn panel(ui: &mut egui::Ui, state: &Option<CompareState>, id: DocId) 
         }
     });
     action
+}
+
+/// Why a Pages field of the Compare Files dialog can't be used.
+#[derive(Debug, PartialEq, Eq)]
+pub enum RangeError {
+    /// Not a page or a range of two pages.
+    NotARange,
+    /// A page below 1 or past the last one.
+    Outside,
+}
+
+impl RangeError {
+    /// The message, with `{file}` and `{n}` (the file's page count) still to fill in.
+    fn message(&self) -> String {
+        match self {
+            RangeError::NotARange => tl!("{file}: enter one page or one range, such as 3 or 2-5").to_string(),
+            RangeError::Outside => tl!("{file}: pages must be within 1-{n}").to_string(),
+        }
+    }
+}
+
+/// The hint of an empty Pages field: the whole file (`no_file` while there is no file yet).
+fn whole_document_hint(count: usize, no_file: &str) -> String {
+    if count == 0 { no_file.to_string() } else { format!("1-{count}") }
+}
+
+/// A Pages field of the Compare Files dialog: empty for the whole file (`None`), one page ("3")
+/// or one range ("2-5", the ends in either order) of a file of `count` pages. Nothing is clamped.
+pub fn parse_range(text: &str, count: usize) -> Result<Option<PageRange>, RangeError> {
+    let text = text.trim();
+    if text.is_empty() {
+        return Ok(None);
+    }
+    let number = |t: &str| {
+        let t = t.trim();
+        if t.is_empty() || !t.bytes().all(|b| b.is_ascii_digit()) {
+            return Err(RangeError::NotARange);
+        }
+        // Digits too long for a number are as far outside the file as any other.
+        match t.parse::<usize>() {
+            Ok(n) if (1..=count).contains(&n) => Ok(n),
+            _ => Err(RangeError::Outside),
+        }
+    };
+    let (a, b) = match text.split_once(['-', '\u{2013}']) {
+        Some((a, b)) => (number(a)?, number(b)?),
+        None => {
+            let n = number(text)?;
+            (n, n)
+        }
+    };
+    Ok(Some(PageRange { from: a.min(b), to: a.max(b) }))
+}
+
+/// What is wrong with a Pages field, and the page count of its file.
+type FieldError = Option<(RangeError, usize)>;
+
+/// Both Pages fields of files of `old_n` and `new_n` pages as ranges of the old and the new file,
+/// and what is wrong with each field. With a range for one file only, the other file uses the same
+/// pages, and is at fault if it doesn't have them. While there is no old file (`old_n` is 0) its
+/// field isn't checked.
+fn field_ranges(old_text: &str, old_n: usize, new_text: &str, new_n: usize) -> ((Option<PageRange>, Option<PageRange>), [FieldError; 2]) {
+    let old = if old_n == 0 { Ok(None) } else { parse_range(old_text, old_n) };
+    let new = parse_range(new_text, new_n);
+    let mut errors = [None, None];
+    let (mut old_range, mut new_range) = (old.as_ref().ok().copied().flatten(), new.as_ref().ok().copied().flatten());
+    if let Err(e) = old {
+        errors[0] = Some((e, old_n));
+    }
+    if let Err(e) = new {
+        errors[1] = Some((e, new_n));
+    }
+    if errors.iter().all(Option::is_none) && old_n > 0 {
+        match (old_range, new_range) {
+            (Some(r), None) if r.to > new_n => errors[1] = Some((RangeError::Outside, new_n)),
+            (None, Some(r)) if r.to > old_n => errors[0] = Some((RangeError::Outside, old_n)),
+            (Some(r), None) => new_range = Some(r),
+            (None, Some(r)) => old_range = Some(r),
+            _ => {}
+        }
+    }
+    ((old_range, new_range), errors)
+}
+
+/// The messages for what is wrong with the two Pages fields, each naming its file and page count.
+fn range_messages(errors: [FieldError; 2]) -> Vec<String> {
+    [tl!("Old file"), tl!("New file")]
+        .into_iter()
+        .zip(errors)
+        .filter_map(|(file, error)| {
+            let (e, count) = error?;
+            Some(crate::i18n::fmt(&e.message(), &[("file", file), ("n", count.to_string().as_str())]))
+        })
+        .collect()
+}
+
+/// Both Pages fields as ranges of the old and the new file, or the first message to show.
+fn ranges(app: &PdfCraftApp, old: DocId, new: DocId) -> Result<(Option<PageRange>, Option<PageRange>), String> {
+    let count = |id| app.session.get(id).map_or(0, |d| d.info.pages.len());
+    let (ranges, errors) = field_ranges(&app.compare_old_pages, count(old), &app.compare_pages, count(new));
+    match range_messages(errors).into_iter().next() {
+        Some(message) => Err(message),
+        None => Ok(ranges),
+    }
 }
 
 impl PdfCraftApp {
@@ -229,17 +372,14 @@ impl PdfCraftApp {
     pub fn run_compare(&mut self, ctx: &egui::Context) {
         let Some((i, new)) = self.active_ids() else { return };
         let Some(old) = self.compare_old else { return };
-        let count = self.views.get(i).map_or(0, |v| v.page_count());
-        let pages = match parse_pages(&self.compare_pages, count) {
-            Ok(pages) => pages,
-            Err(e) => return self.notify_error(e.to_string()),
+        let (old_range, new_range) = match ranges(self, old, new) {
+            Ok(ranges) => ranges,
+            Err(message) => return self.notify_error(message),
         };
-        match self.session.compare_pages(old, new, &pages) {
+        match self.session.compare_in(old, new, old_range, new_range) {
             Ok(result) => {
-                let mut visual = self.session.compare_visual(old, new, 72.0).unwrap_or_default();
-                if !pages.is_empty() {
-                    visual.retain(|(page, _)| pages.contains(page));
-                }
+                // The pages of the two ranges are paired by position, as `doc_compare` does.
+                let visual = self.session.compare_visual_in(old, new, 72.0, old_range, new_range).unwrap_or_default();
                 let n = result.changes.len();
                 // Side by side when the old version is open in a tab and the window has the room.
                 let side_by_side = self.views.iter().any(|v| v.id == old) && ctx.content_rect().width() >= 1000.0;
@@ -247,7 +387,8 @@ impl PdfCraftApp {
                     old,
                     new,
                     result,
-                    pages,
+                    old_range,
+                    new_range,
                     visual,
                     selected: None,
                     side_by_side,
@@ -271,7 +412,7 @@ impl PdfCraftApp {
 
     pub(crate) fn compare_action(&mut self, ctx: &egui::Context, index: usize, a: PanelAction) {
         let Some(s) = self.compare.as_mut() else { return };
-        let (old, new, pages) = (s.old, s.new, s.pages.clone());
+        let (old, new, old_range, new_range) = (s.old, s.new, s.old_range, s.new_range);
         match a {
             PanelAction::Select(i) => {
                 s.selected = Some(i);
@@ -297,7 +438,7 @@ impl PdfCraftApp {
                 s.show_visual = visual;
                 self.shade_compare(index);
             }
-            PanelAction::Mark => match self.session.mark_differences_of(old, new, &pages) {
+            PanelAction::Mark => match self.session.mark_differences_in(old, new, old_range, new_range) {
                 Ok(n) => {
                     if let Some(info) = self.session.get(new).map(|d| d.info.clone()) {
                         self.views[index].document_changed(ctx, &info);
@@ -310,7 +451,7 @@ impl PdfCraftApp {
                 }
                 Err(e) => self.notify_error(e),
             },
-            PanelAction::Report => match self.session.compare_report_of(old, new, &pages) {
+            PanelAction::Report => match self.session.compare_report_in(old, new, old_range, new_range) {
                 Ok(bytes) => {
                     if let Err(e) = self.open_bytes(ctx, "Compare Report.pdf", None, bytes.to_vec()) {
                         self.notify_error(e);
@@ -360,11 +501,13 @@ fn shading(s: &CompareState, old: bool) -> Vec<(usize, [f32; 4], Color32)> {
         text.extend(side.rects.iter().map(|r| (side.page, r.map(|v| v as f32), colour(ch.kind))));
     }
     let mut visual = Vec::new();
-    for (p, r) in &s.visual {
+    for (old_page, new_page, r) in &s.visual {
+        // Each half's regions are on its own pages.
+        let p = if old { *old_page } else { *new_page };
         let r = r.map(|v| v as f32);
         // The old file's half also skips a region overlapping one it already shades.
-        if !overlaps(*p, r, &text) && !(old && overlaps(*p, r, &visual)) {
-            visual.push((*p, r, VISUAL));
+        if !overlaps(p, r, &text) && !(old && overlaps(p, r, &visual)) {
+            visual.push((p, r, VISUAL));
         }
     }
     let mut out = if s.show_text { text } else { Vec::new() };
@@ -420,5 +563,53 @@ pub(crate) fn compare_area(app: &mut PdfCraftApp, old: usize, new: usize, ui: &m
     }
     if let Some(c) = app.compare.as_mut() {
         c.views = pair;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn r(from: usize, to: usize) -> Option<PageRange> {
+        Some(PageRange { from, to })
+    }
+
+    #[test]
+    fn one_filled_field_applies_to_both_files() {
+        let f = field_ranges;
+        assert_eq!(f("", 4, "2", 4), ((r(2, 2), r(2, 2)), [None, None]));
+        assert_eq!(f("2-3", 4, "", 4), ((r(2, 3), r(2, 3)), [None, None]));
+        assert_eq!(f("", 4, "", 4), ((None, None), [None, None]));
+        assert_eq!(f("1", 4, "3", 4), ((r(1, 1), r(3, 3)), [None, None]));
+        // The other file lacks the pages: it is named, with its page count.
+        let (_, e) = f("", 6, "5", 6);
+        assert_eq!(e, [None, None]);
+        let (_, e) = f("5", 6, "", 3);
+        assert_eq!(e, [None, Some((RangeError::Outside, 3))]);
+        let (_, e) = f("", 2, "3", 4);
+        assert_eq!(e, [Some((RangeError::Outside, 2)), None]);
+        // No old file yet: its field isn't checked.
+        assert_eq!(f("9", 0, "2", 4), ((None, r(2, 2)), [None, None]));
+    }
+
+    #[test]
+    fn a_pages_field_is_empty_one_page_or_one_range() {
+        assert_eq!(parse_range("", 4), Ok(None));
+        assert_eq!(parse_range("  ", 4), Ok(None));
+        assert_eq!(parse_range("3", 4), Ok(r(3, 3)));
+        assert_eq!(parse_range("2-4", 4), Ok(r(2, 4)));
+        assert_eq!(parse_range(" 2 \u{2013} 3 ", 4), Ok(r(2, 3)));
+        assert_eq!(parse_range("4-2", 4), Ok(r(2, 4)), "ends in either order");
+    }
+
+    #[test]
+    fn a_pages_field_never_clamps_or_panics() {
+        for bad in ["0", "5", "0-2", "1-5", "99999999999999999999999", "1-99999999999999999999999"] {
+            assert_eq!(parse_range(bad, 4), Err(RangeError::Outside), "{bad}");
+        }
+        for bad in ["a", "-", "1-", "-3", "1,3", "1-2-3", "1;2", "+2", "\u{ff11}"] {
+            assert_eq!(parse_range(bad, 4), Err(RangeError::NotARange), "{bad}");
+        }
+        assert_eq!(parse_range("1", 0), Err(RangeError::Outside), "a file with no pages has no page 1");
     }
 }
