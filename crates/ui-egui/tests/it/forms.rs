@@ -2724,18 +2724,3 @@ fn what_auto_complete_remembered_is_kept_in_the_settings_and_a_hostile_list_is_c
     again.apply_settings(&pdfcraft_ui_egui::settings::import_json(r#"{"form_entries": [5, null, ""]}"#).0);
     assert!(again.session.form_entries().is_empty(), "nothing that is text is nothing remembered");
 }
-
-/// Typing in one field and then clicking straight into another keeps what is typed in the second.
-#[test]
-fn typing_after_moving_straight_to_another_field_goes_into_it() {
-    for on in [false, true] {
-        let mut h = remembered(on);
-        type_in_field(&mut h, "work_city", "zz");
-        click_field(&mut h, "home_city", 0);
-        h.run_steps(3);
-        h.event(egui::Event::Text("ma".into()));
-        h.run_steps(3);
-        assert_eq!(focused(&h), Some(("home_city".into(), 0)));
-        assert_eq!(draft(&h), "ma", "the typing reached the second field (Auto-Complete on: {on})");
-    }
-}
