@@ -3322,7 +3322,7 @@ area = "D"
 tier = "P2"
 milestone = "M4"
 status = "partial"
-commands = []
+commands = ["page.remove_white_margins"]
 tools = ["page_remove_white_margins"]
 evidence = [
     "crates/automation/tests/it/white_margins.rs::every_page_is_cropped_to_its_content_and_a_blank_page_is_left_alone",
@@ -3331,8 +3331,14 @@ evidence = [
     "crates/automation/tests/it/white_margins.rs::a_page_that_is_not_a_whole_number_of_points_is_cropped_without_cutting_content",
     "crates/automation/tests/it/white_margins.rs::rotated_pages_with_a_crop_box_origin_and_tiny_content",
     "crates/engine/src/white_margins.rs::crops_the_text_pages_then_undoes_as_one_step",
+    "crates/ui-egui/tests/it/white_margins.rs::the_dialog_crops_the_pages_to_their_content_as_one_undoable_step",
+    "crates/ui-egui/tests/it/white_margins.rs::the_padding_keeps_room_around_the_content_and_the_range_limits_the_pages",
+    "crates/ui-egui/tests/it/white_margins.rs::a_padding_that_is_not_allowed_is_refused_with_the_reason",
+    "crates/ui-egui/tests/it/white_margins.rs::cancelling_changes_nothing_and_says_so",
+    "crates/ui-egui/tests/it/white_margins.rs::a_result_is_refused_when_the_document_was_edited_while_it_ran",
+    "crates/ui-egui/tests/it/white_margins.rs::the_pages_menu_lists_it_and_opens_the_dialog",
 ]
-notes = "Headless only after the 0.22.0 sync: the registry command and the dialog that ran it are gone until the UI is re-ported. Pages menu and palette command Remove white margins… opens a dialog (All / Current page / From–to, and the padding to keep in the Preferences unit, default 0) and measures on a background worker, page by page, with a progress card and Cancel; the result is applied as one undoable step and a toast says how many pages were cropped, blank (left alone) or already tight, and it is refused, changing nothing, if the document was edited or another was brought to the front meanwhile. Also the tool page_remove_white_margins (engine Session::remove_white_margins, or white_margins_job + apply_white_margins) sets each page's crop box to the bounds of what a raster of the page paints (up to 144 dpi, so about half a point; coarser on very large pages), plus an optional padding in points, within the old crop box, rounded outward to 0.01 pt so it never cuts the content, following /Rotate and /UserUnit; judged as the file sets it, not as the view has it (layers at the file's defaults, comments shown); one undoable step through the ordinary crop edit. A pixel is content unless it is transparent or every colour channel is 250 or more; pages with no content are left as they are and reported, as are pages already tight. Limits: judged from the drawn page, not the content stream (a white-painted shape or faint tint under 2% is not content); no odd/even or page-size options and no per-side margins; not yet in the Organize panel list UI to be re-ported onto the craft framework UI after the 0.22.0 sync."
+notes = "Edit > Pages > Remove white margins… (also the Organize pages panel, the Tools pane and the palette) opens a dialog (All / Current page / From–to, and the padding to keep in the Preferences unit, default 0) and measures on a background worker, page by page, with a progress card and Cancel (a result measured while another tab is in front waits for its document); the result is applied as one undoable step and a toast says how many pages were cropped, blank (left alone) or already tight, and it is refused, changing nothing, if the document was edited or another was brought to the front meanwhile. Also the tool page_remove_white_margins (engine Session::remove_white_margins, or white_margins_job + apply_white_margins) sets each page's crop box to the bounds of what a raster of the page paints (up to 144 dpi, so about half a point; coarser on very large pages), plus an optional padding in points, within the old crop box, rounded outward to 0.01 pt so it never cuts the content, following /Rotate and /UserUnit; judged as the file sets it, not as the view has it (layers at the file's defaults, comments shown); one undoable step through the ordinary crop edit. A pixel is content unless it is transparent or every colour channel is 250 or more; pages with no content are left as they are and reported, as are pages already tight. Limits: judged from the drawn page, not the content stream (a white-painted shape or faint tint under 2% is not content); no odd/even or page-size options and no per-side margins; the padding is not kept between runs of the app."
 
 [[feature]]
 id = "organize.change-page-size"

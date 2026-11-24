@@ -99,6 +99,7 @@ fn results(app: &mut PdfCraftApp, ctx: &egui::Context) {
     app.print_pass(ctx);
     app.recognize_text_pass(ctx);
     app.enhance_scan_pass(ctx);
+    app.white_margins_pass(ctx);
     // Workflows.
     crate::optimize_ui::pass(app, ctx);
     crate::create_ui::pass(app);
