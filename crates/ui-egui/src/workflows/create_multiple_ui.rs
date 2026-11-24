@@ -10,6 +10,7 @@ use craft::host::WriteIntent;
 use pdfcraft_engine::{EditError, SourceKind};
 
 use crate::PdfCraftApp;
+use crate::office_batch::Item;
 
 fn stem(name: &str) -> &str {
     name.rsplit_once('.').map_or(name, |(s, _)| s)
@@ -28,16 +29,42 @@ impl From<EditError> for Stop {
 }
 
 impl PdfCraftApp {
+    /// [`Self::stage_create_multiple`] for a batch with Word, Excel, PowerPoint, OpenDocument or RTF files: they are
+    /// converted in the background and the combined PDF opens when that is done. A file that can't be converted is
+    /// named and left out.
+    pub(crate) fn stage_create_multiple_converting(&mut self, files: Vec<Item>) {
+        self.convert_office_files(
+            files,
+            Box::new(|app, files, _| {
+                // Nothing left to combine: the files left out were named already.
+                if !files.is_empty() {
+                    app.stage_create_multiple(files);
+                }
+            }),
+        );
+    }
+
     /// Convert each selected non-PDF file into its own PDF. Existing outputs and duplicate input
     /// names receive numbered names, so a batch never silently replaces an earlier file.
     pub(crate) fn stage_create_separate<I>(&mut self, files: I, dir: Option<PathBuf>)
     where
-        I: IntoIterator<Item = Result<(String, Vec<u8>), (String, String)>>,
+        I: IntoIterator<Item = Item>,
     {
+        let files: Vec<Item> = files.into_iter().collect();
+        if crate::office_batch::any_office(&files) {
+            self.convert_office_files(files, Box::new(move |app, files, converted| app.stage_create_separate_marked(files, dir, &converted)));
+        } else {
+            self.stage_create_separate_marked(files, dir, &[]);
+        }
+    }
+
+    /// [`Self::stage_create_separate`] where the files at the positions in `converted` are Office documents already
+    /// made into PDFs: they are written like any converted file, not skipped as PDFs.
+    fn stage_create_separate_marked(&mut self, files: Vec<Item>, dir: Option<PathBuf>, converted: &[usize]) {
         let mut used = HashSet::new();
         let mut made = 0usize;
         let mut refused = Vec::new();
-        for file in files {
+        for (position, file) in files.into_iter().enumerate() {
             let (name, bytes) = match file {
                 Ok(file) => file,
                 Err((name, error)) => {
@@ -52,7 +79,7 @@ impl PdfCraftApp {
                     continue;
                 }
             };
-            if kind == SourceKind::Pdf {
+            if kind == SourceKind::Pdf && !converted.contains(&position) {
                 refused.push(format!("{name} ({})", tl!("already a PDF")));
                 continue;
             }
@@ -87,7 +114,7 @@ impl PdfCraftApp {
     /// read stops the run. Files are read as their turn comes, so one file's bytes are held at a time.
     pub(crate) fn stage_create_multiple<I>(&mut self, files: I)
     where
-        I: IntoIterator<Item = Result<(String, Vec<u8>), (String, String)>>,
+        I: IntoIterator<Item = Item>,
     {
         let (mut refused, mut converted) = (Vec::new(), 0usize);
         let mut files = files.into_iter();

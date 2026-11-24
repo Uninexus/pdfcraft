@@ -150,8 +150,13 @@ pub(crate) fn page(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
             }
             if n == 0 {
                 // Choose the files, or on the desktop a folder of them.
+                let hint = if cfg!(target_arch = "wasm32") {
+                    tl!("Drop PDFs, images, text files or folders here, or choose them.")
+                } else {
+                    tl!("Drop PDFs, images, text files, Office documents or folders here, or choose them.")
+                };
                 let mut empty = Notice::new(Tone::Info, tl!("Add the files to combine"))
-                    .lines([tl!("Drop PDFs, images, text files or folders here, or choose them.")])
+                    .lines([hint])
                     .action(NoticeAction::new(tl!("Add files…")).default_action());
                 if cfg!(not(target_arch = "wasm32")) {
                     empty = empty.action(NoticeAction::new(tl!("Add folder…")));

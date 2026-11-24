@@ -301,7 +301,14 @@ impl PdfCraftApp {
         let (taken, refused): (Vec<_>, Vec<_>) = files.into_iter().partition(|f| takes(&f.name, &f.bytes));
         if !refused.is_empty() {
             let names: Vec<&str> = refused.iter().map(|f| f.name.as_str()).collect();
-            self.notify_fmt("Not added: {names}. Combine takes PDFs, images and text files.", &[("names", &names.join(", "))]);
+            self.notify_fmt(
+                if cfg!(target_arch = "wasm32") {
+                    "Not added: {names}. Combine takes PDFs, images and text files."
+                } else {
+                    "Not added: {names}. Combine takes PDFs, images, text files and Word, Excel, PowerPoint, OpenDocument and RTF files."
+                },
+                &[("names", &names.join(", "))],
+            );
         }
         if !taken.is_empty() {
             self.stage_combine_with(taken);
@@ -310,6 +317,12 @@ impl PdfCraftApp {
 
     /// Add files to the Combine files list, with what can be known about them up front.
     pub(crate) fn stage_combine_with(&mut self, files: Vec<Incoming>) {
+        // Word, Excel, PowerPoint, OpenDocument and RTF files are converted in the background, and join the list, in
+        // their place among the others, when that is done. One that can't be converted is named and left out.
+        if files.iter().any(|f| crate::office_batch::is_office(&f.name, &f.bytes)) {
+            self.stage_combine_converting(files);
+            return;
+        }
         let mut added = Vec::new();
         for Incoming { name, bytes, modified, note, open_doc } in files {
             // Images and text files become PDFs as they join the list (#569): from then on they
@@ -384,6 +397,38 @@ impl PdfCraftApp {
             });
         }
         self.open_combine_tab();
+    }
+
+    /// [`Self::stage_combine_with`] for a batch with Office documents.
+    fn stage_combine_converting(&mut self, files: Vec<Incoming>) {
+        let docs = files.iter().filter(|f| crate::office_batch::is_office(&f.name, &f.bytes)).map(|f| (f.name.clone(), f.bytes.clone())).collect();
+        // The tab shows while they convert.
+        self.open_combine_tab();
+        self.convert_office(
+            docs,
+            Box::new(move |app, results| {
+                let mut results = results.into_iter();
+                let (mut ready, mut left_out) = (Vec::new(), Vec::new());
+                for mut file in files {
+                    if crate::office_batch::is_office(&file.name, &file.bytes) {
+                        match results.next() {
+                            // It keeps its name; its bytes are the PDF, which is what it is now.
+                            Some(Ok(pdf)) => file.bytes = pdf,
+                            Some(Err(why)) => {
+                                left_out.push((file.name, why));
+                                continue;
+                            }
+                            None => continue,
+                        }
+                    }
+                    ready.push(file);
+                }
+                app.say_office_left_out(&left_out);
+                if !ready.is_empty() {
+                    app.stage_combine_with(ready);
+                }
+            }),
+        );
     }
 
     /// Open Unlock…'s password dialog for `rows`.
@@ -487,7 +532,14 @@ impl PdfCraftApp {
         let (paths, more) = combinable_in(dir, recursive);
         let folder = dir.file_name().map_or_else(|| dir.to_string_lossy().into_owned(), |n| n.to_string_lossy().into_owned());
         if paths.is_empty() {
-            self.notify_fmt("No PDFs, images or text files found in {folder}", &[("folder", &folder)]);
+            self.notify_fmt(
+                if cfg!(target_arch = "wasm32") {
+                    "No PDFs, images or text files found in {folder}"
+                } else {
+                    "No PDFs, images, text files or Office documents found in {folder}"
+                },
+                &[("folder", &folder)],
+            );
             self.open_combine_tab();
             return;
         }

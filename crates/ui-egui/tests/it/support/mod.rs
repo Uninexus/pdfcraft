@@ -122,7 +122,13 @@ pub fn host_with_files(files: impl Into<Arc<ScriptedFiles>>) -> Arc<Host> {
 
 /// The app over `host` with the tests' services.
 pub fn test_app(host: Arc<Host>) -> PdfCraftApp {
-    PdfCraftApp::with_host(host, services(RecordingClipboard::default()))
+    inert_office(PdfCraftApp::with_host(host, services(RecordingClipboard::default())))
+}
+
+/// `app` with no Office converter installed: a test never starts LibreOffice. A test that converts gives its own.
+pub fn inert_office(mut app: PdfCraftApp) -> PdfCraftApp {
+    app.office_converter = Some(pdfcraft_ui_egui::OfficeConverter::unavailable());
+    app
 }
 
 /// The app over a host whose jobs wait in `jobs` until the test runs them.
@@ -137,7 +143,7 @@ pub fn inline_app() -> PdfCraftApp {
 
 /// The app over the default host and a clipboard the test keeps a clone of.
 pub fn app_with_clipboard(clipboard: RecordingClipboard) -> PdfCraftApp {
-    PdfCraftApp::with_host(host(), services(clipboard))
+    inert_office(PdfCraftApp::with_host(host(), services(clipboard)))
 }
 
 /// An app built over `host`, with the tests' services: the one way a test gives the app a host, so

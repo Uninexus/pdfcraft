@@ -63,6 +63,7 @@ mod marks;
 mod min_window;
 mod object_selection;
 mod ocr;
+mod office_batch;
 mod open_action;
 mod optimize;
 mod organize_drag;

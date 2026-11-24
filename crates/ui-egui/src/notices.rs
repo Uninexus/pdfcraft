@@ -33,6 +33,8 @@ pub enum ProgressKey {
     FolderSearch,
     /// Bates numbering on several files.
     BatesMulti,
+    /// Converting Word, Excel and PowerPoint files to PDF.
+    Office,
 }
 
 /// A background job's progress, shown on its card until the job is done.
@@ -67,6 +69,7 @@ pub fn title(key: ProgressKey) -> String {
         ProgressKey::WhiteMargins => tl!("Removing white margins").to_owned(),
         ProgressKey::FolderSearch => tl!("Searching a folder").to_owned(),
         ProgressKey::BatesMulti => tl!("Numbering files").to_owned(),
+        ProgressKey::Office => tl!("Converting to PDF").to_owned(),
     }
 }
 
@@ -191,6 +194,7 @@ fn route(app: &mut PdfCraftApp, end: &NoticeEnd) {
         ProgressKey::WhiteMargins => app.cancel_white_margins(),
         ProgressKey::FolderSearch => app.cancel_folder_search(),
         ProgressKey::BatesMulti => app.cancel_bates_multi(),
+        ProgressKey::Office => app.cancel_office(),
         ProgressKey::Ocr if app.ocr_batch.is_some() => app.cancel_ocr_batch(),
         ProgressKey::Ocr => app.cancel_ocr(),
         // These jobs offer no Cancel.

@@ -3,8 +3,8 @@
 //!
 //! The clipboard is read through the app's clipboard service (`PdfCraftApp::clipboard`), never the operating system
 //! directly, so the tests give it a stand-in. A file that can't be used is named and left out; nothing usable says what
-//! may be copied. Office files are not converted here: they are named and left out (the `page_insert_image` tool
-//! converts them through LibreOffice).
+//! may be copied. Office files are converted in the background first (see `office_batch`); one that can't be
+//! converted is named and left out like the rest.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -143,7 +143,42 @@ impl PdfCraftApp {
                 Err(e) => return self.notify_error(e),
             },
         }
-        self.insert_sources_as_one_step(ctx, sources, left_out);
+        self.insert_converting_sources(ctx, sources, left_out);
+    }
+
+    /// [`Self::insert_sources_as_one_step`] once the Office files among `sources` are converted, in the background; one
+    /// that can't be converted is left out and named with the rest.
+    fn insert_converting_sources(&mut self, ctx: &egui::Context, sources: Vec<Source>, mut left_out: Vec<Skipped>) {
+        let docs: Vec<Source> = sources.iter().filter(|(name, bytes)| crate::office_batch::is_office(name, bytes)).cloned().collect();
+        if docs.is_empty() {
+            return self.insert_sources_as_one_step(ctx, sources, left_out);
+        }
+        let Some((_, id)) = self.active_ids() else { return };
+        let target = self.pick_target(Some(id));
+        let ctx = ctx.clone();
+        self.convert_office(
+            docs,
+            Box::new(move |app, results| {
+                let now = app.active_ids().map(|(_, id)| id);
+                if app.pick_target(now) != target {
+                    return app.notify_tr("The document changed while the files were being converted, so nothing was inserted.");
+                }
+                let mut results = results.into_iter();
+                let mut ready = Vec::new();
+                for (name, bytes) in sources {
+                    if !crate::office_batch::is_office(&name, &bytes) {
+                        ready.push((name, bytes));
+                        continue;
+                    }
+                    match results.next() {
+                        Some(Ok(pdf)) => ready.push((name, pdf)),
+                        Some(Err(why)) => left_out.push((name, why)),
+                        None => {}
+                    }
+                }
+                app.insert_sources_as_one_step(&ctx, ready, left_out);
+            }),
+        );
     }
 
     /// Insert `sources` (name, bytes) after the selection as one edit and select them; `left_out` is what could not be

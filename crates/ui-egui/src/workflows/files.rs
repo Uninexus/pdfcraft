@@ -77,11 +77,20 @@ fn picker_request(purpose: FilePurpose, multiple: bool) -> PickRequest {
         FilePurpose::TextFont { .. } => request.filter("TrueType / OpenType font", &["ttf", "otf"]),
         FilePurpose::RedactWords => request.filter(tl!("Text"), &["txt"]),
         FilePurpose::CreateMultiple | FilePurpose::CreateMultipleSeparate | FilePurpose::InsertPages | FilePurpose::Combine => {
-            let all: Vec<&str> = std::iter::once("pdf").chain(pdfcraft_engine::CONVERTIBLE).collect();
-            request.filter(tl!("PDF, images and text"), &all).filter("PDF", &["pdf"])
+            let all = convertible_extensions();
+            request.filter(tl!("PDF, images, text and Office documents"), &all).filter("PDF", &["pdf"])
         }
         _ => request.filter("PDF", &["pdf"]),
     }
+}
+
+/// The extensions Create, Insert and Combine take: PDFs, what converts to one, and (on the desktop, where an installed
+/// LibreOffice converts them) Office documents.
+fn convertible_extensions() -> Vec<&'static str> {
+    let all = std::iter::once("pdf").chain(pdfcraft_engine::CONVERTIBLE);
+    #[cfg(not(target_arch = "wasm32"))]
+    let all = all.chain(pdfcraft_engine::OFFICE_EXTENSIONS.iter().copied());
+    all.collect()
 }
 
 /// The document a pick edits, as it was when the picker opened. Page positions captured then
@@ -280,7 +289,12 @@ impl PdfCraftApp {
             // Each file is read when its turn comes, so the selection's bytes are not all held at once.
             if !paths.is_empty() {
                 let host = self.host.clone();
-                self.stage_create_multiple(paths.iter().map(|p| read_named(&host, p)));
+                // Unless Office documents need converting first, which holds the batch.
+                if paths.iter().any(|p| crate::office_batch::has_office_name(&name_of(p))) {
+                    self.stage_create_multiple_converting(paths.iter().map(|p| read_named(&host, p)).collect());
+                } else {
+                    self.stage_create_multiple(paths.iter().map(|p| read_named(&host, p)));
+                }
             }
             return;
         }
@@ -430,7 +444,14 @@ impl PdfCraftApp {
                 }
             }
             FilePurpose::Ocr => self.ocr_files(ctx, files),
-            FilePurpose::CreateMultiple => self.stage_create_multiple(files.into_iter().map(Ok)),
+            FilePurpose::CreateMultiple => {
+                let items: Vec<crate::office_batch::Item> = files.into_iter().map(Ok).collect();
+                if crate::office_batch::any_office(&items) {
+                    self.stage_create_multiple_converting(items);
+                } else {
+                    self.stage_create_multiple(items);
+                }
+            }
             FilePurpose::CreateMultipleSeparate => self.ask_separate_folder(files.into_iter().map(Ok)),
             FilePurpose::RedactWords => {
                 let Some((name, bytes)) = files.into_iter().next() else { return };
@@ -466,6 +487,40 @@ impl PdfCraftApp {
     where
         I: IntoIterator<Item = Result<(String, Vec<u8>), (String, String)>>,
     {
+        let files: Vec<crate::office_batch::Item> = files.into_iter().collect();
+        if crate::office_batch::any_office(&files) {
+            self.insert_converting_office(ctx, files);
+        } else {
+            self.insert_ready(ctx, files);
+        }
+    }
+
+    /// [`Self::insert_each`] for a batch with Word, Excel, PowerPoint, OpenDocument or RTF files: they are converted in
+    /// the background, and the pages go in, in the order given, when that is done, at the place the insert chose now (a
+    /// gap a "+" chose is used up now, so it can't outlive an abandoned conversion). Nothing is inserted if another
+    /// document is in front, or this one changed, by then.
+    fn insert_converting_office(&mut self, ctx: &egui::Context, files: Vec<crate::office_batch::Item>) {
+        let Some((i, id)) = self.active_ids() else { return };
+        let chosen = self.views.get_mut(i).and_then(|v| v.insert_at.take());
+        let target = self.pick_target(Some(id));
+        let ctx = ctx.clone();
+        self.convert_office_files(
+            files,
+            Box::new(move |app, files, _| {
+                let now = app.active_ids().map(|(_, id)| id);
+                if app.pick_target(now) != target {
+                    return app.notify_tr("The document changed while the files were being converted, so nothing was inserted.");
+                }
+                if let Some(view) = app.active.and_then(|i| app.views.get_mut(i)) {
+                    view.insert_at = chosen;
+                }
+                app.insert_ready(&ctx, files);
+            }),
+        );
+    }
+
+    /// Inserts `files`, none of them an Office document still to convert.
+    fn insert_ready(&mut self, ctx: &egui::Context, files: Vec<crate::office_batch::Item>) {
         let Some(view) = self.active.and_then(|i| self.views.get_mut(i)) else { return };
         let (id, chosen) = (view.id, view.insert_at.take());
         let after = view.target_pages().last().map_or(0, |p| p + 1);

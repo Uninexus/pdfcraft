@@ -305,7 +305,7 @@ fn multiple_files_open_as_one_document_in_the_page_grid() {
         assert_eq!(doc.info.pages.len(), 3, "the Word file can't be converted and is left out");
         assert_eq!(doc.info.outline.iter().map(|o| o.title.as_str()).collect::<Vec<_>>(), ["notes", "a", "photo"]);
     }
-    h.get_by_label_contains("left out: report.docx");
+    h.get_by_label_contains("Left out: report.docx");
     h.get_by_label("Insert a file before page 2");
     if let Ok(path) = std::env::var("PDFCRAFT_CREATE_MULTIPLE_SHOT") {
         let _gpu = crate::gpu();

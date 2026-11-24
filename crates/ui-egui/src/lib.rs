@@ -193,6 +193,8 @@ use workflows::ocr_ui;
 use workflows::ocr_verify;
 #[cfg(target_arch = "wasm32")]
 use workflows::ocr_web;
+use workflows::office_batch;
+pub use workflows::office_batch::OfficeConverter;
 use workflows::optimize_ui;
 use workflows::print_paper;
 use workflows::print_ui;
@@ -728,6 +730,11 @@ pub struct PdfCraftApp {
     /// Edit ▸ Bates numbering on several files: the running job.
     pub bates_multi_run: Option<bates_multi_ui::BatesRun>,
     pub(crate) bates_multi_jobs: Queue<(), bates_multi_ui::BatesOutcome>,
+    /// Word, Excel and PowerPoint files being converted to PDF for Insert, Combine and Create.
+    pub office_run: Option<office_batch::OfficeRun>,
+    pub(crate) office_jobs: Queue<(), office_batch::OfficeOutcome>,
+    /// What converts them in place of the installed LibreOffice (tests give a stand-in).
+    pub office_converter: Option<OfficeConverter>,
     pub folder_search: folder_search_ui::FolderSearch,
     pub(crate) folder_search_jobs: Queue<(), Result<pdfcraft_engine::folder_search::Summary, String>>,
     /// Pages copied or cut in Organize Pages, ready to paste (into any document).
