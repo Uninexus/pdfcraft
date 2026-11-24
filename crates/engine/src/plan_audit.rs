@@ -137,12 +137,12 @@ pub fn cross_check(doc: &Document, report: &AuditReport, plan: &Plan) -> PlanAud
         }
         let (check, why) = match (r.role, r.status) {
             (Role::Signer, Status::Signed) if !mine.is_empty() => {
-                if statuses.iter().any(|s| *s == "invalid") {
+                if statuses.contains(&"invalid") {
                     (
                         "signature_invalid",
                         "the plan says signed and a signature labelled for this recipient is in the file, but the validator reads it as invalid",
                     )
-                } else if statuses.iter().any(|s| *s == "valid") {
+                } else if statuses.contains(&"valid") {
                     ("agrees", "the plan says signed and a signature labelled for this recipient is in the file and valid")
                 } else {
                     (
@@ -201,7 +201,7 @@ pub fn cross_check(doc: &Document, report: &AuditReport, plan: &Plan) -> PlanAud
                 why: "the signature field is labelled for an address that is not a recipient of the plan",
             }),
             Label::For(_) => {}
-            Label::Unknown(w) => not_determined.push(Unmatched { signature: SignatureRef::of(e), why: *w }),
+            Label::Unknown(w) => not_determined.push(Unmatched { signature: SignatureRef::of(e), why: w }),
         }
     }
     // The field name as JSON writes it, so the sentence reads the same wherever it is shown.
