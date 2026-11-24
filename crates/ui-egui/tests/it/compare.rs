@@ -283,6 +283,12 @@ fn field_text(h: &Harness<'_, PdfCraftApp>, field: &str) -> String {
     dialog.fields().text(field).unwrap_or_default().to_owned()
 }
 
+/// What a checkbox row of the open Compare Files dialog holds.
+fn field_flag(h: &Harness<'_, PdfCraftApp>, field: &str) -> Option<bool> {
+    let dialog = h.state().dialogs.get_by_id::<HostedParamDialog>(dialog_id("compare")).expect("the Compare Files dialog is open");
+    dialog.fields().bool(field)
+}
+
 /// Whether a label with this text is on screen.
 fn shows(h: &Harness<'_, PdfCraftApp>, text: &str) -> bool {
     h.query_all_by_label_contains(text).next().is_some()
@@ -442,6 +448,75 @@ fn compare_with_different_ranges_shades_each_file_on_its_own_page() {
     assert!(on(&h, old).iter().all(|p| *p == 2 || *p == 3), "{:?}", on(&h, old));
     assert!(on(&h, new).iter().all(|p| *p == 3), "{:?}", on(&h, new));
     assert!(on(&h, old).contains(&2), "the old half is shaded on its own page 3");
+}
+
+/// The dialog's Ignore checkboxes are the `ignore_case` and `ignore_punctuation` options of the
+/// `doc_compare` tool: with neither, a changed capital and a changed full stop are two text
+/// differences; each box leaves out its own kind and not the other's, and both leave the real
+/// word change (and nothing else) in the list. Mark as comments and the report use the same ones.
+#[test]
+fn compare_dialog_ignore_checkboxes_leave_out_case_and_punctuation_changes() {
+    let s = Session::new();
+    let v1 = s.create_from_text("t", "Delivery within five days. Returns accepted").unwrap().to_vec();
+    let v2 = s.create_from_text("t", "delivery within three days. Returns, accepted").unwrap().to_vec();
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |cc| {
+        crate::support::install_runtime(&cc.egui_ctx);
+        {
+            let mut app = crate::control::new_app();
+            app.set_option(&egui::Context::default(), "language", "en").unwrap();
+            app.open_bytes(&egui::Context::default(), "v1.pdf", None, v1.clone()).unwrap();
+            app.open_bytes(&egui::Context::default(), "v2.pdf", None, v2.clone()).unwrap();
+            app
+        }
+    });
+    h.run_steps(4);
+    h.state_mut().compare_old = h.state().views.first().map(|v| v.id);
+    let ctx = h.ctx.clone();
+    let count = |h: &mut Harness<'_, PdfCraftApp>| {
+        h.state_mut().run_compare(&ctx);
+        h.run_steps(2);
+        h.state().compare.as_ref().unwrap().result.changes.len()
+    };
+    assert_eq!(count(&mut h), 3, "case, word and punctuation");
+    h.get_by_label("Clear").click();
+    h.run_steps(2);
+    // Through the dialog: Letter case ignored, punctuation kept.
+    assert!(h.execute("doc.compare"));
+    h.run_steps(2);
+    assert!(shows(&h, "Letter case") && shows(&h, "Punctuation"));
+    assert_eq!(field_flag(&h, "ignore_case"), Some(false), "both start off");
+    set_field(&mut h, "ignore_case", serde_json::json!(true));
+    h.get_by_label("Compare").click();
+    h.run_steps(3);
+    assert!(h.state().compare_ignore_case && !h.state().compare_ignore_punctuation);
+    assert_eq!(h.state().compare.as_ref().unwrap().result.changes.len(), 2, "capital ignored, punctuation kept");
+    // The next dialog opens with the same choice.
+    h.get_by_label("Clear").click();
+    h.run_steps(2);
+    assert!(h.execute("doc.compare"));
+    h.run_steps(2);
+    assert_eq!((field_flag(&h, "ignore_case"), field_flag(&h, "ignore_punctuation")), (Some(true), Some(false)));
+    h.get_by_label("Cancel").click();
+    h.run_steps(2);
+    h.state_mut().compare_ignore_case = false;
+    h.state_mut().compare_ignore_punctuation = true;
+    assert_eq!(count(&mut h), 2, "punctuation ignored, capital kept");
+    h.state_mut().compare_ignore_case = true;
+    assert_eq!(count(&mut h), 1, "only five -> three");
+    // Mark as comments and Report... use the same options as the list: one comment, and a report
+    // that names what was ignored and lists only the real change.
+    assert!(h.state().compare.as_ref().unwrap().options.ignore_case);
+    let new = h.state().active_ids().unwrap().1;
+    h.get_by_label("Mark as comments").click();
+    h.run_steps(3);
+    assert_eq!(h.state().session.get(new).unwrap().info.annotations.len(), 1, "only five -> three is marked");
+    h.get_by_label("Report…").click();
+    h.run_steps(3);
+    let report = h.state().active_ids().unwrap().1;
+    let text: Vec<String> = h.state().session.get(report).unwrap().words().into_iter().map(|w| w.text).collect();
+    let text = text.join(" ");
+    assert!(text.contains("Ignored in the text comparison: letter case, sentence punctuation"), "{text}");
+    assert!(text.contains("five") && !text.contains("Returns,"), "{text}");
 }
 
 #[test]

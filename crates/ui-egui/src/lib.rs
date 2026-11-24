@@ -618,6 +618,10 @@ pub struct PdfCraftApp {
     /// The dialog's Kinds of change checkboxes: which kinds of change the comparison starts with
     /// (all of them; the Compare panel's Show checkboxes change them afterwards).
     pub compare_kinds: pdfcraft_engine::compare::ChangeKinds,
+    /// The dialog's Ignore checkboxes: leave out the text changes that are only letter case, or only
+    /// sentence punctuation. Both off at first; remembered with the settings.
+    pub compare_ignore_case: bool,
+    pub compare_ignore_punctuation: bool,
     pub compare: Option<compare_ui::CompareState>,
     /// The JavaScript console.
     pub js_console: js_ui::JsConsole,

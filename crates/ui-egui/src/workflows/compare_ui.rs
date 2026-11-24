@@ -18,7 +18,7 @@ use craft::ui::primitives::IconSpec;
 use craft::ui::style::DataColor;
 use egui::Color32;
 use pdfcraft_engine::DocId;
-use pdfcraft_engine::compare::{ChangeKinds, Comparison, Kind, PageRange};
+use pdfcraft_engine::compare::{ChangeKinds, Comparison, Kind, PageRange, WordOptions};
 
 use crate::{PdfCraftApp, RightPanel};
 
@@ -50,6 +50,9 @@ pub struct CompareState {
     /// background changes are not kinds of their own: the comparison reads words and pixels, so
     /// they are all visual.
     pub kinds: ChangeKinds,
+    /// The word differences the comparison left out (the dialog's Ignore checkboxes). Mark as
+    /// comments and the report run with the same ones, so they match the list.
+    pub options: WordOptions,
 }
 
 /// Visual differences are shaded orange.
@@ -95,6 +98,8 @@ pub(crate) fn open_compare_dialog(app: &mut PdfCraftApp, ctx: &egui::Context) {
     for (key, on) in kind_values(app.compare_kinds) {
         fields.set(key, on);
     }
+    fields.set(IGNORE_CASE, app.compare_ignore_case);
+    fields.set(IGNORE_PUNCTUATION, app.compare_ignore_punctuation);
     // Passed inline: a closure made apart from the call gets one lifetime for its argument and result.
     let dialog = HostedParamDialog::new(ctx, DIALOG_KEY, fields, move |fields: &mut DialogFields| {
         let chosen = fields.text("old").filter(|o| !o.is_empty()).map(str::to_owned);
@@ -114,6 +119,9 @@ pub(crate) fn open_compare_dialog(app: &mut PdfCraftApp, ctx: &egui::Context) {
             Param::new(KIND_KEYS[1], tl!("Inserted").to_string(), ParamKind::bool(true)),
             Param::new(KIND_KEYS[2], tl!("Deleted").to_string(), ParamKind::bool(true)),
             Param::new(KIND_KEYS[3], tl!("Visual").to_string(), ParamKind::bool(true)),
+            Param::section(tl!("Ignore").to_string()),
+            Param::new(IGNORE_CASE, tl!("Letter case").to_string(), ParamKind::bool(false)),
+            Param::new(IGNORE_PUNCTUATION, tl!("Punctuation").to_string(), ParamKind::bool(false)),
         ];
         let reason = match problems.first() {
             Some(problem) => problem.clone(),
@@ -131,6 +139,11 @@ pub(crate) fn open_compare_dialog(app: &mut PdfCraftApp, ctx: &egui::Context) {
                     Text::new(problem.clone()).tone(Tone::Bad).show(ui);
                 }
                 Text::new(tl!(
+                    "Ignoring letter case or punctuation leaves out text changes that are only that; the words in the changes that remain keep their own text, and pixel differences are still found."
+                ))
+                .shade(Shade::Muted)
+                .show(ui);
+                Text::new(tl!(
                     "Images, annotations, formatting and background changes are not told apart: the comparison finds text changes and pixel differences, so they all count as visual."
                 ))
                 .shade(Shade::Muted)
@@ -147,6 +160,10 @@ pub(crate) fn open_compare_dialog(app: &mut PdfCraftApp, ctx: &egui::Context) {
 
 /// The dialog's keys of the four kinds of change, in the order of [`ChangeKinds::NAMES`].
 const KIND_KEYS: [&str; 4] = ["kind_replaced", "kind_inserted", "kind_deleted", "kind_visual"];
+
+/// The dialog's keys of the two Ignore checkboxes.
+const IGNORE_CASE: &str = "ignore_case";
+const IGNORE_PUNCTUATION: &str = "ignore_punctuation";
 
 /// The kinds as the values of the dialog's checkboxes.
 fn kind_values(kinds: ChangeKinds) -> [(&'static str, bool); 4] {
@@ -166,6 +183,8 @@ pub(crate) fn pass(app: &mut PdfCraftApp, ctx: &egui::Context) {
     let Some(old) = app.views.iter().map(|v| v.id).find(|id| option_key(*id) == chosen) else { return };
     app.compare_old = Some(old);
     app.compare_kinds = kinds_of(&result.fields);
+    app.compare_ignore_case = result.fields.bool(IGNORE_CASE).unwrap_or(false);
+    app.compare_ignore_punctuation = result.fields.bool(IGNORE_PUNCTUATION).unwrap_or(false);
     app.compare_old_pages = result.fields.text("old_pages").unwrap_or_default().to_owned();
     app.compare_pages = result.fields.text("pages").unwrap_or_default().to_owned();
     app.compare_fields_for = app.active_ids().map(|(_, new)| (new, Some(old)));
@@ -412,7 +431,8 @@ impl PdfCraftApp {
             Ok(ranges) => ranges,
             Err(message) => return self.notify_error(message),
         };
-        match self.session.compare_in(old, new, old_range, new_range) {
+        let options = WordOptions { ignore_case: self.compare_ignore_case, ignore_punctuation: self.compare_ignore_punctuation };
+        match self.session.compare_in_options(old, new, old_range, new_range, options) {
             Ok(result) => {
                 // The pages of the two ranges are paired by position, as `doc_compare` does.
                 let visual = self.session.compare_visual_in(old, new, 72.0, old_range, new_range).unwrap_or_default();
@@ -430,6 +450,7 @@ impl PdfCraftApp {
                     side_by_side,
                     views: Default::default(),
                     kinds: self.compare_kinds,
+                    options,
                 });
                 self.shade_compare(i);
                 self.set_right(Some(RightPanel::Compare));
@@ -447,7 +468,7 @@ impl PdfCraftApp {
 
     pub(crate) fn compare_action(&mut self, ctx: &egui::Context, index: usize, a: PanelAction) {
         let Some(s) = self.compare.as_mut() else { return };
-        let (old, new, old_range, new_range, kinds) = (s.old, s.new, s.old_range, s.new_range, s.kinds);
+        let (old, new, old_range, new_range, kinds, options) = (s.old, s.new, s.old_range, s.new_range, s.kinds, s.options);
         match a {
             PanelAction::Select(i) => {
                 s.selected = Some(i);
@@ -472,7 +493,7 @@ impl PdfCraftApp {
                 s.kinds = shown;
                 self.shade_compare(index);
             }
-            PanelAction::Mark => match self.session.mark_differences_in_kinds(old, new, old_range, new_range, kinds) {
+            PanelAction::Mark => match self.session.mark_differences_in_options(old, new, old_range, new_range, kinds, options) {
                 Ok(n) => {
                     if let Some(info) = self.session.get(new).map(|d| d.info.clone()) {
                         self.views[index].document_changed(ctx, &info);
@@ -487,7 +508,7 @@ impl PdfCraftApp {
                 }
                 Err(e) => self.notify_error(e),
             },
-            PanelAction::Report => match self.session.compare_report_in_kinds(old, new, old_range, new_range, kinds) {
+            PanelAction::Report => match self.session.compare_report_in_options(old, new, old_range, new_range, kinds, options) {
                 Ok(bytes) => {
                     if let Err(e) = self.open_bytes(ctx, "Compare Report.pdf", None, bytes.to_vec()) {
                         self.notify_error(e);
