@@ -219,6 +219,8 @@ const SIGN: &[&str] = &[
     "sign.panel",
     SEP,
     "sign.plan.show",
+    "form.signer_report",
+    "sign.audit_report",
 ];
 const WINDOW: &[&str] = &["view.next_tab", "view.previous_tab"];
 const HELP: &[&str] =

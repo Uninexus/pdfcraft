@@ -382,6 +382,8 @@ pub const COMMANDS: &[CommandSpec] = &[
     c("sign.certify_invisible", "Certify (invisible signature)", None, None, Document, "badge-check"),
     c("sign.validate", "Validate all signatures", None, None, Document, "badge-check"),
     c("sign.panel", "Signatures panel", VIEW, None, Document, "signature"),
+    c("sign.audit_report", "Signature audit report…", None, None, Document, "file-check"),
+    c("form.signer_report", "Signer labels report…", None, None, Document, "list-checks"),
     c("sign.plan.show", "Signing plan…", None, None, Document, "signature"),
     c("sign.plan.recipient.add", "Add a recipient to the signing plan", None, None, Document, "signature"),
     c("sign.plan.recipient.remove", "Remove a recipient from the signing plan", None, None, Document, "eraser"),

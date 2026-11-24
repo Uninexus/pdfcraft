@@ -127,8 +127,10 @@ use dialogs::pageboxes;
 use dialogs::printer_marks_ui;
 use dialogs::readiness_ui;
 use dialogs::rename_ui;
-pub use dialogs::signing_plan_ui::{Draft as SigningPlanDraft, View as SigningPlanView};
+use dialogs::signature_report_ui;
+pub use dialogs::signature_report_ui::{ReportKind as SignatureReportKind, ReportWindow as SignatureReport};
 use dialogs::signing_plan_ui;
+pub use dialogs::signing_plan_ui::{Draft as SigningPlanDraft, View as SigningPlanView};
 use dialogs::standards_ui;
 use dialogs::word_count_ui;
 pub use home::folders_ui;
@@ -658,6 +660,8 @@ pub struct PdfCraftApp {
     pub(crate) javascripts_draft: javascripts_ui::Draft,
     /// The Signing plan window's draft, while that window is open (`dialogs::signing_plan_ui`).
     pub signing_plan: Option<SigningPlanDraft>,
+    /// The signature audit report or the signer labels report, while its window is open (`dialogs::signature_report_ui`).
+    pub signature_report: Option<SignatureReport>,
     /// The JavaScript console.
     pub js_console: js_ui::JsConsole,
     #[cfg(not(target_arch = "wasm32"))]

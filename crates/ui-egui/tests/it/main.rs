@@ -89,6 +89,7 @@ mod scan_clean;
 mod script_noop;
 mod search_position;
 mod side_panels;
+mod signature_report;
 mod signing;
 mod signing_plan_window;
 mod snapshot_tabs;

@@ -395,6 +395,8 @@ pub static TOOL_GROUPS: &[ToolGroup] = &[
                 item("Certify (visible signature)", "badge-check", "sign.certify", Ready),
                 item("Certify (invisible signature)", "badge-check", "sign.certify_invisible", Ready),
                 item("Signing plan", "signature", "sign.plan.show", Ready),
+                item("Signature audit report", "file-check", "sign.audit_report", Ready),
+                item("Signer labels report", "list-checks", "form.signer_report", Ready),
             ],
         }],
     },

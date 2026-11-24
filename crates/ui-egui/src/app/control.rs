@@ -588,6 +588,12 @@ impl PdfCraftApp {
                 self.execute(ctx, "tools.javascripts");
             }
             // Through the command, so it is refused with no document open, as the menu is.
+            "signature-audit" => {
+                self.execute(ctx, "sign.audit_report");
+            }
+            "signer-report" => {
+                self.execute(ctx, "form.signer_report");
+            }
             "signing-plan" => {
                 self.execute(ctx, "sign.plan.show");
             }

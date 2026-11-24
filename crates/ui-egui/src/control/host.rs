@@ -148,7 +148,9 @@ impl crate::PdfCraftApp {
                 .or_else(|| self.preferences.is_some().then(|| "preferences".to_string()))
                 .or_else(|| self.shortcuts.is_some().then(|| "shortcuts".to_string()))
                 .or_else(|| self.javascripts_open.then(|| "javascripts".to_string()))
-                .or_else(|| self.signing_plan.is_some().then(|| "signing-plan".to_string())),
+                .or_else(|| self.signing_plan.is_some().then(|| "signing-plan".to_string()))
+                .or_else(|| self.signature_report.as_ref().map(|r| if r.kind == crate::SignatureReportKind::Audit { "signature-audit" } else { "signer-report" }.to_string())),
+            "signature_report": self.signature_report.as_ref().map(|r| json!({ "kind": format!("{:?}", r.kind), "text": r.text, "can_save": r.can_save() })),
             "signing_plan": crate::signing_plan_ui::state(self.signing_plan.as_ref()),
             "javascripts": self.javascripts_draft.state(self.javascripts_open, crate::javascripts_ui::read_only(self)),
             "palette_open": self.palette_open,

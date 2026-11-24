@@ -426,6 +426,8 @@ impl PdfCraftApp {
             "prepress.readiness" => self.open_print_readiness(),
             "tools.javascripts" => crate::javascripts_ui::open(self),
             "sign.plan.show" => self.show_signing_plan(),
+            "sign.audit_report" => self.open_signature_audit(),
+            "form.signer_report" => self.open_signer_report(),
             "sign.plan.recipient.add" | "sign.plan.recipient.remove" | "sign.plan.message.set" => self.change_signing_plan(id),
             "protect.remove" => {
                 if self.apply_edit(ctx, Edit::RemoveProtection) {
