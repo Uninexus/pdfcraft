@@ -396,6 +396,8 @@ pub const COMMANDS: &[CommandSpec] = &[
     c("sign.plan.record", "Record the next recipient's step in the signing plan", None, None, Document, "badge-check"),
     c("sign.plan.decline", "Record that the next recipient declined", None, None, Document, "close"),
     c("sign.plan.sign_next", "Sign as the next recipient…", None, None, Document, "signature"),
+    c("sign.plan.handoff_export", "Save the hand-off package…", None, None, Document, "file-check"),
+    c("sign.plan.handoff_import", "Open a hand-off package…", None, None, Nothing, "signature"),
     c("sign.plan.message.set", "Set the signing plan's message", None, None, Document, "signature"),
     c("sign.fill.text", "Fill & Sign: add text", None, None, Annotate, "type"),
     c("sign.fill.check", "Fill & Sign: checkmark", None, None, Annotate, "check"),

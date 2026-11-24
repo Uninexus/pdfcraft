@@ -95,6 +95,7 @@ mod search_position;
 mod side_panels;
 mod signature_report;
 mod signing;
+mod signing_handoff;
 mod signing_plan_window;
 mod snapshot_tabs;
 mod split_template;

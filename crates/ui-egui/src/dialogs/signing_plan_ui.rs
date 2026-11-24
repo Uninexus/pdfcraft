@@ -556,6 +556,20 @@ fn body(ui: &mut egui::Ui, d: &mut Draft) {
             d.command = Some("sign.plan.message.set");
         }
     }
+    Text::new(tl!("Hand-off package")).role(TypeRole::Heading).show(ui);
+    Text::new(tl!(
+        "A zip of the saved PDF, this plan and a manifest, to send by mail or a shared folder. Nothing is sent by PdfCraft. The package is not signed or encrypted: its hashes only catch a file damaged or changed on the way. A package is only ever written to a new file."
+    ))
+    .role(TypeRole::Caption)
+    .shade(Shade::Muted)
+    .show(ui);
+    let can_export = matches!(d.view, View::Plan(_));
+    if clicked(&Button::new(tl!("Save the hand-off package…")).enabled(can_export).show(ui)) {
+        d.command = Some("sign.plan.handoff_export");
+    }
+    if clicked(&Button::new(tl!("Open a hand-off package…")).show(ui)) {
+        d.command = Some("sign.plan.handoff_import");
+    }
     if let Some(c) = d.confirm.as_mut() {
         Notice::new(Tone::Warn, c.question.clone()).layout(NoticeLayout::Inline).announce(Politeness::Polite).id_salt(14usize).show(ui);
         let mut record = Button::new(tl!("Record it"));

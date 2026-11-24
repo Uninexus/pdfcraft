@@ -128,6 +128,7 @@ pub use pdfcraft_organize::signature_seed::{
     Change as SeedChange, DIGEST_METHODS as SEED_DIGEST_METHODS, ENTRIES as SEED_ENTRIES, Entry as SeedEntry, MAX_ENTRIES as MAX_SEED_ENTRIES,
     MAX_TEXT_CHARS as MAX_SEED_TEXT_CHARS, SUB_FILTERS as SEED_SUB_FILTERS, SeedList, SeedSpec,
 };
+pub use pdfcraft_organize::signing_handoff;
 pub use pdfcraft_organize::signing_plan;
 pub use pdfcraft_organize::thread_action::{
     Change as ThreadActionChange, MAX_BEADS as MAX_ACTION_BEADS, MAX_THREADS as MAX_ACTION_THREADS, ThreadTarget,
