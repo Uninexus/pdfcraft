@@ -3,17 +3,18 @@ use craft::theme::variant::Tone;
 use craft::ui::buttons::Button;
 use craft::ui::choice::{Radio, RadioGroup};
 use craft::ui::contract::{
-    Bind, CollectionEvent, Entry, FieldLayout, Props as _, Scroll, SelectMode, Show as _, ShowCollection as _, ShowContainer as _, SideLabel, Sizing,
-    clicked,
+    Bind, CollectionEvent, Entry, FieldLayout, Politeness, Props as _, Scroll, SelectMode, Show as _, ShowCollection as _, ShowContainer as _,
+    SideLabel, Sizing, clicked,
 };
 use craft::ui::display::Text;
 use craft::ui::form::{Field, Help};
 use craft::ui::layout_components::Stack;
 use craft::ui::list::{List, ListRow, RowEvent, TrailingFace, TrailingPart};
+use craft::ui::notices::Notice;
 use craft::ui::runtime::env::Label;
 use craft::ui::text::TextField;
 
-use super::draft::{ACTION_KINDS, ActionDraft, FieldDraft};
+use super::draft::{ACTION_KINDS, ActionDraft, FieldDraft, menu_item_label};
 use super::properties::{check, code_row, count_row, note, select_row, text_row};
 use super::{CalcOp, Calculate, DATE_PRESETS, Format, TIME_PRESETS, Validate, format_value};
 
@@ -198,6 +199,7 @@ pub(super) fn validate_tab(ui: &mut egui::Ui, d: &mut FieldDraft) {
 pub(super) fn actions_tab(ui: &mut egui::Ui, d: &mut FieldDraft) {
     use pdfcraft_engine::FieldTrigger as T;
     let editing = d.editing.is_some();
+    let before = d.new_action.clone();
     Text::new(if editing { tl!("Edit Action") } else { tl!("Add an Action") }).show(ui);
     // Editing changes the script of one trigger's action: its trigger and kind stay.
     Stack::new().enabled(!editing).show(ui, |ui, _| {
@@ -209,11 +211,15 @@ pub(super) fn actions_tab(ui: &mut egui::Ui, d: &mut FieldDraft) {
     let a = &mut d.new_action;
     if a.kind == 0 {
         code_row(ui, "action-text", tl!("Script:"), &mut a.text, 3);
+    } else if a.kind == 3 {
+        // A menu item is chosen from the safe list and kept apart from the text of the other kinds.
+        let items: Vec<Entry<&'static str>> =
+            pdfcraft_engine::SAFE_MENU_NAMES.iter().copied().map(|name| Entry::new(name, tl!(menu_item_label(name).unwrap_or(name)))).collect();
+        select_row(ui, "action-menu", tl!("Menu item:"), &mut a.menu, &items);
     } else {
         let hint = match a.kind {
             1 => "https://…",
             2 => tl!("Fields to reset (comma-separated; empty: all)"),
-            3 => tl!("Print, NextPage, PrevPage, FirstPage or LastPage"),
             4 => tl!("Page number"),
             5 | 6 => tl!("Field names (comma-separated)"),
             _ => tl!("URL to submit to"),
@@ -221,6 +227,9 @@ pub(super) fn actions_tab(ui: &mut egui::Ui, d: &mut FieldDraft) {
         Field::new(tl!("Value:")).id_salt("action-text").show(ui, |ui, _| {
             TextField::new(tl!("Value:"), Bind::bound(&mut a.text)).placeholder(hint).show(ui);
         });
+    }
+    if d.new_action != before {
+        d.action_error = None;
     }
     let commit = clicked(&Button::new(if editing { tl!("Update") } else { tl!("Add") }).show(ui));
     let discard = editing && clicked(&Button::new(tl!("Discard")).show(ui));
@@ -233,13 +242,19 @@ pub(super) fn actions_tab(ui: &mut egui::Ui, d: &mut FieldDraft) {
                 d.actions.sort_by_key(|(x, _)| T::ALL.iter().position(|y| y == x));
                 d.new_action.text.clear();
                 d.editing = None;
+                d.action_error = None;
             }
-            Err(e) => note(ui, tl!(&e).to_owned()),
+            Err(e) => d.action_error = Some(e),
         }
+    }
+    if let Some(e) = &d.action_error {
+        // Drawn every frame until the next edit, as a live region, so it is announced and stays.
+        Notice::new(Tone::Bad, tl!(e).to_owned()).announce(Politeness::Assertive).show(ui);
     }
     if discard {
         d.new_action = ActionDraft::default();
         d.editing = None;
+        d.action_error = None;
     }
     Text::new(tl!("Actions")).show(ui);
     if d.actions.is_empty() {
@@ -262,6 +277,13 @@ pub(super) fn actions_tab(ui: &mut egui::Ui, d: &mut FieldDraft) {
                 format!("{}, {then}", act.describe())
             };
             let delete = Label::from(crate::i18n::fmt(tl!("Delete {o}"), &[("o", tl!(tr.label()))]));
+            // A menu action already in a file under another name is kept as it is; say so.
+            let summary = match act {
+                pdfcraft_engine::FieldAction::Named(n) if pdfcraft_engine::NamedTarget::new(n).is_err() => {
+                    format!("{summary} ({})", tl!("Not on the safe menu list; kept as it is"))
+                }
+                _ => summary,
+            };
             let mut item =
                 ListRow::new(format!("{}: {summary}", tl!(tr.label()))).trailing_part(DELETE, TrailingFace::Strong(tl!("Delete").into()), delete);
             if !editing && matches!(act, pdfcraft_engine::FieldAction::JavaScript(_)) {
@@ -284,7 +306,7 @@ pub(super) fn actions_tab(ui: &mut egui::Ui, d: &mut FieldDraft) {
         Some((tr, pdfcraft_engine::FieldAction::JavaScript(js))) if d.editing.is_none() => Some((*tr, js.clone())),
         _ => None,
     }) {
-        d.new_action = ActionDraft { trigger, kind: 0, text };
+        d.new_action = ActionDraft { trigger, kind: 0, text, ..ActionDraft::default() };
         d.editing = Some(trigger);
     }
     if let Some(i) = remove.filter(|i| *i < d.actions.len()) {
