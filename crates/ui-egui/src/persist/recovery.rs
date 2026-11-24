@@ -307,6 +307,8 @@ mod idle_tests {
     use std::time::Duration;
 
     use craft::host::{AppInfo, Host, ManualJobs, ScriptedFiles};
+    // Used only by the tests that plant Unix file kinds.
+    #[cfg(unix)]
     use craft::platform::autosave::RecoveryStore;
 
     pub(super) struct TestDir(PathBuf);

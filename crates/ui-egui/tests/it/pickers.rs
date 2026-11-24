@@ -1028,7 +1028,9 @@ fn a_saved_attachment_carries_the_documents_zone() {
         let chosen = dir.0.join(format!("saved{i}.exe"));
         h.state_mut().attachment_action(&egui::Context::default(), id, 0, false);
         h.answer(Picked::Paths(vec![chosen.clone()]));
-        assert_eq!(std::fs::read(&chosen).unwrap(), b"hello notes");
+        // The host's file service keeps what it is given in memory; only the Mark-of-the-Web
+        // stream of the same name reaches the disk (and makes an empty file there).
+        assert_eq!(h.files.file(&chosen).as_deref(), Some(&b"hello notes"[..]));
         assert_eq!(zone_of(&chosen).as_deref(), Some(expected.as_bytes()), "document {i}");
     }
 }
