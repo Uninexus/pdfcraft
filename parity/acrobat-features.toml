@@ -3098,10 +3098,10 @@ area = "D"
 tier = "P2"
 milestone = "M4"
 status = "partial"
-commands = []
+commands = ["page.split"]
 tools = ["doc_split"]
-evidence = ["crates/automation/tests/it/split_name_template.rs::a_template_names_every_part_from_its_placeholders", "crates/automation/tests/it/split_name_template.rs::parts_that_get_the_same_name_stay_distinct_files", "crates/automation/tests/it/split_name_template.rs::a_template_cannot_put_a_part_outside_out_dir", "crates/automation/tests/it/automation.rs::bookmark_split_with_equal_titles_keeps_every_part"]
-notes = "Headless only: doc_split names parts after top-level bookmarks (equal names get -2, -3) or from an optional name_template ({name}, {bookmark}, {n}, {first}, {last}) made safe as a file name. A file already in out_dir with a part's name is replaced, not kept: there is no never-overwrite mode. The split dialog in the app has no name template and is unchanged."
+evidence = ["crates/automation/tests/it/split_name_template.rs::a_template_names_every_part_from_its_placeholders", "crates/automation/tests/it/split_name_template.rs::parts_that_get_the_same_name_stay_distinct_files", "crates/automation/tests/it/split_name_template.rs::a_template_cannot_put_a_part_outside_out_dir", "crates/automation/tests/it/automation.rs::bookmark_split_with_equal_titles_keeps_every_part", "crates/ui-egui/tests/it/split_template.rs::the_preview_shows_the_first_names_the_template_gives", "crates/ui-egui/tests/it/split_template.rs::a_template_that_cannot_be_used_says_why_and_blocks_the_split", "crates/ui-egui/tests/it/split_template.rs::the_parts_are_written_under_the_template_names"]
+notes = "The Split dialog has a File name template row: a hint on the placeholders, the template checked as it is typed (a bad one says why and Split stays off), and the first three file names shown before the split (not for a split by file size). doc_split and the dialog name parts after top-level bookmarks (equal names get -2, -3) or from an optional name_template ({name}, {bookmark}, {n}, {first}, {last}) made safe as a file name. A file already in out_dir with a part's name is replaced, not kept: there is no never-overwrite mode. In the dialog a template that leaves no usable name falls back to the usual name for that part; equal names get -2, -3. The template is not kept between runs of the app."
 
 [[feature]]
 id = "organize.split-multiple-files"

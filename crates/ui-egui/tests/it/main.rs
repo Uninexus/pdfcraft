@@ -95,6 +95,7 @@ mod signature_report;
 mod signing;
 mod signing_plan_window;
 mod snapshot_tabs;
+mod split_template;
 mod split_view;
 mod split_view_edits;
 mod split_view_find;

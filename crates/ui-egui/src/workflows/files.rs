@@ -102,6 +102,62 @@ pub enum SplitPlan {
     Bookmarks,
 }
 
+/// The file names of a split's parts, `parts` being each part's first and last page (1-based). Parts take the default
+/// names ("doc (pages 1-2).pdf", or "doc - Title.pdf" for `titles`, the bookmarks that start them), or the `template`'s
+/// where it leaves a usable name (`bookmarks` fill `{bookmark}`). Equal names, compared without regard to case, get
+/// "(2)", "(3)" after a default name and "-2", "-3" after a template's, so no part replaces another. The dialog's
+/// preview and the split itself both come here, so they agree.
+pub(crate) fn split_file_names(
+    stem: &str,
+    parts: &[(usize, usize)],
+    titles: &[(usize, String)],
+    bookmarks: &[(usize, String)],
+    template: Option<&pdfcraft_engine::split_name::Template>,
+) -> Vec<String> {
+    use pdfcraft_engine::split_name::{PartInfo, fold_key};
+    let safe = |t: &str| t.chars().map(|c| if c.is_alphanumeric() || " -_.,()".contains(c) { c } else { '_' }).collect::<String>();
+    let mut used = std::collections::HashSet::new();
+    let mut names = Vec::with_capacity(parts.len());
+    for (i, (a, b)) in parts.iter().enumerate() {
+        let (a, b) = (*a, *b);
+        let from_template = template.and_then(|t| {
+            let bookmark = bookmarks.iter().find(|(p, _)| *p + 1 == a).map_or("", |(_, title)| title.as_str());
+            t.apply(&PartInfo { name: stem, bookmark, number: i + 1, first: a, last: b })
+        });
+        let (base, dash) = match from_template {
+            Some(base) => (base, true),
+            None => {
+                let title = titles.iter().find(|(p, _)| *p + 1 == a).map(|(_, t)| safe(t));
+                let name = match title {
+                    Some(t) => format!("{stem} - {t}"),
+                    None if a == b => format!("{stem} (page {a})"),
+                    None => format!("{stem} (pages {a}-{b})"),
+                };
+                (name, false)
+            }
+        };
+        let mut unique = format!("{base}.pdf");
+        let mut n = 1;
+        while !used.insert(fold_key(&unique)) {
+            n += 1;
+            unique = if dash { format!("{base}-{n}.pdf") } else { format!("{base} ({n}).pdf") };
+        }
+        names.push(unique);
+    }
+    names
+}
+
+/// Why a file name template can't be used, in the interface language.
+pub(crate) fn template_error(e: &pdfcraft_engine::split_name::TemplateError) -> String {
+    use pdfcraft_engine::split_name::TemplateError as E;
+    match e {
+        E::TooLong => tl!("The template is too long").to_string(),
+        E::Unclosed => tl!("A { has no closing }").to_string(),
+        E::Stray => tl!("A } has no opening {. Write }} for a brace.").to_string(),
+        E::Unknown(word) => crate::i18n::fmt(tl!("{word} is not a placeholder"), &[("word", &format!("{{{word}}}"))]),
+    }
+}
+
 /// Organize ▸ Extract options.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ExtractOptions {
@@ -620,11 +676,21 @@ impl PdfCraftApp {
     /// Split the active document and write the parts: into a chosen folder (desktop, written on
     /// a later frame once the user has chosen it) or as downloads (web).
     pub fn split_active(&mut self, ctx: &egui::Context, plan: &SplitPlan) {
+        self.split_active_named(ctx, plan, None);
+    }
+
+    /// [`Self::split_active`] with a file name template (`{name}`, `{bookmark}`, `{n}`, `{first}`, `{last}`) naming the
+    /// parts; none, or a blank one, keeps the default names.
+    pub fn split_active_named(&mut self, ctx: &egui::Context, plan: &SplitPlan, template: Option<&str>) {
         // What's typed in a form field is part of the document (#166).
         if !self.commit_form_typing(ctx) {
             return;
         }
         let Some((_, id)) = self.active_ids() else { return };
+        let template = match template.filter(|t| !t.trim().is_empty()).map(pdfcraft_engine::split_name::Template::parse).transpose() {
+            Ok(template) => template,
+            Err(e) => return self.notify_fmt("The file name template can't be used: {e}", &[("e", &template_error(&e))]),
+        };
         let stem = self.session.get(id).map(|d| strip_pdf(&d.name).to_string()).unwrap_or_else(|| "document".into());
         let (parts, titles) = match plan {
             SplitPlan::By(by) => (self.session.split(id, by), Vec::new()),
@@ -642,28 +708,10 @@ impl PdfCraftApp {
                 return;
             }
         };
-        let safe = |t: &str| t.chars().map(|c| if c.is_alphanumeric() || " -_.,()".contains(c) { c } else { '_' }).collect::<String>();
-        let mut used = std::collections::HashSet::new();
-        let named: Vec<(String, Arc<Vec<u8>>)> = parts
-            .into_iter()
-            .map(|(a, b, bytes)| {
-                // Bookmark splits are named after the bookmark that starts the part.
-                let title = titles.iter().find(|(p, _)| *p + 1 == a).map(|(_, t)| safe(t));
-                let name = match title {
-                    Some(t) => format!("{stem} - {t}.pdf"),
-                    None if a == b => format!("{stem} (page {a}).pdf"),
-                    None => format!("{stem} (pages {a}-{b}).pdf"),
-                };
-                // Equal titles (or titles that sanitize alike) get (2), (3), ... so no part overwrites another; compared case-insensitively.
-                let mut unique = name.clone();
-                let mut n = 1;
-                while !used.insert(unique.to_lowercase()) {
-                    n += 1;
-                    unique = format!("{} ({n}).pdf", name.trim_end_matches(".pdf"));
-                }
-                (unique, bytes)
-            })
-            .collect();
+        let bookmarks = if template.is_some() { self.session.bookmark_splits(id) } else { Vec::new() };
+        let ranges: Vec<(usize, usize)> = parts.iter().map(|(a, b, _)| (*a, *b)).collect();
+        let names = split_file_names(&stem, &ranges, &titles, &bookmarks, template.as_ref());
+        let named: Vec<(String, Arc<Vec<u8>>)> = names.into_iter().zip(parts).map(|(name, (_, _, bytes))| (name, bytes)).collect();
         self.write_files(&named, "Choose a folder for the split files");
     }
 
