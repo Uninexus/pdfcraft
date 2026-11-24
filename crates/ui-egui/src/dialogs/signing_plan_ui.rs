@@ -371,7 +371,7 @@ impl PdfCraftApp {
         }
         let key = next.email.to_lowercase();
         let Some(doc) = self.session.get(id) else { return };
-        let fields: Vec<(String, usize)> = doc
+        let fields: Vec<(String, Option<usize>)> = doc
             .form
             .iter()
             .filter(|f| f.kind == pdfcraft_engine::FormFieldKind::Signature)

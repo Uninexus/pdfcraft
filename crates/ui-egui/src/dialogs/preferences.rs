@@ -466,6 +466,34 @@ fn date_language_picker_name(ctx: &egui::Context, l: &pdfcraft_engine::dates::Da
     if picker_text_is_drawable(ctx, l.name) { l.name } else { i18n::english_name_for_code(l.code) }
 }
 
+impl Prefs<'_> {
+    /// A button that asks first: the question, with the answer that runs `ask.command` and the one that keeps things as
+    /// they are. The question is announced and the yes answer takes the focus once.
+    fn ask(&mut self, ui: &mut Ui, enabled: bool, ask: &Ask) {
+        let asking = self.confirm.as_ref().is_some_and(|c| c.key == ask.key);
+        if !asking {
+            ui.add_enabled_ui(enabled, |ui| {
+                if Button::new(ask.button).show(ui).clicked() {
+                    *self.confirm = Some(Confirming { key: ask.key, fresh: true });
+                }
+            });
+            return;
+        }
+        Notice::new(Tone::Warn, ask.question).layout(NoticeLayout::Inline).announce(Politeness::Polite).id_salt(ask.key).show(ui);
+        let mut yes = Button::new(ask.yes);
+        if self.confirm.as_mut().is_some_and(|c| std::mem::take(&mut c.fresh)) {
+            yes = yes.request_focus(FocusRequest::Take);
+        }
+        if yes.show(ui).clicked() {
+            *self.confirm = None;
+            self.app.execute(self.ctx, ask.command);
+        }
+        if Button::new(ask.keep).show(ui).clicked() {
+            *self.confirm = None;
+        }
+    }
+}
+
 impl PreferencesModel for Prefs<'_> {
     fn pages(&self) -> Vec<PageSpec<'_>> {
         vec![
@@ -566,32 +594,6 @@ impl PreferencesModel for Prefs<'_> {
             ("fill.date_language", PrefValue::Choice(id)) => d.date_language = (id != FOLLOW_ID).then_some(id),
             ("javascript.enable", PrefValue::Bool(v)) => d.javascript = v,
             _ => {}
-        }
-    }
-
-    /// A button that asks first: the question, with the answer that runs `ask.command` and the one that keeps things as
-    /// they are. The question is announced and the yes answer takes the focus once.
-    fn ask(&mut self, ui: &mut Ui, enabled: bool, ask: &Ask) {
-        let asking = self.confirm.as_ref().is_some_and(|c| c.key == ask.key);
-        if !asking {
-            ui.add_enabled_ui(enabled, |ui| {
-                if Button::new(ask.button).show(ui).clicked() {
-                    *self.confirm = Some(Confirming { key: ask.key, fresh: true });
-                }
-            });
-            return;
-        }
-        Notice::new(Tone::Warn, ask.question).layout(NoticeLayout::Inline).announce(Politeness::Polite).id_salt(ask.key).show(ui);
-        let mut yes = Button::new(ask.yes);
-        if self.confirm.as_mut().is_some_and(|c| std::mem::take(&mut c.fresh)) {
-            yes = yes.request_focus(FocusRequest::Take);
-        }
-        if yes.show(ui).clicked() {
-            *self.confirm = None;
-            self.app.execute(self.ctx, ask.command);
-        }
-        if Button::new(ask.keep).show(ui).clicked() {
-            *self.confirm = None;
         }
     }
 
