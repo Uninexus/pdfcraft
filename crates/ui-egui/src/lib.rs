@@ -307,7 +307,8 @@ pub struct PdfCraftApp {
     /// Starts a PdfCraft window of its own on a file, at a page, for a tab moved out of this window. Tests replace it:
     /// they must not start a process.
     pub window_spawner: WindowSpawner,
-    pub(crate) closed_tabs: Vec<String>,
+    /// The files of tabs closed this session, newest last, for Reopen Closed Tab.
+    pub closed_tabs: Vec<String>,
     /// The Rename dialog's name being typed.
     pub(crate) rename_draft: Option<rename_ui::RenameDraft>,
     /// A name typed in Rename whose "Save and Rename" save did not go through; the dialog opens
