@@ -2,7 +2,7 @@
 
 use craft::behavior::{DisplayOrder, ItemSource};
 // PLAN: assumed `craft::ui::contract::CollectionEvent` re-export of the collection event enum.
-use craft::ui::contract::{Bind, CollectionEvent, LeadOnOpen, Props as _, ShowCollection as _, ShowContainer as _, overlay::Anchor};
+use craft::ui::contract::{Bind, CollectionEvent, LeadOnOpen, Props as _, ShowCollection as _, ShowContainer as _, lead_position, overlay::Anchor};
 use craft::ui::fonts::FontRef;
 use craft::ui::list::{DocumentRows, List, ListRow};
 use craft::ui::popover::{PopupList, PopupListKind};
@@ -78,31 +78,47 @@ pub(super) fn choice_list(ui: &mut egui::Ui, field: &FormField, rect: Rect, zoom
     picked
 }
 
+/// The id Auto-Complete's list is shown with, so the framework hands the field's list keys to it and the caller can ask
+/// where its highlight is.
+///
+/// The id holds the typed text: other text lists other entries, and they start with no highlight.
+fn suggestion_id(ui: &egui::Ui, typed: &str) -> egui::Id {
+    ui.scope_id().with(("pdfcraft.suggestion-list", typed))
+}
+
+/// The row of Auto-Complete's list the arrow keys have highlighted, as of the last pass; none until one was pressed and
+/// whenever the row is not among the `shown` entries.
+pub(super) fn suggestion_lead(ui: &egui::Ui, typed: &str, shown: usize) -> Option<usize> {
+    lead_position(ui.ctx(), suggestion_id(ui, typed)).filter(|at| *at < shown)
+}
+
 /// Auto-Complete's list of earlier entries hung from `rect`, the widget's rectangle on screen, open while `open` is
 /// true: the rows are `offered` in the field's text size (`zoom` screen points per page point) for the text `typed`.
-/// The list takes no keys: the field's editor keeps Enter, Escape and the arrows, and the caller moves `selected`, the
-/// row the arrows are on, which is marked with a leading `>`. Returns the position of the entry clicked this pass.
+/// The field keeps the keyboard focus and hands the list the Up and Down keys and Tab, so the highlight moves with the
+/// arrows and Tab takes it; Enter stays the field's (it commits, or the caller takes the highlighted entry on it) and
+/// Escape shuts the list. Returns the position of the entry clicked or taken with Tab this pass.
 pub(super) fn suggestion_list(
     ui: &mut egui::Ui,
     field: &FormField,
     rect: Rect,
     zoom: f32,
-    (typed, offered, selected): (&str, &[String], Option<usize>),
+    (typed, offered): (&str, &[String]),
     open: &mut bool,
 ) -> Option<usize> {
     let widget = field.widgets.first()?;
     let size = field_text_size(ui.painter(), field, widget, typed) * zoom;
-    let rows: Vec<String> =
-        offered.iter().enumerate().map(|(at, text)| if selected == Some(at) { format!("> {text}") } else { text.clone() }).collect();
-    let names: Vec<&str> = rows.iter().map(String::as_str).collect();
+    let names: Vec<&str> = offered.iter().map(String::as_str).collect();
     let source = Names(&names);
-    let list = ui.scope_id().with("pdfcraft.suggestion-list");
+    let list = suggestion_id(ui, typed);
     let shown = PopupList::new(tl!("Suggestions"), Bind::bound(&mut *open))
         .kind(PopupListKind::Document)
         .overlay(|overlay| {
             let dismiss = overlay.dismiss.focus_left(false);
-            overlay.anchor(Anchor::Rect(rect)).dismiss(dismiss)
+            // Enter stays the field's, and focus stays in the field when the list closes.
+            let focus = overlay.focus.list_enter(false).restore(false);
+            overlay.anchor(Anchor::Rect(rect)).dismiss(dismiss).focus(focus)
         })
+        .list(list)
         .show(ui, |ui, _| {
             List::<usize>::options(tl!("Suggestions"))
                 .id(list)

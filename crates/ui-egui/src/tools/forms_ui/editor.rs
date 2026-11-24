@@ -346,49 +346,7 @@ fn take_suggestion(session: &mut PageSession, f: &FormField, entry: &str) {
         x.text = f.max_len.map_or_else(|| entry.to_owned(), |max| entry.chars().take(max).collect());
         x.selection = TextSelection::caret_at(x.text.chars().count());
         session.forms.suggest_hidden = Some(x.text.clone());
-        session.forms.suggest_selected = None;
     }
-}
-
-/// The keys of Auto-Complete's list, taken before the field's editor sees them: Down and Up move the highlight, Enter
-/// takes the highlighted entry (with none highlighted it is the editor's, and commits what was typed) and Escape shuts
-/// the list while the typing stays. Returns the entries to list and the highlighted row; none for a field that is
-/// not a plain one-line text field, or once the list was shut at this text. The last value says a key of the list
-/// was taken this pass: the editor may have read the same Enter or Escape from the pass's input, and its end is then
-/// ignored, so the field stays open.
-fn suggestion_keys<'a>(
-    ui: &mut egui::Ui,
-    session: &mut PageSession,
-    f: &FormField,
-    suggestions: &'a [String],
-) -> (&'a [String], Option<usize>, bool) {
-    let typed = session.forms.focus.as_ref().map(|x| x.text.clone()).unwrap_or_default();
-    let usable = f.kind == FormFieldKind::Text && super::autocompletes(f) && session.forms.suggest_hidden.as_deref() != Some(typed.as_str());
-    let shown: &[String] = if usable { suggestions } else { &[] };
-    let Some(last) = shown.len().checked_sub(1) else { return (&[], None, false) };
-    let mut selected = session.forms.suggest_selected.as_ref().filter(|(text, at)| *text == typed && *at <= last).map(|(_, at)| *at);
-    // Only the plain keys: Shift+Tab goes back a field and Shift+arrows select text.
-    if ui.input(|i| i.modifiers.is_none()) {
-        let press = |key: egui::Key| ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, key));
-        if press(egui::Key::Escape) {
-            session.forms.suggest_hidden = Some(typed);
-            session.forms.suggest_selected = None;
-            return (&[], None, true);
-        }
-        if press(egui::Key::ArrowDown) {
-            selected = Some(selected.map_or(0, |at| (at + 1).min(last)));
-        } else if press(egui::Key::ArrowUp) {
-            selected = selected.filter(|at| *at > 0).map(|at| at - 1);
-        }
-        if let Some(entry) = selected.and_then(|at| shown.get(at))
-            && press(egui::Key::Enter)
-        {
-            take_suggestion(session, f, entry);
-            return (&[], None, true);
-        }
-    }
-    session.forms.suggest_selected = selected.map(|at| (typed, at));
-    (shown, selected, false)
 }
 
 /// Show the session of the focused field for this pass: the editor over a Text field or an editable
@@ -429,13 +387,14 @@ pub(crate) fn show(
     let types = f.kind == FormFieldKind::Text || (combo && editable_combo(f));
     let mut ended = None;
     let mut shown = None;
-    // What Auto-Complete lists for this pass, and the row the arrow keys are on.
-    let mut offered: &[String] = &[];
-    let mut selected = None;
-    let mut stay = false;
+    // What Auto-Complete lists for this pass: only under a plain text field, and not once the list was shut at this text.
+    let typed = session.forms.focus.as_ref().map(|x| x.text.clone()).unwrap_or_default();
+    let usable = f.kind == FormFieldKind::Text && super::autocompletes(f) && session.forms.suggest_hidden.as_deref() != Some(typed.as_str());
+    let offered: &[String] = if usable { suggestions } else { &[] };
+    // The row the arrow keys highlighted, as of the last pass; the editor's Enter takes it instead of committing.
+    let lead = super::suggestion_lead(ui, &typed, offered.len());
     if types {
         let room = (f.kind == FormFieldKind::Text && f.has(field_flags::DO_NOT_SCROLL)).then(|| doc.field_text_box(&focus.name, widget)).flatten();
-        (offered, selected, stay) = suggestion_keys(ui, session, f, suggestions);
         let focus = session.forms.focus.as_mut()?;
         let Focus { text, selection, .. } = focus;
         let mut host = FieldHost { ctx: ui.ctx().clone(), view: body.view, field: f, widget: w, geo, room, text, caret: selection.caret, laid: None };
@@ -458,17 +417,34 @@ pub(crate) fn show(
         ended = out.ended;
         shown = Some(out.response.id);
     }
-    // Auto-Complete's list under a plain text field: a click takes an entry, the caret going to its end.
-    if ended.is_none() && !offered.is_empty() {
-        let typed = session.forms.focus.as_ref().map(|x| x.text.clone()).unwrap_or_default();
+    // Auto-Complete's keys come through the editor's end: the list's own keys (arrows, Tab and Escape) the framework
+    // hands the list, while Enter and the Escape the editor reads are the field's. Enter on a highlighted entry takes it
+    // and the field stays open; Escape with the list showing shuts the list and keeps the typing.
+    let mut taken = None;
+    let mut stay = false;
+    match (ended, lead.and_then(|at| offered.get(at))) {
+        (Some(EditorEnd::Commit), Some(entry)) => {
+            taken = Some(entry);
+            stay = true;
+        }
+        (Some(EditorEnd::Cancel), _) if !offered.is_empty() => {
+            session.forms.suggest_hidden = Some(typed.clone());
+            stay = true;
+        }
+        _ => {}
+    }
+    if !stay && ended.is_none() && !offered.is_empty() {
         let mut open = true;
-        let clicked = super::suggestion_list(ui, f, rect, zoom, (&typed, offered, selected), &mut open).and_then(|i| offered.get(i));
-        if let Some(entry) = clicked {
-            take_suggestion(session, f, entry);
+        let clicked = super::suggestion_list(ui, f, rect, zoom, (&typed, offered), &mut open).and_then(|i| offered.get(i));
+        if clicked.is_some() {
+            taken = clicked;
         } else if !open {
             // Dismissed: shut until the text changes.
             session.forms.suggest_hidden = Some(typed);
         }
+    }
+    if let Some(entry) = taken {
+        take_suggestion(session, f, entry);
     }
     match ended {
         Some(EditorEnd::Commit | EditorEnd::Cancel) if stay => {}

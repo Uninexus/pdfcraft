@@ -30,7 +30,7 @@ mod choice_list;
 pub(crate) mod editor;
 
 use calendar::calendar;
-use choice_list::{choice_list, suggestion_list};
+use choice_list::{choice_list, suggestion_lead, suggestion_list};
 
 /// The page's paper: what an unbaked widget is filled with until its appearance is rendered.
 const PAPER: Color32 = Color32::WHITE;
@@ -67,8 +67,6 @@ pub struct FormView {
     pub focus: Option<Focus>,
     /// The text Auto-Complete's list was dismissed at (Escape, or an entry taken): it stays shut until the text changes.
     pub(crate) suggest_hidden: Option<String>,
-    /// The row of Auto-Complete's list the arrow keys are on, with the text it was chosen for.
-    pub(crate) suggest_selected: Option<(String, usize)>,
     /// The draft whose edit is queued (`DocView::pending_edit`): if the field refuses the value,
     /// the editor reopens with it rather than losing the typing.
     pub(crate) committed: Option<Focus>,
