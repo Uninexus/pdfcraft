@@ -50,6 +50,7 @@ mod folders;
 mod fonts;
 mod forms;
 mod identity;
+mod insert_clipboard;
 mod javascript;
 mod javascripts_window;
 mod layer_actions;
