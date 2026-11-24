@@ -435,6 +435,8 @@ impl PdfCraftApp {
             compare_ignore_case: false,
             compare_ignore_punctuation: false,
             compare: None,
+            readiness_open: false,
+            readiness_report: None,
             js_console: Default::default(),
             #[cfg(not(target_arch = "wasm32"))]
             script_pending: None,
@@ -626,6 +628,7 @@ impl PdfCraftApp {
             || self.sign_draft.is_some()
             || self.cert_viewer.is_some()
             || self.js_dialog.is_some()
+            || self.readiness_open
             || self.comment_props.is_some()
             || self.stamp_dialog.is_some()
     }

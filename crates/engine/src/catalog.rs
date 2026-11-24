@@ -413,6 +413,7 @@ pub static TOOL_GROUPS: &[ToolGroup] = &[
                 item("Set page boxes", "square-dashed-mouse-pointer", "page.boxes", Ready),
                 item("Add printer marks", "ruler", "prepress.marks", Ready),
                 item("Fix hairlines", "minus", "prepress.hairlines", Ready),
+                item("Print readiness", "file-check", "prepress.readiness", Ready),
             ],
         }],
     },

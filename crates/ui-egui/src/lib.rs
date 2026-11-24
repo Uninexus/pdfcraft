@@ -623,6 +623,10 @@ pub struct PdfCraftApp {
     pub compare_ignore_case: bool,
     pub compare_ignore_punctuation: bool,
     pub compare: Option<compare_ui::CompareState>,
+    /// Print production ▸ Print readiness is open (`dialogs::readiness_ui`).
+    pub readiness_open: bool,
+    /// The report it shows, measured when it opened; nothing is kept once it closes.
+    pub readiness_report: Option<pdfcraft_engine::printcheck::PrintReadiness>,
     /// The JavaScript console.
     pub js_console: js_ui::JsConsole,
     #[cfg(not(target_arch = "wasm32"))]

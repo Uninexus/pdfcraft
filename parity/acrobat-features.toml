@@ -8773,9 +8773,10 @@ area = "L"
 tier = "P1"
 milestone = "M11"
 status = "partial"
-commands = []
+commands = ["prepress.readiness"]
 tools = ["print_readiness"]
 evidence = [
+    "crates/ui-egui/tests/it/print_readiness.rs::the_report_lists_the_ink_findings_and_changes_nothing",
     "crates/engine/src/printcheck.rs::total_ink_over_the_limit_is_a_warning_and_under_it_is_silent",
     "crates/engine/src/printcheck.rs::a_colour_a_form_sets_is_counted_where_it_is_drawn_and_a_self_drawing_form_is_flagged",
     "crates/automation/tests/it/automation.rs::print_readiness_reports_ink_through_tools",
@@ -8786,7 +8787,7 @@ evidence = [
     "crates/engine/src/printcheck.rs::the_least_resolution_is_settable_and_bad_values_are_refused",
     "crates/automation/tests/it/automation.rs::print_readiness_min_ppi_through_tools",
 ]
-notes = "Headless only after the 0.22.0 sync: the registry command and the dialog that ran it are gone until the UI is re-ported. First slice: print_readiness warns when a painted CMYK colour (k, K, or sc/scn in DeviceCMYK or a four-component ICCBased space, inside forms too) has more than 300% total ink, with the highest value found. The limit is settable: print_readiness takes ink_limit (100 to 400 percent, default 300; anything else is refused) and says which limit it used; the Print readiness dialog has a field for each of the three (Total ink limit, Least bleed, Least resolution; empty is the default; a value is applied with Enter or when the field loses focus, not per keystroke, and one outside the range is refused in red on the field's own line, which always shows the range, and changes nothing; a comma is a decimal mark), remembered in the settings JSON (print_readiness: ink_limit, min_bleed_mm, min_ppi, each read alone) and set through ui.set readiness-ink-limit, readiness-min-bleed-mm and readiness-min-ppi (a number or default; ui.state.print_readiness reports them); the findings, the Measured lines and Copy report (which names any changed threshold) all follow them. The labels and hints are English only. The least bleed the page-bleed finding accepts (default 2 mm on the tightest side, only on pages with a TrimBox) is settable too: min_bleed_mm, 0 to 50, 0 turns it off. The image-resolution warning line (default 300 ppi; a fail under 150) is settable too: min_ppi, 36 to 1200, with the fail line at the lesser of 150 and the value. Missing: ink inside images, shadings, patterns and annotation appearances, a Preferences page control for the thresholds, a per-pixel coverage map, a separations preview. Invisible text (Tr 3) is ignored. UI to be re-ported onto the craft framework UI after the 0.22.0 sync."
+notes = "First slice: print_readiness warns when a painted CMYK colour (k, K, or sc/scn in DeviceCMYK or a four-component ICCBased space, inside forms too) has more than 300% total ink, with the highest value found. The limit is settable: print_readiness takes ink_limit (100 to 400 percent, default 300; anything else is refused) and says which limit it used; the Print readiness dialog has a field for each of the three (Total ink limit, Least bleed, Least resolution; empty is the default; a value is applied with Enter or when the field loses focus, not per keystroke, and one outside the range is refused in red on the field's own line, which always shows the range, and changes nothing; a comma is a decimal mark), remembered in the settings JSON (print_readiness: ink_limit, min_bleed_mm, min_ppi, each read alone) and set through ui.set readiness-ink-limit, readiness-min-bleed-mm and readiness-min-ppi (a number or default; ui.state.print_readiness reports them); the findings, the Measured lines and Copy report (which names any changed threshold) all follow them. The labels and hints are English only. The least bleed the page-bleed finding accepts (default 2 mm on the tightest side, only on pages with a TrimBox) is settable too: min_bleed_mm, 0 to 50, 0 turns it off. The image-resolution warning line (default 300 ppi; a fail under 150) is settable too: min_ppi, 36 to 1200, with the fail line at the lesser of 150 and the value. Missing: ink inside images, shadings, patterns and annotation appearances, a Preferences page control for the thresholds, a per-pixel coverage map, a separations preview. Invisible text (Tr 3) is ignored."
 
 [[feature]]
 id = "print.color-warnings"
@@ -8795,10 +8796,10 @@ area = "L"
 tier = "P1"
 milestone = "M11"
 status = "partial"
-commands = []
+commands = ["prepress.readiness"]
 tools = ["print_readiness"]
-evidence = ["crates/engine/src/printcheck.rs::rich_black_text_is_reported_and_pure_black_text_is_not", "crates/engine/src/printcheck.rs::overprint_and_spot_colours_are_noted", "crates/automation/tests/it/automation.rs::print_readiness_reports_ink_through_tools"]
-notes = "Headless only after the 0.22.0 sync: the registry command and the dialog that ran it are gone until the UI is re-ported. First slice: print_readiness notes text shown in rich black (K 90% or more with other inks), pages that turn overprint on (a gs with OP or op true) and the spot colours selected (Separation, DeviceN). Spot colours are those selected with cs (process colorants, All and None are not spot colours; Indexed bases and patterns are not seen). Missing: a warning by text size, overprint effects and previews, rich black in fills and strokes, a UI panel (the report is text and findings only). UI to be re-ported onto the craft framework UI after the 0.22.0 sync."
+evidence = ["crates/ui-egui/tests/it/print_readiness.rs::the_report_lists_the_ink_findings_and_changes_nothing", "crates/engine/src/printcheck.rs::rich_black_text_is_reported_and_pure_black_text_is_not", "crates/engine/src/printcheck.rs::overprint_and_spot_colours_are_noted", "crates/automation/tests/it/automation.rs::print_readiness_reports_ink_through_tools"]
+notes = "First slice: print_readiness notes text shown in rich black (K 90% or more with other inks), pages that turn overprint on (a gs with OP or op true) and the spot colours selected (Separation, DeviceN). Spot colours are those selected with cs (process colorants, All and None are not spot colours; Indexed bases and patterns are not seen). Missing: a warning by text size, overprint effects and previews, rich black in fills and strokes, a UI panel (the report is text and findings only)."
 
 [[feature]]
 id = "print.font-embedding-warning"
@@ -8807,14 +8808,15 @@ area = "L"
 tier = "P1"
 milestone = "M11"
 status = "partial"
-commands = []
+commands = ["prepress.readiness"]
 tools = ["print_readiness"]
 evidence = [
+    "crates/ui-egui/tests/it/print_readiness.rs::the_dialog_shows_what_was_measured_and_the_pdfa_result",
     "crates/engine/src/printcheck.rs::a_font_the_file_only_names_is_one_document_warning_and_none_means_no_finding",
     "crates/engine/src/printcheck.rs::many_fonts_with_huge_names_give_a_bounded_finding",
     "crates/automation/tests/it/automation.rs::print_readiness_warns_about_fonts_the_file_does_not_embed_through_tools",
 ]
-notes = "Headless only after the 0.22.0 sync: the registry command and the dialog that ran it are gone until the UI is re-ported. print_readiness gives one warn finding, font-not-embedded, when the PDF/A-2b structural check reports a font that a resource dictionary names but does not embed (no FontFile, FontFile2 or FontFile3). It names at most eight font names, each cut to 64 characters before it is copied, and says how many font names there are. Not covered: the check reads resource dictionaries, not content, so a font listed in a /Resources /Font dictionary but never selected with Tf is reported; it looks at every indirect object in the file, so a font only an unreachable object (an orphaned page or form left by an incremental update) names is reported too, and a page, form, appearance stream, pattern or Type 3 font resource counts alike; a font dictionary written inline inside /Font (not as an indirect object) is missed; fonts only in /AcroForm /DR are not looked at; the standard 14 fonts are reported like any other; a Type 3 font is never reported; a Type 0 font is judged by its first descendant's FontDescriptor. Only the finding's message is bounded: the fonts_not_embedded list and field, the Fonts not embedded measured line and the PDF/A issues keep full names. The count is of font names (names equal in their first 64 characters show the same). There is no setting to turn the finding off."
+notes = "print_readiness gives one warn finding, font-not-embedded, when the PDF/A-2b structural check reports a font that a resource dictionary names but does not embed (no FontFile, FontFile2 or FontFile3). It names at most eight font names, each cut to 64 characters before it is copied, and says how many font names there are. Not covered: the check reads resource dictionaries, not content, so a font listed in a /Resources /Font dictionary but never selected with Tf is reported; it looks at every indirect object in the file, so a font only an unreachable object (an orphaned page or form left by an incremental update) names is reported too, and a page, form, appearance stream, pattern or Type 3 font resource counts alike; a font dictionary written inline inside /Font (not as an indirect object) is missed; fonts only in /AcroForm /DR are not looked at; the standard 14 fonts are reported like any other; a Type 3 font is never reported; a Type 0 font is judged by its first descendant's FontDescriptor. Only the finding's message is bounded: the fonts_not_embedded list and field, the Fonts not embedded measured line and the PDF/A issues keep full names. The count is of font names (names equal in their first 64 characters show the same). There is no setting to turn the finding off."
 
 [[feature]]
 id = "print.object-inspector"

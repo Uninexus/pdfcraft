@@ -423,6 +423,7 @@ impl PdfCraftApp {
             "protect.password" => self.open_protect(),
             "prepress.convert_colors" => self.open_convert_colours(ctx),
             "prepress.hairlines" => self.open_fix_hairlines(ctx),
+            "prepress.readiness" => self.open_print_readiness(),
             "protect.remove" => {
                 if self.apply_edit(ctx, Edit::RemoveProtection) {
                     self.notify_tr("Security will be removed when you save");
