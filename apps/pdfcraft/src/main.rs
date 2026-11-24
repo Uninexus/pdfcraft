@@ -202,7 +202,8 @@ fn main() -> eframe::Result {
     }
     startup.files = rejoin_split_paths(startup.files, |p| std::path::Path::new(p).is_file());
     let may_hand_off = startup.may_hand_off();
-    let startup::Arguments { files, options, control_port, control_token, control_token_file, create_images, combine, two_paged, .. } = startup;
+    let startup::Arguments { files, options, control_port, control_token, control_token_file, create_images, combine, two_paged, new_window, .. } =
+        startup;
     // A bad control configuration stops the launch before any window opens.
     let control = match control_options(control_port, control_token, control_token_file) {
         Ok(control) => control,
@@ -247,7 +248,7 @@ fn main() -> eframe::Result {
     let frame = craft::window::policy::decide_for(craft::window::Prefix::new("PDFCRAFT"), craft::window::policy::Backend::from_env(), title_bar);
     let lang = startup_lang(saved_lang.as_deref(), &options);
     let choice = renderer_choice(std::env::var("PDFCRAFT_RENDERER").ok().as_deref());
-    let launch = Launch { files, options, control, create_images, combine, frame, lang, two_paged };
+    let launch = Launch { files, options, control, create_images, combine, frame, lang, two_paged, new_window };
     // Finder, Open With and the Dock deliver files as Apple events, not arguments; catch the one
     // that launched us as well as later ones. Lives until the event loop returns.
     #[cfg(target_os = "macos")]
@@ -417,6 +418,8 @@ struct Launch {
     /// The language the interface starts in, whose fonts are installed with the runtime.
     lang: pdfcraft_ui_egui::i18n::Lang,
     two_paged: bool,
+    /// `--new-window`: a window for these files alone (it doesn't bring last session back).
+    new_window: bool,
 }
 
 impl Launch {
@@ -503,7 +506,7 @@ fn app_creator<'a>(
     instance: Option<&'a single_instance::Server>,
     #[cfg(target_os = "macos")] apple_events: &'a apple_events::AppleEvents,
 ) -> eframe::AppCreator<'a> {
-    let Launch { files, options, control, create_images, combine, frame, lang, two_paged } = launch;
+    let Launch { files, options, control, create_images, combine, frame, lang, two_paged, new_window } = launch;
     Box::new(move |cc| {
         started.set(true);
         install_runtime(cc, frame, lang)?;
@@ -574,12 +577,16 @@ fn app_creator<'a>(
                 app.notify(e);
             }
         } else if combine {
-            app.reopen_last_files(&[]);
+            if startup::reopens_last_session(new_window) {
+                app.reopen_last_files(&[]);
+            }
             app.combine_paths(&cc.egui_ctx, &files);
         } else {
             // With the preference on, last session's files come back first; files named on
             // the command line open after them, in front (#442).
-            app.reopen_last_files(&files);
+            if startup::reopens_last_session(new_window) {
+                app.reopen_last_files(&files);
+            }
             startup::open_files(&mut app, &files, two_paged);
         }
         for (k, v) in options {

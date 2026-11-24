@@ -264,6 +264,9 @@ pub(crate) const FIELD_HIGHLIGHT_DEFAULT: [u8; 3] = [0x6E, 0x8E, 0xF5];
 /// The colour a required field's border shows in Preferences > Forms while it follows the theme.
 pub(crate) const REQUIRED_FIELD_DEFAULT: [u8; 3] = [0xE3, 0x22, 0x22];
 
+/// How a tab moves to a window of its own: the file and the page to show (0-based).
+pub type WindowSpawner = fn(&str, usize) -> Result<(), String>;
+
 pub struct PdfCraftApp {
     /// The app's services: jobs, files, settings sections, commands. Every queue is built from it.
     pub(crate) host: std::sync::Arc<craft::host::Host>,
@@ -301,6 +304,9 @@ pub struct PdfCraftApp {
     /// The interface language signature status captions were last drawn in.
     pub(crate) status_captions_lang: Option<i18n::Lang>,
     pub views: Vec<DocView>,
+    /// Starts a PdfCraft window of its own on a file, at a page, for a tab moved out of this window. Tests replace it:
+    /// they must not start a process.
+    pub window_spawner: WindowSpawner,
     pub(crate) closed_tabs: Vec<String>,
     /// The Rename dialog's name being typed.
     pub(crate) rename_draft: Option<rename_ui::RenameDraft>,

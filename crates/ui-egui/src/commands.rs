@@ -607,6 +607,10 @@ impl PdfCraftApp {
                     return Some(v.view_history(id == "view.next_view"));
                 }
             }
+            "view.move_to_new_window" => match active {
+                Some(i) => self.move_tab_to_new_window(i),
+                None => self.notify_tr("Open a document first"),
+            },
             "view.next_tab" => self.step_tab(true),
             "view.previous_tab" => self.step_tab(false),
             "view.theme" => self.toggle_theme(ctx),

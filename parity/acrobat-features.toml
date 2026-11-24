@@ -1264,11 +1264,11 @@ title = "Multiple windows; drag a tab out into a window"
 area = "B"
 tier = "P1"
 milestone = "M14"
-status = "planned"
-commands = []
+status = "partial"
+commands = ["view.move_to_new_window"]
 tools = []
-evidence = []
-notes = "A tab dragged more than 32 points out of the window (the cursor changes there), or Move to new window in its right-click menu, starts a second PdfCraft process (--new-window --page N, which does not reopen last session) on the document's file, at the page shown, and closes the tab. Only a saved document without unsaved changes and with no other tab of it moves (otherwise a notification says why); a failed launch keeps the tab. The tests drag tabs headlessly with the launch replaced; starting the real process, and the window itself, are not tested. Not yet: unsaved documents, dragging into another window, and no automation tool (pure window management). UI to be re-ported onto the craft framework UI after the 0.22.0 sync."
+evidence = ["crates/ui-egui/tests/it/new_window.rs::the_command_opens_the_saved_document_at_its_page_in_a_new_window_and_closes_the_tab", "crates/ui-egui/tests/it/new_window.rs::the_tabs_context_menu_moves_it_too", "crates/ui-egui/tests/it/new_window.rs::a_document_with_unsaved_changes_is_refused_with_the_reason_and_stays", "crates/ui-egui/tests/it/new_window.rs::a_launch_that_fails_keeps_the_tab_and_says_so", "apps/pdfcraft/src/startup.rs::a_new_window_does_not_reopen_last_session"]
+notes = "Window ▸ Move tab to new window (view.move_to_new_window, also in the tab's right-click menu and the palette), or dragging a tab out of the window and letting go outside it, starts a second PdfCraft process (--new-window --page N, which does not reopen last session) on the document's file, at the page shown, and closes the tab here; the tab is not offered by Reopen Closed Tab. Only a saved document without unsaved changes and with no other tab of it moves: otherwise a notice says why (save it first, or close its other tab) and the tab stays, as it does if the file is gone or the launch fails. The tests replace the process launch; starting the real process, the tab-strip drag-out gesture and the window itself are not tested. Not yet: unsaved documents (they are refused, not asked about), dragging into another window, and no automation tool (pure window management of the desktop shell). Not in the browser."
 
 [[feature]]
 id = "view.split-window"

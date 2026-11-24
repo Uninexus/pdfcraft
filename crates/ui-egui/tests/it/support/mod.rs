@@ -125,9 +125,11 @@ pub fn test_app(host: Arc<Host>) -> PdfCraftApp {
     inert_office(PdfCraftApp::with_host(host, services(RecordingClipboard::default())))
 }
 
-/// `app` with no Office converter installed: a test never starts LibreOffice. A test that converts gives its own.
+/// `app` with no Office converter installed and no way to start another window: a test never starts LibreOffice or a
+/// process. A test that converts, or watches the launches, gives its own.
 pub fn inert_office(mut app: PdfCraftApp) -> PdfCraftApp {
     app.office_converter = Some(pdfcraft_ui_egui::OfficeConverter::unavailable());
+    app.window_spawner = |_, _| Err("tests start no process".to_string());
     app
 }
 

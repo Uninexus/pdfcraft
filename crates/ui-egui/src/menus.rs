@@ -235,7 +235,7 @@ const SIGN: &[&str] = &[
     "form.signer_report",
     "sign.audit_report",
 ];
-const WINDOW: &[&str] = &["view.next_tab", "view.previous_tab"];
+const WINDOW: &[&str] = &["view.next_tab", "view.previous_tab", SEP, "view.move_to_new_window"];
 const HELP: &[&str] =
     &["help.shortcuts", SEP, "help.app_page", "help.github", "help.website", "help.discord", SEP, "help.check_updates", SEP, "help.about"];
 

@@ -49,6 +49,7 @@ pub(crate) fn services_asking(update_source: Option<craft::update::updater::Chec
 pub(crate) fn app_on(host: Host) -> PdfCraftApp {
     let mut app = PdfCraftApp::with_host(Arc::new(host), services());
     app.office_converter = Some(pdfcraft_ui_egui::OfficeConverter::unavailable());
+    app.window_spawner = |_, _| Err("tests start no process".to_string());
     // Inert by default: a test must never write the registry or open Windows Settings of the PC it runs on.
     // A test that wants to see the calls installs its own hooks.
     app.default_app_hooks =

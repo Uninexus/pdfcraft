@@ -17,6 +17,64 @@ pub(crate) enum Action {
         tab: u64,
         down: bool,
     },
+    /// Open a tab's document in a second PdfCraft window and close the tab here, by its view key.
+    MoveToNewWindow(u64),
+}
+
+/// Why a tab can't move to a window of its own: the other window reads the file from disk, so the document needs a
+/// saved path and nothing the file doesn't have, and no other view of it here, or it would be open in two processes
+/// at once.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum NewWindowRefusal {
+    /// It has unsaved changes: the new window would show the older file, and closing the tab here would lose them.
+    Unsaved,
+    /// It has no file on disk (a new, combined or pasted document).
+    NoPath,
+    /// Split view shows the document in another tab too.
+    OtherView,
+}
+
+/// The file a document with `path`, `unsaved` work and another view (`twin`) moves to a new window with, or why it
+/// can't. Unsaved changes are checked first: a saved but edited document is not safe to hand over.
+pub(crate) fn new_window_plan(path: Option<&str>, unsaved: bool, twin: bool) -> Result<&str, NewWindowRefusal> {
+    if unsaved {
+        return Err(NewWindowRefusal::Unsaved);
+    }
+    let path = path.filter(|p| !p.is_empty()).ok_or(NewWindowRefusal::NoPath)?;
+    if twin {
+        return Err(NewWindowRefusal::OtherView);
+    }
+    Ok(path)
+}
+
+/// The program and arguments that start a PdfCraft window of its own on `path`, at `page` (0-based). `--new-window`
+/// keeps the launch out of the single-instance hand-off, which would pass the file to this very process, and out of
+/// reopening last session's files. `path` is absolute, so a name that starts with `-` can't be read as an option.
+#[cfg(not(target_arch = "wasm32"))]
+fn new_window_command(exe: &std::path::Path, path: &std::path::Path, page: usize) -> (std::ffi::OsString, Vec<std::ffi::OsString>) {
+    let page = page.saturating_add(1).to_string();
+    (exe.as_os_str().to_owned(), vec!["--new-window".into(), "--page".into(), page.into(), path.as_os_str().to_owned()])
+}
+
+/// Start a new PdfCraft process on `path` at `page` (0-based), without waiting for it.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn spawn_new_window(path: &str, page: usize) -> Result<(), String> {
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let path = std::path::absolute(path).map_err(|e| e.to_string())?;
+    let (program, args) = new_window_command(&exe, &path, page);
+    let mut child = std::process::Command::new(program).args(args).spawn().map_err(|e| e.to_string())?;
+    // Reap it when it ends, so it doesn't stay a zombie for as long as this window lives. If the thread can't start,
+    // that is only logged.
+    if let Err(e) = std::thread::Builder::new().name("pdfcraft-new-window".into()).spawn(move || drop(child.wait())) {
+        log::warn!("new window: can't wait for the process: {e}");
+    }
+    Ok(())
+}
+
+/// The browser has no second window to start: the web says so instead.
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn spawn_new_window(_path: &str, _page: usize) -> Result<(), String> {
+    Err("Not available in the browser".into())
 }
 
 /// Reveal a local file without opening it or changing document/Recent state. The file manager call
@@ -43,6 +101,46 @@ impl crate::PdfCraftApp {
                 self.notify_error(e);
             }
         }
+    }
+
+    /// Open tab `index`'s document in a new window, at the page shown, and close the tab here. A document with unsaved
+    /// changes, no file, a file that is gone or another tab of it is refused with a notice that says why; a launch that
+    /// fails keeps the tab. The closed tab is not added to the reopen history: the document lives on in the other
+    /// window, and reopening it here would show it twice.
+    pub(crate) fn move_tab_to_new_window(&mut self, index: usize) {
+        if cfg!(target_arch = "wasm32") {
+            self.notify_tr("Moving a tab to a new window is not available in the browser");
+            return;
+        }
+        let Some(view) = self.views.get(index) else { return };
+        let (id, page) = (view.id, view.current());
+        // A document under OCR review stays put until the review ends (and says so).
+        if self.hold_close_for_ocr_review(index) {
+            return;
+        }
+        let path = self.session.get(id).and_then(|d| d.path.clone());
+        let path = match new_window_plan(path.as_deref(), self.has_unsaved_work(index), self.has_twin(index)) {
+            Ok(path) => path.to_owned(),
+            Err(NewWindowRefusal::Unsaved | NewWindowRefusal::NoPath) => {
+                self.notify_tr("Save the document before moving it to a new window");
+                return;
+            }
+            Err(NewWindowRefusal::OtherView) => {
+                self.notify_tr("Close the other tab of this document before moving it to a new window");
+                return;
+            }
+        };
+        if !std::path::Path::new(&path).is_file() {
+            self.notify_tr("The document's file no longer exists");
+            return;
+        }
+        if let Err(e) = (self.window_spawner)(&path, page) {
+            self.notify_fmt("Couldn't open a new window: {e}", &[("e", &e)]);
+            return;
+        }
+        let history = self.closed_tabs.clone();
+        self.close_tab(index);
+        self.closed_tabs = history;
     }
 
     /// Drops the latest closed-tab entry of `path`, once Reopen Closed Tab has brought it back.
@@ -86,6 +184,11 @@ impl crate::PdfCraftApp {
                 }
             }
             Action::Rename(id) => self.start_rename(ctx, id),
+            Action::MoveToNewWindow(tab) => {
+                if let Some(i) = self.tab_with_key(tab) {
+                    self.move_tab_to_new_window(i);
+                }
+            }
         }
     }
 }

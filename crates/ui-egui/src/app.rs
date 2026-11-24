@@ -289,6 +289,7 @@ impl PdfCraftApp {
             session: Session::new(),
             status_captions_lang: None,
             views: Vec::new(),
+            window_spawner: crate::tab_context::spawn_new_window,
             closed_tabs: Vec::new(),
             rename_draft: None,
             rename_returned: rename_ui::Returned::default(),

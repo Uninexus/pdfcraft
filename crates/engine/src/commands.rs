@@ -282,6 +282,9 @@ pub const COMMANDS: &[CommandSpec] = &[
     // also run from Combine files, which has no document open.
     c("view.next_tab", "Next tab", VIEW, Some(Shortcut { command: false, shift: false, mac_ctrl: true, key: "Tab" }), Nothing, "chevron_right"),
     c("view.previous_tab", "Previous tab", VIEW, Some(Shortcut { command: false, shift: true, mac_ctrl: true, key: "Tab" }), Nothing, "chevron_left"),
+    // The tab's document opens in a second PdfCraft window (a saved document with no unsaved changes), and the tab
+    // closes here. Dragging a tab out of the window does the same.
+    c("view.move_to_new_window", "Move tab to new window", VIEW, None, Document, "arrow-up-right"),
     // View-local history also appears in the Page navigation section; don't duplicate its menu.
     c("view.previous_view", "Previous view", None, Some(Shortcut::cmd("[")), Document, "chevron_left"),
     c("view.next_view", "Next view", None, Some(Shortcut::cmd("]")), Document, "chevron_right"),
