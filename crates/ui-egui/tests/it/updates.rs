@@ -263,3 +263,13 @@ fn saving_at_the_restart_question_writes_the_file_and_quits() {
     assert_eq!(name.as_deref(), Some("Changed"), "the change is in the file");
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
+
+/// A build of this fork must only ever look at the fork's own releases: with upstream's
+/// repository the app told users of this fork to "update" to upstream's build.
+#[test]
+fn updates_come_from_the_forks_releases_only() {
+    let app = &pdfcraft_ui_egui::UPDATE_APP;
+    assert_eq!(app.repo, pdfcraft_ui_egui::FORK_REPO);
+    assert!(!app.repo.contains("storytold"), "the update source is not upstream's");
+    assert!(app.releases_url().contains(app.repo), "the Download page is the fork's release page");
+}
