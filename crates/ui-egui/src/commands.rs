@@ -1036,6 +1036,7 @@ impl PdfCraftApp {
             "redact.pages" => crate::redact_ui::dialogs::open_pages(self, ctx),
             "redact.search" => {
                 self.redact_search.found = None;
+                self.redact_search.error = None;
                 self.redact_search_open = true;
             }
             "redact.properties" => self.redact_props = Some(self.redact_prefs.clone()),

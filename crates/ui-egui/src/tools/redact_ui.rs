@@ -3,7 +3,9 @@
 //! mark every match, set the default box colour and overlay text, and apply all marks (with a
 //! confirmation, as Acrobat asks) or clear them.
 
-use pdfcraft_engine::{Edit, NewAnnotation, REDACTION_CODE_SETS, RedactPattern, RedactionCodeSet, Rgb, Shape, Style, rect_quad};
+use pdfcraft_engine::{
+    Edit, NewAnnotation, REDACTION_CODE_SETS, RedactPattern, RedactRegex, RedactValidator, RedactionCodeSet, Rgb, Shape, Style, rect_quad,
+};
 
 use crate::PdfCraftApp;
 
@@ -172,6 +174,8 @@ pub enum SearchMode {
     /// Every word or phrase of a list, one per line.
     Words,
     Patterns,
+    /// A caller-written regular expression, optionally with a check-digit test.
+    Regex,
 }
 
 /// Find text and redact.
@@ -184,6 +188,13 @@ pub struct SearchDraft {
     pub case_sensitive: bool,
     pub whole_words: bool,
     pub pattern: RedactPattern,
+    /// The regular expression of the Regex mode.
+    pub regex: String,
+    /// The checksum a Regex match must pass (`None` keeps every match).
+    pub validator: Option<RedactValidator>,
+    /// Why the last search was refused (the expression is invalid, too long, matches nothing
+    /// but the empty string, or matches too often); nothing was marked then.
+    pub error: Option<String>,
     /// The result of the last search (matches marked), shown in the dialog.
     pub found: Option<usize>,
 }
@@ -197,8 +208,27 @@ impl Default for SearchDraft {
             case_sensitive: false,
             whole_words: false,
             pattern: RedactPattern::Phone,
+            regex: String::new(),
+            validator: None,
+            error: None,
             found: None,
         }
+    }
+}
+
+/// The matches of `re` on one page; fails when the page has more than the engine marks, so a
+/// page is never marked only in part.
+fn regex_hits(re: &RedactRegex, text: &pdfcraft_render::PageText) -> Result<Vec<std::ops::Range<usize>>, String> {
+    let failure = std::cell::RefCell::new(None);
+    let found = text.find_with(|chars| {
+        re.find(chars).unwrap_or_else(|e| {
+            *failure.borrow_mut() = Some(e.to_string());
+            Vec::new()
+        })
+    });
+    match failure.into_inner() {
+        Some(e) => Err(e),
+        None => Ok(found),
     }
 }
 
@@ -211,14 +241,24 @@ impl PdfCraftApp {
         let Some((_, id)) = self.active_ids() else { return 0 };
         let Some(doc) = self.session.get(id) else { return 0 };
         let d = self.redact_search.clone();
+        self.redact_search.error = None;
         let needles = match d.mode {
             SearchMode::Phrase if !d.text.trim().is_empty() => vec![d.text.clone()],
             SearchMode::Words => pdfcraft_engine::redact_word_list(&d.words),
-            SearchMode::Phrase | SearchMode::Patterns => Vec::new(),
+            SearchMode::Phrase | SearchMode::Patterns | SearchMode::Regex => Vec::new(),
         };
-        if d.mode != SearchMode::Patterns && needles.is_empty() {
+        if !matches!(d.mode, SearchMode::Patterns | SearchMode::Regex) && needles.is_empty() {
             return 0;
         }
+        // A refused expression names its reason in the dialog and marks nothing.
+        let user_re = match (d.mode, RedactRegex::new(&d.regex, d.validator)) {
+            (SearchMode::Regex, Ok(re)) => Some(re),
+            (SearchMode::Regex, Err(e)) => {
+                self.redact_search.error = Some(e.to_string());
+                return 0;
+            }
+            _ => None,
+        };
         let config = pdfcraft_render::RenderConfig { password: doc.password.as_deref().map(std::sync::Arc::from), ..Default::default() };
         let mut r = pdfcraft_render::PageRenderer::new(doc.bytes.clone(), config);
         let mut edits = Vec::new();
@@ -226,8 +266,16 @@ impl PdfCraftApp {
         for (page, page_info) in doc.info.pages.iter().enumerate() {
             let out = r.render(pdfcraft_render::RenderRequest { page, kind: pdfcraft_render::RequestKind::Text, scale: 1.0, ..Default::default() });
             let Some(text) = out.text else { continue };
-            let hits = match d.mode {
-                SearchMode::Patterns => text.find_with(|c| pdfcraft_engine::find_pattern(d.pattern, c)),
+            let hits = match (d.mode, &user_re) {
+                (SearchMode::Regex, Some(re)) => match regex_hits(re, &text) {
+                    Ok(hits) => hits,
+                    Err(e) => {
+                        // Marking only the first matches would leave the rest readable.
+                        self.redact_search.error = Some(e);
+                        return 0;
+                    }
+                },
+                (SearchMode::Patterns, _) => text.find_with(|c| pdfcraft_engine::find_pattern(d.pattern, c)),
                 _ => needles.iter().flat_map(|w| text.find_opts(w, d.case_sensitive, d.whole_words)).collect(),
             };
             for h in hits {

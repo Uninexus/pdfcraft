@@ -17,7 +17,7 @@ use craft::ui::runtime::env::UnitKind;
 use craft::ui::runtime::requests::ColorRequest;
 use craft::ui::text::{NumberField, TextField};
 use egui::Ui;
-use pdfcraft_engine::{Edit, OverlayFont, REDACT_PATTERNS, REDACTION_CODE_SETS, RedactPattern, Rgb};
+use pdfcraft_engine::{Edit, OverlayFont, REDACT_PATTERNS, REDACTION_CODE_SETS, RedactPattern, RedactValidator, Rgb};
 
 use super::{HiddenDraft, RedactPrefs, SearchDraft, SearchMode};
 use crate::comments::colours::{self, RecentColours};
@@ -205,9 +205,21 @@ pub(crate) fn finish_pages(ctx: &egui::Context, app: &mut PdfCraftApp, fields: &
     app.redact_pages(ctx, &pages);
 }
 
+/// The English name of a check-digit test, also its translation key.
+fn check_label(v: RedactValidator) -> &'static str {
+    match v {
+        RedactValidator::Luhn => "Card number (Luhn)",
+        RedactValidator::Mod97 => "Mod 97",
+        RedactValidator::Iban => "IBAN",
+    }
+}
+
 fn search_rows(ui: &mut Ui, d: &mut SearchDraft, import: &mut bool) {
     let mode = d.mode;
     let patterns: Vec<Entry<RedactPattern>> = REDACT_PATTERNS.iter().map(|p| Entry::new(*p, tl!(p.label()))).collect();
+    let checks: Vec<Entry<Option<RedactValidator>>> = std::iter::once(Entry::new(None, tl!("None")))
+        .chain(pdfcraft_engine::REDACT_VALIDATORS.iter().map(|v| Entry::new(Some(*v), tl!(check_label(*v)))))
+        .collect();
     FieldGroup::new(tl!("Find text and redact")).show(ui, |ui, _| {
         RadioGroup::new(tl!("Search for"), Bind::bound(&mut d.mode)).show(ui, |ui, _| {
             Radio::new(SearchMode::Phrase).label(tl!("Single word or phrase")).show(ui);
@@ -230,12 +242,24 @@ fn search_rows(ui: &mut Ui, d: &mut SearchDraft, import: &mut bool) {
                     d.pattern = p;
                 }
             });
+            Radio::new(SearchMode::Regex).label(tl!("Pattern (regular expression)")).show(ui);
+            TextField::new(tl!("Regular expression"), Bind::bound(&mut d.regex))
+                .placeholder(tl!("Regular expression"))
+                .enabled(mode == SearchMode::Regex)
+                .show(ui);
+            Field::new(tl!("Check digits")).enabled(mode == SearchMode::Regex).show(ui, |ui, _| {
+                if let Some(v) = Select::new(tl!("Check digits"), Bind::given(d.validator), &checks).show(ui).value().copied() {
+                    d.validator = v;
+                }
+            });
         });
-        let phrase_or_words = mode != SearchMode::Patterns;
+        let phrase_or_words = !matches!(mode, SearchMode::Patterns | SearchMode::Regex);
         Checkbox::new(Bind::bound(&mut d.whole_words)).label(tl!("Whole words only")).enabled(phrase_or_words).show(ui);
         Checkbox::new(Bind::bound(&mut d.case_sensitive)).label(tl!("Case-sensitive")).enabled(phrase_or_words).show(ui);
         Text::new(tl!("Text in images isn't found; recognise text (OCR) first.")).shade(Shade::Muted).show(ui);
-        if let Some(n) = d.found {
+        if let Some(reason) = &d.error {
+            Text::new(crate::i18n::fmt(tl!("The expression was refused, so nothing was marked: {reason}"), &[("reason", reason)])).show(ui);
+        } else if let Some(n) = d.found {
             let line = if n == 0 {
                 tl!("No matches.").to_string()
             } else {

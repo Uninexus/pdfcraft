@@ -92,6 +92,7 @@ mod reading_colors;
 mod recent_files;
 mod recovery;
 mod redact;
+mod redact_pattern;
 mod reload;
 mod scan_clean;
 mod script_noop;
