@@ -14,6 +14,7 @@
 
 pub mod actions;
 pub mod autotag;
+pub mod bates_batch;
 mod bookmarks;
 pub mod build_info;
 pub mod camera;
@@ -64,6 +65,7 @@ pub mod signature_audit;
 pub mod signature_image;
 pub mod signature_scan;
 mod sources;
+pub mod split_name;
 pub mod spooler;
 mod stamp_preview;
 #[cfg(test)]

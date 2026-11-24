@@ -139,6 +139,7 @@ const EDIT: &[&str] = &[
     "edit.find",
     "edit.replace",
     "edit.advanced_search",
+    "edit.search_folder",
     SEP,
     "edit.column_select",
     "edit.snapshot",
@@ -146,6 +147,7 @@ const EDIT: &[&str] = &[
     "edit.attach",
     "form.clear",
     "tools.javascripts",
+    "edit.bates_multi",
     SEP,
     "app.preferences",
 ];

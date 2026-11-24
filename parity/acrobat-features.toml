@@ -1505,7 +1505,7 @@ area = "B"
 tier = "P1"
 milestone = "M12"
 status = "partial"
-commands = ["edit.advanced_search"]
+commands = ["edit.advanced_search", "edit.search_folder"]
 tools = ["text_find_folder"]
 evidence = [
     "crates/automation/tests/it/find_folder.rs::matches_across_two_files_with_pages_and_snippets",
@@ -1522,8 +1522,12 @@ evidence = [
     "crates/engine/src/folder_search.rs::cancelling_keeps_the_files_done_and_stops_the_rest",
     "crates/engine/src/folder_search.rs::caps_on_file_size_entries_and_bytes_are_reported",
     "crates/engine/src/folder_search.rs::an_unlistable_subfolder_is_reported_apart_from_skipped_files",
+    "crates/ui-egui/tests/it/folder_search.rs::the_results_are_listed_by_file_and_a_click_opens_the_file_at_its_page",
+    "crates/ui-egui/tests/it/folder_search.rs::stopping_keeps_what_was_found_and_says_the_list_is_incomplete",
+    "crates/ui-egui/tests/it/folder_search.rs::a_search_without_text_is_refused_and_starts_nothing",
+    "crates/ui-egui/tests/it/folder_search.rs::the_edit_menu_lists_it_and_the_panel_leads_back_to_the_document",
 ]
-notes = "Edit > Advanced search has a Search in: This document / Folder scope. Folder searches the .pdf files of a chosen folder (optionally its sub-folders, to 32 levels) on a worker thread with the engine's folder_search, which extracts each page's text and uses the find bar's matcher, so Case-sensitive and Whole words agree. Results are listed by file with the page and context, and a double-click opens the file at that page (a file that is already open comes to the front at that page). Stop keeps what was found and says the list is incomplete. The text_find_folder tool does the same headlessly: folder inside --root, at most 2000 files, 5000 matches and 4 GiB read (the answer says when a cap cut it), a corrupt, password-protected, oversized or linked file is listed as skipped with its reason and never stops the search, links are never followed, and failed or cut pages make complete false. The search reads the text layer only: scanned pages need OCR first, a password-protected file is skipped (there is no per-file password), files are read one after another, and there is no index, so a large folder is read again on every search (a full-text index is view.search-index). In the window up to 1000 matches are listed, and a file whose name is not UTF-8 is listed but cannot be opened from the list. UI to be re-ported onto the craft framework UI after the 0.22.0 sync."
+notes = "Edit > Search all PDFs in a folder… (also the Search all PDFs in a folder… button in the Search panel) switches the Search panel to its Folder scope and asks for a folder; the query and the Whole words and Case-sensitive options are the panel's. It searches the .pdf files of a chosen folder (optionally its sub-folders, to 32 levels) on the host job queue with a progress card and Cancel (also the panel's Stop) with the engine's folder_search, which extracts each page's text and uses the find bar's matcher, so Case-sensitive and Whole words agree. Results are listed by file with the page and context, and a click opens the file at that page (a file that is already open comes to the front at that page). Stop keeps what was found and says the list is incomplete. The text_find_folder tool does the same headlessly: folder inside --root, at most 2000 files, 5000 matches and 4 GiB read (the answer says when a cap cut it), a corrupt, password-protected, oversized or linked file is listed as skipped with its reason and never stops the search, links are never followed, and failed or cut pages make complete false. The search reads the text layer only: scanned pages need OCR first, a password-protected file is skipped (there is no per-file password), files are read one after another, and there is no index, so a large folder is read again on every search (a full-text index is view.search-index). In the window up to 1000 matches are listed, and a file whose name is not UTF-8 is listed but cannot be opened from the list."
 
 [[feature]]
 id = "view.search-boolean"
@@ -2694,10 +2698,10 @@ area = "C"
 tier = "P1"
 milestone = "M7"
 status = "partial"
-commands = []
+commands = ["edit.bates_multi"]
 tools = ["doc_bates_multi"]
-evidence = ["crates/automation/tests/it/automation.rs::bates_numbers_continue_across_files_and_report_preflight_and_permission_failures"]
-notes = "The headless batch tool allocates inclusive intervals in input order and reports per-file failures; it refuses existing output paths. Missing: a GUI batch dialog (Acrobat sets this up from Header & Footer ▸ Add Bates numbering with a file list), so it is reachable only through `doc_bates_multi`."
+evidence = ["crates/automation/tests/it/automation.rs::bates_numbers_continue_across_files_and_report_preflight_and_permission_failures", "crates/ui-egui/tests/it/bates_multi.rs::the_numbers_run_on_from_one_file_to_the_next_and_the_copies_go_to_the_chosen_folder", "crates/ui-egui/tests/it/bates_multi.rs::a_file_that_cannot_be_read_stops_the_run_with_nothing_written", "crates/ui-egui/tests/it/bates_multi.rs::a_name_already_in_the_folder_is_never_replaced", "crates/ui-egui/tests/it/bates_multi.rs::cancelling_before_the_run_starts_writes_nothing_and_says_so", "crates/ui-egui/tests/it/bates_multi.rs::the_edit_menu_lists_it_and_the_dialog_asks_for_files_first"]
+notes = "Edit > Bates numbering on several files… (also under Bates numbering in the Edit a PDF tools) opens a dialog with a file list (Browse, Remove, reorder by drag or Ctrl+] and Ctrl+[, Sort By Name), the first number, the digits and the text before and after the number. After OK it asks for a folder and numbers the files in the listed order on a background worker, the numbers running on from one file to the next, with a progress card and Cancel. Every file is read and counted first, so a file that cannot be used stops the run with nothing written; a numbered copy never replaces a file (a taken name gets (2), (3)), and the originals are not changed. The number goes at the bottom right of every page (the batch tool puts it in the footer centre). A copy that cannot be written is named in the message and its numbers stay unused. Up to 1000 files and 512 MB of input. Also the headless tool doc_bates_multi, which allocates inclusive intervals in input order, reports per-file failures and refuses existing output paths; both share engine::bates_batch. Not in the browser."
 
 [[feature]]
 id = "edit.bates-remove"
@@ -3094,10 +3098,10 @@ area = "D"
 tier = "P2"
 milestone = "M4"
 status = "partial"
-commands = []
+commands = ["page.split"]
 tools = ["doc_split"]
-evidence = ["crates/automation/tests/it/split_name_template.rs::a_template_names_every_part_from_its_placeholders", "crates/automation/tests/it/split_name_template.rs::parts_that_get_the_same_name_stay_distinct_files", "crates/automation/tests/it/split_name_template.rs::a_template_cannot_put_a_part_outside_out_dir", "crates/automation/tests/it/automation.rs::bookmark_split_with_equal_titles_keeps_every_part"]
-notes = "Headless only: doc_split names parts after top-level bookmarks (equal names get -2, -3) or from an optional name_template ({name}, {bookmark}, {n}, {first}, {last}) made safe as a file name. A file already in out_dir with a part's name is replaced, not kept: there is no never-overwrite mode. The split dialog in the app has no name template and is unchanged."
+evidence = ["crates/automation/tests/it/split_name_template.rs::a_template_names_every_part_from_its_placeholders", "crates/automation/tests/it/split_name_template.rs::parts_that_get_the_same_name_stay_distinct_files", "crates/automation/tests/it/split_name_template.rs::a_template_cannot_put_a_part_outside_out_dir", "crates/automation/tests/it/automation.rs::bookmark_split_with_equal_titles_keeps_every_part", "crates/ui-egui/tests/it/split_template.rs::the_preview_shows_the_first_names_the_template_gives", "crates/ui-egui/tests/it/split_template.rs::a_template_that_cannot_be_used_says_why_and_blocks_the_split", "crates/ui-egui/tests/it/split_template.rs::the_parts_are_written_under_the_template_names"]
+notes = "The Split dialog has a File name template row: a hint on the placeholders, the template checked as it is typed (a bad one says why and Split stays off), and the first three file names shown before the split (not for a split by file size). doc_split and the dialog name parts after top-level bookmarks (equal names get -2, -3) or from an optional name_template ({name}, {bookmark}, {n}, {first}, {last}) made safe as a file name. A file already in out_dir with a part's name is replaced, not kept: there is no never-overwrite mode. In the dialog a template that leaves no usable name falls back to the usual name for that part; equal names get -2, -3. The template is not kept between runs of the app."
 
 [[feature]]
 id = "organize.split-multiple-files"

@@ -1,5 +1,6 @@
 pub(super) mod a11y_ui;
 pub(super) mod actions_ui;
+pub(super) mod bates_multi_ui;
 pub(super) mod combine_grid;
 pub(super) mod combine_ui;
 pub(super) mod compare_ui;
@@ -7,6 +8,7 @@ pub(super) mod create_multiple_ui;
 pub(super) mod create_ui;
 pub(super) mod export_ui;
 pub(super) mod files;
+pub(super) mod folder_search_ui;
 pub(super) mod insert_clipboard;
 pub(crate) mod job_count;
 pub(super) mod js_dialogs;

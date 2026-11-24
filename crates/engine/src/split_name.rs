@@ -1,15 +1,42 @@
-//! `doc_split`'s `name_template`: parsing it, filling it in for a part, and making the result a safe file name.
-
-use crate::error::{Result, ToolError};
+//! The name template of Split (`doc_split`'s `name_template` and the Split dialog's file name template): parsing it,
+//! filling it in for a part, and making the result a safe file name.
 
 /// Most bytes a part's name may have before ".pdf" and a "-N" suffix; a file name is at most 255.
-pub(crate) const MAX_BASE_BYTES: usize = 200;
+pub const MAX_BASE_BYTES: usize = 200;
 
 /// Longest `name_template` text, in bytes; a longer one is refused.
-pub(crate) const MAX_TEMPLATE_BYTES: usize = 1000;
+pub const MAX_TEMPLATE_BYTES: usize = 1000;
 
 /// How much of an expanded template is kept before it is made a file name (the name is cut to 200 bytes anyway).
 const MAX_EXPANDED_BYTES: usize = 4096;
+
+/// Why a template is refused. Display is the English text the tools give; the dialog words each itself.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TemplateError {
+    /// Longer than [`MAX_TEMPLATE_BYTES`].
+    TooLong,
+    /// A `{` without its `}`.
+    Unclosed,
+    /// A `}` without its `{`.
+    Stray,
+    /// A placeholder that does not exist.
+    Unknown(String),
+}
+
+impl std::fmt::Display for TemplateError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::TooLong => write!(f, "name_template is longer than {MAX_TEMPLATE_BYTES} bytes"),
+            Self::Unclosed => f.write_str("name_template has a { without a closing }"),
+            Self::Stray => f.write_str("name_template has a } without an opening {; write }} for a literal brace"),
+            Self::Unknown(word) => {
+                write!(f, "name_template has an unknown placeholder {{{word}}}; use {{name}}, {{bookmark}}, {{n}}, {{first}} or {{last}}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for TemplateError {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Piece {
@@ -23,10 +50,10 @@ enum Piece {
 
 /// A parsed `name_template`.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Template(Vec<Piece>);
+pub struct Template(Vec<Piece>);
 
 /// What a part's placeholders stand for.
-pub(crate) struct PartInfo<'a> {
+pub struct PartInfo<'a> {
     pub name: &'a str,
     /// The top-level bookmark whose page is the part's first page; empty when there is none.
     pub bookmark: &'a str,
@@ -37,9 +64,9 @@ pub(crate) struct PartInfo<'a> {
 
 impl Template {
     /// Placeholders are `{name}`, `{bookmark}`, `{n}`, `{first}` and `{last}`; `{{` and `}}` are a literal brace.
-    pub(crate) fn parse(text: &str) -> Result<Self> {
+    pub fn parse(text: &str) -> Result<Self, TemplateError> {
         if text.len() > MAX_TEMPLATE_BYTES {
-            return Err(ToolError::InvalidArgs(format!("name_template is longer than {MAX_TEMPLATE_BYTES} bytes")));
+            return Err(TemplateError::TooLong);
         }
         let mut pieces = Vec::new();
         let mut literal = String::new();
@@ -60,7 +87,7 @@ impl Template {
                         match chars.next() {
                             Some('}') => break,
                             Some(c) if word.chars().count() < 16 => word.push(c),
-                            _ => return Err(ToolError::InvalidArgs("name_template has a { without a closing }".into())),
+                            _ => return Err(TemplateError::Unclosed),
                         }
                     }
                     let piece = match word.as_str() {
@@ -69,18 +96,14 @@ impl Template {
                         "n" => Piece::Number,
                         "first" => Piece::First,
                         "last" => Piece::Last,
-                        _ => {
-                            return Err(ToolError::InvalidArgs(format!(
-                                "name_template has an unknown placeholder {{{word}}}; use {{name}}, {{bookmark}}, {{n}}, {{first}} or {{last}}"
-                            )));
-                        }
+                        _ => return Err(TemplateError::Unknown(word.clone())),
                     };
                     if !literal.is_empty() {
                         pieces.push(Piece::Text(std::mem::take(&mut literal)));
                     }
                     pieces.push(piece);
                 }
-                '}' => return Err(ToolError::InvalidArgs("name_template has a } without an opening {; write }} for a literal brace".into())),
+                '}' => return Err(TemplateError::Stray),
                 c => literal.push(c),
             }
         }
@@ -91,12 +114,12 @@ impl Template {
     }
 
     /// Whether the template uses `{bookmark}`.
-    pub(crate) fn uses_bookmark(&self) -> bool {
+    pub fn uses_bookmark(&self) -> bool {
         self.0.contains(&Piece::Bookmark)
     }
 
     /// The file name for a part, without ".pdf", or `None` when nothing usable is left (the caller then uses the default name).
-    pub(crate) fn apply(&self, part: &PartInfo) -> Option<String> {
+    pub fn apply(&self, part: &PartInfo) -> Option<String> {
         let mut out = String::new();
         let last_piece = self.0.len().saturating_sub(1);
         for (at, piece) in self.0.iter().enumerate() {
@@ -145,7 +168,7 @@ fn without_pdf(text: &str) -> &str {
 }
 
 /// The key that decides whether two part names are the same file: the same on a system that ignores case.
-pub(crate) fn fold_key(name: &str) -> String {
+pub fn fold_key(name: &str) -> String {
     // Upper then lower, so that σ and ς, which only share an upper case, fold together.
     name.to_uppercase().to_lowercase()
 }
@@ -164,7 +187,7 @@ fn is_device_name(name: &str) -> bool {
 
 /// `name` with a `_` in front when it is a Windows device name, which no file can be called on Windows
 /// even with an extension (`nul.x-part1` is one too).
-pub(crate) fn guard_device_name(name: &str) -> String {
+pub fn guard_device_name(name: &str) -> String {
     if is_device_name(name) { format!("_{name}") } else { name.to_owned() }
 }
 
@@ -175,7 +198,7 @@ pub(crate) fn guard_device_name(name: &str) -> String {
 /// becomes `_.`); leading and trailing dots and spaces go (Windows drops trailing ones, and a leading
 /// dot hides the file); a Windows device name (see [`guard_device_name`]) gets a `_` in front; and the
 /// result is cut to [`MAX_BASE_BYTES`] bytes between characters, device-name check included.
-pub(crate) fn sanitize(text: &str) -> Option<String> {
+pub fn sanitize(text: &str) -> Option<String> {
     // Dots and spaces at the ends go first, so a name of nothing but dots is empty, not `_`.
     let text = text.trim_matches(|c| c == '.' || c == ' ');
     let mut s: String = text.chars().map(|c| if c.is_alphanumeric() || " -_.,()".contains(c) { c } else { '_' }).collect();
@@ -208,7 +231,7 @@ mod tests {
     #[test]
     fn a_bad_template_is_refused() {
         for bad in ["{oops}", "{n", "}", "{", "{{}", "{nnnnnnnnnnnnnnnnnnnnnnnn}"] {
-            assert!(matches!(Template::parse(bad), Err(ToolError::InvalidArgs(_))), "{bad}");
+            assert!(Template::parse(bad).is_err(), "{bad}");
         }
     }
 
@@ -282,7 +305,7 @@ mod tests {
 
     #[test]
     fn a_huge_value_or_template_is_bounded() {
-        assert!(matches!(Template::parse(&"a".repeat(MAX_TEMPLATE_BYTES + 1)), Err(ToolError::InvalidArgs(_))));
+        assert!(Template::parse(&"a".repeat(MAX_TEMPLATE_BYTES + 1)) == Err(TemplateError::TooLong));
         let t = Template::parse(&"{bookmark}".repeat(99)).unwrap();
         let name = t.apply(&part(&"b".repeat(5_000_000))).unwrap();
         assert!(name.len() <= MAX_BASE_BYTES);

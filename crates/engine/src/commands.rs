@@ -213,6 +213,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     // takes ⌘H to hide the app, and Ctrl+H is Read mode on Windows and Linux (as in Acrobat).
     c("edit.replace", "Replace…", EDIT, Some(Shortcut::cmd_shift("H")), Modification, "replace"),
     c("edit.advanced_search", "Advanced search…", EDIT, Some(Shortcut::cmd_shift("F")), Document, "search"),
+    c("edit.search_folder", "Search all PDFs in a folder…", EDIT, None, Document, "search"),
     c("view.palette", "Find tools and commands…", VIEW, Some(Shortcut::cmd("K")), Nothing, "search"),
     // Page display: View ▸ Page display and the rail's button list the base layouts as radios and
     // continuous scrolling as a checkbox, so `menu = None` keeps them out of the generated menus.
@@ -354,6 +355,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     c("edit.links_from_urls", "Create links from URLs", None, None, Modification, "link"),
     c("edit.remove_links", "Remove all links", None, None, Modification, "trash-2"),
     c("edit.bates", "Add Bates numbering…", None, None, Modification, "hash"),
+    c("edit.bates_multi", "Bates numbering on several files…", EDIT, None, Nothing, "hash"),
     c("edit.bates_remove", "Remove Bates numbering", None, None, Marks(crate::MarkKind::Bates), "hash"),
     c("edit.image", "Add image…", None, None, Modification, "image-plus"),
     c("redact.mark", "Redact text and images", None, None, Modification, "rectangle"),

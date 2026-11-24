@@ -805,6 +805,8 @@ impl PdfCraftApp {
                     self.choose_right_panel(Some(crate::RightPanel::Search));
                 }
             }
+            "edit.search_folder" => self.open_folder_search(),
+            "edit.bates_multi" => self.open_bates_multi(ctx),
             "export.all_images" => crate::export_ui::open(self, ctx, crate::export_ui::ExportKind::AllImages),
             "edit.text" => {
                 self.quick_tool = crate::QuickTool::AddText;
