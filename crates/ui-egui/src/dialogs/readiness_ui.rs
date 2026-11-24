@@ -389,7 +389,7 @@ fn options_body(ui: &mut egui::Ui, text: &mut [String; 3], refused: &[Option<Str
         events.typed[at] = text[at] != before;
         // The focus is on the field's text part, which `focus::is_focused` counts as the field; the response alone
         // does not report the field losing it.
-        let had_focus_key = egui::Id::new(("readiness-field-focus", at));
+        let had_focus_key = edit.response.id.with("readiness-field-had-focus");
         let has_focus = focus::is_focused(ui.ctx(), edit.response.id);
         let had_focus = ui.ctx().data_mut(|d| d.get_temp::<bool>(had_focus_key).unwrap_or(false));
         ui.ctx().data_mut(|d| d.insert_temp(had_focus_key, has_focus));
