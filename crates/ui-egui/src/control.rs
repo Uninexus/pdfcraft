@@ -43,7 +43,9 @@
 //!   digital signatures), `form-tooltips=true|false` shows or hides a field's tooltip, and
 //!   `field-highlight-color=#RRGGBB|default` sets the colour Highlight fields draws (`default`
 //!   follows the theme); `ui.state` reports `identity_email`, `form_tooltips` and
-//!   `field_highlight_color` (null while it follows the theme).
+//!   `field_highlight_color` (null while it follows the theme). `form-autocomplete=off|basic` sets
+//!   Preferences > Forms > Auto-Complete; `ui.state` reports `form_autocomplete` and
+//!   `form_entry_count`.
 //!   `units=in|mm|cm|pt` and `blank-paper=letter|a4` set Preferences > Documents and view > Units
 //!   (the unit page sizes and margins are shown in) and Paper for new blank pages (what Create >
 //!   Blank page uses); `ui.state.units` and `ui.state.blank_paper` report them.

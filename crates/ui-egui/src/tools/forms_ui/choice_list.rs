@@ -77,3 +77,46 @@ pub(super) fn choice_list(ui: &mut egui::Ui, field: &FormField, rect: Rect, zoom
     }
     picked
 }
+
+/// Auto-Complete's list of earlier entries hung from `rect`, the widget's rectangle on screen, open while `open` is
+/// true: the rows are `offered` in the field's text size (`zoom` screen points per page point) for the text `typed`.
+/// The lead starts nowhere, so Enter keeps what was typed until an arrow key has chosen a row. Returns the position of
+/// the entry activated this pass.
+pub(super) fn suggestion_list(
+    ui: &mut egui::Ui,
+    field: &FormField,
+    rect: Rect,
+    zoom: f32,
+    typed: &str,
+    offered: &[String],
+    open: &mut bool,
+) -> Option<usize> {
+    let widget = field.widgets.first()?;
+    let size = field_text_size(ui.painter(), field, widget, typed) * zoom;
+    let names: Vec<&str> = offered.iter().map(String::as_str).collect();
+    let source = Names(&names);
+    // Named like the options list, so the framework routes the arrows and Enter to it while the field's editor has the keys.
+    let list = ui.scope_id().with("pdfcraft.suggestion-list");
+    let shown = PopupList::new(tl!("Suggestions"), Bind::bound(&mut *open))
+        .kind(PopupListKind::Document)
+        .overlay(|overlay| {
+            let dismiss = overlay.dismiss.focus_left(false);
+            overlay.anchor(Anchor::Rect(rect)).dismiss(dismiss)
+        })
+        .list(list)
+        .show(ui, |ui, _| {
+            List::<usize>::options(tl!("Suggestions"))
+                .id(list)
+                .lead_on_open(LeadOnOpen::Selected)
+                .document_rows(DocumentRows::new(FontRef::proportional(), size, HAlign::Start))
+                .show_items(ui, &source, &mut |key, _| ListRow::new(names.get(*key).copied().unwrap_or_default().to_owned()).option())
+                .events
+        });
+    let mut picked = None;
+    for event in shown.inner.into_iter().flatten() {
+        if let CollectionEvent::Activate(key) = event {
+            picked = Some(key);
+        }
+    }
+    picked
+}

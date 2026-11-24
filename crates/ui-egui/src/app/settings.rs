@@ -93,6 +93,10 @@ pub struct Behavior {
     pub identity_email: Option<String>,
     /// Preferences > Forms: a field's tooltip shows on hover.
     pub form_tooltips: Option<bool>,
+    /// Preferences > Forms > Auto-Complete: Basic (on) or Off.
+    pub form_autocomplete: Option<bool>,
+    /// JSON text: what Auto-Complete remembered, newest first. Plain text the person typed, kept in the local settings only.
+    pub form_entries: Option<String>,
     /// Preferences > Forms: the Highlight fields colour; absent follows the theme (TOML has no null).
     pub field_highlight_color: Option<[u8; 3]>,
     pub comments_panel_closed: Option<bool>,
@@ -607,6 +611,8 @@ pub fn import_json(text: &str) -> (PdfCraftSettings, Vec<SectionError>) {
             highlight_fields: r.bool("highlight_fields"),
             identity_email: r.string("identity_email"),
             form_tooltips: r.bool("form_tooltips"),
+            form_autocomplete: r.bool("form_autocomplete"),
+            form_entries: r.text("form_entries"),
             field_highlight_color: r.typed("field_highlight_color"),
             comments_panel_closed: r.bool("comments_panel_closed"),
             right_panel_closed: r.bool("right_panel_closed"),

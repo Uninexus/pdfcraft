@@ -30,7 +30,7 @@ mod choice_list;
 pub(crate) mod editor;
 
 use calendar::calendar;
-use choice_list::choice_list;
+use choice_list::{choice_list, suggestion_list};
 
 /// The page's paper: what an unbaked widget is filled with until its appearance is rendered.
 const PAPER: Color32 = Color32::WHITE;
@@ -65,6 +65,8 @@ pub struct Focus {
 #[derive(Clone, Debug, Default)]
 pub struct FormView {
     pub focus: Option<Focus>,
+    /// The text Auto-Complete's list was dismissed at (Escape, or an entry taken): it stays shut until the text changes.
+    pub(crate) suggest_hidden: Option<String>,
     /// The draft whose edit is queued (`DocView::pending_edit`): if the field refuses the value,
     /// the editor reopens with it rather than losing the typing.
     pub(crate) committed: Option<Focus>,
@@ -216,6 +218,12 @@ impl Focus {
     fn is_on(&self, f: &FormField, widget: usize) -> bool {
         self.name == f.name && self.widget == widget && self.obj.is_none_or(|o| o == f.obj)
     }
+}
+
+/// Whether Auto-Complete works in `f`: a plain one-line text field ([`pdfcraft_engine::form_entries::rememberable`]
+/// refuses password, comb, multi-line, rich-text, read-only and formatted ones).
+pub(crate) fn autocompletes(f: &FormField) -> bool {
+    pdfcraft_engine::form_entries::rememberable(f)
 }
 
 /// The field `focus` is on: the twin with its field object, or else the first field with its name.

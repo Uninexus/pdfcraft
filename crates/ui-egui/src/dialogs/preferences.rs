@@ -89,6 +89,7 @@ struct PrefsDraft {
     author: String,
     identity_email: String,
     form_tooltips: bool,
+    form_autocomplete: bool,
     field_highlight_color: Option<[u8; 3]>,
     hide_empty_highlight_hover: bool,
     comment_tool_pinned: bool,
@@ -131,6 +132,7 @@ impl PrefsDraft {
             author: app.comment_prefs.author.clone(),
             identity_email: app.identity_email.clone(),
             form_tooltips: app.form_tooltips,
+            form_autocomplete: app.session.form_autocomplete(),
             field_highlight_color: app.field_highlight_color,
             hide_empty_highlight_hover: app.comment_prefs.hide_empty_highlight_hover,
             comment_tool_pinned: app.comment_prefs.pinned,
@@ -178,6 +180,7 @@ impl PrefsDraft {
             author: prefs.author,
             identity_email: String::new(),
             form_tooltips: true,
+            form_autocomplete: engine.form_autocomplete(),
             field_highlight_color: None,
             hide_empty_highlight_hover: prefs.hide_empty_highlight_hover,
             comment_tool_pinned: prefs.pinned,
@@ -369,6 +372,10 @@ fn unit_table<'a>() -> Table<'a, Unit> {
     ]
 }
 
+fn autocomplete_table<'a>() -> Table<'a, bool> {
+    vec![(false, "off", tl!("Off")), (true, "basic", tl!("Basic"))]
+}
+
 fn paper_table<'a>() -> Table<'a, crate::paper::Paper> {
     vec![(crate::paper::Paper::Letter, "letter", tl!("US Letter")), (crate::paper::Paper::A4, "a4", tl!("A4"))]
 }
@@ -503,6 +510,7 @@ impl PreferencesModel for Prefs<'_> {
             ("forms.highlight", PrefValue::Bool(v)) => d.highlight_fields = v,
             ("forms.highlight_color", PrefValue::Color(c)) => d.field_highlight_color = Some([c.0[0], c.0[1], c.0[2]]),
             ("forms.tooltips", PrefValue::Bool(v)) => d.form_tooltips = v,
+            ("forms.autocomplete", PrefValue::Choice(id)) => d.form_autocomplete = lookup(&autocomplete_table(), &id).unwrap_or(d.form_autocomplete),
             ("comment.hide_hover", PrefValue::Bool(v)) => d.hide_empty_highlight_hover = v,
             ("comment.pinned", PrefValue::Bool(v)) => d.comment_tool_pinned = v,
             ("fill.flatten", PrefValue::Bool(v)) => d.flatten_fill_sign_on_save = v,
@@ -529,6 +537,17 @@ impl PreferencesModel for Prefs<'_> {
                     if Button::new(label).show(ui).clicked() {
                         self.app.execute(self.ctx, command);
                     }
+                }
+            });
+            return false;
+        }
+        if key == "forms.entries" {
+            // Acts on what was remembered at once, like the buttons above; nothing here is part of the draft.
+            let any = !self.app.session.form_entries().is_empty();
+            ui.add_enabled_ui(any, |ui| {
+                if Button::new(tl!("Remove all remembered entries")).show(ui).clicked() {
+                    self.app.session.clear_form_entries();
+                    self.app.notify_fmt("Remembered entries removed", &[]);
                 }
             });
             return false;
@@ -626,6 +645,7 @@ impl PreferencesModel for Prefs<'_> {
                 d.highlight_fields = fresh.highlight_fields;
                 d.field_highlight_color = fresh.field_highlight_color;
                 d.form_tooltips = fresh.form_tooltips;
+                d.form_autocomplete = fresh.form_autocomplete;
             }
             "comment" => {
                 d.hide_empty_highlight_hover = fresh.hide_empty_highlight_hover;
@@ -708,6 +728,7 @@ impl PreferencesDraft for Prefs<'_> {
         self.app.comment_prefs.author = d.author;
         self.app.identity_email = d.identity_email.trim().chars().take(crate::MAX_AUTHOR_CHARS).collect();
         self.app.form_tooltips = d.form_tooltips;
+        self.app.session.set_form_autocomplete(d.form_autocomplete);
         self.app.field_highlight_color = d.field_highlight_color;
         self.app.comment_prefs.hide_empty_highlight_hover = d.hide_empty_highlight_hover;
         self.app.comment_prefs.pinned = d.comment_tool_pinned;
@@ -884,6 +905,10 @@ impl Prefs<'_> {
             )
             .help(tl!("Drawn over fields you can fill in. Reset this page to follow the theme again.")),
             RowSpec::new("forms.tooltips", tl!("Show a field's tooltip when the pointer rests on it"), RowKind::Bool(d.form_tooltips)),
+            choice_row("forms.autocomplete", tl!("Auto-Complete"), d.form_autocomplete, &autocomplete_table()).help(tl!(
+                "Offers what you typed into other text fields before, as you type. Passwords, signatures, dates, numbers, multi-line and read-only fields are never remembered. Entries stay on this computer. Turning this off keeps the saved list until you remove it."
+            )),
+            RowSpec::new("forms.entries", tl!("Remembered entries"), RowKind::Custom),
         ];
         PageSpec::new("forms", tl!("Forms"), rows)
     }

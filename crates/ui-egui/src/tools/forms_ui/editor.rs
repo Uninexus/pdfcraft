@@ -12,7 +12,7 @@ use std::sync::Arc;
 use craft::behavior::CanvasView;
 use craft::behavior::kurbo::Point;
 use craft::pages::ui::view::PageBody;
-use craft::text::ui::editor::{CaretLine, EditKind, EditorEnd, EditorMode, HostLine, HostRun, TextEditor, TextEditorHost};
+use craft::text::ui::editor::{CaretLine, EditKind, EditorEnd, EditorMode, HostLine, HostRun, TextEditor, TextEditorHost, TextSelection};
 use craft::ui::contract::{Bind, Props as _, Show as _};
 use egui::text::{CCursor, CharIndex, LayoutJob};
 use egui::{Align, Color32, CornerRadius, FontId, Pos2, Rect, pos2, vec2};
@@ -355,6 +355,7 @@ pub(crate) fn show(
     form: &[FormField],
     info: &DocInfo,
     today: (i64, u32, u32),
+    suggestions: &[String],
     pages: PageGeometry<'_>,
 ) -> Option<egui::Id> {
     let focus = session.forms.focus.as_ref()?;
@@ -399,6 +400,24 @@ pub(crate) fn show(
         let out = ui.push_id((&f.name, f.obj, widget), |ui| editor.show_at(ui, rect)).inner;
         ended = out.ended;
         shown = Some(out.response.id);
+    }
+    // Auto-Complete: the entries remembered earlier that start like the text, in a list under a plain text field.
+    if ended.is_none() && f.kind == FormFieldKind::Text && !suggestions.is_empty() && super::autocompletes(f) {
+        let typed = session.forms.focus.as_ref().map(|x| x.text.clone()).unwrap_or_default();
+        let mut open = session.forms.suggest_hidden.as_deref() != Some(typed.as_str());
+        if open {
+            let picked = super::suggestion_list(ui, f, rect, zoom, &typed, suggestions, &mut open).and_then(|i| suggestions.get(i));
+            if let Some(entry) = picked {
+                if let Some(x) = session.forms.focus.as_mut() {
+                    x.text = f.max_len.map_or_else(|| entry.clone(), |max| entry.chars().take(max).collect());
+                    x.selection = TextSelection::caret_at(x.text.chars().count());
+                    session.forms.suggest_hidden = Some(x.text.clone());
+                }
+            } else if !open {
+                // Dismissed: shut until the text changes.
+                session.forms.suggest_hidden = Some(typed);
+            }
+        }
     }
     match ended {
         Some(EditorEnd::Commit) => commit(session, form),

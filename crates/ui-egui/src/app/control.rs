@@ -63,6 +63,14 @@ impl PdfCraftApp {
             ("form-tooltips", _) => {
                 self.form_tooltips = value.parse::<bool>().map_err(|_| "form-tooltips must be true or false")?;
             }
+            // Preferences > Forms > Auto-Complete: Off (the default) or Basic.
+            ("form-autocomplete", _) => {
+                self.session.set_form_autocomplete(match value {
+                    "off" => false,
+                    "basic" => true,
+                    _ => return Err("form-autocomplete must be off or basic".into()),
+                });
+            }
             ("field-highlight-color", _) => {
                 self.field_highlight_color = match value {
                     "default" => None,

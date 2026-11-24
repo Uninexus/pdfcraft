@@ -897,6 +897,9 @@ struct PageBodyCx<'a> {
     form_tooltips: bool,
     /// Preferences > Forms: the Highlight fields colour; `None` follows the theme.
     field_highlight_color: Option<[u8; 3]>,
+    /// Preferences > Forms > Auto-Complete: the remembered entries the focused plain text field's text could be
+    /// completed to (none while the preference is off).
+    form_suggestions: &'a [String],
     /// No dialog, close prompt or palette over the pages.
     unobstructed: bool,
     /// Every page's size in view space, unturned by the view (`DocView::page_sizes`).
@@ -1465,7 +1468,7 @@ fn page_body(ui: &mut egui::Ui, body: &PageBody<'_>, callbacks: &mut PageCallbac
         }
     }
     // The focused field's editor, and the Fill & Sign text being typed, over their pages.
-    if let Some(editor) = crate::forms_ui::editor::show(ui, body, session, cx.doc, cx.form, cx.info, cx.today, cx.geometry(body))
+    if let Some(editor) = crate::forms_ui::editor::show(ui, body, session, cx.doc, cx.form, cx.info, cx.today, cx.form_suggestions, cx.geometry(body))
         && *field_arrived
     {
         // The keys of a field that takes typing are its editor's: it takes the focus over from the field's part.
@@ -1712,6 +1715,15 @@ pub fn document_area_at(app: &mut PdfCraftApp, index: usize, rect: Rect, ui: &mu
     let table_preview = crate::field_table_ui::preview(&mut app.dialogs, doc_id);
     // Full screen shows the pages on black, as production does.
     let surround = if app.full_screen_document() { PasteboardColor::Black } else { PasteboardColor::Default };
+    // Auto-Complete: only for the focused plain text field, and only with the preference on (the session says none otherwise).
+    let form_suggestions: Vec<String> = app.views[index]
+        .session
+        .forms
+        .focus
+        .as_ref()
+        .filter(|focus| crate::forms_ui::focused_field(focus, &form).is_some_and(crate::forms_ui::autocompletes))
+        .map(|focus| app.session.suggest_form_entries(&focus.text))
+        .unwrap_or_default();
     let view = &mut app.views[index];
     // PLAN: assumed `page_tools::seen_tool(&PageSession, QuickTool) -> QuickTool`, the placing rule `page_tool`
     // applies (copied comments on the pointer make the page see Select), so the parts gate on the same tool.
@@ -1832,6 +1844,7 @@ pub fn document_area_at(app: &mut PdfCraftApp, index: usize, rect: Rect, ui: &mu
         text_links: app.text_links,
         form_tooltips: app.form_tooltips,
         field_highlight_color: app.field_highlight_color,
+        form_suggestions: &form_suggestions,
         unobstructed,
         prefs: &app.comment_prefs,
         redact_hover: (app.redact_prefs.hover_fill, app.redact_prefs.opacity),

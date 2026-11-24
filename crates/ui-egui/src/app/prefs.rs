@@ -185,6 +185,8 @@ impl PdfCraftApp {
             highlight_fields: Some(self.highlight_fields),
             identity_email: Some(self.identity_email.clone()),
             form_tooltips: Some(self.form_tooltips),
+            form_autocomplete: Some(self.session.form_autocomplete()),
+            form_entries: json_text(&self.session.form_entries().entries()),
             field_highlight_color: self.field_highlight_color,
             comments_panel_closed: Some(self.comments_panel_closed),
             right_panel_closed: Some(self.right_panel_closed),
@@ -505,6 +507,13 @@ impl PdfCraftApp {
         }
         if let Some(on) = b.form_tooltips {
             self.form_tooltips = on;
+        }
+        if let Some(on) = b.form_autocomplete {
+            self.session.set_form_autocomplete(on);
+        }
+        // Not an array, or not text in it: nothing remembered, never an error (see `FormEntries::restored`).
+        if let Some(list) = parsed(&b.form_entries).as_ref().and_then(serde_json::Value::as_array) {
+            self.session.set_form_entries(pdfcraft_engine::form_entries::FormEntries::restored(list.iter().filter_map(serde_json::Value::as_str)));
         }
         if let Some(colour) = b.field_highlight_color {
             self.field_highlight_color = Some(colour);

@@ -894,6 +894,15 @@ impl PdfCraftApp {
             _ => false,
         };
         if self.apply_edit(ctx, edit) {
+            // Auto-Complete: what was typed and accepted is remembered once the field is left (the session keeps it only
+            // while the preference is on, and only from a plain text field).
+            if typed
+                && let Some(draft) = &committed
+                && let Some(id) = doc_id
+                && let Some(field) = self.session.get(id).and_then(|doc| doc.form.iter().find(|f| f.name == draft.name)).cloned()
+            {
+                self.session.remember_form_entry(&field, &draft.text);
+            }
             if signature_page.is_some()
                 && let Some(id) = doc_id
             {
