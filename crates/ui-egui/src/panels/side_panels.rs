@@ -207,8 +207,19 @@ pub fn default_workspace(rail_side: DockSide) -> Workspace<PanelId> {
 
 /// A saved workspace fitted to the panels this build has: a side panel added since it was saved joins the rail at its
 /// default place, so a saved layout does not keep it out (the dock refuses to show a panel it has no place for).
+/// The side panel that showed stays the one that shows: the panel placed at its default place does not take its turn.
 pub(crate) fn fit_saved(workspace: &mut Workspace<PanelId>, rail_side: DockSide) {
+    let shown = open_side(workspace);
     workspace.reconcile(|_| true, permissions, &default_workspace(rail_side));
+    let now = open_side(workspace);
+    if now != shown {
+        // A refusal leaves the fitted layout as it is, which still opens every panel.
+        let _kept = match (shown, now) {
+            (Some(panel), _) => set_shown(workspace, panel, true),
+            (None, Some(panel)) => set_shown(workspace, panel, false),
+            (None, None) => Ok(()),
+        };
+    }
 }
 
 /// The floating quick toolbar sits in the left margin of the page area, as production's does. The page area starts where
@@ -1268,7 +1279,9 @@ mod tests {
     fn a_side_panel_newer_than_the_saved_layout_can_still_be_shown() {
         let mut saved = without(PanelId::Destinations, &default_workspace(DockSide::End));
         assert!(!saved.layout().contains(&PanelId::Destinations));
+        set_shown(&mut saved, PanelId::Bookmarks, true).unwrap();
         fit_saved(&mut saved, DockSide::End);
+        assert_eq!(open_side(&saved), Some(PanelId::Bookmarks), "the panel that showed still shows");
         assert!(set_shown(&mut saved, PanelId::Destinations, true).is_ok(), "the dock has a place for it");
         assert_eq!(open_side(&saved), Some(PanelId::Destinations));
     }
