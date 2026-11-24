@@ -615,6 +615,9 @@ pub struct PdfCraftApp {
     pub compare_old_pages: String,
     /// The (new, old) files the Pages fields were typed for; another pair opens them empty.
     pub compare_fields_for: Option<(DocId, Option<DocId>)>,
+    /// The dialog's Kinds of change checkboxes: which kinds of change the comparison starts with
+    /// (all of them; the Compare panel's Show checkboxes change them afterwards).
+    pub compare_kinds: pdfcraft_engine::compare::ChangeKinds,
     pub compare: Option<compare_ui::CompareState>,
     /// The JavaScript console.
     pub js_console: js_ui::JsConsole,

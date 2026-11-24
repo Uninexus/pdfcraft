@@ -120,9 +120,9 @@ fn text_and_visual_versions() -> (Vec<u8>, Vec<u8>) {
     (v1, s.save_bytes(id).unwrap().to_vec())
 }
 
-/// The Compare panel's Show: Text / Visual filter, on both halves: Text takes the text changes
-/// out of the list and the shading, Visual takes the visual differences (counted, never listed)
-/// out of the shading, and each brings them back.
+/// The Compare panel's Show checkboxes (Replaced, Inserted, Deleted, Visual), on both halves: a
+/// kind of text change leaves the list and the shading, Visual takes the visual differences
+/// (counted, never listed) out of the shading, and each brings them back.
 #[test]
 fn compare_filters_hide_text_or_visual_changes() {
     let (v1, v2) = text_and_visual_versions();
@@ -155,9 +155,9 @@ fn compare_filters_hide_text_or_visual_changes() {
     assert!(text_old > 0 && visual_old > 0, "and on the old file: {text_old} text, {visual_old} visual");
     h.get_by_label_contains("\"five\" → \"three\"");
 
-    h.get_by_label("Text").click();
+    h.get_by_label("Replaced").click();
     h.run_steps(2);
-    assert!(h.query_by_label_contains("\"five\" → \"three\"").is_none(), "text changes leave the list");
+    assert!(h.query_by_label_contains("\"five\" → \"three\"").is_none(), "replaced changes leave the list");
     assert_eq!(kinds(&h, new_i), (0, visual_new), "and the new file's shading");
     assert_eq!(kinds(&h, old_i), (0, visual_old), "and the old file's");
 
@@ -166,11 +166,85 @@ fn compare_filters_hide_text_or_visual_changes() {
     assert_eq!(kinds(&h, new_i), (0, 0));
     assert_eq!(kinds(&h, old_i), (0, 0));
 
-    h.get_by_label("Text").click();
+    h.get_by_label("Replaced").click();
     h.run_steps(2);
     h.get_by_label_contains("\"five\" → \"three\"");
-    assert_eq!(kinds(&h, new_i), (text_new, 0), "text back, visual still hidden");
+    assert_eq!(kinds(&h, new_i), (text_new, 0), "replaced back, visual still hidden");
     assert_eq!(kinds(&h, old_i), (text_old, 0));
+}
+
+/// The Compare Files dialog's Kinds of change checkboxes choose what the comparison shows, and
+/// Mark as comments and the report follow them (the panel's Show checkboxes change them after).
+#[test]
+fn compare_dialog_kinds_filter_the_panel_marks_and_report() {
+    let s = Session::new();
+    let v1 = s.create_from_text("t", "Rent is 900 per month. Pets are not allowed.").unwrap().to_vec();
+    let v2 = s.create_from_text("t", "Rent is 950 per month. Pets are allowed. Parking included.").unwrap().to_vec();
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |cc| {
+        crate::support::install_runtime(&cc.egui_ctx);
+        {
+            let mut app = crate::control::new_app();
+            app.set_option(&egui::Context::default(), "language", "en").unwrap();
+            app.open_bytes(&egui::Context::default(), "v1.pdf", None, v1.clone()).unwrap();
+            app.open_bytes(&egui::Context::default(), "v2.pdf", None, v2.clone()).unwrap();
+            app
+        }
+    });
+    h.run_steps(4);
+    assert!(h.execute("doc.compare"));
+    h.run_steps(2);
+    assert!(shows(&h, "Kinds of change"));
+    // Nothing ticked: Compare is off, so no empty-kinds error is possible.
+    for key in ["kind_replaced", "kind_inserted", "kind_deleted", "kind_visual"] {
+        set_field(&mut h, key, serde_json::json!(false));
+    }
+    assert!(compare_is_off(&h), "Compare waits for a kind of change");
+    // Without Inserted and Deleted: only the replacement is compared and listed.
+    set_field(&mut h, "kind_replaced", serde_json::json!(true));
+    set_field(&mut h, "kind_visual", serde_json::json!(true));
+    assert!(!compare_is_off(&h));
+    h.get_by_label("Compare").click();
+    h.run_steps(3);
+    let k = h.state().compare.as_ref().unwrap().kinds;
+    assert_eq!((k.replaced, k.inserted, k.deleted, k.visual), (true, false, false, true));
+    assert_eq!(h.state().compare_kinds, k, "the next dialog opens with the same kinds");
+    h.get_by_label_contains("\"900\" → \"950\"");
+    assert!(h.query_by_label_contains("+ \"Parking included").is_none(), "the insertion is not listed");
+    let id = h.state().active_ids().unwrap().1;
+    h.get_by_label("Mark as comments").click();
+    h.run_steps(3);
+    assert_eq!(h.state().session.get(id).unwrap().info.annotations.len(), 1, "only the replacement is marked");
+    // Nothing ticked in the panel: Mark as comments and Report… are off.
+    for k in ["Replaced", "Visual"] {
+        h.get_by_label(k).click();
+        h.run_steps(2);
+    }
+    assert!(h.state().compare.as_ref().unwrap().kinds.is_empty());
+    assert!(h.query_by(|n| n.label().as_deref() == Some("Mark as comments") && n.is_disabled()).is_some(), "Mark as comments is off");
+    assert!(h.query_by(|n| n.label().as_deref() == Some("Report…") && n.is_disabled()).is_some(), "Report… is off");
+    // Visual only: Mark as comments says why it adds nothing.
+    h.get_by_label("Visual").click();
+    h.run_steps(2);
+    h.get_by_label("Mark as comments").click();
+    h.run_steps(3);
+    assert_eq!(crate::support::shown_notice(&h).as_deref(), Some("No comments added: visual differences are shaded, not marked as comments"));
+    assert_eq!(h.state().session.get(id).unwrap().info.annotations.len(), 1, "still only the first mark");
+    h.get_by_label("Replaced").click();
+    h.run_steps(2);
+    // Bringing Inserted back through the panel marks the insertion too.
+    h.get_by_label("Inserted").click();
+    h.run_steps(2);
+    assert!(h.state().compare.as_ref().unwrap().kinds.inserted);
+    h.get_by_label("Mark as comments").click();
+    h.run_steps(3);
+    assert_eq!(h.state().session.get(id).unwrap().info.annotations.len(), 3, "1 + replaced and inserted again");
+    // Deleted back on: the report opens as a new document.
+    h.get_by_label("Deleted").click();
+    h.run_steps(2);
+    h.get_by_label("Report…").click();
+    h.run_steps(3);
+    let report = h.state().active_ids().unwrap().1;
+    assert_eq!(h.state().session.get(report).unwrap().name, "Compare Report.pdf");
 }
 
 fn four_page_versions() -> (Vec<u8>, Vec<u8>) {
