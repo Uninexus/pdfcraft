@@ -313,11 +313,12 @@ impl PdfCraftApp {
     }
 
     fn apply_dock(&mut self, s: &settings::Dock) {
-        if let Some(workspace) = parsed(&s.dock).and_then(|v| serde_json::from_value(v).ok()) {
-            std::sync::Arc::make_mut(&mut self.dock).replace(workspace);
-        }
         if let Some(side) = s.rail_side.as_deref().and_then(from_name) {
             self.rail_side = side;
+        }
+        if let Some(mut workspace) = parsed(&s.dock).and_then(|v| serde_json::from_value(v).ok()) {
+            crate::panels::side_panels::fit_saved(&mut workspace, self.rail_side);
+            std::sync::Arc::make_mut(&mut self.dock).replace(workspace);
         }
     }
 

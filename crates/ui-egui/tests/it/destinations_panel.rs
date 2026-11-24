@@ -2,7 +2,7 @@
 
 use egui::{Key, Modifiers};
 use egui_kittest::Harness;
-use egui_kittest::kittest::{NodeT as _, Queryable};
+use egui_kittest::kittest::Queryable;
 use pdfcraft_ui_egui::PdfCraftApp;
 
 /// Three pages and three names in a leaf that holds its own `/Names` array (so each can be removed).

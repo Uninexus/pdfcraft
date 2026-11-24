@@ -205,6 +205,12 @@ pub fn default_workspace(rail_side: DockSide) -> Workspace<PanelId> {
     Workspace::new(Layout::new(Some(root), vec![floating]))
 }
 
+/// A saved workspace fitted to the panels this build has: a side panel added since it was saved joins the rail at its
+/// default place, so a saved layout does not keep it out (the dock refuses to show a panel it has no place for).
+pub(crate) fn fit_saved(workspace: &mut Workspace<PanelId>, rail_side: DockSide) {
+    workspace.reconcile(|_| true, permissions, &default_workspace(rail_side));
+}
+
 /// The floating quick toolbar sits in the left margin of the page area, as production's does. The page area starts where
 /// the Tools pane ends, so the toolbar moves by the pane's width when the pane closes and opens, and stays clear of the
 /// page text. A toolbar the user has dragged elsewhere (not in the strip the pane's edge defines) stays where it is.
@@ -1239,5 +1245,31 @@ mod tests {
         let snapshot = moved.state().settings_snapshot();
         let restored = harness(move |app| app.apply_settings(&snapshot));
         assert!(tools_x(&restored) > 700.0);
+    }
+
+    /// A layout saved before a side panel existed: the panel is nowhere in it, neither shown nor hidden.
+    fn without(panel: PanelId, workspace: &Workspace<PanelId>) -> Workspace<PanelId> {
+        fn strip(value: &mut Value, name: &Value) {
+            match value {
+                Value::Array(items) => {
+                    items.retain(|item| item != name);
+                    items.iter_mut().for_each(|item| strip(item, name));
+                }
+                Value::Object(fields) => fields.values_mut().for_each(|field| strip(field, name)),
+                _ => {}
+            }
+        }
+        let mut value = serde_json::to_value(workspace).unwrap();
+        strip(&mut value, &serde_json::to_value(panel).unwrap());
+        serde_json::from_value(value).unwrap()
+    }
+
+    #[test]
+    fn a_side_panel_newer_than_the_saved_layout_can_still_be_shown() {
+        let mut saved = without(PanelId::Destinations, &default_workspace(DockSide::End));
+        assert!(!saved.layout().contains(&PanelId::Destinations));
+        fit_saved(&mut saved, DockSide::End);
+        assert!(set_shown(&mut saved, PanelId::Destinations, true).is_ok(), "the dock has a place for it");
+        assert_eq!(open_side(&saved), Some(PanelId::Destinations));
     }
 }
