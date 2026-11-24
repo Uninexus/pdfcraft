@@ -192,25 +192,33 @@ pub(super) fn find_bar(view: &mut DocView, pages: usize, area: Rect, editing: bo
         .push_id(("find-bar", key), |ui| {
             TaskBar::at_edge(tl!("Find"), Align::End).show(ui, area.shrink2(egui::vec2(6.0, 12.0)), |ui, _cx| {
                 let Find { query, options, matches, bar, replacement, replacing, substitute_font, .. } = &mut *find;
+                // Read before the bar borrows it: the bar may switch the row on in this pass, and the
+                // checkbox then follows on the repaint asked for below.
+                let replacing_before = *replacing;
                 let mut find_bar = FindBar::new(query, options, matches).state(bar).progress(searched, pages);
                 if editing {
                     find_bar = find_bar.replace(replacement, replacing);
                 }
-                ui.vertical(|ui| {
-                    let out = find_bar.show(ui);
-                    // The bar's options menu is the framework's, so the Replace-only option sits under
-                    // the Replace row: off, a paragraph whose font lacks a letter of the new text is
-                    // left alone and counted.
-                    if editing && *replacing {
-                        Row::new().show(ui, |ui, _| {
-                            Checkbox::new(Bind::bound(&mut *substitute_font))
-                                .label(tl!("Use a substitute font if the font lacks letters").to_string())
-                                .show(ui);
-                        });
-                    }
-                    out
-                })
-                .inner
+                let out = ui
+                    .vertical(|ui| {
+                        let out = find_bar.show(ui);
+                        // The bar's options menu is the framework's, so the Replace-only option sits under
+                        // the Replace row: off, a paragraph whose font lacks a letter of the new text is
+                        // left alone and counted.
+                        if editing && replacing_before {
+                            Row::new().show(ui, |ui, _| {
+                                Checkbox::new(Bind::bound(&mut *substitute_font))
+                                    .label(tl!("Use a substitute font if the font lacks letters").to_string())
+                                    .show(ui);
+                            });
+                        }
+                        out
+                    })
+                    .inner;
+                if *replacing != replacing_before {
+                    ui.ctx().request_repaint();
+                }
+                out
             })
         })
         .inner;
