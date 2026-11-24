@@ -17,9 +17,23 @@ fn linked_pdf() -> Vec<u8> {
 
 /// [`linked_pdf`] with this entry as the link's action.
 fn linked_pdf_with(action: &str) -> Vec<u8> {
+    pdf_with(action, false)
+}
+
+/// [`linked_pdf`] with this entry as the link's action and one file, `inner.pdf`, attached to the document.
+fn attached_pdf(action: &str) -> Vec<u8> {
+    pdf_with(action, true)
+}
+
+fn pdf_with(action: &str, attached: bool) -> Vec<u8> {
+    let catalog = if attached {
+        "<< /Type /Catalog /Pages 2 0 R /Threads [4 0 R 5 0 R] /Names << /EmbeddedFiles 10 0 R >> >>"
+    } else {
+        "<< /Type /Catalog /Pages 2 0 R /Threads [4 0 R 5 0 R] >>"
+    };
     let link = format!("<< /Type /Annot /Subtype /Link /Rect [10 10 50 50] /Border [0 0 0] {action} >>");
-    let bodies = [
-        "<< /Type /Catalog /Pages 2 0 R /Threads [4 0 R 5 0 R] >>",
+    let mut bodies = vec![
+        catalog,
         "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 200 200] >>",
         "<< /Type /Page /Parent 2 0 R /Annots [9 0 R] >>",
         "<< /F 6 0 R /I << /Title (Intro) >> >>",
@@ -29,6 +43,11 @@ fn linked_pdf_with(action: &str) -> Vec<u8> {
         "<< /T 5 0 R /P 3 0 R /R [0 0 30 30] /N 8 0 R /V 8 0 R >>",
         link.as_str(),
     ];
+    if attached {
+        bodies.push("<< /Names [(inner.pdf) 11 0 R] >>");
+        bodies.push("<< /Type /Filespec /F (inner.pdf) /UF (inner.pdf) /EF << /F 12 0 R >> >>");
+        bodies.push("<< /Type /EmbeddedFile /Length 4 >>\nstream\nabcd\nendstream");
+    }
     let mut out = b"%PDF-1.7\n".to_vec();
     let mut offsets = Vec::new();
     for (i, body) in bodies.iter().enumerate() {
@@ -222,7 +241,7 @@ fn a_new_link_offers_the_web_and_page_actions_and_says_why_the_others_wait() {
     let (from, to) = (at(&h, 100.0, 40.0), at(&h, 170.0, 70.0));
     drag(&mut h, from, to);
     h.get_by_role_and_label(Role::Dialog, "Create Link");
-    for radio in ["Go to an article thread", "Run a menu item", "Open a PDF file"] {
+    for radio in ["Go to an article thread", "Run a menu item", "Open a PDF file", "Go to a page in an attached file"] {
         assert!(disabled(&h, Role::RadioButton, radio), "{radio} needs a link that exists");
     }
     assert!(!disabled(&h, Role::RadioButton, "Go to a page view"));
@@ -245,4 +264,36 @@ fn a_media_action_is_kept_unless_the_dialog_is_asked_to_take_it_out() {
     h.undo();
     h.run_steps(3);
     assert!(media(&h), "one undo puts it back");
+}
+
+#[test]
+fn a_link_is_set_to_go_to_a_page_of_an_attached_file_in_one_undo_step() {
+    let mut h = harness_on(attached_pdf("/A << /S /URI /URI (http://x.test) >>"));
+    open_properties(&mut h);
+    assert!(disabled(&h, Role::ComboBox, "Attached file"), "a web link leaves the attached file choice off");
+    h.get_by_label("Go to a page in an attached file").click();
+    h.run_steps(3);
+    assert!(!disabled(&h, Role::ComboBox, "Attached file"));
+    ok(&mut h);
+    let read = with_doc(&h, |d, o| d.link_embedded_action(o));
+    assert!(read.is_goto_embedded, "the link now has an attached-file action");
+    assert_eq!(read.embedded_file.as_deref(), Some("inner.pdf"));
+    assert_eq!(read.destination_page, Some(1), "the page the dialog showed, counting from 1");
+    h.undo();
+    h.run_steps(3);
+    assert_eq!(link(&h).action, LinkAction::Uri("http://x.test".into()), "one undo puts the web address back");
+    assert!(!with_doc(&h, |d, o| d.link_embedded_action(o)).is_goto_embedded);
+}
+
+#[test]
+fn the_dialog_shows_the_attached_file_action_a_link_already_has() {
+    let mut h = harness_on(attached_pdf("/A << /S /GoToE /T << /R /C /N (inner.pdf) >> /D [1 /Fit] >>"));
+    open_properties(&mut h);
+    assert!(!disabled(&h, Role::ComboBox, "Attached file"), "the link's own attached-file action is the one chosen");
+    assert!(disabled(&h, Role::ComboBox, "Zoom"), "and the page view is not");
+    ok(&mut h);
+    let read = with_doc(&h, |d, o| d.link_embedded_action(o));
+    assert!(read.is_goto_embedded, "OK alone keeps the action as it is");
+    assert_eq!(read.destination_page, Some(2));
+    assert_eq!(h.state().dialogs.open_dialogs().len(), 0);
 }

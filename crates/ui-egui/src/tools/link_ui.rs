@@ -21,7 +21,10 @@ use craft::ui::runtime::requests::ColorRequest;
 use craft::ui::text::{NumberField, TextField};
 use egui::{Pos2, Rect};
 use pdfcraft_cos::ObjRef;
-use pdfcraft_engine::{Edit, LaunchTarget, LinkAction, LinkHighlight, LinkItem, LinkStyle, LinkZoom, NamedTarget, SAFE_MENU_NAMES, ThreadTarget};
+use pdfcraft_engine::{
+    Edit, EmbeddedTarget, LaunchTarget, LinkAction, LinkHighlight, LinkItem, LinkStyle, LinkZoom, MAX_EMBEDDED_PAGE, NamedTarget, SAFE_MENU_NAMES,
+    ThreadTarget,
+};
 use pdfcraft_render::{DocInfo, LinkTarget};
 
 use crate::PdfCraftApp;
@@ -63,6 +66,8 @@ pub enum LinkKind {
     Menu,
     /// Open another PDF file by a relative path.
     File,
+    /// Go to a page of a PDF file attached to this document.
+    Embedded,
 }
 
 /// Link Properties' working copy.
@@ -103,6 +108,14 @@ pub struct LinkDraft {
     pub current_menu: Option<usize>,
     /// The file the link opened when the dialog opened, and whether in a new window.
     pub current_file: Option<(String, bool)>,
+    /// The document's attached files, which the go-to-an-attached-file action chooses among.
+    pub attachments: Vec<AttachmentChoice>,
+    /// The attached file to go to, as a position in `attachments`.
+    pub embedded: usize,
+    /// The page of that file, counting from 1.
+    pub embedded_page: usize,
+    /// The attached file and page (counting from 1) the link went to when the dialog opened.
+    pub current_embedded: Option<(String, usize)>,
     /// The kind of sound, movie, rendition or rich-media action the link has, which the dialog can
     /// take out but not write.
     pub media: Option<&'static str>,
@@ -133,11 +146,24 @@ impl Default for LinkDraft {
             current_thread: None,
             current_menu: None,
             current_file: None,
+            attachments: Vec::new(),
+            embedded: 0,
+            embedded_page: 1,
+            current_embedded: None,
             media: None,
             remove_media: false,
             style: LinkStyle::default(),
         }
     }
+}
+
+/// One attached file the Link Action group offers to go to.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AttachmentChoice {
+    /// Its key in the document's `/EmbeddedFiles`, which the action names it by.
+    pub key: String,
+    /// Whether it is a PDF file, by its name.
+    pub pdf: bool,
 }
 
 /// One article thread the Link Action group offers.
@@ -386,7 +412,30 @@ fn draft_ok(d: &LinkDraft, has_threads: bool) -> bool {
             LinkKind::Page | LinkKind::Menu => true,
             LinkKind::Thread => has_threads,
             LinkKind::File => LaunchTarget::new(d.file.trim(), None).is_ok(),
+            LinkKind::Embedded => embedded_problem(d).is_none(),
         }
+}
+
+/// The target an attached-file draft goes to: a PDF attachment and a page the engine takes.
+fn embedded_target(d: &LinkDraft) -> Option<EmbeddedTarget> {
+    let choice = d.attachments.get(d.embedded).filter(|a| a.pdf)?;
+    EmbeddedTarget::new(&choice.key, u32::try_from(d.embedded_page).ok()?, None).ok()
+}
+
+/// Why an attached-file draft cannot be accepted, or `None` when it can.
+fn embedded_problem(d: &LinkDraft) -> Option<String> {
+    let Some(choice) = d.attachments.get(d.embedded) else {
+        return Some(tl!("This document has no attachments.").to_string());
+    };
+    if !choice.pdf {
+        return Some(tl!("Choose an attached file that is a PDF file.").to_string());
+    }
+    if !u32::try_from(d.embedded_page).is_ok_and(|p| (1..=MAX_EMBEDDED_PAGE).contains(&p)) {
+        return Some(crate::i18n::fmt(tl!("Type a page number from 1 to {max}."), &[("max", &MAX_EMBEDDED_PAGE.to_string())]).to_string());
+    }
+    embedded_target(d)
+        .is_none()
+        .then(|| tl!("A link cannot name this attached file: its name may have only letters, digits, . _ - ( ) and space.").to_string())
 }
 
 /// Why OK is not available, for the kind of action the draft has.
@@ -394,6 +443,7 @@ fn ok_reason(d: &LinkDraft, has_threads: bool) -> String {
     match d.kind {
         LinkKind::Thread if !has_threads => tl!("This document has no article threads.").to_string(),
         LinkKind::File => tl!("Type a relative path to a PDF file, such as folder/other.pdf.").to_string(),
+        LinkKind::Embedded => embedded_problem(d).unwrap_or_default(),
         _ => tl!("Type the web address.").to_string(),
     }
 }
@@ -501,6 +551,8 @@ fn action(ui: &mut egui::Ui, d: &mut LinkDraft, cx: &ActionCx<'_>) {
         let kind = d.kind;
         // The article, menu item and file actions are set on the link's object, which a new link has not got yet.
         let existing = d.obj.is_some();
+        let can_embed = existing && !d.attachments.is_empty();
+        let embedded_hint = if kind == LinkKind::Embedded && existing { embedded_problem(d) } else { None };
         RadioGroup::new(tl!("Link Action").to_string(), Bind::bound(&mut d.kind)).show(ui, |ui, _| {
             Radio::new(LinkKind::Web).label(tl!("Open a web page").to_string()).show(ui);
             web_rows(ui, &mut d.url, kind == LinkKind::Web);
@@ -512,6 +564,9 @@ fn action(ui: &mut egui::Ui, d: &mut LinkDraft, cx: &ActionCx<'_>) {
             menu_rows(ui, &mut d.menu, kind == LinkKind::Menu && existing);
             Radio::new(LinkKind::File).label(tl!("Open a PDF file").to_string()).enabled(existing).show(ui);
             file_rows(ui, &mut d.file, &mut d.new_window, kind == LinkKind::File && existing);
+            Radio::new(LinkKind::Embedded).label(tl!("Go to a page in an attached file").to_string()).enabled(can_embed).show(ui);
+            let at = EmbeddedAt { attachments: &d.attachments, hint: embedded_hint.as_deref(), on: kind == LinkKind::Embedded && can_embed };
+            embedded_rows(ui, &at, &mut d.embedded, &mut d.embedded_page);
         });
         if !existing {
             Text::new(tl!("An article, menu item or file action can be set once the link exists: create it, then open its properties.").to_string())
@@ -615,6 +670,44 @@ fn file_rows(ui: &mut egui::Ui, file: &mut String, new_window: &mut bool, on: bo
         TextField::new(tl!("File to open").to_string(), Bind::bound(&mut *file)).placeholder("other.pdf").enabled(on).show(ui);
     });
     Checkbox::new(Bind::bound(&mut *new_window)).label(tl!("Open in a new window").to_owned()).enabled(on).show(ui);
+}
+
+/// What the attached-file rows of the Link Action group show.
+struct EmbeddedAt<'a> {
+    /// The document's attached files.
+    attachments: &'a [AttachmentChoice],
+    /// Why the draft cannot be accepted, when it is this action and cannot.
+    hint: Option<&'a str>,
+    /// Whether this action is the one chosen.
+    on: bool,
+}
+
+/// The attached file and page rows of the Link Action group.
+fn embedded_rows(ui: &mut egui::Ui, at: &EmbeddedAt<'_>, chosen: &mut usize, page: &mut usize) {
+    if at.attachments.is_empty() {
+        Field::new(tl!("Attached file").to_string())
+            .help(Help::Text(tl!("This document has no attachments.").to_string().into()))
+            .show(ui, |_, _| {});
+        return;
+    }
+    let rows = at.attachments.iter().enumerate().map(|(i, a)| (i, a.key.clone())).collect();
+    if let Some(i) = select_row(ui, tl!("Attached file").to_string(), *chosen, rows, at.on) {
+        *chosen = i;
+    }
+    let mut field = Field::new(tl!("Page in the attached file").to_string()).enabled(at.on);
+    if let Some(why) = at.hint {
+        field = field.help(Help::Text(why.to_string().into()));
+    }
+    field.show(ui, |ui, _| {
+        let edit = NumberField::new(tl!("Page in the attached file").to_string(), Bind::given(Some(*page as f64)))
+            .range(1.0..=f64::from(MAX_EMBEDDED_PAGE))
+            .step(1.0)
+            .enabled(at.on)
+            .show(ui);
+        if let Some(n) = edit.edit.events.landed().cloned().flatten() {
+            *page = (n.round().max(1.0) as usize).min(MAX_EMBEDDED_PAGE as usize);
+        }
+    });
 }
 
 /// Whether a typed web address is one a link can take.
@@ -734,6 +827,19 @@ fn thread_choices(doc: &pdfcraft_engine::Document) -> Vec<ThreadChoice> {
         .collect()
 }
 
+/// The attached files of `doc` that are in its `/EmbeddedFiles`, for the Link Action group to choose among.
+fn attachment_choices(doc: &pdfcraft_engine::Document) -> Vec<AttachmentChoice> {
+    let pdf = |s: &str| s.to_lowercase().ends_with(".pdf");
+    doc.info
+        .attachments
+        .iter()
+        .filter_map(|a| match &a.source {
+            pdfcraft_render::AttachmentSource::Document { key } => Some(AttachmentChoice { key: key.clone(), pdf: pdf(&a.name) || pdf(key) }),
+            pdfcraft_render::AttachmentSource::Annotation { .. } => None,
+        })
+        .collect()
+}
+
 /// The draft of an existing link: its page or web address, and, for an article, menu item or file
 /// action the dialog edits, that action. Any other action is kept as it is.
 fn existing_draft(doc: &pdfcraft_engine::Document, l: &LinkItem, page: usize, index: Option<usize>) -> LinkDraft {
@@ -757,6 +863,7 @@ fn existing_draft(doc: &pdfcraft_engine::Document, l: &LinkItem, page: usize, in
             _ => LinkZoom::FitPage,
         },
         current: Some(l.action.clone()),
+        attachments: attachment_choices(doc),
         style: l.style,
         ..LinkDraft::default()
     };
@@ -809,7 +916,33 @@ fn read_object_action(doc: &pdfcraft_engine::Document, obj: ObjRef, name: &str, 
                 d.new_window = new_window;
             }
         }
+        "GoToE" => read_embedded(doc, obj, d),
         _ => {}
+    }
+}
+
+/// Takes the link's go-to-an-attached-file action into the draft, when it is one the dialog writes:
+/// a page of a PDF attachment of this document, named by its key, and nothing else in it.
+fn read_embedded(doc: &pdfcraft_engine::Document, obj: ObjRef, d: &mut LinkDraft) {
+    let read = doc.link_embedded_action(obj);
+    let (Some(name), Some(page)) = (read.embedded_file.as_deref(), read.destination_page) else { return };
+    let shaped = read.settable
+        && read.exact
+        && read.is_goto_embedded
+        && read.has_target
+        && read.relationship.as_deref() == Some("C")
+        && !read.has_annotation_target
+        && !read.has_nested_target
+        && read.file_kind.is_none()
+        && read.destination_kind == Some("array");
+    let at = d.attachments.iter().position(|a| a.pdf && a.key == name);
+    let page = usize::try_from(page).ok().filter(|p| (1..=MAX_EMBEDDED_PAGE as usize).contains(p));
+    if let (true, Some(at), Some(page)) = (shaped, at, page) {
+        d.preserve_action = false;
+        d.kind = LinkKind::Embedded;
+        d.embedded = at;
+        d.embedded_page = page;
+        d.current_embedded = Some((name.to_string(), page));
     }
 }
 
@@ -845,6 +978,12 @@ fn object_action_edit(d: &LinkDraft) -> Option<(&'static str, Edit)> {
             let target = LaunchTarget::new(file, Some(d.new_window)).ok()?;
             (d.current_file.as_ref() != Some(&(file.to_string(), d.new_window)))
                 .then_some(("Set link file action", Edit::SetLinkLaunchAction { link, target: Some(target) }))
+        }
+        LinkKind::Embedded => {
+            let target = embedded_target(d)?;
+            let now = (target.name().to_string(), d.embedded_page);
+            (d.current_embedded.as_ref() != Some(&now))
+                .then_some(("Set link attached-file action", Edit::SetLinkEmbeddedAction { link, target: Some(target) }))
         }
     }
 }
@@ -996,6 +1135,51 @@ mod tests {
         assert!(matches!(edits.get(1), Some(Edit::RemoveLinkMediaAction { .. })), "{edits:?}");
         d.media = None;
         assert!(matches!(edit_for(&d), Edit::SetLink { .. }), "an action that is not media is not taken out by this");
+    }
+
+    fn attached(d: &mut LinkDraft) {
+        d.attachments =
+            vec![super::AttachmentChoice { key: "notes.txt".into(), pdf: false }, super::AttachmentChoice { key: "inner.pdf".into(), pdf: true }];
+        d.embedded = 1;
+        d.embedded_page = 3;
+    }
+
+    #[test]
+    fn an_attached_file_page_is_one_step_with_the_link_and_counts_from_one() {
+        let mut d = with_object(LinkKind::Embedded);
+        attached(&mut d);
+        let edits = steps(&d);
+        assert!(matches!(edits[0], Edit::SetLink { action: None, .. }), "the web address is left for the attached-file action to replace");
+        let Some(Edit::SetLinkEmbeddedAction { target: Some(t), .. }) = edits.get(1) else { panic!("{edits:?}") };
+        assert_eq!((t.name(), t.page()), ("inner.pdf", 3), "the dialog and the target both count pages from 1");
+        // An action left as it was is not written again; a changed page is.
+        d.current_embedded = Some(("inner.pdf".into(), 3));
+        assert!(matches!(edit_for(&d), Edit::SetLink { .. }));
+        d.embedded_page = 4;
+        assert!(matches!(steps(&d).get(1), Some(Edit::SetLinkEmbeddedAction { .. })));
+    }
+
+    #[test]
+    fn an_attached_file_is_written_only_when_it_is_a_pdf_the_engine_takes() {
+        let mut d = with_object(LinkKind::Embedded);
+        assert!(!super::draft_ok(&d, true), "a document with no attachments has nothing to go to");
+        assert!(matches!(edit_for(&d), Edit::SetLink { .. }));
+        attached(&mut d);
+        assert!(super::draft_ok(&d, true));
+        d.embedded = 0;
+        assert!(!super::draft_ok(&d, true), "an attachment that is not a PDF is refused");
+        assert!(super::embedded_problem(&d).is_some());
+        assert!(matches!(edit_for(&d), Edit::SetLink { .. }));
+        d.embedded = 1;
+        for page in [0, pdfcraft_engine::MAX_EMBEDDED_PAGE as usize + 1] {
+            d.embedded_page = page;
+            assert!(!super::draft_ok(&d, true), "page {page} is refused");
+            assert!(matches!(edit_for(&d), Edit::SetLink { .. }), "page {page} writes nothing");
+        }
+        d.embedded_page = 1;
+        d.attachments[1].key = "a/b.pdf".into();
+        assert!(!super::draft_ok(&d, true), "a name the engine refuses is not accepted");
+        assert!(matches!(edit_for(&d), Edit::SetLink { .. }));
     }
 
     #[test]
