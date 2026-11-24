@@ -83,6 +83,22 @@ impl FieldPropsDialog {
         self.draft.signer_view = view;
     }
 
+    /// The "When signed" entries as typed and what the file holds.
+    pub fn signed(&self) -> &super::signed::SignedDraft {
+        &self.draft.signed
+    }
+
+    /// Sets the lock and seed entries as typed and shown (the app does it when the dialog opens and after a command; a
+    /// test sets the lock choice, which has no control a test can click reliably).
+    pub fn set_signed(&mut self, signed: super::signed::SignedDraft) {
+        self.draft.signed = signed;
+    }
+
+    /// Updates only what the dialog says the file holds, so an undo is seen and what was typed stays.
+    pub(super) fn set_signed_view(&mut self, view: super::signed::SignedView) {
+        self.draft.signed.view = view;
+    }
+
     pub(super) fn set_signer_plan(&mut self, plan: super::signer::PlanNote) {
         self.draft.signer_plan = plan;
     }
@@ -128,6 +144,7 @@ pub(crate) fn open(app: &mut PdfCraftApp, name: &str, widget: usize, tab: FieldT
     host::open(app, dialog);
     if signature {
         app.load_signer_entry(id);
+        app.load_signed_entry(id);
         // Start from the label the field holds.
         let typed = app.dialogs.get::<FieldPropsDialog>().map(|d| d.draft.signer_view.label.clone().unwrap_or_default());
         if let (Some(typed), Some(dialog)) = (typed, app.dialogs.get_mut::<FieldPropsDialog>()) {
@@ -141,6 +158,7 @@ pub(crate) fn open(app: &mut PdfCraftApp, name: &str, widget: usize, tab: FieldT
 pub(crate) fn finish(ctx: &egui::Context, app: &mut PdfCraftApp) {
     let recent = app.recent_colours.clone();
     app.refresh_signer_view();
+    app.refresh_signed_view();
     let Some(dialog) = app.dialogs.get_mut::<FieldPropsDialog>() else { return };
     dialog.recent = recent;
     let request = dialog.pending_colour.take();
@@ -155,7 +173,7 @@ pub(crate) fn finish(ctx: &egui::Context, app: &mut PdfCraftApp) {
             }
         });
     }
-    // A Signer button asked for a registered command: it runs here, once the dialog is drawn.
+    // A Signer or When signed button asked for a registered command: it runs here, once the dialog is drawn.
     if let Some(command) = signer_command {
         app.execute(ctx, command);
     }

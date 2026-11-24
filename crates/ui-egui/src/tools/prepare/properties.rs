@@ -189,7 +189,52 @@ fn general_tab(ui: &mut egui::Ui, d: &mut FieldDraft) {
     check(ui, tl!("Required"), &mut d.required, true);
     if d.kind == FormFieldKind::Signature {
         signer_section(ui, d);
+        signed_section(ui, d);
     }
+}
+
+/// General tab of a signature field: what the signature locks and the seed values (reasons) the one who signs is offered,
+/// as entries in the file. The buttons ask for the registered commands `form.field.lock.set`, `form.field.seed.set` and
+/// `form.field.seed.clear`; the app runs them after the pass, so this panel never changes the document itself.
+fn signed_section(ui: &mut egui::Ui, d: &mut FieldDraft) {
+    use super::signed::LOCK_CHOICES;
+    Text::new(tl!("When signed")).show(ui);
+    // Live regions: what the file holds now, which the buttons and an undo change.
+    Notice::new(Tone::Info, d.signed.view.lock.clone()).layout(NoticeLayout::Inline).announce(Politeness::Polite).id_salt(22usize).show(ui);
+    let choices: Vec<Entry<usize>> = LOCK_CHOICES.iter().enumerate().map(|(i, c)| Entry::new(i, c.label())).collect();
+    let at = LOCK_CHOICES.iter().position(|c| *c == d.signed.lock).unwrap_or(0);
+    let mut picked = None;
+    Field::new(tl!("Lock:")).id_salt("lock-choice").show(ui, |ui, _| {
+        picked = Select::new(tl!("Lock:"), Bind::given(at), &choices).show(ui).value().copied();
+    });
+    if let Some(choice) = picked.and_then(|i| LOCK_CHOICES.get(i)) {
+        d.signed.lock = *choice;
+    }
+    let lists = d.signed.lock.lists();
+    Field::new(tl!("Fields to lock, one name per line:")).id_salt("lock-fields").show(ui, |ui, _| {
+        TextField::new(tl!("Fields to lock, one name per line:"), Bind::bound(&mut d.signed.lock_fields)).lines(4).enabled(lists).show(ui);
+    });
+    if clicked(&Button::new(tl!("Set the lock")).show(ui)) {
+        d.signer_command = Some("form.field.lock.set");
+    }
+    Notice::new(Tone::Info, d.signed.view.seed.clone()).layout(NoticeLayout::Inline).announce(Politeness::Polite).id_salt(23usize).show(ui);
+    Field::new(tl!("Reasons to pick from, one per line:")).id_salt("seed-reasons").show(ui, |ui, _| {
+        TextField::new(tl!("Reasons to pick from, one per line:"), Bind::bound(&mut d.signed.reasons)).lines(4).show(ui);
+    });
+    check(ui, tl!("The signer must pick one of the reasons"), &mut d.signed.reason_required, true);
+    let set = clicked(&Button::new(tl!("Set seed values")).show(ui));
+    let clear = clicked(&Button::new(tl!("No seed values")).enabled(d.signed.view.seed_has_entry).show(ui));
+    if set {
+        d.signer_command = Some("form.field.seed.set");
+    } else if clear {
+        d.signer_command = Some("form.field.seed.clear");
+    }
+    note(
+        ui,
+        tl!(
+            "Choose Lock nothing and Set the lock to take a lock out. These buttons change the file at once; Undo in the Edit menu takes them back, and Cancel does not. The lock and the seed values are notes stored in this file for the one who signs and for other programs. PdfCraft does not make the locked fields read-only after a signature and does not read the seed values when it signs; nothing is signed or sent."
+        ),
+    );
 }
 
 /// General tab of a signature field: who it is meant for, as a label in the file. The buttons ask for the registered

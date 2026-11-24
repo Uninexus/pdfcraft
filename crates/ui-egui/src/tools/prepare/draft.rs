@@ -136,8 +136,10 @@ pub struct FieldDraft {
     pub signer_plan: super::signer::PlanNote,
     /// The document the dialog was opened on: the signer commands refuse any other.
     pub doc: Option<pdfcraft_engine::DocId>,
-    /// The registered command a Signer button asked for, run by the app after the pass.
+    /// The registered command a Signer or When signed button asked for, run by the app after the pass.
     pub signer_command: Option<&'static str>,
+    /// General tab of a signature field: the lock and seed values as typed, and what the file holds now.
+    pub signed: super::signed::SignedDraft,
     pub(super) original: Box<Option<FieldDraft>>,
 }
 
@@ -210,6 +212,7 @@ impl Default for FieldDraft {
             signer_plan: Default::default(),
             doc: None,
             signer_command: None,
+            signed: Default::default(),
             original: Box::new(None),
         }
     }
@@ -285,6 +288,7 @@ impl FieldDraft {
             signer_plan: Default::default(),
             doc: None,
             signer_command: None,
+            signed: Default::default(),
             original: Box::new(None),
         };
         d.original = Box::new(Some(d.clone()));
