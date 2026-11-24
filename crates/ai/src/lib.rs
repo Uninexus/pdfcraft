@@ -13,6 +13,7 @@
 
 use std::path::{Path, PathBuf};
 
+pub mod agent;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod chatgpt;
 pub mod refs;

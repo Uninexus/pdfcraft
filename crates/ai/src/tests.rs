@@ -284,3 +284,37 @@ fn document_context_reports_what_was_really_included() {
     let fits = document_context(&[(1, "a".into()), (2, "b".into())]);
     assert!(!fits.cut && fits.included.len() == 2);
 }
+
+mod agent_turns {
+    use crate::agent::{MAX_CALLS, parse_turn};
+    use serde_json::json;
+
+    #[test]
+    fn a_fenced_reply_with_prose_around_it_is_read() {
+        let t = parse_turn(
+            "Here you go:\n```json\n{\"message\": \" Done \", \"calls\": [{\"tool\": \"page_rotate\", \"args\": {\"pages\": [2]}, \"why\": \"a\\n  b\"}]}\n```",
+        );
+        assert_eq!(t.message, "Done");
+        assert_eq!(t.calls.len(), 1);
+        assert_eq!(t.calls[0].tool, "page_rotate");
+        assert_eq!(t.calls[0].args, json!({ "pages": [2] }));
+        assert_eq!(t.calls[0].why, "a b");
+    }
+
+    #[test]
+    fn an_object_without_calls_or_message_is_skipped_and_plain_talk_is_a_message() {
+        let t = parse_turn("see {\"x\": 1} and {\"calls\": []}");
+        assert!(t.calls.is_empty() && t.message.is_empty());
+        let t = parse_turn("The total is 42.");
+        assert_eq!((t.message.as_str(), t.calls.len()), ("The total is 42.", 0));
+    }
+
+    #[test]
+    fn junk_calls_are_dropped_and_the_count_is_capped() {
+        let t = parse_turn(r#"{"calls": [1, {"tool": ""}, {"tool": "a", "args": [1]}, {"nothing": true}]}"#);
+        assert_eq!(t.calls.len(), 1);
+        assert_eq!(t.calls[0].args, json!({}));
+        let many = format!("{{\"calls\": [{}]}}", vec![r#"{"tool":"a"}"#; MAX_CALLS + 20].join(","));
+        assert_eq!(parse_turn(&many).calls.len(), MAX_CALLS);
+    }
+}

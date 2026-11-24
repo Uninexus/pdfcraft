@@ -10228,11 +10228,11 @@ title = "Natural-language editing through registry commands"
 area = "N"
 tier = "P3"
 milestone = "M13"
-status = "planned"
+status = "partial"
 commands = []
-tools = []
-evidence = []
-notes = ""
+tools = ["ai_edit_plan", "ai_edit_apply"]
+evidence = ["crates/automation/tests/it/ai.rs::a_plan_proposes_edits_and_changes_nothing", "crates/automation/tests/it/ai.rs::a_plan_lets_the_model_look_first_and_returns_what_it_saw", "crates/automation/tests/it/ai.rs::a_plan_refuses_tools_outside_the_allow_list_after_asking_the_model_to_retry", "crates/automation/tests/it/ai.rs::apply_runs_the_steps_as_undo_steps_and_undo_takes_them_back", "crates/automation/tests/it/ai.rs::apply_checks_every_step_first_and_undoes_earlier_steps_when_one_fails"]
+notes = "Headless only so far (ai_edit_plan, ai_edit_apply; optional provider, off until an endpoint is set up). The plan call sends the request and page text to the configured model, which may look at the document with read-only tools and proposes edits from a fixed allow-list without changing anything; ai_edit_apply runs a confirmed list in order, all or none, as ordinary undo steps, and saves nothing. No window for it yet."
 
 [[feature]]
 id = "misc.ai-presentation"
