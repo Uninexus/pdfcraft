@@ -2,14 +2,14 @@
 //! commands `form.field.signer.set` and `form.field.signer.clear`, each one undo step, with the address rule and the
 //! signing plan beside the file applied as the `form_field_signer` tool does.
 
-use crate::support::{shown_notice, AppHarness as _};
+use crate::support::{AppHarness as _, shown_notice};
 use egui::accesskit::Role;
-use egui_kittest::kittest::Queryable;
 use egui_kittest::Harness;
-use pdfcraft_engine::signing_plan::{plan_bytes, Plan, Role as PlanRole};
+use egui_kittest::kittest::Queryable;
+use pdfcraft_engine::signing_plan::{Plan, Role as PlanRole, plan_bytes};
 use pdfcraft_engine::{Edit, NewField, Session};
-use pdfcraft_ui_egui::prepare::FieldPropsDialog;
 use pdfcraft_ui_egui::PdfCraftApp;
+use pdfcraft_ui_egui::prepare::FieldPropsDialog;
 
 /// A blank page with a signature field `Sig1` and a text field `Name`.
 fn fixture() -> Vec<u8> {

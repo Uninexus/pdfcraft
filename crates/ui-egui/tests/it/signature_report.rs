@@ -6,9 +6,9 @@ use std::sync::Arc;
 use crate::support::AppHarness as _;
 use craft::host::{Picked, ScriptedFiles};
 use egui::accesskit::Role;
-use egui_kittest::kittest::{NodeT as _, Queryable};
 use egui_kittest::Harness;
-use pdfcraft_engine::signing_plan::{plan_bytes, Plan, Role as PlanRole};
+use egui_kittest::kittest::{NodeT as _, Queryable};
+use pdfcraft_engine::signing_plan::{Plan, Role as PlanRole, plan_bytes};
 use pdfcraft_engine::{Edit, NewField, Session};
 use pdfcraft_ui_egui::{PdfCraftApp, SignatureReportKind};
 
