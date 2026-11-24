@@ -2291,6 +2291,91 @@ fn the_scroll_speed_preference_scales_mouse_wheel_notches() {
 }
 
 #[test]
+fn the_forms_preferences_are_set_kept_and_read_from_the_last_release() {
+    let ctx = egui::Context::default();
+    let mut app = crate::control::new_app();
+    assert!(app.form_tooltips && app.field_highlight_color.is_none(), "tooltips on and the theme's colour until asked");
+    app.set_option(&ctx, "form-tooltips", "false").unwrap();
+    assert!(app.set_option(&ctx, "form-tooltips", "no").unwrap_err().contains("true or false"));
+    app.set_option(&ctx, "field-highlight-color", "#102030").unwrap();
+    for bad in ["102030", "#12345", "#12345G", "#1020304", "blue"] {
+        assert!(app.set_option(&ctx, "field-highlight-color", bad).unwrap_err().contains("#RRGGBB"), "{bad}");
+    }
+    assert_eq!(app.field_highlight_color, Some([0x10, 0x20, 0x30]), "a refused colour changes nothing");
+    assert!(app.required_field_color.is_none(), "the required field border is its own setting");
+    app.set_option(&ctx, "required-field-color", "#00FF80").unwrap();
+    for bad in ["00FF80", "#00FF", "#GG0000", "", "green"] {
+        let error = app.set_option(&ctx, "required-field-color", bad).unwrap_err();
+        assert!(error.contains("required-field-color"), "{error}");
+    }
+    assert_eq!(app.required_field_color, Some([0, 255, 128]));
+    assert_eq!(app.field_highlight_color, Some([0x10, 0x20, 0x30]), "the highlight colour is not touched");
+    let mut again = crate::control::new_app();
+    again.apply_settings(&app.settings_snapshot());
+    assert!(!again.form_tooltips);
+    assert_eq!(again.field_highlight_color, Some([0x10, 0x20, 0x30]), "both survive a restart");
+    assert_eq!(again.required_field_color, Some([0, 255, 128]));
+    again.set_option(&ctx, "field-highlight-color", "default").unwrap();
+    assert!(again.field_highlight_color.is_none());
+    // The last release kept the colour as three whole numbers; anything else keeps the current one.
+    let read =
+        pdfcraft_ui_egui::settings::import_json(r#"{"field_highlight_color": [1, 2, 3], "required_field_color": [4, 5, 6], "form_tooltips": false}"#)
+            .0;
+    let mut next = crate::control::new_app();
+    next.apply_settings(&read);
+    assert_eq!((next.field_highlight_color, next.required_field_color, next.form_tooltips), (Some([1, 2, 3]), Some([4, 5, 6]), false));
+    for hostile in [r#"[1,2]"#, r#"[1,2,300]"#, r#"[1,2,-3]"#, r#"[1.5,2,3]"#, r##""#ff0000""##, r#"["a","b","c"]"#] {
+        next.apply_settings(&pdfcraft_ui_egui::settings::import_json(&format!(r#"{{"required_field_color": {hostile}}}"#)).0);
+        assert_eq!(next.required_field_color, Some([4, 5, 6]), "{hostile}");
+    }
+    for hostile in [r#"{"field_highlight_color": [1, 2]}"#, r#"{"field_highlight_color": [1, 2, 300]}"#, r#"{"field_highlight_color": "red"}"#] {
+        next.apply_settings(&pdfcraft_ui_egui::settings::import_json(hostile).0);
+        assert_eq!(next.field_highlight_color, Some([1, 2, 3]), "{hostile}");
+    }
+}
+
+#[test]
+fn the_units_and_blank_paper_are_set_reported_and_kept_in_the_settings() {
+    use pdfcraft_ui_egui::paper::Paper;
+    use pdfcraft_ui_egui::units::Unit;
+    let ctx = egui::Context::default();
+    let mut app = crate::control::new_app();
+    app.set_option(&ctx, "units", "MM").unwrap();
+    app.set_option(&ctx, "blank-paper", "letter").unwrap();
+    assert_eq!((app.units, app.blank_paper), (Unit::Millimetres, Paper::Letter));
+    assert!(app.set_option(&ctx, "units", "feet").unwrap_err().contains("in, mm, cm or pt"));
+    assert!(app.set_option(&ctx, "blank-paper", "a3").unwrap_err().contains("letter or a4"));
+    assert_eq!((app.units, app.blank_paper), (Unit::Millimetres, Paper::Letter), "a refused value changes nothing");
+    let mut again = crate::control::new_app();
+    again.units = Unit::Points;
+    again.blank_paper = Paper::A4;
+    again.apply_settings(&app.settings_snapshot());
+    assert_eq!((again.units, again.blank_paper), (Unit::Millimetres, Paper::Letter), "both survive a restart");
+    // A saved name that is neither paper keeps the current one.
+    again.apply_settings(&pdfcraft_ui_egui::settings::import_json(r#"{"blank_paper": "folio"}"#).0);
+    assert_eq!(again.blank_paper, Paper::Letter);
+    again.apply_settings(&pdfcraft_ui_egui::settings::import_json(r#"{"blank_paper": "a4"}"#).0);
+    assert_eq!(again.blank_paper, Paper::A4, "the last release's key is read too");
+}
+
+#[test]
+fn resetting_the_comment_tool_defaults_forgets_the_colours_and_keeps_the_name_and_the_pin() {
+    use pdfcraft_ui_egui::comments::CommentTool;
+    let ctx = egui::Context::default();
+    let mut app = crate::control::new_app();
+    let fresh = app.comment_prefs.style(CommentTool::Ink).color;
+    app.comment_prefs.set_color(CommentTool::Ink, [0.1, 0.6, 0.2]);
+    app.set_option(&ctx, "author", "Ada").unwrap();
+    app.set_option(&ctx, "comment-tool-pinned", "true").unwrap();
+    assert!(app.set_option(&ctx, "reset-comment-defaults", "false").unwrap_err().contains("must be true"));
+    assert_ne!(app.comment_prefs.style(CommentTool::Ink).color, fresh, "a refused call changes nothing");
+    app.set_option(&ctx, "reset-comment-defaults", "true").unwrap();
+    assert_eq!(app.comment_prefs.style(CommentTool::Ink).color, fresh);
+    assert_eq!(app.comment_prefs.author, "Ada");
+    assert!(app.comment_prefs.pinned);
+}
+
+#[test]
 fn the_invert_middle_drag_preference_is_off_by_default_and_kept_in_the_settings() {
     let mut app = crate::control::new_app();
     assert!(!app.invert_middle_drag, "the middle button keeps its direction unless asked");

@@ -1,4 +1,4 @@
-//! Preferences ▸ Identity: the name new comments are signed with.
+//! Preferences ▸ Identity: the name new comments are signed with and the email of new digital signatures.
 
 use crate::support::AppHarness as _;
 use egui::accesskit::Role;
@@ -67,4 +67,36 @@ fn the_identity_name_signs_new_comments_and_is_remembered() {
     assert_eq!(restored.comment_prefs.author, "Grace Hopper");
     restored.apply_settings(&pdfcraft_ui_egui::settings::import_json(&format!(r#"{{"author": "{}"}}"#, "x".repeat(10_000))).0);
     assert_eq!(restored.comment_prefs.author.chars().count(), 200);
+}
+
+#[test]
+fn the_identity_email_is_typed_remembered_and_set_through_the_control_channel() {
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(|cc| {
+        crate::support::install_runtime(&cc.egui_ctx);
+        {
+            let mut app = crate::control::new_app();
+            app.set_option(&egui::Context::default(), "language", "en").unwrap();
+            app.set_option(&egui::Context::default(), "dialog", "preferences").unwrap();
+            app
+        }
+    });
+    h.run_steps(4);
+    h.get_by_role_and_label(Role::TextInput, "Email").scroll_to_me();
+    h.run_steps(4);
+    h.get_by_role_and_label(Role::TextInput, "Email").click();
+    h.run_steps(1);
+    h.get_by_role_and_label(Role::TextInput, "Email").type_text("grace@example.com");
+    h.run_steps(3);
+    assert_eq!(h.state().identity_email, "grace@example.com", "a row applies as it changes");
+    // Remembered; a hostile saved value is trimmed and cut, and a mistyped one is ignored.
+    let mut restored = crate::control::new_app();
+    restored.apply_settings(&h.state().settings_snapshot());
+    assert_eq!(restored.identity_email, "grace@example.com");
+    restored.apply_settings(&pdfcraft_ui_egui::settings::import_json(&format!(r#"{{"identity_email": "  {}  "}}"#, "x".repeat(10_000))).0);
+    assert_eq!(restored.identity_email.chars().count(), 200);
+    restored.apply_settings(&pdfcraft_ui_egui::settings::import_json(r#"{"identity_email": 5}"#).0);
+    assert_eq!(restored.identity_email.chars().count(), 200, "a mistyped value keeps the current one");
+    // The control channel sets it too.
+    restored.set_option(&egui::Context::default(), "identity-email", " a@b.c ").unwrap();
+    assert_eq!(restored.identity_email, "a@b.c");
 }

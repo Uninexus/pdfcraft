@@ -57,6 +57,46 @@ impl PdfCraftApp {
             ("single_key_accelerators", _) => {
                 self.single_key_accelerators = value.parse::<bool>().map_err(|_| "single_key_accelerators must be true or false")?;
             }
+            // Preferences > Identity > Email: the contact information of new digital signatures.
+            ("identity-email", _) => self.identity_email = value.trim().chars().take(crate::MAX_AUTHOR_CHARS).collect(),
+            // Preferences > Forms: a field's tooltip on hover, and the Highlight fields colour (`default` follows the theme).
+            ("form-tooltips", _) => {
+                self.form_tooltips = value.parse::<bool>().map_err(|_| "form-tooltips must be true or false")?;
+            }
+            // Preferences > Forms > Auto-Complete: Off (the default) or Basic.
+            ("form-autocomplete", _) => {
+                self.session.set_form_autocomplete(match value {
+                    "off" => false,
+                    "basic" => true,
+                    _ => return Err("form-autocomplete must be off or basic".into()),
+                });
+            }
+            ("field-highlight-color", _) => {
+                self.field_highlight_color = match value {
+                    "default" => None,
+                    hex => Some(hex_colour(hex).ok_or("field-highlight-color must be #RRGGBB or default")?),
+                };
+            }
+            ("required-field-color", _) => {
+                self.required_field_color = match value {
+                    "default" => None,
+                    hex => Some(hex_colour(hex).ok_or("required-field-color must be #RRGGBB or default")?),
+                };
+            }
+            // Preferences > Documents and view: the unit lengths are shown in and the paper Create > Blank page uses.
+            ("units", _) => {
+                self.units = crate::units::Unit::from_token(value).ok_or("units must be in, mm, cm or pt")?;
+            }
+            ("blank-paper", _) => {
+                self.blank_paper = crate::paper::Paper::from_token(value).ok_or("blank-paper must be letter or a4")?;
+            }
+            // Preferences > Comment: forgets every comment tool's remembered colour, opacity, width and font size.
+            ("reset-comment-defaults", _) => {
+                if value != "true" {
+                    return Err("reset-comment-defaults must be true".into());
+                }
+                self.comment_prefs.reset_defaults();
+            }
             // The Compare dialog's Ignore checkboxes (saved with the other settings).
             ("compare-ignore-case", _) => {
                 self.compare_ignore_case = value.parse::<bool>().map_err(|_| "compare-ignore-case must be true or false")?;
@@ -73,6 +113,31 @@ impl PdfCraftApp {
                 }
                 let setting = field.parse(value).map_err(|_| field.key_error())?;
                 self.set_readiness_option(field, setting)?;
+            }
+            ("javascripts-filter" | "javascripts-kind" | "javascripts-select", _) => {
+                // The JavaScripts window's own controls, for an agent that has opened it.
+                if !self.javascripts_open {
+                    return Err(format!("{key} needs the JavaScripts window: ui.set dialog=javascripts first"));
+                }
+                crate::javascripts_ui::sync(self);
+                let d = &mut self.javascripts_draft;
+                match key {
+                    "javascripts-filter" => d.set_filter(value),
+                    "javascripts-kind" => d.set_kind(match value {
+                        "all" => None,
+                        k => Some(pdfcraft_engine::JavaScriptKind::from_id(k).ok_or(
+                            "javascripts-kind must be all, document, open_action, document_action, field, link, annotation, page or bookmark",
+                        )?),
+                    }),
+                    _ => {
+                        if d.dirty() {
+                            return Err("the editor has unsaved changes: apply them or discard them first (ui.state javascripts.dirty)".into());
+                        }
+                        if !d.select_id(value) {
+                            return Err(format!("no script {value:?} in the list (ui.state javascripts.entries)"));
+                        }
+                    }
+                }
             }
             ("animation_effects", _) => {
                 // PLAN: assumed `crate::settings::motion_from_name(&str) -> Option<MotionChoice>` and `set_motion(&mut self, MotionChoice)`, which writes the field and the store (pdf-shell-w9).
@@ -518,6 +583,20 @@ impl PdfCraftApp {
             "enhance-scan" => self.open_enhance_scan(ctx),
             "js-console" => crate::js_dialogs::open_console(self),
             "document-js" => crate::js_dialogs::open_document_scripts(self),
+            // Through the command, so it is refused with no document open, as the menu is.
+            "javascripts" => {
+                self.execute(ctx, "tools.javascripts");
+            }
+            // Through the command, so it is refused with no document open, as the menu is.
+            "signature-audit" => {
+                self.execute(ctx, "sign.audit_report");
+            }
+            "signer-report" => {
+                self.execute(ctx, "form.signer_report");
+            }
+            "signing-plan" => {
+                self.execute(ctx, "sign.plan.show");
+            }
             "preferences" => self.open_preferences(),
             "compare-files" => crate::compare_ui::open_compare_dialog(self, ctx),
             "action-wizard" => crate::actions_ui::open_wizard(self, ctx, None),
@@ -584,4 +663,12 @@ fn side_name<'a>(value: &'a str, key: &str) -> Result<&'a str, String> {
         "left" | "right" => Ok(value),
         _ => Err(format!("{key} must be left or right")),
     }
+}
+
+/// A colour written `#RRGGBB`; `None` for anything else.
+fn hex_colour(text: &str) -> Option<[u8; 3]> {
+    let hex = text.strip_prefix('#').filter(|h| h.len() == 6 && h.bytes().all(|b| b.is_ascii_hexdigit()))?;
+    // All six bytes are ASCII hex digits, so every two-byte slice is on a char boundary.
+    let byte = |i: usize| hex.get(i..i + 2).and_then(|pair| u8::from_str_radix(pair, 16).ok());
+    Some([byte(0)?, byte(2)?, byte(4)?])
 }

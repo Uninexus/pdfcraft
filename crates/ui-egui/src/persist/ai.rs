@@ -197,8 +197,7 @@ impl AiSettings {
             let session = pdfcraft_ai::chatgpt::sign_in(&path, &open, &cancel).map_err(|e| e.to_string())?;
             // The file holds tokens: on Windows only the user and SYSTEM may read it (Unix gets 0600).
             #[cfg(windows)]
-            if let Err(e) =
-                pdfcraft_platform::owner_only::current_user_sid().and_then(|me| pdfcraft_platform::owner_only::restrict_to_owner(&path, &me))
+            if let Err(e) = craft::platform::owner_only::current_user_sid().and_then(|me| craft::platform::owner_only::restrict_to_owner(&path, &me))
             {
                 return Err(format!("cannot restrict the ChatGPT sign-in file to your account: {e}"));
             }
@@ -266,8 +265,7 @@ impl AiSettings {
         // mode 0600 from the save itself).
         #[cfg(windows)]
         if self.problem.is_none()
-            && let Err(e) =
-                pdfcraft_platform::owner_only::current_user_sid().and_then(|me| pdfcraft_platform::owner_only::restrict_to_owner(path, &me))
+            && let Err(e) = craft::platform::owner_only::current_user_sid().and_then(|me| craft::platform::owner_only::restrict_to_owner(path, &me))
         {
             self.problem = Some(format!("cannot restrict the AI settings file to your account: {e}"));
         }

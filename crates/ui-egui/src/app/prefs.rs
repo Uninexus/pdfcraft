@@ -180,8 +180,15 @@ impl PdfCraftApp {
             full_screen_fill: Some(self.full_screen_fill),
             full_screen_escape_exits: Some(self.full_screen_escape_exits),
             units: Some(self.units),
+            blank_paper: Some(self.blank_paper.token().to_string()),
             always_default_view: Some(self.always_default_view),
             highlight_fields: Some(self.highlight_fields),
+            identity_email: Some(self.identity_email.clone()),
+            form_tooltips: Some(self.form_tooltips),
+            form_autocomplete: Some(self.session.form_autocomplete()),
+            form_entries: json_text(&self.session.form_entries().entries()),
+            field_highlight_color: self.field_highlight_color,
+            required_field_color: self.required_field_color,
             comments_panel_closed: Some(self.comments_panel_closed),
             right_panel_closed: Some(self.right_panel_closed),
             ocr: json_text(&self.ocr_draft.to_pref()),
@@ -485,11 +492,36 @@ impl PdfCraftApp {
         if let Some(units) = b.units {
             self.units = units;
         }
+        // Settings are untrusted: a name that is neither paper keeps the current one.
+        if let Some(paper) = b.blank_paper.as_deref().and_then(crate::paper::Paper::from_token) {
+            self.blank_paper = paper;
+        }
         if let Some(on) = b.always_default_view {
             self.always_default_view = on;
         }
         if let Some(on) = b.highlight_fields {
             self.highlight_fields = on;
+        }
+        // Settings are untrusted: the email is trimmed and cut like the name.
+        if let Some(email) = b.identity_email.as_deref() {
+            self.identity_email = email.trim().chars().take(MAX_AUTHOR_CHARS).collect();
+        }
+        if let Some(on) = b.form_tooltips {
+            self.form_tooltips = on;
+        }
+        if let Some(on) = b.form_autocomplete {
+            self.session.set_form_autocomplete(on);
+        }
+        // Not an array, or not text in it: nothing remembered, never an error (see `FormEntries::restored`).
+        if let Some(list) = parsed(&b.form_entries).as_ref().and_then(serde_json::Value::as_array) {
+            self.session.set_form_entries(pdfcraft_engine::form_entries::FormEntries::restored(list.iter().filter_map(serde_json::Value::as_str)));
+        }
+        if let Some(colour) = b.field_highlight_color {
+            self.field_highlight_color = Some(colour);
+        }
+        // A missing or mistyped colour keeps the current one.
+        if let Some(colour) = b.required_field_color {
+            self.required_field_color = Some(colour);
         }
         if let Some(closed) = b.comments_panel_closed {
             self.comments_panel_closed = closed;

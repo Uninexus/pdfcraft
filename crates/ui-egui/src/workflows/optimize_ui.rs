@@ -129,7 +129,12 @@ static TOGGLES: [Toggle; 20] = [
         label: "Discard external cross-references",
         effect: Effect::Setting(|s| s.discard_external_refs, |s, on| s.discard_external_refs = on),
     },
-    Toggle { tab: 2, key: "privatedata", label: "Discard private data of other applications", effect: Effect::Discard(Hidden::PrivateData) },
+    Toggle {
+        tab: 2,
+        key: "privatedata",
+        label: "Discard private data (other applications' data and PdfCraft signer labels)",
+        effect: Effect::Discard(Hidden::PrivateData),
+    },
     Toggle { tab: 2, key: "hiddentext", label: "Discard hidden text", effect: Effect::Discard(Hidden::HiddenText) },
     Toggle {
         tab: 3,

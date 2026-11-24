@@ -12,7 +12,7 @@ use std::sync::Arc;
 use craft::behavior::CanvasView;
 use craft::behavior::kurbo::Point;
 use craft::pages::ui::view::PageBody;
-use craft::text::ui::editor::{CaretLine, EditKind, EditorEnd, EditorMode, HostLine, HostRun, TextEditor, TextEditorHost};
+use craft::text::ui::editor::{CaretLine, EditKind, EditorEnd, EditorMode, HostLine, HostRun, TextEditor, TextEditorHost, TextSelection};
 use craft::ui::contract::{Bind, Props as _, Show as _};
 use egui::text::{CCursor, CharIndex, LayoutJob};
 use egui::{Align, Color32, CornerRadius, FontId, Pos2, Rect, pos2, vec2};
@@ -339,6 +339,16 @@ pub(super) fn offset_at(
     laid.hit_box(frame.in_box(at)).0
 }
 
+/// Puts the Auto-Complete entry `entry` in the focused field's draft, cut to the field's limit, with the caret at its
+/// end, and shuts the list until the text changes.
+fn take_suggestion(session: &mut PageSession, f: &FormField, entry: &str) {
+    if let Some(x) = session.forms.focus.as_mut() {
+        x.text = f.max_len.map_or_else(|| entry.to_owned(), |max| entry.chars().take(max).collect());
+        x.selection = TextSelection::caret_at(x.text.chars().count());
+        session.forms.suggest_hidden = Some(x.text.clone());
+    }
+}
+
 /// Show the session of the focused field for this pass: the editor over a Text field or an editable
 /// combo box, the drop-down list of a combo box and the calendar of a date field. The session ends
 /// by queuing its edit in `session.pending_edit` (a commit), by moving to another field, or by
@@ -355,6 +365,7 @@ pub(crate) fn show(
     form: &[FormField],
     info: &DocInfo,
     today: (i64, u32, u32),
+    suggestions: &[String],
     pages: PageGeometry<'_>,
 ) -> Option<egui::Id> {
     let focus = session.forms.focus.as_ref()?;
@@ -376,6 +387,12 @@ pub(crate) fn show(
     let types = f.kind == FormFieldKind::Text || (combo && editable_combo(f));
     let mut ended = None;
     let mut shown = None;
+    // What Auto-Complete lists for this pass: only under a plain text field, and not once the list was shut at this text.
+    let typed = session.forms.focus.as_ref().map(|x| x.text.clone()).unwrap_or_default();
+    let usable = f.kind == FormFieldKind::Text && super::autocompletes(f) && session.forms.suggest_hidden.as_deref() != Some(typed.as_str());
+    let offered: &[String] = if usable { suggestions } else { &[] };
+    // The row the arrow keys highlighted, as of the last pass; the editor's Enter takes it instead of committing.
+    let lead = super::suggestion_lead(ui, &typed, offered.len());
     if types {
         let room = (f.kind == FormFieldKind::Text && f.has(field_flags::DO_NOT_SCROLL)).then(|| doc.field_text_box(&focus.name, widget)).flatten();
         let focus = session.forms.focus.as_mut()?;
@@ -400,7 +417,37 @@ pub(crate) fn show(
         ended = out.ended;
         shown = Some(out.response.id);
     }
+    // Auto-Complete's keys come through the editor's end: the list's own keys (arrows, Tab and Escape) the framework
+    // hands the list, while Enter and the Escape the editor reads are the field's. Enter on a highlighted entry takes it
+    // and the field stays open; Escape with the list showing shuts the list and keeps the typing.
+    let mut taken = None;
+    let mut stay = false;
+    match (ended, lead.and_then(|at| offered.get(at))) {
+        (Some(EditorEnd::Commit), Some(entry)) => {
+            taken = Some(entry);
+            stay = true;
+        }
+        (Some(EditorEnd::Cancel), _) if !offered.is_empty() => {
+            session.forms.suggest_hidden = Some(typed.clone());
+            stay = true;
+        }
+        _ => {}
+    }
+    if !stay && ended.is_none() && !offered.is_empty() {
+        let mut open = true;
+        let clicked = super::suggestion_list(ui, f, rect, zoom, (&typed, offered), &mut open).and_then(|i| offered.get(i));
+        if clicked.is_some() {
+            taken = clicked;
+        } else if !open {
+            // Dismissed: shut until the text changes.
+            session.forms.suggest_hidden = Some(typed);
+        }
+    }
+    if let Some(entry) = taken {
+        take_suggestion(session, f, entry);
+    }
     match ended {
+        Some(EditorEnd::Commit | EditorEnd::Cancel) if stay => {}
         Some(EditorEnd::Commit) => commit(session, form),
         Some(EditorEnd::Next) => {
             session.pending_edit = super::tab_to_next_field(session, info, form, f, widget, true, pages);

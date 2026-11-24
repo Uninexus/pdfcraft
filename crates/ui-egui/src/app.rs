@@ -368,6 +368,10 @@ impl PdfCraftApp {
             update_check_at_start: true,
             show_secured_notice: true,
             text_links: true,
+            identity_email: String::new(),
+            form_tooltips: true,
+            field_highlight_color: None,
+            required_field_color: None,
             always_default_view: false,
             #[cfg(not(target_arch = "wasm32"))]
             watch,
@@ -439,6 +443,10 @@ impl PdfCraftApp {
             ai: Default::default(),
             ai_draft: Default::default(),
             readiness_open: false,
+            signing_plan: None,
+            signature_report: None,
+            javascripts_open: false,
+            javascripts_draft: Default::default(),
             readiness_report: None,
             readiness_options: Default::default(),
             readiness_edit: Default::default(),
@@ -635,6 +643,9 @@ impl PdfCraftApp {
             || self.js_dialog.is_some()
             || self.readiness_open
             || self.ai_open
+            || self.javascripts_open
+            || self.signing_plan.is_some()
+            || self.signature_report.is_some()
             || self.comment_props.is_some()
             || self.stamp_dialog.is_some()
     }

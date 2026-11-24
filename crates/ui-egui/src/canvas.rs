@@ -893,6 +893,15 @@ struct PageBodyCx<'a> {
     can_copy: bool,
     comments_hidden: bool,
     text_links: bool,
+    /// Preferences > Forms: a field's tooltip shows on hover.
+    form_tooltips: bool,
+    /// Preferences > Forms: the Highlight fields colour; `None` follows the theme.
+    field_highlight_color: Option<[u8; 3]>,
+    /// Preferences > Forms: the border colour of a required field; `None` follows the theme.
+    required_field_color: Option<[u8; 3]>,
+    /// Preferences > Forms > Auto-Complete: the remembered entries the focused plain text field's text could be
+    /// completed to (none while the preference is off).
+    form_suggestions: &'a [String],
     /// No dialog, close prompt or palette over the pages.
     unobstructed: bool,
     /// Every page's size in view space, unturned by the view (`DocView::page_sizes`).
@@ -1021,7 +1030,15 @@ fn page_parts_of(ui: &mut egui::Ui, body: &PageBody<'_>, session: &mut PageSessi
     if cx.tool == QuickTool::Select && !cx.preparing {
         let can_fill = cx.doc.allows_form_filling();
         for placed in body.pages {
-            parts.extend(crate::forms_ui::field_parts(session, cx.info, cx.doc, placed.page, can_fill, badge_tips, geo));
+            parts.extend(crate::forms_ui::field_parts(
+                session,
+                cx.info,
+                cx.doc,
+                placed.page,
+                can_fill,
+                crate::forms_ui::Tips { badges: badge_tips, fields: cx.form_tooltips },
+                geo,
+            ));
         }
     }
     // The sign tabs of each page, after the fields: a tab is painted over its field.
@@ -1423,6 +1440,12 @@ fn page_body(ui: &mut egui::Ui, body: &PageBody<'_>, callbacks: &mut PageCallbac
         let mut overlays = PageOverlays::new(*page, *xf, cx.doc, page_tabs, &session.compare_marks, &mut session.flash)
             .highlight_fields(session.highlight_fields)
             .guides(cx.guides);
+        if let Some(colour) = cx.field_highlight_color {
+            overlays = overlays.field_color(colour);
+        }
+        if let Some(colour) = cx.required_field_color {
+            overlays = overlays.required_color(colour);
+        }
         if let Some(picked) = view_picked.filter(|p| p.page == *page) {
             overlays = overlays.picked(picked.rect);
         }
@@ -1458,7 +1481,7 @@ fn page_body(ui: &mut egui::Ui, body: &PageBody<'_>, callbacks: &mut PageCallbac
         }
     }
     // The focused field's editor, and the Fill & Sign text being typed, over their pages.
-    if let Some(editor) = crate::forms_ui::editor::show(ui, body, session, cx.doc, cx.form, cx.info, cx.today, cx.geometry(body))
+    if let Some(editor) = crate::forms_ui::editor::show(ui, body, session, cx.doc, cx.form, cx.info, cx.today, cx.form_suggestions, cx.geometry(body))
         && *field_arrived
     {
         // The keys of a field that takes typing are its editor's: it takes the focus over from the field's part.
@@ -1705,6 +1728,15 @@ pub fn document_area_at(app: &mut PdfCraftApp, index: usize, rect: Rect, ui: &mu
     let table_preview = crate::field_table_ui::preview(&mut app.dialogs, doc_id);
     // Full screen shows the pages on black, as production does.
     let surround = if app.full_screen_document() { PasteboardColor::Black } else { PasteboardColor::Default };
+    // Auto-Complete: only for the focused plain text field, and only with the preference on (the session says none otherwise).
+    let form_suggestions: Vec<String> = app.views[index]
+        .session
+        .forms
+        .focus
+        .as_ref()
+        .filter(|focus| crate::forms_ui::focused_field(focus, &form).is_some_and(crate::forms_ui::autocompletes))
+        .map(|focus| app.session.suggest_form_entries(&focus.text))
+        .unwrap_or_default();
     let view = &mut app.views[index];
     // PLAN: assumed `page_tools::seen_tool(&PageSession, QuickTool) -> QuickTool`, the placing rule `page_tool`
     // applies (copied comments on the pointer make the page see Select), so the parts gate on the same tool.
@@ -1823,6 +1855,10 @@ pub fn document_area_at(app: &mut PdfCraftApp, index: usize, rect: Rect, ui: &mu
         can_copy: doc.allows_copying(),
         comments_hidden: doc.comments_hidden(),
         text_links: app.text_links,
+        form_tooltips: app.form_tooltips,
+        field_highlight_color: app.field_highlight_color,
+        required_field_color: app.required_field_color,
+        form_suggestions: &form_suggestions,
         unobstructed,
         prefs: &app.comment_prefs,
         redact_hover: (app.redact_prefs.hover_fill, app.redact_prefs.opacity),

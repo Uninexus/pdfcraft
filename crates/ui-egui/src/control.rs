@@ -39,6 +39,19 @@
 //!   `guides=on|off` shows or hides the active tab's ruler guides (View > Guides > Show Guides,
 //!   `view.show_guides`); `ui.state.active.show_guides` and `.guides` (how many the document has) report it.
 //!   `comment-tool-pinned=true|false` remembers the annotation quick bar's pin across restarts.
+//!   `identity-email=<address>` sets Preferences > Identity > Email (the contact information of new
+//!   digital signatures), `form-tooltips=true|false` shows or hides a field's tooltip, and
+//!   `field-highlight-color=#RRGGBB|default` sets the colour Highlight fields draws and
+//!   `required-field-color=#RRGGBB|default` the border of a required field (`default` follows the
+//!   theme); `ui.state` reports `identity_email`, `form_tooltips`, `field_highlight_color` and
+//!   `required_field_color` (null while one follows the theme). `form-autocomplete=off|basic` sets
+//!   Preferences > Forms > Auto-Complete; `ui.state` reports `form_autocomplete` and
+//!   `form_entry_count`.
+//!   `units=in|mm|cm|pt` and `blank-paper=letter|a4` set Preferences > Documents and view > Units
+//!   (the unit page sizes and margins are shown in) and Paper for new blank pages (what Create >
+//!   Blank page uses); `ui.state.units` and `ui.state.blank_paper` report them.
+//!   `reset-comment-defaults=true` forgets every comment tool's remembered colour, opacity, width
+//!   and font size (Preferences > Comment).
 //!   `compare-ignore-case=true|false` and `compare-ignore-punctuation=true|false` set the Compare
 //!   dialog's Ignore checkboxes, which persist; `ui.state.compare_ignore` reports `case` and
 //!   `punctuation`.

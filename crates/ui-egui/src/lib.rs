@@ -121,11 +121,15 @@ pub use dialogs::bookmark_styles_ui;
 use dialogs::comment_props;
 use dialogs::convert_colours_ui;
 use dialogs::hairlines_ui;
+use dialogs::javascripts_ui;
 use dialogs::marks_ui;
 use dialogs::pageboxes;
 use dialogs::printer_marks_ui;
 use dialogs::readiness_ui;
 use dialogs::rename_ui;
+pub use dialogs::signature_report_ui::{ReportKind as SignatureReportKind, ReportWindow as SignatureReport};
+use dialogs::signing_plan_ui;
+pub use dialogs::signing_plan_ui::{Draft as SigningPlanDraft, View as SigningPlanView};
 use dialogs::standards_ui;
 use dialogs::word_count_ui;
 pub use home::folders_ui;
@@ -248,6 +252,12 @@ impl Default for DefaultAppHooks {
         }
     }
 }
+
+/// The colour Highlight fields shows in Preferences > Forms while it follows the theme.
+pub(crate) const FIELD_HIGHLIGHT_DEFAULT: [u8; 3] = [0x6E, 0x8E, 0xF5];
+
+/// The colour a required field's border shows in Preferences > Forms while it follows the theme.
+pub(crate) const REQUIRED_FIELD_DEFAULT: [u8; 3] = [0xE3, 0x22, 0x22];
 
 pub struct PdfCraftApp {
     /// The app's services: jobs, files, settings sections, commands. Every queue is built from it.
@@ -477,6 +487,15 @@ pub struct PdfCraftApp {
     /// Preferences: web and email addresses written as plain page text open on a click, like
     /// links (#4207).
     pub text_links: bool,
+    /// Preferences > Identity > Email: the contact information of new digital signatures. Empty is none. (The name
+    /// is `comment_prefs.author`.)
+    pub identity_email: String,
+    /// Preferences > Forms: show a field's tooltip (its `/TU`) when the pointer rests on it.
+    pub form_tooltips: bool,
+    /// Preferences > Forms: the colour Highlight fields draws over fillable fields; `None` follows the theme.
+    pub field_highlight_color: Option<[u8; 3]>,
+    /// Preferences > Forms: the border colour of a required field; `None` follows the theme.
+    pub required_field_color: Option<[u8; 3]>,
     /// Preferences: open every document at Default zoom and Default page display, whatever
     /// layout or zoom it asks for (#1618).
     pub always_default_view: bool,
@@ -641,6 +660,14 @@ pub struct PdfCraftApp {
     pub readiness_options: readiness_ui::ReadinessOptions,
     /// What the dialog's three fields hold as typed.
     pub readiness_edit: readiness_ui::ReadinessEdit,
+    /// Edit ▸ JavaScripts is open (`dialogs::javascripts_ui`).
+    pub javascripts_open: bool,
+    /// Its list, filters and the script being edited.
+    pub(crate) javascripts_draft: javascripts_ui::Draft,
+    /// The Signing plan window's draft, while that window is open (`dialogs::signing_plan_ui`).
+    pub signing_plan: Option<SigningPlanDraft>,
+    /// The signature audit report or the signer labels report, while its window is open (`dialogs::signature_report_ui`).
+    pub signature_report: Option<SignatureReport>,
     /// The JavaScript console.
     pub js_console: js_ui::JsConsole,
     #[cfg(not(target_arch = "wasm32"))]

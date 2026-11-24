@@ -13,7 +13,7 @@ use craft::behavior::{CursorIcon, HitShape, IconId, Input, PointerButton, PressP
 use craft::pages::ui::PlacedPage;
 use craft::theme::variant::Tone;
 use craft::ui::contract::{Access, Animate as _, Common, Component, Cx, MeasureCx, NoValue, Outcome, PaintUi, Props, Role, Show as _};
-use craft::ui::primitives::{Draw, IconSpec, PaintShape, StrokeWidth, TextRun};
+use craft::ui::primitives::{Draw, IconSpec, PaintShape, StrokeColor, StrokeWidth, TextRun};
 use craft::ui::style::{ComponentStyle, DataColor, Metrics, StyleColor, StyleCx, TypeRole};
 use egui::{Color32, CornerRadius, Rect, Response, Vec2, pos2};
 use pdfcraft_engine::guides::Guide;
@@ -484,6 +484,12 @@ pub(crate) struct PageOverlays<'a> {
     /// Acrobat's "Highlight existing fields".
     #[prop]
     highlight_fields: bool,
+    /// Preferences > Forms > Highlight colour, a data colour the user chose; `None` follows the theme.
+    #[prop]
+    field_color: Option<[u8; 3]>,
+    /// Preferences > Forms > Required field border, a data colour the user chose; `None` follows the theme.
+    #[prop]
+    required_color: Option<[u8; 3]>,
     /// Snapshot's kept area on this page (view space): outlined until another tool or drag replaces it.
     #[prop]
     kept_area: Option<[f32; 4]>,
@@ -514,6 +520,8 @@ impl<'a> PageOverlays<'a> {
             flash,
             guides: &[],
             highlight_fields: false,
+            field_color: None,
+            required_color: None,
             kept_area: None,
             picked: None,
         }
@@ -609,12 +617,18 @@ impl PageOverlays<'_> {
     /// is marked: a push button holds no value (the frames and controls of a LaTeX `animate` animation are
     /// push buttons), and a read-only widget is left as it is drawn.
     fn paint_field_highlights(&self, draw: &Draw<'_>, style: &PageOverlaysStyle) {
+        // The colours the user chose are data, not theme roles: the first marks a field that isn't required, and tints
+        // every field; the second is a required field's border.
+        let chosen = self.field_color.map(|[r, g, b]| DataColor::new(Color32::from_rgb(r, g, b)));
+        let required_edge = self
+            .required_color
+            .map_or(StrokeColor::Theme(style.required_edge), |[r, g, b]| StrokeColor::Data(DataColor::new(Color32::from_rgb(r, g, b))));
         for field in self.doc.form.iter().filter(|f| f.kind != FormFieldKind::PushButton) {
             let required = field.has(pdfcraft_engine::field_flags::REQUIRED);
             let (width, line, edge) = if required {
-                (StrokeWidth::Thick, style.outline, style.required_edge)
+                (StrokeWidth::Thick, style.outline, required_edge)
             } else {
-                (StrokeWidth::Thin, style.field_line, style.field_edge)
+                (StrokeWidth::Thin, style.field_line, chosen.map_or(StrokeColor::Theme(style.field_edge), StrokeColor::Data))
             };
             for widget in field.widgets.iter().filter(|w| w.page == Some(self.page) && !w.hidden && !w.read_only) {
                 let rect = self.xf.user_rect_f64(&self.doc.info, self.page, widget.rect);
@@ -629,7 +643,10 @@ impl PageOverlays<'_> {
                 } else {
                     (PaintShape::Rect(rect, CornerRadius::ZERO), PaintShape::Rect(rect, CornerRadius::ZERO))
                 };
-                draw.faded(48.0 / 255.0, |draw| draw.fill(&shape, style.field_fill));
+                draw.faded(48.0 / 255.0, |draw| match chosen {
+                    Some(colour) => draw.data_fill(&shape, colour),
+                    None => draw.fill(&shape, style.field_fill),
+                });
                 draw.stroke(&outline, width, edge);
             }
         }

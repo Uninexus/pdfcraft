@@ -2556,3 +2556,153 @@ fn an_auto_sized_drop_downs_list_shows_its_items_at_the_fields_text_size() {
     let item = text_rect(&h, long).expect("the long item in the open list");
     assert!(item.width() <= field.width(), "the item fits as the field's value does: {} wide in a {} field", item.width(), field.width());
 }
+
+/// The form with two plain text fields, one under the other, and a password field below them.
+fn auto_complete_harness() -> Harness<'static, PdfCraftApp> {
+    let mut h = harness();
+    let ctx_h = h.ctx.clone();
+    for (name, y) in [("home_city", 40.0), ("work_city", 80.0), ("secret", 120.0)] {
+        h.state_mut().apply_edit(
+            &ctx_h,
+            pdfcraft_engine::Edit::AddField {
+                page: 0,
+                rect: [50.0, y, 200.0, y + 20.0],
+                kind: pdfcraft_engine::NewField::Text { multiline: false },
+                name: Some(name.into()),
+            },
+        );
+    }
+    h.state_mut().apply_edit(
+        &ctx_h,
+        pdfcraft_engine::Edit::SetFieldProps {
+            name: "secret".into(),
+            props: Box::new(pdfcraft_engine::FieldProps { flags: vec![(pdfcraft_engine::field_flags::PASSWORD, true)], ..Default::default() }),
+        },
+    );
+    h.run_steps(4);
+    h
+}
+
+fn type_in_field(h: &mut Harness<'static, PdfCraftApp>, name: &str, text: &str) {
+    click_field(h, name, 0);
+    h.event(egui::Event::Text(text.into()));
+    h.run_steps(3);
+}
+
+/// The text being typed into the focused field.
+fn draft(h: &Harness<'static, PdfCraftApp>) -> String {
+    h.state().views[0].session.forms.focus.as_ref().map(|f| f.text.clone()).unwrap_or_default()
+}
+
+/// A harness with "Maplewood" remembered, and Auto-Complete on or off.
+fn remembered(on: bool) -> Harness<'static, PdfCraftApp> {
+    let mut h = auto_complete_harness();
+    // Seeded directly, so the preference can be off while there are entries to offer.
+    h.state_mut().session.set_form_entries(pdfcraft_engine::form_entries::FormEntries::restored(["Maplewood"]));
+    if on {
+        h.set_option("form-autocomplete", "basic").unwrap();
+    }
+    h
+}
+
+#[test]
+fn auto_complete_offers_nothing_while_off_even_with_saved_entries() {
+    let mut h = remembered(false);
+    assert_eq!(h.state().session.form_entries().len(), 1);
+    type_in_field(&mut h, "work_city", "ma");
+    assert!(h.query_by_label("Maplewood").is_none(), "no list while Auto-Complete is off");
+}
+
+#[test]
+fn auto_complete_remembers_on_leaving_a_field_and_offers_it_in_another() {
+    let mut h = auto_complete_harness();
+    h.set_option("form-autocomplete", "basic").unwrap();
+    type_in_field(&mut h, "home_city", "Maplewood");
+    h.key_press(egui::Key::Enter);
+    h.run_steps(4);
+    assert_eq!(h.state().session.form_entries().entries(), ["Maplewood"]);
+    type_in_field(&mut h, "work_city", "ma");
+    h.get_by_label("Maplewood").click();
+    h.run_steps(4);
+    assert_eq!(draft(&h), "Maplewood", "a clicked entry is taken");
+    assert_eq!(focused(&h), Some(("work_city".into(), 0)), "the field stays open");
+    h.event(egui::Event::Text("!".into()));
+    h.run_steps(3);
+    assert_eq!(draft(&h), "Maplewood!", "typing goes on from the end of the entry");
+}
+
+#[test]
+fn enter_with_nothing_highlighted_commits_the_typed_text() {
+    let mut h = remembered(true);
+    type_in_field(&mut h, "work_city", "ma");
+    h.get_by_label("Maplewood");
+    h.key_press(egui::Key::Enter);
+    h.run_steps(4);
+    assert_eq!(value(&h, "work_city"), vec!["ma".to_string()]);
+}
+
+#[test]
+fn the_arrow_keys_and_enter_take_a_suggestion_and_escape_hides_the_list() {
+    let mut h = remembered(true);
+    type_in_field(&mut h, "work_city", "ma");
+    h.get_by_label("Maplewood");
+    h.key_press(egui::Key::ArrowDown);
+    h.run_steps(2);
+    h.key_press(egui::Key::Enter);
+    h.run_steps(3);
+    assert_eq!(draft(&h), "Maplewood");
+    assert!(h.query_by_label("Maplewood").is_none(), "the list closes once an entry is taken");
+
+    let mut h = remembered(true);
+    type_in_field(&mut h, "work_city", "ma");
+    h.get_by_label("Maplewood");
+    h.key_press(egui::Key::Escape);
+    h.run_steps(3);
+    assert!(h.query_by_label("Maplewood").is_none());
+    assert_eq!(draft(&h), "ma", "the typing is kept");
+}
+
+#[test]
+fn a_password_field_shows_no_list_and_a_check_box_is_never_remembered() {
+    let mut h = remembered(true);
+    type_in_field(&mut h, "secret", "ma");
+    assert!(h.query_by_label("Maplewood").is_none(), "no suggestions into a password field");
+    let ctx_h = h.ctx.clone();
+    h.state_mut().apply_edit(
+        &ctx_h,
+        pdfcraft_engine::Edit::AddField {
+            page: 0,
+            rect: [50.0, 160.0, 70.0, 180.0],
+            kind: pdfcraft_engine::NewField::CheckBox,
+            name: Some("agree".into()),
+        },
+    );
+    h.run_steps(3);
+    let s = h.state_mut();
+    let id = s.views[0].id;
+    let field = |name: &str| s.session.get(id).unwrap().form.iter().find(|f| f.name == name).unwrap().clone();
+    let (check, password, plain) = (field("agree"), field("secret"), field("home_city"));
+    assert!(!s.session.remember_form_entry(&check, "Off") && !s.session.remember_form_entry(&password, "hunter2"));
+    assert!(s.session.remember_form_entry(&plain, "Oakdale"), "a plain text field is");
+    assert_eq!(s.session.form_entries().entries(), ["Oakdale", "Maplewood"]);
+}
+
+#[test]
+fn what_auto_complete_remembered_is_kept_in_the_settings_and_a_hostile_list_is_cut_down() {
+    let ctx = egui::Context::default();
+    let mut app = crate::control::new_app();
+    assert!(!app.session.form_autocomplete(), "off until asked");
+    assert!(app.set_option(&ctx, "form-autocomplete", "advanced").unwrap_err().contains("off or basic"));
+    app.set_option(&ctx, "form-autocomplete", "basic").unwrap();
+    app.session.set_form_entries(pdfcraft_engine::form_entries::FormEntries::restored(["Oakdale", "Maplewood"]));
+    let mut again = crate::control::new_app();
+    again.apply_settings(&app.settings_snapshot());
+    assert!(again.session.form_autocomplete());
+    assert_eq!(again.session.form_entries().entries(), ["Oakdale", "Maplewood"], "the list survives a restart, newest first");
+    // The last release kept the list as an array of text; anything else is nothing remembered, never an error.
+    let long = format!(r#"{{"form_entries": [{}]}}"#, (0..1000).map(|n| format!("\"entry {n}\"")).collect::<Vec<_>>().join(","));
+    again.apply_settings(&pdfcraft_ui_egui::settings::import_json(&long).0);
+    assert!(again.session.form_entries().len() <= 200, "a huge list is cut down");
+    again.apply_settings(&pdfcraft_ui_egui::settings::import_json(r#"{"form_entries": [5, null, ""]}"#).0);
+    assert!(again.session.form_entries().is_empty(), "nothing that is text is nothing remembered");
+}

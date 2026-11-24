@@ -425,6 +425,14 @@ impl PdfCraftApp {
             "prepress.hairlines" => self.open_fix_hairlines(ctx),
             "prepress.readiness" => self.open_print_readiness(),
             "ai.ask" | "ai.summary" | "ai.translate" | "ai.edit" => self.open_ai_for(id),
+            "tools.javascripts" => crate::javascripts_ui::open(self),
+            "sign.plan.show" => self.show_signing_plan(),
+            "sign.audit_report" => self.open_signature_audit(),
+            "form.signer_report" => self.open_signer_report(),
+            "sign.plan.recipient.add" | "sign.plan.recipient.remove" | "sign.plan.message.set" | "sign.plan.record" | "sign.plan.decline" => {
+                self.change_signing_plan(id)
+            }
+            "sign.plan.sign_next" => self.sign_as_next_recipient(ctx),
             "protect.remove" => {
                 if self.apply_edit(ctx, Edit::RemoveProtection) {
                     self.notify_tr("Security will be removed when you save");
@@ -929,6 +937,8 @@ impl PdfCraftApp {
                     crate::prepare::dialog::open(self, &name, w, crate::prepare::FieldTab::General);
                 }
             }
+            "form.field.signer.set" => self.set_field_signer(ctx, false),
+            "form.field.signer.clear" => self.set_field_signer(ctx, true),
             field if crate::prepare::FieldTool::from_command(field).is_some() => {
                 let Some(tool) = crate::prepare::FieldTool::from_command(field) else { return Some(false) };
                 self.quick_tool = crate::QuickTool::Field(tool);

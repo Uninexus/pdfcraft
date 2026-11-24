@@ -85,8 +85,22 @@ pub struct Behavior {
     /// Esc leaves full screen (off leaves it to ⌘L / Ctrl+L only).
     pub full_screen_escape_exits: Option<bool>,
     pub units: Option<crate::units::Unit>,
+    /// The paper Create > Blank page makes: `letter` or `a4`.
+    pub blank_paper: Option<String>,
     pub always_default_view: Option<bool>,
     pub highlight_fields: Option<bool>,
+    /// Preferences > Identity > Email, the contact information of new digital signatures.
+    pub identity_email: Option<String>,
+    /// Preferences > Forms: a field's tooltip shows on hover.
+    pub form_tooltips: Option<bool>,
+    /// Preferences > Forms > Auto-Complete: Basic (on) or Off.
+    pub form_autocomplete: Option<bool>,
+    /// JSON text: what Auto-Complete remembered, newest first. Plain text the person typed, kept in the local settings only.
+    pub form_entries: Option<String>,
+    /// Preferences > Forms: the Highlight fields colour; absent follows the theme (TOML has no null).
+    pub field_highlight_color: Option<[u8; 3]>,
+    /// Preferences > Forms: the border colour of a required field; absent follows the theme.
+    pub required_field_color: Option<[u8; 3]>,
     pub comments_panel_closed: Option<bool>,
     pub right_panel_closed: Option<bool>,
     /// JSON text: the Scan & OCR choices.
@@ -594,8 +608,15 @@ pub fn import_json(text: &str) -> (PdfCraftSettings, Vec<SectionError>) {
             full_screen_fill: r.bool("full_screen_fill"),
             full_screen_escape_exits: r.bool("full_screen_escape_exits"),
             units: r.typed("units"),
+            blank_paper: r.string("blank_paper"),
             always_default_view: r.bool("always_default_view"),
             highlight_fields: r.bool("highlight_fields"),
+            identity_email: r.string("identity_email"),
+            form_tooltips: r.bool("form_tooltips"),
+            form_autocomplete: r.bool("form_autocomplete"),
+            form_entries: r.text("form_entries"),
+            field_highlight_color: r.typed("field_highlight_color"),
+            required_field_color: r.typed("required_field_color"),
             comments_panel_closed: r.bool("comments_panel_closed"),
             right_panel_closed: r.bool("right_panel_closed"),
             ocr: r.text("ocr"),

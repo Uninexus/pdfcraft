@@ -30,7 +30,7 @@ mod choice_list;
 pub(crate) mod editor;
 
 use calendar::calendar;
-use choice_list::choice_list;
+use choice_list::{choice_list, suggestion_lead, suggestion_list};
 
 /// The page's paper: what an unbaked widget is filled with until its appearance is rendered.
 const PAPER: Color32 = Color32::WHITE;
@@ -65,6 +65,8 @@ pub struct Focus {
 #[derive(Clone, Debug, Default)]
 pub struct FormView {
     pub focus: Option<Focus>,
+    /// The text Auto-Complete's list was dismissed at (Escape, or an entry taken): it stays shut until the text changes.
+    pub(crate) suggest_hidden: Option<String>,
     /// The draft whose edit is queued (`DocView::pending_edit`): if the field refuses the value,
     /// the editor reopens with it rather than losing the typing.
     pub(crate) committed: Option<Focus>,
@@ -218,6 +220,12 @@ impl Focus {
     }
 }
 
+/// Whether Auto-Complete works in `f`: a plain one-line text field ([`pdfcraft_engine::form_entries::rememberable`]
+/// refuses password, comb, multi-line, rich-text, read-only and formatted ones).
+pub(crate) fn autocompletes(f: &FormField) -> bool {
+    pdfcraft_engine::form_entries::rememberable(f)
+}
+
 /// The field `focus` is on: the twin with its field object, or else the first field with its name.
 pub(crate) fn focused_field<'a>(focus: &Focus, form: &'a [FormField]) -> Option<&'a FormField> {
     focus.obj.and_then(|o| form.iter().find(|f| f.obj == o && f.name == focus.name)).or_else(|| form.iter().find(|f| f.name == focus.name))
@@ -365,23 +373,34 @@ pub(crate) fn hover_moved(session: &mut PageSession, now: Option<WidgetRef>) {
     }
 }
 
+/// Which tooltips the form widgets' parts carry.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Tips {
+    /// A signed signature's validation verdict.
+    pub badges: bool,
+    /// A field's own `/TU` (Preferences > Forms > Show a field's tooltip).
+    pub fields: bool,
+}
+
 /// The parts of the form widgets on `page`, one per shown widget (as the document's page actions and timers show
 /// them, [`pdfcraft_engine::Document::shown_by_scripts`]), hit over its turned rectangle. Each has the cursor a press
 /// would earn, its tooltip (`/TU`, the name the user interface identifies the field by, ISO 32000-2 Table 226, as
 /// Acrobat shows it on hover, #3854) and, when it can be filled, a focus stop. The stops come first in the document's
 /// tab order (each page's `/Tabs`), so the framework's Tab and Shift+Tab follow it. Over the page's text too: a check
-/// box drawn with a glyph, or set on printed text, is a button, not text to select.
+/// box drawn with a glyph, or set on printed text, is a button, not text to select. `tips.fields` is Preferences > Forms >
+/// Show a field's tooltip: off, a field shows no tooltip (a signature's verdict still shows with `tips.badges`).
 pub(crate) fn field_parts(
     session: &PageSession,
     info: &DocInfo,
     doc: &pdfcraft_engine::Document,
     page: usize,
     can_fill: bool,
-    badge_tips: bool,
+    tips: Tips,
     geo: PageGeometry<'_>,
 ) -> Vec<PagePart> {
     let Some(xf) = session.page_xform(page, geo) else { return Vec::new() };
     let form = doc.form.as_slice();
+    let (badge_tips, field_tips) = (tips.badges, tips.fields);
     let badges = if badge_tips { crate::canvas::signature_badges(&doc.signatures, page) } else { Vec::new() };
     let tabbed = tab_order(form, info);
     let in_order: HashSet<(usize, usize)> = tabbed.iter().copied().collect();
@@ -409,7 +428,7 @@ pub(crate) fn field_parts(
             .flatten();
         if let Some(tip) = badge_tip {
             part = part.tip_now(tip);
-        } else if let Some(tip) = f.tooltip.as_deref().filter(|t| !t.trim().is_empty()) {
+        } else if field_tips && let Some(tip) = f.tooltip.as_deref().filter(|t| !t.trim().is_empty()) {
             part = part.tip(tip.to_owned());
         }
         let is_focused = session.forms.focus.as_ref().is_some_and(|x| x.is_on(f, wi));

@@ -146,12 +146,27 @@ impl crate::PdfCraftApp {
                 .last()
                 .and_then(|d| d.key.clone())
                 .or_else(|| self.preferences.is_some().then(|| "preferences".to_string()))
-                .or_else(|| self.shortcuts.is_some().then(|| "shortcuts".to_string())),
+                .or_else(|| self.shortcuts.is_some().then(|| "shortcuts".to_string()))
+                .or_else(|| self.javascripts_open.then(|| "javascripts".to_string()))
+                .or_else(|| self.signing_plan.is_some().then(|| "signing-plan".to_string()))
+                .or_else(|| self.signature_report.as_ref().map(|r| if r.kind == crate::SignatureReportKind::Audit { "signature-audit" } else { "signer-report" }.to_string())),
+            "signature_report": self.signature_report.as_ref().map(|r| json!({ "kind": format!("{:?}", r.kind), "text": r.text, "can_save": r.can_save() })),
+            "signing_plan": crate::signing_plan_ui::state(self.signing_plan.as_ref()),
+            "javascripts": self.javascripts_draft.state(self.javascripts_open, crate::javascripts_ui::read_only(self)),
             "palette_open": self.palette_open,
             "theme": format!("{:?}", self.root_env(ctx).resolved(ctx).mode),
             "theme_preference": format!("{:?}", self.theme_preference),
             "show_page_edge_shadows": self.show_page_edge_shadows,
             "single_key_accelerators": self.single_key_accelerators,
+            "identity_email": self.identity_email,
+            "required_field_color": self.required_field_color.map(|[r, g, b]| format!("#{r:02X}{g:02X}{b:02X}")),
+            "form_tooltips": self.form_tooltips,
+            // What is remembered is the person's own typing: only its count is reported.
+            "form_autocomplete": if self.session.form_autocomplete() { "basic" } else { "off" },
+            "form_entry_count": self.session.form_entries().len(),
+            "field_highlight_color": self.field_highlight_color.map(|[r, g, b]| format!("#{r:02X}{g:02X}{b:02X}")),
+            "units": self.units.label(),
+            "blank_paper": self.blank_paper.token(),
             "compare_ignore": json!({ "case": self.compare_ignore_case, "punctuation": self.compare_ignore_punctuation }),
             "print_readiness": json!({ "ink_limit": self.readiness_options.ink_limit, "min_bleed_mm": self.readiness_options.min_bleed_mm, "min_ppi": self.readiness_options.min_ppi }),
             "language": self.language,

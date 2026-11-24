@@ -1768,6 +1768,25 @@ fn the_hand_tool_moves_the_page_with_the_pointer() {
 }
 
 #[test]
+fn the_required_field_border_follows_the_preference() {
+    let _gpu = gpu();
+    let mut h = form_harness();
+    h.set_option("panel", "none").unwrap();
+    h.set_option("fields", "on").unwrap();
+    h.set_option("required-field-color", "#00FF00").unwrap();
+    let props = pdfcraft_engine::FieldProps { required: Some(true), ..Default::default() };
+    let ctx_h = h.ctx.clone();
+    h.state_mut().apply_edit(&ctx_h, pdfcraft_engine::Edit::SetFieldProps { name: "fullname".into(), props: Box::new(props) });
+    crate::support::settle(&mut h);
+    let r = rect(&h, 0).expect("page 1");
+    let ppp = h.ctx.pixels_per_point();
+    let at = egui::pos2(r.min.x + r.width() * (50.0 / 300.0) + 0.75, r.min.y + r.height() * (1.0 - 315.0 / 400.0));
+    let img = h.render().expect("renders");
+    let px = *img.get_pixel((at.x * ppp) as u32, (at.y * ppp) as u32);
+    assert!(px[1] > 180 && px[0] < 100 && px[2] < 100, "a green border: {px:?}");
+}
+
+#[test]
 fn required_fields_get_a_red_border_when_highlighting() {
     let _gpu = gpu();
     let mut h = form_harness();

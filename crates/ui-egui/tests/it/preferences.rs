@@ -113,6 +113,18 @@ fn cases() -> Vec<Case> {
             applied: |a| a.units == Unit::Millimetres,
         },
         Case {
+            name: "paper for new blank pages",
+            page: "Documents and view",
+            edit: |h| choose(h, "Paper for new blank pages", "A4"),
+            applied: |a| a.blank_paper == pdfcraft_ui_egui::paper::Paper::A4,
+        },
+        Case {
+            name: "keep the comment tool selected",
+            page: "Comment",
+            edit: |h| click(h, "Keep the selected comment tool selected after use"),
+            applied: |a| a.comment_prefs.pinned,
+        },
+        Case {
             name: "tools side and rail side",
             page: "General & Interface",
             edit: |h| {
@@ -141,10 +153,23 @@ fn cases() -> Vec<Case> {
         },
         Case {
             name: "comment author",
-            page: "Comment",
+            page: "Identity",
             edit: |h| type_into(h, "Name on new comments", "Ada"),
             applied: |a| a.comment_prefs.author == "Ada",
         },
+        Case {
+            name: "identity email",
+            page: "Identity",
+            edit: |h| type_into(h, "Email", "ada@example.com"),
+            applied: |a| a.identity_email == "ada@example.com",
+        },
+        Case {
+            name: "field tooltips",
+            page: "Forms",
+            edit: |h| click(h, "Show a field's tooltip when the pointer rests on it"),
+            applied: |a| !a.form_tooltips,
+        },
+        Case { name: "auto-complete", page: "Forms", edit: |h| choose(h, "Auto-Complete", "Basic"), applied: |a| a.session.form_autocomplete() },
         Case {
             name: "date format",
             page: "Fill & Sign",
@@ -179,4 +204,19 @@ fn preference_rows_apply_live_and_survive_closing() {
         assert!(!preferences_shown(&h), "{}: Escape closes the window", case.name);
         assert!((case.applied)(h.state()), "{}: Escape keeps the change", case.name);
     }
+}
+
+#[test]
+fn remove_all_remembered_entries_forgets_them_and_leaves_the_window_open() {
+    let mut h = harness();
+    h.state_mut().session.set_form_entries(pdfcraft_engine::form_entries::FormEntries::restored(["Maplewood", "Oakdale"]));
+    h.state_mut().open_preferences();
+    h.run_steps(4);
+    let button = egui::accesskit::Role::Button;
+    h.get_by_role_and_label(button, "Remove all remembered entries").scroll_to_me();
+    h.run_steps(3);
+    h.get_by_role_and_label(button, "Remove all remembered entries").click();
+    h.run_steps(3);
+    assert!(h.state().session.form_entries().is_empty(), "the button forgets what was remembered");
+    assert!(preferences_shown(&h), "and leaves the window open");
 }

@@ -150,6 +150,7 @@ const EDIT: &[&str] = &[
     SEP,
     "edit.attach",
     "form.clear",
+    "tools.javascripts",
     SEP,
     "app.preferences",
 ];
@@ -221,6 +222,11 @@ const SIGN: &[&str] = &[
     SEP,
     "sign.validate",
     "sign.panel",
+    SEP,
+    "sign.plan.show",
+    "sign.plan.sign_next",
+    "form.signer_report",
+    "sign.audit_report",
 ];
 const WINDOW: &[&str] = &["view.next_tab", "view.previous_tab"];
 const HELP: &[&str] =
