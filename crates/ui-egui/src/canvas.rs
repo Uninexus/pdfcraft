@@ -311,6 +311,8 @@ pub struct PageSession {
     /// Addresses written as plain text on a page (#4207), with the text layer they were found in.
     pub(crate) text_links: HashMap<usize, (Arc<PageText>, Arc<[TextLink]>)>,
     pub(crate) text_failed: HashSet<usize>,
+    /// Keep every text layer read, so a search of all open documents can take each page's text before it would be dropped.
+    pub(crate) hold_text: bool,
     /// The background jobs that extract text layers, made on the first pass that has the app's job host.
     // PLAN: pdf-canvas-w10's `want_text` and `cache.rs` read `text_queue` as a `JobQueue`; they take this `Option`
     // (`as_mut()`), since a `JobQueue` needs the host's jobs and `DocView::new` has none.
@@ -432,6 +434,7 @@ impl PageSession {
             texts: HashMap::new(),
             text_links: HashMap::new(),
             text_failed: HashSet::new(),
+            hold_text: false,
             text_queue: None,
             highlight_fields,
             flash: None,

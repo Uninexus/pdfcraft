@@ -166,7 +166,7 @@ impl DocView {
     /// pass and churn the workers. Failures are never evicted either: they cost nothing
     /// to remember, and evicting one would re-request and re-fail it every pass.
     fn retain_text_layers(&mut self, visible: &[usize]) {
-        if self.session.texts.len() <= MAX_CACHED_TEXT_PAGES {
+        if self.session.texts.len() <= MAX_CACHED_TEXT_PAGES || self.session.hold_text {
             return;
         }
         if self.find.as_ref().is_some_and(|f| !f.case_query.trim().is_empty()) {

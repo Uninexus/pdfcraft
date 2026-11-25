@@ -196,6 +196,7 @@ use workflows::ocr_verify;
 use workflows::ocr_web;
 use workflows::office_batch;
 pub use workflows::office_batch::OfficeConverter;
+use workflows::open_docs_search_ui;
 use workflows::optimize_batch_ui;
 use workflows::optimize_ui;
 use workflows::print_paper;
@@ -750,6 +751,8 @@ pub struct PdfCraftApp {
     /// What converts them in place of the installed LibreOffice (tests give a stand-in).
     pub office_converter: Option<OfficeConverter>,
     pub folder_search: folder_search_ui::FolderSearch,
+    /// The Search panel's All open documents scope and what its search found.
+    pub open_docs_search: open_docs_search_ui::OpenDocsSearch,
     pub(crate) folder_search_jobs: Queue<(), Result<pdfcraft_engine::folder_search::Summary, String>>,
     /// Pages copied or cut in Organize Pages, ready to paste (into any document).
     pub page_clipboard: Option<PageClip>,

@@ -20,6 +20,7 @@ pub(super) mod ocr_verify;
 #[cfg(target_arch = "wasm32")]
 pub(super) mod ocr_web;
 pub(super) mod office_batch;
+pub(super) mod open_docs_search_ui;
 pub(super) mod optimize_batch_ui;
 pub(super) mod optimize_ui;
 pub(super) mod print_paper;

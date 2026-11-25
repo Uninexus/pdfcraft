@@ -1495,8 +1495,11 @@ milestone = "M12"
 status = "partial"
 commands = ["edit.advanced_search"]
 tools = ["text_find"]
-evidence = ["crates/ui-egui/tests/it/viewer.rs::advanced_search_lists_results_with_context"]
-notes = "in the current document, as a side panel; searching other open documents, folders and indexes is still to come"
+evidence = [
+    "crates/ui-egui/tests/it/viewer.rs::advanced_search_lists_results_with_context",
+    "crates/ui-egui/tests/it/search_open_docs.rs::matches_from_every_open_document_are_listed_and_a_click_switches_tab",
+]
+notes = "as a side panel, in the current document or in all open documents (results grouped by document, capped per document and in all, a click switches to that tab); searching folders is the separate Folder scope (view.search-folder); searching indexes is still to come"
 
 [[feature]]
 id = "view.search-folder"
