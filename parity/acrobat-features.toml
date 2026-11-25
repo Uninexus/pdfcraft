@@ -4315,10 +4315,10 @@ area = "E"
 tier = "P1"
 milestone = "M5"
 status = "partial"
-commands = ["comment.hide_all"]
+commands = ["comment.hide_all", "comment.show_all_types", "comment.toggle_type.text", "comment.toggle_type.highlight", "comment.toggle_type.underline", "comment.toggle_type.strikeout", "comment.toggle_type.squiggly", "comment.toggle_type.freetext", "comment.toggle_type.ink", "comment.toggle_type.line", "comment.toggle_type.square", "comment.toggle_type.circle", "comment.toggle_type.polygon", "comment.toggle_type.polyline", "comment.toggle_type.stamp", "comment.toggle_type.caret", "comment.toggle_type.attachment", "comment.toggle_type.sound", "comment.toggle_type.redact"]
 tools = ["comments_hide"]
-evidence = ["crates/engine/src/tests.rs::comments_lock_take_checkmarks_hide_and_summarize", "crates/ui-egui/tests/it/comments.rs::comments_take_checkmarks_lock_hide_and_summarize", "crates/automation/tests/it/automation.rs::comment_checkmarks_locks_hiding_and_summaries_through_tools"]
-notes = "hide/show all comments (fields and links still draw); per-type hiding not yet"
+evidence = ["crates/engine/src/tests.rs::comments_lock_take_checkmarks_hide_and_summarize", "crates/engine/src/tests.rs::hiding_a_comment_type_hides_those_comments_only_and_never_changes_the_file", "crates/ui-egui/tests/it/comment_types.rs::the_panel_menu_hides_and_shows_one_comment_type", "crates/automation/tests/it/automation.rs::hiding_comment_types_hides_those_comments_only_through_tools", "crates/ui-egui/tests/it/comments.rs::comments_take_checkmarks_lock_hide_and_summarize", "crates/automation/tests/it/automation.rs::comment_checkmarks_locks_hiding_and_summaries_through_tools"]
+notes = "hide/show all comments (fields and links still draw); the Comments panel's \"…\" menu lists the comment types the document has under Show comment types, one check each, and Show all comment types; comments_hide takes types for the same without the GUI. Hiding a type is a view setting like hide-all: the page stops drawing those comments, the file never changes, and it survives a reload. Not yet: a hidden type's comments can still be selected by clicking where they were and their pop-ups still open; the panel list does not dim them."
 
 [[feature]]
 id = "comment.popups"
@@ -10204,11 +10204,11 @@ title = "Screenshots of the window or a region via the control channel"
 area = "N"
 tier = "P1"
 milestone = "M3"
-status = "partial"
+status = "shipped"
 commands = []
 tools = []
-evidence = []
-notes = "Partial since the craft framework UI port (#8160): its UI test (`screenshots_of_window_and_region`) was lost in the port and needs replacing before this is shipped again."
+evidence = ["crates/ui-egui/tests/it/control.rs::screenshots_of_window_and_region"]
+notes = "`screenshots_of_window_and_region` replaces the test lost in the craft framework UI port (#8160): it takes a window and a region screenshot over the control channel and checks the PNG headers against the window size and the requested rectangle."
 
 [[feature]]
 id = "misc.ai-provider"

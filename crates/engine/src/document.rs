@@ -101,7 +101,32 @@ pub struct Document {
     pub edit_notices: Vec<EditNotice>,
     /// View ▸ Guides: view state only, never saved (see [`crate::guides`]).
     pub(crate) guides: crate::guides::Guides,
+    /// Comment types (annotation subtypes, see [`COMMENT_TYPES`]) the reader hides on the page:
+    /// view state, never saved, kept when the file is reloaded after a save.
+    pub(crate) hidden_types: std::collections::BTreeSet<String>,
 }
+
+/// The annotation subtypes Comments ▸ Show comment types can hide, in the order a menu lists
+/// them. Form fields and links are not comments and always draw.
+pub const COMMENT_TYPES: &[&str] = &[
+    "Text",
+    "Highlight",
+    "Underline",
+    "StrikeOut",
+    "Squiggly",
+    "FreeText",
+    "Ink",
+    "Line",
+    "Square",
+    "Circle",
+    "Polygon",
+    "PolyLine",
+    "Stamp",
+    "Caret",
+    "FileAttachment",
+    "Sound",
+    "Redact",
+];
 
 /// Something the last successful edit did that the user should hear about, never left silent
 /// (app-agents.md rule 13).
@@ -870,6 +895,12 @@ impl Document {
     /// Whether comments are hidden (Comments ▸ Hide all comments).
     pub fn comments_hidden(&self) -> bool {
         self.config.hide_comments
+    }
+
+    /// The comment types hidden on the page (Comments ▸ Show comment types), as annotation
+    /// subtypes of [`COMMENT_TYPES`]. Independent of [`Self::comments_hidden`].
+    pub fn hidden_comment_types(&self) -> &std::collections::BTreeSet<String> {
+        &self.hidden_types
     }
 
     /// Whether `Edit::DeleteAnnotation` would delete the annotation at `(page, index)`: the

@@ -427,6 +427,7 @@ impl Session {
             xfa_warnings: Vec::new(),
             edit_notices: Vec::new(),
             guides: Default::default(),
+            hidden_types: Default::default(),
         }
     }
 }

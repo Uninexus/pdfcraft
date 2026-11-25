@@ -212,6 +212,10 @@ impl Session {
             doc.config.hide_comments = old.config.hide_comments;
             doc.renderer = RenderPool::new(doc.display.clone(), render_threads(), display_config(&doc.config));
         }
+        if let Some(old) = self.docs.get(old).filter(|d| !d.hidden_types.is_empty()) {
+            doc.hidden_types = old.hidden_types.clone();
+            doc.renderer = RenderPool::new(doc.display.clone(), render_threads(), crate::live_scripts::screen_config(&doc));
+        }
         // Caches keyed by the edit generation (edit lines, images, measurements) must see a new one.
         doc.generation = generation + 1;
         // Guides are the reader's view state too, and keep their ids; those on pages the new file

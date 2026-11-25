@@ -317,6 +317,21 @@ impl Session {
         true
     }
 
+    /// Hide the comments of the given types on the page and show the rest (Comments ▸ Show
+    /// comment types); `types` are annotation subtypes of [`crate::COMMENT_TYPES`]. A view
+    /// setting like [`Self::set_hide_comments`]: the file doesn't change. Returns whether
+    /// anything changed.
+    pub fn set_hidden_comment_types(&mut self, id: DocId, types: std::collections::BTreeSet<String>) -> bool {
+        let Some(doc) = self.docs.iter_mut().find(|d| d.id == id) else { return false };
+        if doc.hidden_types == types {
+            return false;
+        }
+        doc.hidden_types = types;
+        doc.renderer = RenderPool::new(doc.display.clone(), render_threads(), crate::live_scripts::screen_config(doc));
+        doc.generation += 1;
+        true
+    }
+
     /// Set the document's reading colours (Acrobat's Replace Document Colors). Returns whether
     /// anything changed; callers must drop cached rasters and text for the document.
     pub fn set_reading_colors(&mut self, id: DocId, colors: ReadingColors) -> bool {

@@ -133,12 +133,13 @@ pub(crate) fn screen_config(doc: &Document) -> pdfcraft_render::RenderConfig {
 /// `config` with the fields as page actions and timers show them.
 pub(crate) fn with_live_view(doc: &Document, config: pdfcraft_render::RenderConfig) -> pdfcraft_render::RenderConfig {
     let live = &doc.live;
-    let annotations: Vec<(i32, i32, bool)> = doc
+    let mut annotations: Vec<(i32, i32, bool)> = doc
         .form
         .iter()
         .filter_map(|f| live.shown.get(&f.name).map(|d| (f, on_screen(*d))))
         .flat_map(|(f, on)| f.widgets.iter().filter_map(move |w| object(w).map(|(n, g)| (n, g, on))))
         .collect();
+    annotations.extend(hidden_type_annotations(doc));
     let appearances: Vec<(i32, i32, i32, i32)> = doc
         .form
         .iter()
@@ -151,6 +152,30 @@ pub(crate) fn with_live_view(doc: &Document, config: pdfcraft_render::RenderConf
         .flatten()
         .collect();
     pdfcraft_render::RenderConfig { annotations: std::sync::Arc::new(annotations), appearances: std::sync::Arc::new(appearances), ..config }
+}
+
+/// The comments of the types the reader hides, as the viewer's overrides: hidden, by object.
+fn hidden_type_annotations(doc: &Document) -> Vec<(i32, i32, bool)> {
+    let Some(editor) = doc.editor.as_ref().filter(|_| !doc.hidden_types.is_empty()) else { return Vec::new() };
+    let cos = &editor.cos;
+    let Ok(pages) = pdfcraft_annot::page_refs(cos) else { return Vec::new() };
+    let mut out = Vec::new();
+    for page in pages {
+        let annots = cos.get(page).as_dict().and_then(|d| d.get(b"Annots").cloned()).map(|a| cos.resolve(&a));
+        for r in annots.as_deref().and_then(pdfcraft_cos::Object::as_array).into_iter().flatten().filter_map(pdfcraft_cos::Object::as_ref) {
+            let Ok(num) = i32::try_from(r.num) else { continue };
+            let hidden = cos
+                .get(r)
+                .as_dict()
+                .and_then(|d| d.name(b"Subtype"))
+                .and_then(|n| std::str::from_utf8(n).ok())
+                .is_some_and(|subtype| doc.hidden_types.contains(subtype));
+            if hidden {
+                out.push((num, i32::from(r.generation), false));
+            }
+        }
+    }
+    out
 }
 
 /// Draw the viewer with how fields show now.

@@ -1395,9 +1395,20 @@ pub fn tools() -> Vec<ToolDef> {
                 json!({ "doc": doc(), "layer": { "type": ["string", "integer"], "description": "A layer name, or a 1-based position in doc_info's layers." }, "visible": { "type": "boolean" } }),
                 &["doc", "layer", "visible"],
             )),
-        t("comments_hide", "Hide all comments", "Hide or show every comment on the page (fields and links still draw). A view setting: the file doesn't change.")
+        t("comments_hide", "Hide all comments", "Hide or show every comment on the page (fields and links still draw). With types, hide or show only the comments of those types (the viewer's Show comment types menu) and leave Hide all comments as it is; the result lists the types now hidden. A view setting: the file doesn't change.")
             .cmd("comment.hide_all")
-            .with(schema(json!({ "doc": doc(), "hidden": { "type": "boolean", "description": "Default true." } }), &["doc"])),
+            .with(schema(
+                json!({
+                    "doc": doc(),
+                    "hidden": { "type": "boolean", "description": "Default true. With types: true hides them, false shows them again." },
+                    "types": {
+                        "type": "array",
+                        "items": { "type": "string", "enum": pdfcraft_engine::COMMENT_TYPES },
+                        "description": "Annotation subtypes to hide or show, such as Highlight or FreeText (case does not matter). An empty list with hidden false shows every type."
+                    }
+                }),
+                &["doc"],
+            )),
         t("view_reading_colors", "Set reading colours", "Set the document's reading colours (Acrobat's Replace Document Colors, in the Reading Options): solid text and line-art paints are remapped for readability and the page clears to the background colour in page_render. A view setting: the file doesn't change. mode is one of: off, black-on-white, white-on-black, yellow-on-black, green-on-black, or custom (which takes text and background as #RRGGBB). only_black maps only near-black paints (default false) and line_art also maps line-art paints (default true); both override the mode's preset. A flag that differs from the mode's preset default makes the returned mode read custom, because the resulting params no longer match any preset. Returns the resulting setting.")
             .cmd("a11y.reading_options")
             .with(schema(
