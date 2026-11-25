@@ -25,7 +25,7 @@ trailer << /Root 1 0 R >>
 %%EOF";
 
 fn tags_panel() -> Harness<'static, PdfCraftApp> {
-    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |cc| {
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 1400.0)).build_eframe(move |cc| {
         crate::support::install_runtime(&cc.egui_ctx);
         {
             let mut app = crate::control::new_app();

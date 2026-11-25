@@ -58,10 +58,8 @@ pub struct FileResult {
     pub result: Result<(u64, u64), String>,
 }
 
-/// How a run ended: each file's result in the order run, whether Cancel stopped it, and the words for the user.
+/// How a run ended, in the words for the user (each file's result and whether Cancel stopped it are in them).
 pub struct OptimizeBatchOutcome {
-    pub results: Vec<FileResult>,
-    pub cancelled: bool,
     pub message: String,
 }
 
@@ -335,7 +333,7 @@ pub(crate) fn optimize_files(
     count.set(total, total);
     results.extend(problems);
     let message = summary(&results, total, cancelled, dir);
-    OptimizeBatchOutcome { results, cancelled, message }
+    OptimizeBatchOutcome { message }
 }
 
 /// How a run ended, in words: what was written, and each file that was not, with why.
