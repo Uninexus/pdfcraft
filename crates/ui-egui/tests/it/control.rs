@@ -1625,6 +1625,47 @@ fn read_mode_retains_existing_rail_click_to_close_policy() {
     assert_eq!(h.state().mode, pdfcraft_ui_egui::Mode::Read);
 }
 
+/// The width and height the PNG header (IHDR) declares.
+fn png_size(png: &[u8]) -> (u32, u32) {
+    assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n", "a PNG signature");
+    let be = |at: usize| u32::from_be_bytes([png[at], png[at + 1], png[at + 2], png[at + 3]]);
+    (be(16), be(20))
+}
+
+fn screenshot_png(shot: &Value) -> Vec<u8> {
+    use base64::Engine as _;
+    base64::engine::general_purpose::STANDARD.decode(shot["base64"].as_str().expect("an inline PNG")).expect("base64")
+}
+
+#[test]
+fn screenshots_of_window_and_region() {
+    let (mut h, c) = harness();
+    // The harness makes its GPU renderer on the first render. Make it here, outside the screenshot's
+    // deadline, so a loaded machine does not time the first capture out.
+    h.render().expect("the test renderer draws");
+    let full = ok(&mut h, &c, "ui.screenshot", json!({}));
+    let ppp = full["pixels_per_point"].as_f64().unwrap();
+    let (full_w, full_h) = (full["width"].as_f64().unwrap(), full["height"].as_f64().unwrap());
+    assert!(full_w > 0.0 && full_h > 0.0, "the window screenshot has pixels");
+    assert_eq!(full_w, (1400.0 * ppp).round(), "the window is 1400 points wide at its scale");
+    assert_eq!(full["mime"], "image/png");
+    let full_png = screenshot_png(&full);
+    assert_eq!(png_size(&full_png), (full_w as u32, full_h as u32), "the PNG header agrees with the reply");
+
+    let region = ok(&mut h, &c, "ui.screenshot", json!({ "region": [10, 20, 110, 70] }));
+    let (region_w, region_h) = (region["width"].as_f64().unwrap(), region["height"].as_f64().unwrap());
+    assert!(region_w < full_w && region_h < full_h, "the region is smaller than the window in both dimensions");
+    assert_eq!((region_w, region_h), ((100.0 * ppp).round(), (50.0 * ppp).round()), "the crop is the requested rectangle at the window's scale");
+    let region_png = screenshot_png(&region);
+    assert_eq!(png_size(&region_png), (region_w as u32, region_h as u32), "the cropped PNG header agrees with the reply");
+
+    // A reversed region is a malformed request; one that cannot lie inside the window is refused at
+    // admission with an actionable message.
+    assert!(call(&mut h, &c, "ui.screenshot", json!({ "region": [5, 5, 1, 1] })).is_err());
+    let outside = call(&mut h, &c, "ui.screenshot", json!({ "region": [1300, 0, 1500, 10] })).unwrap_err();
+    assert!(outside.contains("inside the"), "{outside}");
+}
+
 #[test]
 fn control_open_of_an_already_open_file_replies_ok_and_focuses_its_tab() {
     let dir = std::env::temp_dir().join(format!("pdfcraft-ui-open-{}", std::process::id()));

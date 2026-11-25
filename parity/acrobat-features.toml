@@ -10204,11 +10204,11 @@ title = "Screenshots of the window or a region via the control channel"
 area = "N"
 tier = "P1"
 milestone = "M3"
-status = "partial"
+status = "shipped"
 commands = []
 tools = []
-evidence = []
-notes = "Partial since the craft framework UI port (#8160): its UI test (`screenshots_of_window_and_region`) was lost in the port and needs replacing before this is shipped again."
+evidence = ["crates/ui-egui/tests/it/control.rs::screenshots_of_window_and_region"]
+notes = "`screenshots_of_window_and_region` replaces the test lost in the craft framework UI port (#8160): it takes a window and a region screenshot over the control channel and checks the PNG headers against the window size and the requested rectangle."
 
 [[feature]]
 id = "misc.ai-provider"
