@@ -2,14 +2,29 @@
 use craft::behavior::kurbo::Point;
 use craft::behavior::overlay::Align;
 use craft::pages::ui::TextMark;
-use craft::text::find::{FindMatches, FindOptions};
+use craft::text::find::{FindMatches, FindOptions, FindPattern};
 use craft::text::ui::find::{FindBar, FindBarState, FindRequest};
 use craft::ui::canvas_controls::TaskBar;
 use craft::ui::choice::Checkbox;
 use craft::ui::contract::{Bind, Props as _, Show as _, ShowContainer as _};
 use craft::ui::layout_components::Row;
 
+use std::collections::HashMap;
+
 use super::{DocView, Rect, ViewAction};
+
+/// The first number a comment hit takes as its "page" in [`FindMatches`]: past every real page, so the
+/// comments' hits follow the text hits in the count and in Next and Previous. Hit `i` is page `BASE + i`.
+const COMMENT_PAGE_BASE: usize = usize::MAX / 2;
+/// The most comments one search lists.
+const MAX_COMMENT_HITS: usize = 2000;
+
+/// A comment the search found: its `(page, index)` and where it sits on its page (for scrolling to it).
+#[derive(Clone, Debug, PartialEq)]
+struct CommentHit {
+    key: (usize, usize),
+    rect: [f32; 4],
+}
 
 /// The find bar (⌘F): query, matches across the document, current match.
 #[derive(Default)]
@@ -31,13 +46,30 @@ pub struct Find {
     /// Replace also where the paragraph's font lacks a letter of the new text, in a substitute
     /// font (off: such a match is left alone and counted).
     pub substitute_font: bool,
+    /// Also search the text of the document's comments and replies ("Include comments").
+    pub include_comments: bool,
+    /// The comments found, in page order; hit `i` stands in `matches` as page `COMMENT_PAGE_BASE + i`.
+    comment_hits: Vec<CommentHit>,
+    /// A comment the search just moved to, which the bar scrolls to once it has the document.
+    reveal_comment: Option<CommentHit>,
 }
 
 impl Find {
     /// The matches as highlights for the page view's text marks, the current one stronger.
     pub fn marks(&self) -> Vec<TextMark> {
         let current = self.matches.current();
-        self.matches.matches().iter().enumerate().map(|(i, m)| TextMark::new(m.page, m.range.clone(), current == Some(i))).collect()
+        let marks = self.matches.matches().iter().enumerate().filter(|(_, m)| m.page < COMMENT_PAGE_BASE);
+        marks.map(|(i, m)| TextMark::new(m.page, m.range.clone(), current == Some(i))).collect()
+    }
+
+    /// Forget the comments listed among the matches, after the matches were started over.
+    pub(super) fn forget_comment_hits(&mut self) {
+        self.comment_hits.clear();
+    }
+
+    /// The comment a match stands for, when it is a comment's.
+    fn comment_at(&self, page: usize) -> Option<&CommentHit> {
+        self.comment_hits.get(page.checked_sub(COMMENT_PAGE_BASE)?)
     }
 }
 
@@ -66,6 +98,8 @@ impl DocView {
         // automatic choice has already scrolled them to a match.
         let from = f.matches.from().unwrap_or(current);
         f.matches = FindMatches::new(from);
+        // The new matches hold no comments: the next sync adds them again.
+        f.comment_hits.clear();
         if f.case_query.trim().is_empty() {
             return;
         }
@@ -95,6 +129,31 @@ impl DocView {
         }
     }
 
+    /// Keep the comments among the matches in step with the search and the document: with "Include comments" on,
+    /// the comments whose text (or a reply's) holds the query, none when comments are hidden or of a hidden type.
+    pub(super) fn sync_find_comments(&mut self, doc: &pdfcraft_engine::Document, editing: bool) {
+        let Some(f) = self.find.as_mut() else { return };
+        let on = f.include_comments && !f.in_panel && !editing && !f.case_query.trim().is_empty();
+        let hits = if on { find_comment_hits(doc, &f.case_query, &f.options) } else { Vec::new() };
+        if hits == f.comment_hits {
+            return;
+        }
+        for i in 0..f.comment_hits.len() {
+            f.matches.set_page(COMMENT_PAGE_BASE + i, Vec::<std::ops::Range<usize>>::new());
+        }
+        for i in 0..hits.len() {
+            f.matches.set_page(COMMENT_PAGE_BASE + i, vec![0usize..1]);
+        }
+        f.comment_hits = hits;
+    }
+
+    /// Scroll to the comment the search moved to, now that the document is at hand.
+    fn reveal_found_comment(&mut self, info: &pdfcraft_render::DocInfo) {
+        let Some(hit) = self.find.as_mut().and_then(|f| f.reveal_comment.take()) else { return };
+        self.reveal_rect(hit.key.0, hit.rect, info);
+        self.session.flash = Some((hit.key.0, hit.rect, 0.0));
+    }
+
     /// Go to match `i` (the Search panel's results).
     pub fn go_to_match(&mut self, i: usize) {
         let Some(f) = self.find.as_mut() else { return };
@@ -119,6 +178,16 @@ impl DocView {
     /// `flash_match` alone.
     pub(super) fn show_current_match(&mut self) {
         let Some(p) = self.find.as_ref().and_then(|f| f.matches.current_match()).map(|m| m.page) else { return };
+        // A comment: select it as a click in the Comments panel does, and scroll to it once the bar has the document.
+        if let Some(hit) = self.find.as_ref().and_then(|f| f.comment_at(p)).cloned() {
+            self.session.comments.select_keys(&[hit.key]);
+            self.session.comments.reveal = true;
+            self.go_to_page(hit.key.0);
+            if let Some(f) = self.find.as_mut() {
+                f.reveal_comment = Some(hit);
+            }
+            return;
+        }
         self.go_to_page(p);
         self.flash_match(p);
     }
@@ -143,6 +212,9 @@ impl DocView {
     }
 
     fn flash_match(&mut self, page: usize) {
+        if page >= COMMENT_PAGE_BASE {
+            return;
+        }
         // Put the match's centre at the window's centre, as Acrobat does (#3530) and as a /FitR
         // destination's rectangle is: a page wider or taller than the window no longer leaves it
         // off to one side or near an edge.
@@ -176,10 +248,47 @@ impl DocView {
     }
 }
 
+/// The comments whose text, or a reply's, holds `query` under the find `options` (the find bar's own matcher, so match case
+/// and whole words apply), in page order. Nothing while comments are hidden; a comment of a hidden type is skipped.
+fn find_comment_hits(doc: &pdfcraft_engine::Document, query: &str, options: &FindOptions) -> Vec<CommentHit> {
+    if doc.comments_hidden() {
+        return Vec::new();
+    }
+    let Ok(pattern) = FindPattern::compile(query, options) else { return Vec::new() };
+    let info = &doc.info;
+    let hidden = doc.hidden_comment_types();
+    // Each thread's text: the comment's and its replies' (not status changes).
+    let tops = pdfcraft_render::thread_tops(&info.annotations);
+    let mut texts: HashMap<(usize, usize), String> = HashMap::new();
+    for a in info.annotations.iter().filter(|a| a.state.is_none()) {
+        let key = (a.page, a.index);
+        if let Some(text) = a.contents.as_deref().filter(|t| !t.is_empty()) {
+            let all = texts.entry(tops.get(&key).copied().unwrap_or(key)).or_default();
+            if !all.is_empty() {
+                all.push('\n');
+            }
+            all.push_str(text);
+        }
+    }
+    let mut hits: Vec<CommentHit> = info
+        .annotations
+        .iter()
+        .filter(|a| a.is_comment() && !a.is_group_member() && !hidden.contains(&a.subtype))
+        .filter(|a| texts.get(&(a.page, a.index)).is_some_and(|text| !pattern.find_all(text, 1).is_empty()))
+        .map(|a| CommentHit { key: (a.page, a.index), rect: a.shown_rect(info.pages.get(a.page).map_or(0, |p| p.rotation)) })
+        .collect();
+    hits.sort_by_key(|h| h.key);
+    hits.truncate(MAX_COMMENT_HITS);
+    hits
+}
+
 /// The find bar at the page view's top edge, end-aligned. In Edit text mode (`editing`) it offers a
 /// Replace row: Replace changes the highlighted match, Replace all every match, each inside its own
 /// paragraph.
-pub(super) fn find_bar(view: &mut DocView, pages: usize, area: Rect, editing: bool, ui: &mut egui::Ui) {
+pub(super) fn find_bar(view: &mut DocView, doc: &pdfcraft_engine::Document, area: Rect, editing: bool, ui: &mut egui::Ui) {
+    let pages = doc.info.pages.len();
+    view.sync_find_comments(doc, editing);
+    view.reveal_found_comment(&doc.info);
     let searched = view.session.texts.len() + view.session.text_failed.len();
     let key = view.pane.key;
     let Some(find) = view.find.as_mut() else { return };
@@ -188,10 +297,11 @@ pub(super) fn find_bar(view: &mut DocView, pages: usize, area: Rect, editing: bo
         return;
     }
     // One id per pane, so two panes' bars do not share a field id (and so the focus).
+    let mut comments_changed = false;
     let shown = ui
         .push_id(("find-bar", key), |ui| {
             TaskBar::at_edge(tl!("Find"), Align::End).show(ui, area.shrink2(egui::vec2(6.0, 12.0)), |ui, _cx| {
-                let Find { query, options, matches, bar, replacement, replacing, substitute_font, .. } = &mut *find;
+                let Find { query, options, matches, bar, replacement, replacing, substitute_font, include_comments, .. } = &mut *find;
                 // Read before the bar borrows it: the bar may switch the row on in this pass, and the
                 // checkbox then follows on the repaint asked for below.
                 let replacing_before = *replacing;
@@ -211,6 +321,14 @@ pub(super) fn find_bar(view: &mut DocView, pages: usize, area: Rect, editing: bo
                                     .label(tl!("Use a substitute font if the font lacks letters").to_string())
                                     .show(ui);
                             });
+                        }
+                        // Off, a search finds page text only; on, it also finds comments (and replies) holding the query.
+                        if !editing {
+                            let before = *include_comments;
+                            Row::new().show(ui, |ui, _| {
+                                Checkbox::new(Bind::bound(&mut *include_comments)).label(tl!("Include comments").to_string()).show(ui);
+                            });
+                            comments_changed = before != *include_comments;
                         }
                         out
                     })
@@ -232,8 +350,9 @@ pub(super) fn find_bar(view: &mut DocView, pages: usize, area: Rect, editing: bo
         Some(FindRequest::ReplaceAll { .. }) => view.pending_action = Some(ViewAction::Replace { all: true }),
         _ => {}
     }
-    if out.search {
+    if out.search || comments_changed {
         view.rerun_find();
+        view.sync_find_comments(doc, editing);
     }
     if out.stepped {
         // The bar already stepped the matches.

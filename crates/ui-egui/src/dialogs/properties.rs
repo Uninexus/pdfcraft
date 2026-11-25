@@ -78,6 +78,19 @@ fn yes(on: bool) -> String {
     tl!(if on { "Yes" } else { "No" }).to_string()
 }
 
+/// Whether the file is laid out for fast web view: yes while its linearization dictionary holds,
+/// and no when it has none or an incremental save has since broken it.
+fn fast_web_view(doc: &Document) -> String {
+    let report = doc.linearization();
+    if report.valid {
+        tl!("Yes").to_string()
+    } else if report.linearized {
+        tl!("No (changed since it was prepared for fast web view)").to_string()
+    } else {
+        tl!("No").to_string()
+    }
+}
+
 /// A read-only row; document values and chrome labels both show "—" when empty.
 fn value(label: &str, text: String) -> PropertyRow {
     PropertyRow::value(tl!(label).to_string(), if text.is_empty() { "—".to_owned() } else { text })
@@ -381,6 +394,7 @@ impl PdfCraftApp {
         }
         rows.extend([
             value("Number of pages", i.pages.len().to_string()),
+            value("Fast web view", fast_web_view(doc)),
             value("Tagged PDF", yes(i.tagged)),
             value("Form fields", i.fields.len().to_string()),
             value("Comments", i.annotations.len().to_string()),
