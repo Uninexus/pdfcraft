@@ -61,6 +61,7 @@ mod insert_clipboard;
 mod javascript;
 mod javascripts_window;
 mod layer_actions;
+mod layout_table;
 mod legacy_settings;
 mod link_object_actions;
 mod links;

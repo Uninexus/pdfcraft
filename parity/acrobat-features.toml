@@ -9653,11 +9653,11 @@ title = "Table editor (headers, scope, spans)"
 area = "M"
 tier = "P2"
 milestone = "M12"
-status = "planned"
+status = "partial"
 commands = []
 tools = ["accessibility_layout_table_to_blocks"]
-evidence = ["crates/a11y/src/layout_table.rs::a_label_and_value_table_becomes_divs_and_paragraphs", "crates/a11y/src/layout_table.rs::what_the_cells_hold_stays_and_a_table_in_a_cell_stays_a_table", "crates/a11y/src/layout_table.rs::direct_rows_and_cells_are_converted_in_place", "crates/automation/tests/it/automation.rs::a_layout_table_becomes_blocks_through_automation"]
-notes = "Headless only so far: accessibility_layout_table_to_blocks turns a layout table into Div and P tags in one undoable step (cells holding tags become Div, nested tables stay, Table attributes go). The editor itself (header cells, Scope, Headers/IDs, spans) and a Tags panel command remain planned."
+evidence = ["crates/a11y/src/layout_table.rs::a_label_and_value_table_becomes_divs_and_paragraphs", "crates/a11y/src/layout_table.rs::what_the_cells_hold_stays_and_a_table_in_a_cell_stays_a_table", "crates/a11y/src/layout_table.rs::direct_rows_and_cells_are_converted_in_place", "crates/automation/tests/it/automation.rs::a_layout_table_becomes_blocks_through_automation", "crates/ui-egui/tests/it/layout_table.rs::a_layout_table_becomes_blocks_from_the_tags_panel_and_undo_restores_it", "crates/ui-egui/tests/it/layout_table.rs::a_header_cell_gets_a_scope_and_a_data_cell_becomes_a_header"]
+notes = "accessibility_layout_table_to_blocks turns a layout table into Div and P tags in one undoable step (cells holding tags become Div, nested tables stay, Table attributes go). The Tags panel offers Convert layout table to blocks on a Table tag, and Make header cell / Make data cell and Header scope (Row, Column, Both, None) on TD and TH tags, each one undoable edit; they are panel buttons for the selected tag, not a row context menu, and only for tags whose type is literally Table, TH or TD. Header cells have no Headers/IDs editor and spans cannot be edited yet (accessibility_set_tag_property covers Scope only)."
 
 [[feature]]
 id = "a11y.alt-text-workflow"
