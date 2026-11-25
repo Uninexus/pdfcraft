@@ -245,9 +245,7 @@ pub(crate) fn foreign_share(path: &Path, root: &Path) -> bool {
 
 /// A Windows device name (`CON`, `NUL`, `COM1`… also with an extension), which names no file.
 pub(crate) fn is_device_name(component: &str) -> bool {
-    let stem = component.split('.').next().unwrap_or(component).trim_end_matches(' ').to_ascii_uppercase();
-    let numbered = |prefix: &str| stem.strip_prefix(prefix).is_some_and(|n| matches!(n, "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9"));
-    matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL" | "CLOCK$" | "CONIN$" | "CONOUT$") || numbered("COM") || numbered("LPT")
+    pdfcraft_organize::signing_handoff::is_device_name(component)
 }
 
 #[cfg(test)]
@@ -512,7 +510,6 @@ mod tests {
         // remove is what `Written::write` or `record` was given under it.
         const RESOLVED_BY_CALLER: &[&str] = &[
             "write_atomic",
-            "write_atomic_with",
             "read_input",
             "read_input_bytes",
             "read_model",

@@ -337,3 +337,119 @@ trailer << /Root 1 0 R >>
         .to_string();
     assert!(e.contains("figure 7 is not drawn on any page"), "{e}");
 }
+
+/// Serves `replies` (model message contents) one per connection, in order; returns the base URL and
+/// the raw requests seen.
+fn sequence(replies: Vec<String>) -> (String, std::thread::JoinHandle<Vec<String>>) {
+    let l = TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}/v1", l.local_addr().unwrap());
+    let h = std::thread::spawn(move || {
+        let mut seen = Vec::new();
+        for content in replies {
+            let (mut s, _) = l.accept().unwrap();
+            let (mut req, mut buf) = (Vec::new(), [0u8; 16384]);
+            loop {
+                let n = s.read(&mut buf).unwrap();
+                req.extend_from_slice(&buf[..n]);
+                let t = String::from_utf8_lossy(&req).into_owned();
+                if let Some(i) = t.find("\r\n\r\n") {
+                    let len = t[..i]
+                        .lines()
+                        .find_map(|l| l.to_ascii_lowercase().strip_prefix("content-length:").and_then(|v| v.trim().parse::<usize>().ok()))
+                        .unwrap_or(0);
+                    if req.len() >= i + 4 + len {
+                        break;
+                    }
+                }
+                if n == 0 {
+                    break;
+                }
+            }
+            let body = json!({ "choices": [{ "message": { "content": content } }] }).to_string();
+            let r = format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+            s.write_all(r.as_bytes()).unwrap();
+            seen.push(String::from_utf8_lossy(&req).into_owned());
+        }
+        seen
+    });
+    (url, h)
+}
+
+fn open(tag: &str) -> (Automation, u64) {
+    let dir = std::env::temp_dir().join(format!("pdfcraft-automation-ai-{tag}-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("a.pdf"), pdf()).unwrap();
+    let mut a = Automation::new().with_root(&dir).unwrap();
+    let doc = json_of(a.call("doc_open", &json!({ "path": "a.pdf" })).unwrap())["doc"].as_u64().unwrap();
+    (a, doc)
+}
+
+#[test]
+fn a_plan_proposes_edits_and_changes_nothing() {
+    let (mut a, doc) = open("plan");
+    let reply = r#"Sure: {"message":"Rotating page 1.","calls":[{"tool":"rotate_pages","args":{"pages":[1],"degrees":90},"why":"as asked"}]}"#;
+    let (url, reqs) = sequence(vec![reply.into()]);
+    let out = json_of(a.call("ai_edit_plan", &json!({ "doc": doc, "instruction": "rotate page 1", "base_url": url, "model": "m" })).unwrap());
+    assert_eq!(out["steps"][0]["tool"], "rotate_pages");
+    assert_eq!(out["steps"][0]["args"], json!({ "pages": [1], "degrees": 90 }));
+    assert_eq!(out["steps"][0]["why"], "as asked");
+    assert_eq!(out["steps"][0]["destructive"], false);
+    let req = reqs.join().unwrap().remove(0);
+    assert!(req.contains("rotate_pages") && req.contains("Invoice total 42") && req.contains("rotate page 1"), "{req}");
+    // The model's proposal never touched the document.
+    let s = json_of(a.call("doc_list", &json!({})).unwrap());
+    assert_eq!(s["documents"][0]["dirty"], false);
+}
+
+#[test]
+fn a_plan_asks_again_when_the_model_names_a_call_that_is_not_allowed() {
+    let (mut a, doc) = open("deny");
+    let bad = r#"{"message":"","calls":[{"tool":"doc_save","args":{"path":"x.pdf"}}]}"#;
+    let good = r#"{"message":"I cannot save.","calls":[]}"#;
+    let (url, reqs) = sequence(vec![bad.into(), good.into()]);
+    let out = json_of(a.call("ai_edit_plan", &json!({ "doc": doc, "instruction": "save it", "base_url": url, "model": "m" })).unwrap());
+    assert_eq!(out["steps"], json!([]));
+    let seen = reqs.join().unwrap();
+    assert!(seen[1].contains("could not be used") && seen[1].contains("doc_save"));
+
+    let (url, reqs) = sequence(vec![bad.into(), bad.into(), bad.into()]);
+    let e = a.call("ai_edit_plan", &json!({ "doc": doc, "instruction": "save it", "base_url": url, "model": "m" })).unwrap_err().to_string();
+    assert!(e.contains("doc_save"), "{e}");
+    reqs.join().unwrap();
+}
+
+#[test]
+fn a_reply_that_is_only_talk_proposes_no_change() {
+    let (mut a, doc) = open("talk");
+    let (url, reqs) = sequence(vec!["The total is 42.".into()]);
+    let out = json_of(a.call("ai_edit_plan", &json!({ "doc": doc, "instruction": "what is the total?", "base_url": url, "model": "m" })).unwrap());
+    assert_eq!(out["steps"], json!([]));
+    assert_eq!(out["message"], "The total is 42.");
+    reqs.join().unwrap();
+}
+
+#[test]
+fn apply_runs_the_steps_as_undo_steps_and_undo_takes_them_back() {
+    let (mut a, doc) = open("apply");
+    let steps = json!([{ "tool": "rotate_pages", "args": { "pages": [1], "degrees": 90 } }, { "tool": "set_document_info", "args": { "key": "Title", "value": "Hi" } }]);
+    let out = json_of(a.call("ai_edit_apply", &json!({ "doc": doc, "steps": steps })).unwrap());
+    assert_eq!(out["applied"], 2);
+    let n = out["undo_steps"].as_u64().unwrap();
+    assert!(n >= 2, "{out}");
+    assert_eq!(out["document"]["dirty"], true);
+    for _ in 0..n {
+        a.call("edit_undo", &json!({ "doc": doc })).unwrap();
+    }
+    assert!(a.call("edit_undo", &json!({ "doc": doc })).is_err(), "undo_steps should account for every step");
+}
+
+#[test]
+fn apply_refuses_the_whole_list_when_one_step_is_not_allowed() {
+    let (mut a, doc) = open("refuse");
+    let e = a
+        .call("ai_edit_apply", &json!({ "doc": doc, "steps": [{ "tool": "rotate_pages", "args": { "pages": [1], "degrees": 90 } }, { "tool": "doc_save", "args": {} }] }))
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("step 2") && e.contains("doc_save"), "{e}");
+    assert!(a.call("edit_undo", &json!({ "doc": doc })).is_err(), "nothing should have run");
+}

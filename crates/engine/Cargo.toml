@@ -10,6 +10,7 @@ workspace = true
 
 [dependencies]
 craft-docpath = { workspace = true }
+craft-font-catalog = { workspace = true }
 craft-image-codecs = { workspace = true }
 pdfcraft-measure = { workspace = true }
 image = { version = "0.25", default-features = false }
@@ -37,6 +38,7 @@ pdfcraft-fonts = { workspace = true }
 pdfcraft-create = { workspace = true }
 pdfcraft-model = { workspace = true }
 pdfcraft-geom = { workspace = true }
+serde_json = { workspace = true }
 thiserror = { workspace = true }
 # Already in the graph (url and idna through webbrowser, icu_properties through boa): they show
 # the host of a document's link the way the browser reads it (links::display_host).

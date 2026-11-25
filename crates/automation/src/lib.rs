@@ -16,6 +16,7 @@
 
 mod a11y;
 mod ai;
+mod ai_edit;
 mod batch;
 mod bates;
 mod comments;
@@ -50,7 +51,6 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use pdfcraft_engine::{BlockKey, CombineSource, DocId, Document, Edit, Session, TextBlock, block_overlapping, commands};
-use pdfcraft_platform::staging::{StagingName, staging_suffixes};
 use pdfcraft_render::{PageRenderer, PageText, RenderConfig, RenderRequest, RequestKind};
 use serde_json::{Value, json};
 
@@ -67,7 +67,6 @@ mod error;
 mod json;
 mod pages;
 mod paths;
-mod split_name;
 
 pub use dispatch::Content;
 pub use error::ToolError;
@@ -82,8 +81,6 @@ use pages::{FIND_FIRST_BATCH, FIND_MAX_WARNING_BYTES, FIND_MAX_WARNINGS, extract
 pub(crate) use paths::MAX_INPUT;
 use paths::{child, lexical, write_atomic};
 pub(crate) use paths::{read_input, read_input_bytes};
-#[cfg(test)]
-use paths::{write_atomic_synced, write_atomic_with};
 
 struct OcrReview {
     handle: u64,

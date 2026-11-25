@@ -80,6 +80,8 @@ impl Automation {
             "ai_translate" => self.ai_translate(&a)?,
             "ai_redaction_suggest" => self.ai_redaction_suggest(&a)?,
             "ai_alt_text_suggest" => self.ai_alt_text_suggest(&a)?,
+            "ai_edit_plan" => self.ai_edit_plan(&a)?,
+            "ai_edit_apply" => self.ai_edit_apply(&a)?,
             "text_find" => self.text_find(&a)?,
             "text_find_folder" => self.text_find_folder(&a)?,
             "text_replace" => self.text_replace(&a)?,

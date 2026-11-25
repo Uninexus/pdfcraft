@@ -4,26 +4,40 @@
 //! the code the list showed, so an edit made from a stale list is refused and the list is read again.
 //!
 //! Scripts are untrusted document content: this window only reads and rewrites them. It never
-//! runs one.
+//! runs one. It is a window beside the dialog host, like Print readiness, so it reads the app
+//! directly and closes with the document it lists.
 
-use egui::{Align, Layout};
+use craft::behavior::{Selection, keyed};
+use craft::theme::variant::Tone;
+use craft::ui::contract::{Bind, Entry, Props as _, SelectMode, Show as _, ShowCollection as _, ShowContainer as _};
+use craft::ui::dialog::Dialog;
+use craft::ui::display::{Shade, Text};
+use craft::ui::layout_components::Row;
+use craft::ui::list::{List, ListRow};
+use craft::ui::notices::{Notice, NoticeLayout};
+use craft::ui::pickers::Select;
+use craft::ui::sections::{DialogRole, FooterButton};
+use craft::ui::style::TypeRole;
+use craft::ui::text::TextField;
 use pdfcraft_engine::{DocId, Edit, JavaScriptEntry, JavaScriptInventory, JavaScriptKind};
 
-use crate::theme::{self, Tokens};
-use crate::{PdfCraftApp, widgets};
+use crate::PdfCraftApp;
 
 /// Most code shown in the editor, in bytes. A longer script is cut here and cannot be edited, so
 /// the editor never lays out (or hands back) a megabyte of text.
 pub(crate) const SHOWN_LIMIT: usize = 64 * 1024;
 /// Most characters of a script's first line shown in the list.
 const FIRST_LINE_CHARS: usize = 80;
-const ROW_HEIGHT: f32 = 24.0;
 /// Most characters of a name, field name or title from the file shown anywhere in the window.
 const NAME_CHARS: usize = 200;
 /// Most bytes of a script's code the filter looks at (searched in lower case, kept per row).
 const SEARCH_CODE: usize = 4096;
 /// Longest filter text, in characters.
 pub(crate) const FILTER_CHARS: usize = 200;
+/// Rows of the list shown before it scrolls.
+const LIST_ROWS: u16 = 8;
+/// Lines the editor grows to before its text scrolls inside it.
+const EDITOR_LINES: usize = 16;
 
 /// What the user was doing when unsaved typing stood in the way.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -35,7 +49,7 @@ pub(crate) enum Leave {
 }
 
 /// One list row, made once per listing.
-struct Row {
+struct ScriptRow {
     label: String,
     /// The label and the start of the code, in lower case, for the text filter.
     haystack: String,
@@ -71,7 +85,7 @@ pub(crate) struct Draft {
     pub(crate) kind: Option<JavaScriptKind>,
     inventory: JavaScriptInventory,
     /// One per entry of `inventory`.
-    rows: Vec<Row>,
+    rows: Vec<ScriptRow>,
     /// The document and edit generation the inventory was read at.
     listed: Option<(DocId, u64)>,
     /// Indices into the inventory that the filters let through.
@@ -84,6 +98,8 @@ pub(crate) struct Draft {
     pub(crate) confirm_delete: bool,
     /// Asked to leave this script (or close) with unsaved typing: waiting for Discard or Keep editing.
     pub(crate) leaving: Option<Leave>,
+    /// Counts the times the editor was filled again, so its field starts from the new text.
+    epoch: usize,
 }
 
 /// Why the window can't change anything, if it can't.
@@ -190,24 +206,17 @@ fn row_label(e: &JavaScriptEntry) -> String {
     s
 }
 
-fn make_row(e: &JavaScriptEntry) -> Row {
+fn make_row(e: &JavaScriptEntry) -> ScriptRow {
     let label = row_label(e);
     let mut haystack = label.to_lowercase();
     if let Some(code) = e.code.as_deref() {
         haystack.push('\n');
         haystack.push_str(&cut_str(code, SEARCH_CODE).to_lowercase());
     }
-    Row { label, haystack }
+    ScriptRow { label, haystack }
 }
 
 impl Draft {
-    /// Forget everything once the window is gone.
-    pub(crate) fn reset(&mut self) {
-        if self.listed.is_some() {
-            *self = Self::default();
-        }
-    }
-
     pub(crate) fn dirty(&self) -> bool {
         self.loaded.as_ref().is_some_and(|l| l.original != self.text)
     }
@@ -239,9 +248,10 @@ impl Draft {
         self.text.clear();
         self.confirm_delete = false;
         self.leaving = None;
+        self.epoch = self.epoch.wrapping_add(1);
     }
 
-    /// Fill the editor from entry `i` of the listing.
+    /// Set the text filter (at most [`FILTER_CHARS`] characters).
     pub(crate) fn set_filter(&mut self, text: &str) {
         self.filter = text.chars().take(FILTER_CHARS).collect();
         self.refresh_visible();
@@ -252,6 +262,7 @@ impl Draft {
         self.refresh_visible();
     }
 
+    /// Fill the editor from entry `i` of the listing.
     pub(crate) fn select(&mut self, i: usize) {
         let Some(e) = self.inventory.entries.get(i) else { return };
         let code = e.code.as_deref().unwrap_or("");
@@ -269,6 +280,7 @@ impl Draft {
         self.confirm_delete = false;
         self.leaving = None;
         self.notice = None;
+        self.epoch = self.epoch.wrapping_add(1);
     }
 
     /// Select the script with this id, if listed.
@@ -410,7 +422,7 @@ fn relist(app: &mut PdfCraftApp, id: DocId, quiet: bool, failed: bool) {
     app.javascripts_draft.relisted(id, generation, inventory, quiet, failed);
 }
 
-/// Whether the control channel and the window see the document as read-only, and why.
+/// Whether the control channel and the window see the document as read-only.
 pub(crate) fn read_only(app: &PdfCraftApp) -> bool {
     app.active_ids().and_then(|(_, id)| app.session.get(id)).is_some_and(|d| locked(d).is_some())
 }
@@ -424,26 +436,38 @@ pub(crate) fn sync(app: &mut PdfCraftApp) {
     }
 }
 
+/// Opens the window on the active document with nothing selected.
+pub(crate) fn open(app: &mut PdfCraftApp) {
+    app.javascripts_draft = Draft::default();
+    app.javascripts_open = true;
+}
+
+/// Closes the window and forgets the list.
+fn close(app: &mut PdfCraftApp) {
+    app.javascripts_open = false;
+    app.javascripts_draft = Draft::default();
+}
+
 /// Apply the editor's code to the selected script.
-pub(crate) fn apply(app: &mut PdfCraftApp) -> bool {
+pub(crate) fn apply(app: &mut PdfCraftApp, ctx: &egui::Context) -> bool {
     let Some((_, id)) = app.active_ids() else { return false };
     let Some(doc) = app.session.get(id) else { return false };
     let locked = locked(doc).is_some();
     let Some(l) = app.javascripts_draft.loaded.clone().filter(|_| app.javascripts_draft.can_edit(locked)) else { return false };
     let code = app.javascripts_draft.text.clone();
-    let done = app.apply_edit(Edit::SetJavaScript { id: l.id.clone(), expect: l.fingerprint.clone(), code });
+    let done = app.apply_edit(ctx, Edit::SetJavaScript { id: l.id.clone(), expect: l.fingerprint.clone(), code });
     finish(app, id, done, tl!("Applied. Undo in the Edit menu takes it back."));
     done
 }
 
 /// Delete the selected script.
-pub(crate) fn delete(app: &mut PdfCraftApp) -> bool {
+pub(crate) fn delete(app: &mut PdfCraftApp, ctx: &egui::Context) -> bool {
     let Some((_, id)) = app.active_ids() else { return false };
     let Some(doc) = app.session.get(id) else { return false };
     let locked = locked(doc).is_some();
     let Some(l) = app.javascripts_draft.loaded.clone().filter(|_| !locked) else { return false };
     app.javascripts_draft.confirm_delete = false;
-    let done = app.apply_edit(Edit::RemoveJavaScript { id: l.id.clone(), expect: l.fingerprint.clone() });
+    let done = app.apply_edit(ctx, Edit::RemoveJavaScript { id: l.id.clone(), expect: l.fingerprint.clone() });
     if done {
         // The id may lead to an action chained after the removed one now: not the script that was selected.
         app.javascripts_draft.deselect();
@@ -452,128 +476,68 @@ pub(crate) fn delete(app: &mut PdfCraftApp) -> bool {
     done
 }
 
-/// After an edit: read the list again, and say what happened.
+/// After an edit: read the list again, and say what happened. A refusal is already a notice of
+/// the app; the window adds one only when the script it holds changed or went.
 fn finish(app: &mut PdfCraftApp, id: DocId, done: bool, message: &str) {
-    let refusal = app.toast.as_ref().map(|t| t.0.clone());
     relist(app, id, done, !done);
-    let d = &mut app.javascripts_draft;
     if done {
-        d.notice = Some(message.to_string());
-    } else if d.notice.is_none() {
-        d.notice = refusal;
+        app.javascripts_draft.notice = Some(message.to_string());
     }
 }
 
-/// Escape or a click outside asked to close the window: not while typing would be lost without
-/// asking. Returns `true` when the close must wait for the answer.
-pub(crate) fn guard_dismiss(app: &mut PdfCraftApp) -> bool {
-    let d = &mut app.javascripts_draft;
-    if d.dirty() {
-        d.leaving = Some(Leave::Close);
-        return true;
-    }
-    false
+/// What a footer button asks for.
+#[derive(Clone, Copy)]
+enum Action {
+    Apply,
+    Delete,
+    Close,
+    DeleteNow,
+    KeepScript,
+    Discard,
+    KeepEditing,
 }
 
-/// The window. Returns `true` to close.
-pub(crate) fn body(ui: &mut egui::Ui, app: &mut PdfCraftApp) -> bool {
-    let t = Tokens::get(ui.ctx());
-    ui.set_width(760.0);
-    ui.label(egui::RichText::new(tl!("JavaScripts")).font(theme::semibold(18.0)));
-    ui.add_space(2.0);
-    let Some((_, id)) = app.active_ids() else { return true };
-    let Some(lock) = app.session.get(id).map(locked) else { return true };
+/// Shows the window while it is open and carries out the button it was answered with. It closes
+/// with the document it listed, and asks before it drops unsaved typing (Escape and Close too).
+pub(crate) fn show(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
+    if !app.javascripts_open {
+        return;
+    }
+    let Some((_, id)) = app.active_ids() else { return close(app) };
+    let Some(lock) = app.session.get(id).map(locked) else { return close(app) };
     sync(app);
     let read_only = lock.is_some();
-    let d = &mut app.javascripts_draft;
+    let mut d = std::mem::take(&mut app.javascripts_draft);
     d.refresh_visible();
-
-    ui.label(egui::RichText::new(tl!("Every script in this document, in one list. Nothing here runs a script.")).small().color(t.text_muted));
-    match lock {
-        Some(Locked::Unreadable) => {
-            ui.colored_label(ui.visuals().warn_fg_color, tl!("This document can't be edited, so its scripts are shown read-only."));
-        }
-        Some(Locked::Permissions) => {
-            ui.colored_label(
-                ui.visuals().warn_fg_color,
-                tl!("This document's security settings don't allow changes, so its scripts are shown read-only. Enter its permissions password to edit them."),
-            );
-        }
-        None => {}
+    if d.leaving.is_some() && !d.dirty() {
+        d.leaving = None;
     }
-    ui.add_space(6.0);
-
-    ui.horizontal(|ui| {
-        let label = ui.label(tl!("Filter:"));
-        ui.add(
-            widgets::line(&mut d.filter)
-                .char_limit(FILTER_CHARS)
-                .desired_width(300.0)
-                .hint_text(tl!("Name, field, trigger or code"))
-                .id_salt("javascripts-filter"),
-        )
-        .labelled_by(label.id);
-        let shown = d.kind.map_or_else(|| tl!("All kinds").to_string(), kind_label);
-        let kind_label_text = ui.label(tl!("Kind:"));
-        craft_ui::ComboBox::from_id_salt("javascripts-kind")
-            .selected_text(shown)
-            .show_ui(ui, |ui| {
-                ui.selectable_value(&mut d.kind, None, tl!("All kinds"));
-                for k in JavaScriptKind::ALL {
-                    ui.selectable_value(&mut d.kind, Some(k), kind_label(k));
-                }
-            })
-            .response
-            .labelled_by(kind_label_text.id);
-    });
-    d.refresh_visible();
-    let summary = if d.shown() == d.total() {
-        crate::i18n::fmt(tl!("{n} scripts"), &[("n", &d.total().to_string())])
+    let has = d.loaded.is_some();
+    let can_apply = d.can_edit(read_only) && d.dirty();
+    let actions: Vec<(Action, FooterButton)> = if d.leaving.is_some() {
+        vec![
+            (Action::Discard, FooterButton::new(tl!("Discard"), DialogRole::Destructive).stays_open(true)),
+            (Action::KeepEditing, FooterButton::new(tl!("Keep editing"), DialogRole::Other).stays_open(true)),
+        ]
+    } else if d.confirm_delete && has {
+        vec![
+            (Action::DeleteNow, FooterButton::new(tl!("Delete script"), DialogRole::Destructive).stays_open(true)),
+            (Action::KeepScript, FooterButton::new(tl!("Keep"), DialogRole::Other).stays_open(true)),
+        ]
     } else {
-        crate::i18n::fmt(tl!("Showing {shown} of {n} scripts"), &[("shown", &d.shown().to_string()), ("n", &d.total().to_string())])
+        vec![
+            (Action::Apply, FooterButton::new(tl!("Apply"), DialogRole::Accept).stays_open(true).enabled(can_apply)),
+            (Action::Delete, FooterButton::new(tl!("Delete"), DialogRole::Other).stays_open(true).enabled(has && !read_only)),
+            (Action::Close, FooterButton::new(tl!("Close"), DialogRole::Cancel)),
+        ]
     };
-    ui.label(egui::RichText::new(summary).small().color(t.text_muted));
-    if d.capped() {
-        ui.label(egui::RichText::new(tl!("The document holds more scripts than can be listed; some are not shown.")).small().color(t.text_muted));
-    }
-    if d.inventory.truncated > 0 {
-        ui.label(
-            egui::RichText::new(tl!("Some scripts are too long to be listed in full and are marked (cut); they can't be edited here."))
-                .small()
-                .color(t.text_muted),
-        );
-    }
-
-    if d.inventory.names_left_out > 0 {
-        ui.label(egui::RichText::new(names_left_out_note()).small().color(t.text_muted));
-    }
-
+    let buttons: Vec<FooterButton> = actions.iter().map(|(_, b)| b.clone()).collect();
+    let mut open = true;
     let mut pick = None;
-    egui::Frame::new().fill(t.hover).corner_radius(egui::CornerRadius::same(6)).inner_margin(egui::Margin::same(6)).show(ui, |ui| {
-        ui.set_width(ui.available_width());
-        if d.visible.is_empty() {
-            let message = if d.total() == 0 { tl!("This document has no JavaScripts.") } else { tl!("No script matches the filter.") };
-            ui.label(egui::RichText::new(message).color(t.text_muted));
-            return;
-        }
-        let width = ui.available_width();
-        egui::ScrollArea::vertical().max_height(190.0).auto_shrink([false, true]).id_salt("javascripts-list").show_rows(
-            ui,
-            ROW_HEIGHT,
-            d.visible.len(),
-            |ui, range| {
-                for row in range {
-                    let Some((i, e, r)) = d.visible.get(row).and_then(|i| Some((*i, d.inventory.entries.get(*i)?, d.rows.get(*i)?))) else {
-                        continue;
-                    };
-                    let selected = d.loaded.as_ref().is_some_and(|l| l.id == e.id);
-                    if ui.add_sized([width, ROW_HEIGHT - 2.0], egui::Button::selectable(selected, r.label.as_str()).truncate()).clicked() {
-                        pick = Some(i);
-                    }
-                }
-            },
-        );
+    let shown = Dialog::new(tl!("JavaScripts")).opened(Bind::bound(&mut open)).escape_keeps_typing(true).buttons(buttons).show(ui, |ui, _cx| {
+        pick = body(ui, &mut d, lock);
     });
+    let picked = shown.output.picked.and_then(|at| actions.get(at)).map(|(a, _)| *a);
     if let Some(i) = pick {
         // Another script than the one open: not while typing would be lost without asking.
         let same = d.inventory.entries.get(i).is_some_and(|e| d.loaded.as_ref().is_some_and(|l| l.id == e.id));
@@ -585,27 +549,135 @@ pub(crate) fn body(ui: &mut egui::Ui, app: &mut PdfCraftApp) -> bool {
             }
         }
     }
+    app.javascripts_draft = d;
+    let ctx = ui.ctx().clone();
+    match picked {
+        Some(Action::Apply) => {
+            apply(app, &ctx);
+        }
+        Some(Action::Delete) => app.javascripts_draft.confirm_delete = true,
+        Some(Action::DeleteNow) => {
+            delete(app, &ctx);
+        }
+        Some(Action::KeepScript) => app.javascripts_draft.confirm_delete = false,
+        Some(Action::KeepEditing) => app.javascripts_draft.leaving = None,
+        Some(Action::Discard) => match app.javascripts_draft.leaving.take() {
+            Some(Leave::Close) => {
+                close(app);
+                return;
+            }
+            Some(Leave::Select(id)) => {
+                app.javascripts_draft.select_id(&id);
+            }
+            None => {}
+        },
+        Some(Action::Close) | None => {}
+    }
+    if !open {
+        // Escape, the close action or Close: not while typing would be lost without asking.
+        if app.javascripts_draft.dirty() {
+            app.javascripts_draft.leaving = Some(Leave::Close);
+        } else {
+            close(app);
+        }
+    }
+}
 
-    ui.add_space(6.0);
-    let mut apply_now = false;
-    let mut delete_ask = false;
-    let mut delete_now = false;
-    let mut close = false;
+/// The window's content. Returns the list row the user picked, if any (an index of the listing).
+fn body(ui: &mut egui::Ui, d: &mut Draft, lock: Option<Locked>) -> Option<usize> {
+    let read_only = lock.is_some();
+    Text::new(tl!("Every script in this document, in one list. Nothing here runs a script.")).shade(Shade::Muted).show(ui);
+    match lock {
+        Some(Locked::Unreadable) => {
+            Notice::new(Tone::Warn, tl!("This document can't be edited, so its scripts are shown read-only.").to_string())
+                .layout(NoticeLayout::Inline)
+                .id_salt(0usize)
+                .show(ui);
+        }
+        Some(Locked::Permissions) => {
+            Notice::new(
+                Tone::Warn,
+                tl!("This document's security settings don't allow changes, so its scripts are shown read-only. Enter its permissions password to edit them.")
+                    .to_string(),
+            )
+            .layout(NoticeLayout::Inline)
+            .id_salt(0usize)
+            .show(ui);
+        }
+        None => {}
+    }
+
+    let kinds: Vec<Entry<usize>> = std::iter::once(Entry::new(0usize, tl!("All kinds").to_string()))
+        .chain(JavaScriptKind::ALL.iter().enumerate().map(|(i, k)| Entry::new(i + 1, kind_label(*k))))
+        .collect();
+    let kind_at = d.kind.and_then(|k| JavaScriptKind::ALL.iter().position(|a| *a == k)).map_or(0, |i| i + 1);
+    let mut kind_pick = None;
+    Row::new().show(ui, |ui, _| {
+        TextField::new(tl!("Filter"), Bind::bound(&mut d.filter)).placeholder(tl!("Name, field, trigger or code")).limit(FILTER_CHARS).show(ui);
+        kind_pick = Select::new(tl!("Kind"), Bind::given(kind_at), &kinds).show(ui).value().copied();
+    });
+    if let Some(at) = kind_pick.filter(|at| *at != kind_at) {
+        d.set_kind(at.checked_sub(1).and_then(|i| JavaScriptKind::ALL.get(i).copied()));
+    }
+    d.refresh_visible();
+
+    let summary = if d.shown() == d.total() {
+        crate::i18n::fmt(tl!("{n} scripts"), &[("n", &d.total().to_string())])
+    } else {
+        crate::i18n::fmt(tl!("Showing {shown} of {n} scripts"), &[("shown", &d.shown().to_string()), ("n", &d.total().to_string())])
+    };
+    Text::new(summary).role(TypeRole::Caption).shade(Shade::Muted).show(ui);
+    if d.capped() {
+        Text::new(tl!("The document holds more scripts than can be listed; some are not shown."))
+            .role(TypeRole::Caption)
+            .shade(Shade::Muted)
+            .show(ui);
+    }
+    if d.inventory.truncated > 0 {
+        Text::new(tl!("Some scripts are too long to be listed in full and are marked (cut); they can't be edited here."))
+            .role(TypeRole::Caption)
+            .shade(Shade::Muted)
+            .show(ui);
+    }
+    if d.inventory.names_left_out > 0 {
+        Text::new(names_left_out_note()).role(TypeRole::Caption).shade(Shade::Muted).show(ui);
+    }
+
+    let mut picked = None;
+    if d.visible.is_empty() {
+        let message = if d.total() == 0 { tl!("This document has no JavaScripts.") } else { tl!("No script matches the filter.") };
+        Text::new(message).shade(Shade::Muted).show(ui);
+    } else {
+        let current = d.loaded.as_ref().and_then(|l| d.inventory.entries.iter().position(|e| e.id == l.id));
+        let mut selection = Selection::new(current.into_iter().collect(), current, current);
+        let order = d.visible.clone();
+        let rows = keyed(&order, |i| *i);
+        let labels = &d.rows;
+        List::new(tl!("Scripts").to_string()).select(SelectMode::Single).selection(Bind::bound(&mut selection)).max_rows(LIST_ROWS).show_items(
+            ui,
+            &rows,
+            &mut |key, item| match labels.get(*key) {
+                Some(r) => ListRow::new(r.label.clone()).state(item.row.clone()),
+                None => ListRow::new(String::new()),
+            },
+        );
+        picked = selection.items.first().copied().filter(|p| Some(*p) != current);
+    }
+
     if let Some((cut, readable)) = d.loaded.as_ref().map(|l| (l.cut, l.readable)) {
-        let heading = d.selected_entry().map(|e| format!("{}: {}  ({})", kind_label(e.kind), location(e), e.trigger)).unwrap_or_default();
-        ui.label(egui::RichText::new(heading).font(theme::semibold(14.0)));
+        let heading = d.selected_entry().map(|e| format!("{}: {}  ({})", kind_label(e.kind), location(e), short(&e.trigger))).unwrap_or_default();
+        Text::new(heading).role(TypeRole::Heading).show(ui);
         let editable = d.can_edit(read_only);
-        egui::ScrollArea::vertical().max_height(260.0).auto_shrink([false, true]).id_salt("javascripts-code").show(ui, |ui| {
-            ui.add(
-                widgets::block(&mut d.text)
-                    .code_editor()
-                    .desired_rows(12)
-                    .desired_width(f32::INFINITY)
-                    .char_limit(SHOWN_LIMIT)
-                    .interactive(editable)
-                    .id_salt("javascripts-code-text"),
-            );
-        });
+        let epoch = d.epoch;
+        TextField::new(tl!("Script code"), Bind::bound(&mut d.text))
+            .lines(EDITOR_LINES)
+            .max_lines(EDITOR_LINES)
+            .mono()
+            .tab_inserts(true)
+            .limit(SHOWN_LIMIT)
+            .read_only(!editable)
+            .id_salt(epoch)
+            .show(ui);
         let note = match cut {
             Cut::Listing => Some(
                 tl!("This script is too long to be listed in full, so only its start is shown and it can't be edited here. It can still be deleted.")
@@ -619,85 +691,28 @@ pub(crate) fn body(ui: &mut egui::Ui, app: &mut PdfCraftApp) -> bool {
             Cut::No => None,
         };
         if let Some(note) = note {
-            ui.label(egui::RichText::new(note).small().color(t.text_muted));
+            Text::new(note).role(TypeRole::Caption).shade(Shade::Muted).show(ui);
         }
     } else if d.total() > 0 {
-        ui.label(egui::RichText::new(tl!("Select a script to read or change its code.")).color(t.text_muted));
+        Text::new(tl!("Select a script to read or change its code.")).shade(Shade::Muted).show(ui);
     }
     if let Some(n) = &d.notice {
-        ui.label(egui::RichText::new(n).color(t.text));
+        Notice::new(Tone::Info, n.clone()).layout(NoticeLayout::Inline).id_salt(1usize).show(ui);
     }
-    ui.add_space(6.0);
-    let has = d.loaded.is_some();
-    let can_apply = d.can_edit(read_only) && d.dirty();
-    let confirming = d.confirm_delete && has;
-    if d.leaving.is_some() && !d.dirty() {
-        d.leaving = None;
+    if d.leaving.is_some() {
+        Notice::new(Tone::Warn, tl!("You have unsaved changes to this script. Discard them?").to_string())
+            .layout(NoticeLayout::Inline)
+            .id_salt(2usize)
+            .show(ui);
+    } else if d.confirm_delete && d.loaded.is_some() {
+        Notice::new(Tone::Warn, tl!("Delete this script? Undo brings it back.").to_string()).layout(NoticeLayout::Inline).id_salt(3usize).show(ui);
     }
-    let discarding = d.leaving.is_some();
-    let mut discard = false;
-    ui.horizontal(|ui| {
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            if discarding {
-                if ui.push_id("javascripts-discard", |ui| widgets::pill_button(ui, tl!("Discard"), true)).inner.clicked() {
-                    discard = true;
-                }
-                if ui.push_id("javascripts-keep-editing", |ui| widgets::pill_button(ui, tl!("Keep editing"), false)).inner.clicked() {
-                    d.leaving = None;
-                }
-                ui.label(tl!("You have unsaved changes to this script. Discard them?"));
-                return;
-            }
-            if confirming {
-                if ui.push_id("javascripts-delete-now", |ui| widgets::pill_button(ui, tl!("Delete script"), true)).inner.clicked() {
-                    delete_now = true;
-                }
-                if ui.push_id("javascripts-keep", |ui| widgets::pill_button(ui, tl!("Keep"), false)).inner.clicked() {
-                    d.confirm_delete = false;
-                }
-                ui.label(tl!("Delete this script? Undo brings it back."));
-                return;
-            }
-            if ui.add_enabled_ui(can_apply, |ui| widgets::pill_button(ui, tl!("Apply"), true)).inner.clicked() {
-                apply_now = true;
-            }
-            if ui.push_id("javascripts-close", |ui| widgets::pill_button(ui, tl!("Close"), false)).inner.clicked() {
-                if d.dirty() {
-                    d.leaving = Some(Leave::Close);
-                } else {
-                    close = true;
-                }
-            }
-            if ui.add_enabled_ui(has && !read_only, |ui| widgets::pill_button(ui, tl!("Delete"), false)).inner.clicked() {
-                delete_ask = true;
-            }
-        });
-    });
-    if discard && let Some(leave) = d.leaving.take() {
-        match leave {
-            Leave::Close => close = true,
-            Leave::Select(id) => {
-                d.select_id(&id);
-            }
-        }
-    }
-    if delete_ask {
-        d.confirm_delete = true;
-    }
-    if apply_now {
-        apply(app);
-    }
-    if delete_now {
-        delete(app);
-    }
-    close
+    picked
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Dialog;
-    use egui_kittest::Harness;
 
     fn fixture() -> Vec<u8> {
         let objs = [
@@ -718,40 +733,6 @@ mod tests {
         }
         out.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objs.len() + 1).as_bytes());
         out
-    }
-
-    #[test]
-    fn apply_from_a_stale_list_is_refused_and_the_list_is_read_again() {
-        let mut h = Harness::builder().with_size(egui::vec2(1000.0, 800.0)).build_eframe(|_| {
-            let mut app = PdfCraftApp::new();
-            app.set_option("language", "en").unwrap();
-            app.open_bytes("one.pdf", None, fixture()).unwrap();
-            app.run_command("tools.javascripts");
-            app
-        });
-        h.run_steps(3);
-        assert_eq!(h.state().dialog, Some(Dialog::JavaScripts));
-        h.state_mut().javascripts_draft.select(0);
-        // The window's idea of the script is out of date: it names a fingerprint the document
-        // does not hold (what a list from before another edit would carry).
-        h.state_mut().javascripts_draft.loaded.as_mut().unwrap().fingerprint = "0000000000000000".into();
-        h.state_mut().javascripts_draft.text = "two();".into();
-        let before = h.state().session.get(h.state().active_ids().unwrap().1).unwrap().bytes.clone();
-        assert!(!apply(h.state_mut()), "the engine refuses it");
-        let app = h.state();
-        let doc = app.session.get(app.active_ids().unwrap().1).unwrap();
-        assert_eq!(doc.bytes, before, "nothing was changed");
-        assert_eq!(doc.can_undo(), None);
-        let d = &app.javascripts_draft;
-        assert!(d.notice.as_deref().is_some_and(|n| n.contains("nothing was changed") && n.contains("Your text is kept")), "{:?}", d.notice);
-        assert_eq!(d.text, "two();", "the typing is kept, not reloaded");
-        assert!(d.dirty(), "and it can be applied against the current code");
-        assert_ne!(d.loaded.as_ref().unwrap().fingerprint, "0000000000000000");
-        // With the fresh fingerprint the same Apply goes through.
-        assert!(apply(h.state_mut()));
-        let app = h.state();
-        let doc = app.session.get(app.active_ids().unwrap().1).unwrap();
-        assert_eq!(doc.list_javascripts().entries[0].code.as_deref(), Some("two();"));
     }
 
     #[test]
@@ -791,5 +772,24 @@ mod tests {
         assert!(cut.len() <= SHOWN_LIMIT && cut.len() >= SHOWN_LIMIT - 1);
         assert_eq!(cut_str("abc", 10), "abc");
         assert_eq!(cut_str("é", 1), "");
+    }
+
+    #[test]
+    fn a_stale_selection_keeps_the_typing_after_a_refused_apply() {
+        let mut sess = pdfcraft_engine::Session::new();
+        let id = sess.open("one.pdf", None, std::sync::Arc::new(fixture()), None).unwrap();
+        let mut d = Draft::default();
+        d.relisted(id, 0, sess.get(id).unwrap().list_javascripts(), true, false);
+        d.select(0);
+        // The window names a fingerprint the document does not hold, as a list from before another edit would.
+        if let Some(l) = d.loaded.as_mut() {
+            l.fingerprint = "0000000000000000".into();
+        }
+        d.text = "two();".into();
+        d.relisted(id, 1, sess.get(id).unwrap().list_javascripts(), false, true);
+        assert_eq!(d.text, "two();", "the typing is kept, not reloaded");
+        assert!(d.dirty(), "and it can be applied against the current code");
+        assert!(d.notice.as_deref().is_some_and(|n| n.contains("nothing was changed") && n.contains("Your text is kept")), "{:?}", d.notice);
+        assert_ne!(d.loaded.as_ref().map(|l| l.fingerprint.as_str()), Some("0000000000000000"));
     }
 }

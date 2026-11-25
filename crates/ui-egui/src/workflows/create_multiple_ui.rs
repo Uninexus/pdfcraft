@@ -5,9 +5,12 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use craft::docpath::names::{CopyNumbering, safe_file_stem, unique_file_name};
+use craft::host::WriteIntent;
 use pdfcraft_engine::{EditError, SourceKind};
 
 use crate::PdfCraftApp;
+use crate::office_batch::Item;
 
 fn stem(name: &str) -> &str {
     name.rsplit_once('.').map_or(name, |(s, _)| s)
@@ -26,20 +29,18 @@ impl From<EditError> for Stop {
 }
 
 impl PdfCraftApp {
-    /// [`Self::stage_create_multiple`] for a batch with Word, Excel, PowerPoint, OpenDocument or
-    /// RTF files: LibreOffice converts them on a worker, and the combined PDF opens when that is
-    /// done. Without LibreOffice nothing is made.
-    pub(crate) fn stage_create_multiple_office(&mut self, files: Vec<crate::office_batch::Item>) {
-        self.convert_office_files(files, Box::new(|app, files, _| app.stage_create_multiple(files)), String::new());
-    }
-
-    /// [`Self::stage_create_separate`] for a batch with Office files, as
-    /// [`Self::stage_create_multiple_office`] does for Combine.
-    pub(crate) fn stage_create_separate_office(&mut self, files: Vec<crate::office_batch::Item>, dir: Option<PathBuf>) {
+    /// [`Self::stage_create_multiple`] for a batch with Word, Excel, PowerPoint, OpenDocument or RTF files: they are
+    /// converted in the background and the combined PDF opens when that is done. A file that can't be converted is
+    /// named and left out.
+    pub(crate) fn stage_create_multiple_converting(&mut self, files: Vec<Item>) {
         self.convert_office_files(
             files,
-            Box::new(move |app, files, converted| app.stage_create_separate_marked(files, dir, &converted)),
-            String::new(),
+            Box::new(|app, files, _| {
+                // Nothing left to combine: the files left out were named already.
+                if !files.is_empty() {
+                    app.stage_create_multiple(files);
+                }
+            }),
         );
     }
 
@@ -47,18 +48,19 @@ impl PdfCraftApp {
     /// names receive numbered names, so a batch never silently replaces an earlier file.
     pub(crate) fn stage_create_separate<I>(&mut self, files: I, dir: Option<PathBuf>)
     where
-        I: IntoIterator<Item = Result<(String, Vec<u8>), (String, String)>>,
+        I: IntoIterator<Item = Item>,
     {
-        self.stage_create_separate_marked(files, dir, &[]);
+        let files: Vec<Item> = files.into_iter().collect();
+        if crate::office_batch::any_office(&files) {
+            self.convert_office_files(files, Box::new(move |app, files, converted| app.stage_create_separate_marked(files, dir, &converted)));
+        } else {
+            self.stage_create_separate_marked(files, dir, &[]);
+        }
     }
 
-    /// [`Self::stage_create_separate`] where the files at the positions in `converted` are
-    /// Office documents already made into PDFs: they are written like any converted file, not
-    /// skipped as PDFs.
-    fn stage_create_separate_marked<I>(&mut self, files: I, dir: Option<PathBuf>, converted: &[usize])
-    where
-        I: IntoIterator<Item = Result<(String, Vec<u8>), (String, String)>>,
-    {
+    /// [`Self::stage_create_separate`] where the files at the positions in `converted` are Office documents already
+    /// made into PDFs: they are written like any converted file, not skipped as PDFs.
+    fn stage_create_separate_marked(&mut self, files: Vec<Item>, dir: Option<PathBuf>, converted: &[usize]) {
         let mut used = HashSet::new();
         let mut made = 0usize;
         let mut refused = Vec::new();
@@ -81,34 +83,16 @@ impl PdfCraftApp {
                 refused.push(format!("{name} ({})", tl!("already a PDF")));
                 continue;
             }
-            let base = crate::files::file_stem_from_user(stem(&name));
+            let base = safe_file_stem(stem(&name), "pdf");
             let base = if base.is_empty() { "document" } else { &base };
-            let mut output = None;
-            for number in 1..10_000 {
-                let filename = if number == 1 { format!("{base}.pdf") } else { format!("{base} ({number}).pdf") };
-                let candidate = dir.as_ref().map(|d| d.join(&filename));
-                if !used.contains(&filename.to_lowercase()) && !candidate.as_ref().is_some_and(|path| path.exists()) {
-                    used.insert(filename.to_lowercase());
-                    output = Some((filename, candidate));
-                    break;
-                }
-            }
-            let Some((filename, target)) = output else {
-                refused.push(format!("{name} ({})", tl!("no unused output name")));
-                continue;
-            };
-            #[cfg(not(target_arch = "wasm32"))]
-            let result = match target {
-                Some(path) => crate::editing::write_atomically(&path.to_string_lossy(), &pdf).map_err(|e| e.to_string()),
-                None => Err(tl!("no output folder was chosen").to_string()),
-            };
-            #[cfg(target_arch = "wasm32")]
-            let result = {
-                let _ = target;
-                crate::editing::download(&filename, &pdf)
-            };
-            match result {
-                Ok(()) => made += 1,
+            let filename = unique_file_name(&format!("{base}.pdf"), CopyNumbering::Parenthesized, |candidate| {
+                used.contains(&candidate.to_lowercase()) || dir.as_ref().is_some_and(|d| self.host.files().exists(&d.join(candidate)))
+            });
+            used.insert(filename.to_lowercase());
+            // Without a folder (the web) the write is a download.
+            let path = dir.as_ref().map_or_else(|| PathBuf::from(&filename), |d| d.join(&filename));
+            match self.host.files().write(&path, &pdf, WriteIntent::SaveAs) {
+                Ok(_) => made += 1,
                 Err(error) => refused.push(format!("{filename} ({error})")),
             }
         }
@@ -130,7 +114,7 @@ impl PdfCraftApp {
     /// read stops the run. Files are read as their turn comes, so one file's bytes are held at a time.
     pub(crate) fn stage_create_multiple<I>(&mut self, files: I)
     where
-        I: IntoIterator<Item = Result<(String, Vec<u8>), (String, String)>>,
+        I: IntoIterator<Item = Item>,
     {
         let (mut refused, mut converted) = (Vec::new(), 0usize);
         let mut files = files.into_iter();
@@ -152,11 +136,7 @@ impl PdfCraftApp {
         let bytes = match session.combine_each(sources) {
             Ok(Some(bytes)) => bytes,
             Ok(None) => {
-                self.notify_tr(if cfg!(target_arch = "wasm32") {
-                    "None of those files can be made into a PDF; use PDFs, images or .txt files"
-                } else {
-                    "None of those files can be made into a PDF; use PDFs, images, .txt files or Word, Excel or PowerPoint files"
-                });
+                self.notify_tr("None of those files can be made into a PDF; use PDFs, images or .txt files");
                 return;
             }
             Err(Stop::Read { name, error }) => {

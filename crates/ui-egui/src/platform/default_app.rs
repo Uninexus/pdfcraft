@@ -1,5 +1,5 @@
 //! "Set up PdfCraft as a PDF app…" (Windows): the portable `pdfcraft.exe` has no installer to
-//! register it, so Windows doesn't list it under Settings ▸ Default apps. This registers it for
+//! register it, so Windows doesn't list it under Settings, Default apps. This registers it for
 //! the current user (`pdfcraft_platform::file_types`), opens that Settings page and says what to
 //! pick there. It never chooses the default itself: Windows doesn't let a program do that.
 

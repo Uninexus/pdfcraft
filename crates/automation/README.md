@@ -45,6 +45,10 @@ DeviceCMYK `k`), so text added to a print file can be 100 K black. `content_list
 - With a root set, every read and write path must resolve inside it (symlinks and `..` included). Relative paths resolve inside the root, and `..` is resolved by name before the check. Every path outside the root gets the same refusal (`<path> is outside the allowed directory <root>`), whether or not it exists, so a confined agent can't probe the rest of the disk; on Windows another network share or device path (`\\host\share`, `\\?\UNC\…`, `\\.\…`) is refused without being contacted. "Not found" and other filesystem errors are reported only for paths inside the root. Tools that write several files into a folder name them after the document or input file, with separators, colons and control characters replaced by `_`, so a name can't lead them out of the folder. The root itself must be a folder.
 - `Automation::with_automation_roots` holds a read folder and a write folder (`pdfcraft-cli mcp --automation-read-root DIR --automation-write-root DIR`, see [docs/mcp.md](../../docs/mcp.md)). Reads must lie inside the read root and writes inside the write root, links followed. A root left out grants none of its access. Refusals read `automation path rejected: outside the read root <root>: <path>`. As with a root set, on Windows a path on another network share or device path is refused with that refusal without being contacted (#4003). It applies on top of `with_root`.
 
+## AI edits
+
+`ai_edit_plan {doc, instruction, ...}` asks the configured AI model (same settings as `ai_ask`) to carry out an editing request and returns the proposed calls as `steps` (`tool`, `args`, `why`, `summary`, `destructive`) without touching the document. The calls the model may make are a fixed list in `pdfcraft_engine::ai_edit` (rotate, delete, move, reverse, duplicate and insert pages, set the title, author, subject or keywords, fill or clear form fields, add text); each is checked against the document, as the calls before it leave it, and a reply with a call that cannot run is sent back to the model with the reason (three tries). `ai_edit_apply {doc, steps}` runs a confirmed list: all steps are checked first, they run in order, and if one fails the earlier ones are undone. Applied steps are ordinary undo steps (`undo_steps` says how many `edit_undo` calls take them back); nothing is saved. The desktop app's Edit with AI uses the same engine code. The model protocol (one JSON object with `message` and `calls`) lives in `pdfcraft-ai`'s `agent` module, so any chat-completions server or the ChatGPT-plan route works without native function calling.
+
 ## Text search and cache limits
 
 `text_word_count` counts the current snapshot without filling the text cache. It returns totals
@@ -328,9 +332,9 @@ with an error, and the annotation's own views, lighting and render modes are not
 
 ## Viewer navigation history
 
-A running PdfCraft instance launched with `--control FILE` exposes its per-tab history through
-`pdfcraft-cli ui --control FILE command id=view.previous_view` and
-`pdfcraft-cli ui --control FILE command id=view.next_view`. `commands` reports whether each action
+A running PdfCraft instance launched with `--control PORT` exposes its per-tab history through
+`pdfcraft-cli ui --control PORT --control-token-file FILE command id=view.previous_view` and
+`pdfcraft-cli ui --control PORT --control-token-file FILE command id=view.next_view`. `commands` reports whether each action
 is enabled for the active document. These are the same actions as the rail buttons, View → Page
 navigation, and Ctrl+[ / Ctrl+] (⌘[ / ⌘] on macOS).
 

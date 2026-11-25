@@ -105,6 +105,8 @@ pub struct AiSettings {
     pub(crate) problem: Option<String>,
     pub(crate) test: Task<Vec<String>>,
     pub(crate) ask: Task<String>,
+    /// The changes the model proposed for an Edit request.
+    pub(crate) plan: Task<crate::dialogs::ai_ui::EditPlan>,
     /// The ChatGPT sign-in in progress (the browser is open), and the flag that cancels it.
     #[cfg_attr(target_arch = "wasm32", allow(dead_code, reason = "signing in needs a browser and a loopback listener, which the web build lacks"))]
     pub(crate) sign_in: Task<()>,
@@ -149,6 +151,7 @@ impl AiSettings {
             problem,
             test: Task::Idle,
             ask: Task::Idle,
+            plan: Task::Idle,
             sign_in: Task::Idle,
             sign_in_error: None,
             sign_in_cancel: Default::default(),
@@ -194,8 +197,7 @@ impl AiSettings {
             let session = pdfcraft_ai::chatgpt::sign_in(&path, &open, &cancel).map_err(|e| e.to_string())?;
             // The file holds tokens: on Windows only the user and SYSTEM may read it (Unix gets 0600).
             #[cfg(windows)]
-            if let Err(e) =
-                pdfcraft_platform::owner_only::current_user_sid().and_then(|me| pdfcraft_platform::owner_only::restrict_to_owner(&path, &me))
+            if let Err(e) = craft::platform::owner_only::current_user_sid().and_then(|me| craft::platform::owner_only::restrict_to_owner(&path, &me))
             {
                 return Err(format!("cannot restrict the ChatGPT sign-in file to your account: {e}"));
             }
@@ -263,8 +265,7 @@ impl AiSettings {
         // mode 0600 from the save itself).
         #[cfg(windows)]
         if self.problem.is_none()
-            && let Err(e) =
-                pdfcraft_platform::owner_only::current_user_sid().and_then(|me| pdfcraft_platform::owner_only::restrict_to_owner(path, &me))
+            && let Err(e) = craft::platform::owner_only::current_user_sid().and_then(|me| craft::platform::owner_only::restrict_to_owner(path, &me))
         {
             self.problem = Some(format!("cannot restrict the AI settings file to your account: {e}"));
         }

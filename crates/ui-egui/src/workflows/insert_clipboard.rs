@@ -1,8 +1,15 @@
-//! Organize ▸ Insert ▸ From Clipboard: the pictures and files on the system clipboard become
-//! pages after the selection, all as one undo step.
+//! Pages ▸ Insert pages from clipboard (`page.insert_clipboard`): the picture or the copied files on the system
+//! clipboard become pages after the selection, all as one undo step, with the new pages selected.
+//!
+//! The clipboard is read through the app's clipboard service (`PdfCraftApp::clipboard`), never the operating system
+//! directly, so the tests give it a stand-in. A file that can't be used is named and left out; nothing usable says what
+//! may be copied. Office files are converted in the background first (see `office_batch`); one that can't be
+//! converted is named and left out like the rest.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+
+use craft::platform::clipboard::ClipboardError;
 
 use crate::PdfCraftApp;
 
@@ -26,13 +33,13 @@ type Source = (String, Arc<Vec<u8>>);
 /// A file's name and why it can't be used.
 type Skipped = (String, String);
 
-/// A file's name and size, or why it can't be used. Nothing is opened: a pipe or a device
-/// copied by mistake would wait for ever.
+/// A file's name and size, or why it can't be used. Nothing is opened: a pipe or a device copied by mistake would wait
+/// for ever.
 fn file_size(path: &Path) -> Result<(String, u64), Skipped> {
     let name = path.file_name().map_or_else(|| path.display().to_string(), |n| n.to_string_lossy().into_owned());
     match std::fs::metadata(path) {
-        Ok(meta) if !meta.is_file() => Err((name, "it is not a file".into())),
-        Ok(meta) if meta.len() > MAX_FILE_BYTES => Err((name, "it is larger than 256 MB".into())),
+        Ok(meta) if !meta.is_file() => Err((name, tl!("it is not a file").to_string())),
+        Ok(meta) if meta.len() > MAX_FILE_BYTES => Err((name, tl!("it is larger than 256 MB").to_string())),
         Ok(meta) => Ok((name, meta.len())),
         Err(e) => Err((name, e.to_string())),
     }
@@ -45,7 +52,7 @@ fn read_file(path: &Path, name: String) -> Result<Source, Skipped> {
         let mut bytes = Vec::new();
         std::fs::File::open(path)?.take(MAX_FILE_BYTES.saturating_add(1)).read_to_end(&mut bytes)?;
         if bytes.len() as u64 > MAX_FILE_BYTES {
-            return Err(std::io::Error::other("it is larger than 256 MB"));
+            return Err(std::io::Error::other(tl!("it is larger than 256 MB")));
         }
         Ok(bytes)
     };
@@ -62,33 +69,28 @@ fn left_out_list(left_out: &[Skipped]) -> (String, usize) {
 }
 
 impl PdfCraftApp {
-    /// What the clipboard (or the test stand-in) holds: copied files first, else a picture.
-    fn clipboard_pages(&self) -> Option<Found> {
-        let picture = |clip: Option<crate::create_ui::Clip>| match clip {
-            Some(crate::create_ui::Clip::Image { width, height, rgba }) => Some(Found::Picture { width, height, rgba }),
-            _ => None,
-        };
-        if let Some(files) = self.clipboard_files_override.clone().filter(|f| !f.is_empty()) {
-            return Some(Found::Files(files));
+    /// What the clipboard holds: copied files first, else a picture; `None` when it holds neither.
+    fn clipboard_pages(&mut self) -> Result<Option<Found>, ClipboardError> {
+        if let Some(files) = self.clipboard.read_files()? {
+            return Ok(Some(Found::Files(files)));
         }
-        if self.clipboard_override.is_some() {
-            return picture(self.clipboard_override.clone());
-        }
-        #[cfg(not(target_arch = "wasm32"))]
-        if self.system_clipboard {
-            let files = crate::os_clipboard::files();
-            if !files.is_empty() {
-                return Some(Found::Files(files));
-            }
-            return picture(crate::create_ui::read_clipboard());
-        }
-        None
+        Ok(self.clipboard.read_image()?.map(|image| Found::Picture { width: image.width as usize, height: image.height as usize, rgba: image.rgba }))
     }
 
-    /// Insert pages from the clipboard: the picture or the copied PDFs, pictures and text files
-    /// it holds go after the selection (or the current page), in order, as one undo step, and are
-    /// selected. Nothing it can't use stops the rest; it says what it left out.
-    pub(crate) fn insert_from_clipboard(&mut self) {
+    /// Says why the clipboard couldn't be read.
+    fn say_clipboard_unreadable(&mut self, error: &ClipboardError) {
+        if matches!(error, ClipboardError::TooLarge { .. }) {
+            self.notify_tr("The clipboard holds too much to insert from it");
+            return;
+        }
+        let why = error.text().map_or_else(|| error.to_string(), crate::i18n::platform_text);
+        self.notify_fmt("Couldn't read the clipboard: {e}", &[("e", &why)]);
+    }
+
+    /// `page.insert_clipboard`: the picture or the copied PDFs, pictures and text files go after the selection (or the
+    /// current page), in order, as one undo step, and are selected. What can't be used doesn't stop the rest, and is
+    /// named.
+    pub(crate) fn insert_from_clipboard(&mut self, ctx: &egui::Context) {
         if cfg!(target_arch = "wasm32") {
             self.notify_tr("Inserting from the clipboard is not available in the browser");
             return;
@@ -99,7 +101,11 @@ impl PdfCraftApp {
         }
         let mut left_out: Vec<Skipped> = Vec::new();
         let mut sources = Vec::new();
-        match self.clipboard_pages() {
+        let found = match self.clipboard_pages() {
+            Ok(found) => found,
+            Err(e) => return self.say_clipboard_unreadable(&e),
+        };
+        match found {
             None => {
                 self.notify_tr("The clipboard has no picture or PDF, image or text file to insert");
                 return;
@@ -134,52 +140,51 @@ impl PdfCraftApp {
             }
             Some(Found::Picture { width, height, rgba }) => match crate::create_ui::png_from_rgba(width, height, &rgba) {
                 Ok(png) => sources.push(("Clipboard.png".to_string(), Arc::new(png))),
-                Err(e) => {
-                    self.notify_error(e);
-                    return;
-                }
+                Err(e) => return self.notify_error(e),
             },
         }
-        self.insert_sources_as_one_step(sources, left_out);
+        self.insert_converting_sources(ctx, sources, left_out);
     }
 
-    /// Insert `sources` (name, bytes) after the selection as one edit and select them; `left_out`
-    /// is what could not be read already. Says what was left out.
-    fn insert_sources_as_one_step(&mut self, sources: Vec<Source>, mut left_out: Vec<Skipped>) {
-        let Some(view) = self.active.and_then(|i| self.views.get_mut(i)) else { return };
-        // Word, Excel, PowerPoint, OpenDocument and RTF files convert with LibreOffice on a
-        // worker first; the pages go in when they are ready (one that fails is left out and named).
-        if sources.iter().any(|(name, bytes)| crate::office_batch::is_office(name, bytes)) {
-            let id = view.id;
-            // Said if nothing can be converted, so what was already left out isn't lost.
-            let note = if left_out.is_empty() {
-                String::new()
-            } else {
-                let (list, more) = left_out_list(&left_out);
-                let names = if more > 0 { format!("{list}, +{more}") } else { list };
-                crate::i18n::fmt(tl!("Left out: {names}"), &[("names", &names)])
-            };
-            let files =
-                sources.into_iter().map(|(name, bytes)| Ok((name, Arc::try_unwrap(bytes).unwrap_or_else(|shared| shared.to_vec())))).collect();
-            self.convert_office_files(
-                files,
-                Box::new(move |app, files, _| {
-                    if !app.active.and_then(|i| app.views.get(i)).is_some_and(|v| v.id == id) {
-                        return app.notify_tr("Another document came to the front while the files were being converted, so nothing was inserted.");
-                    }
-                    let mut sources = Vec::new();
-                    for file in files {
-                        match file {
-                            Ok((name, bytes)) => sources.push((name, Arc::new(bytes))),
-                            Err(skipped) => left_out.push(skipped),
-                        }
-                    }
-                    app.insert_sources_as_one_step(sources, left_out);
-                }),
-                note,
-            );
-            return;
+    /// [`Self::insert_sources_as_one_step`] once the Office files among `sources` are converted, in the background; one
+    /// that can't be converted is left out and named with the rest.
+    fn insert_converting_sources(&mut self, ctx: &egui::Context, sources: Vec<Source>, mut left_out: Vec<Skipped>) {
+        let docs: Vec<Source> = sources.iter().filter(|(name, bytes)| crate::office_batch::is_office(name, bytes)).cloned().collect();
+        if docs.is_empty() {
+            return self.insert_sources_as_one_step(ctx, sources, left_out);
         }
+        let Some((_, id)) = self.active_ids() else { return };
+        let target = self.pick_target(Some(id));
+        let ctx = ctx.clone();
+        self.convert_office(
+            docs,
+            Box::new(move |app, results| {
+                let now = app.active_ids().map(|(_, id)| id);
+                if app.pick_target(now) != target {
+                    return app.notify_tr("The document changed while the files were being converted, so nothing was inserted.");
+                }
+                let mut results = results.into_iter();
+                let mut ready = Vec::new();
+                for (name, bytes) in sources {
+                    if !crate::office_batch::is_office(&name, &bytes) {
+                        ready.push((name, bytes));
+                        continue;
+                    }
+                    match results.next() {
+                        Some(Ok(pdf)) => ready.push((name, pdf)),
+                        Some(Err(why)) => left_out.push((name, why)),
+                        None => {}
+                    }
+                }
+                app.insert_sources_as_one_step(&ctx, ready, left_out);
+            }),
+        );
+    }
+
+    /// Insert `sources` (name, bytes) after the selection as one edit and select them; `left_out` is what could not be
+    /// read already. Says what was left out.
+    fn insert_sources_as_one_step(&mut self, ctx: &egui::Context, sources: Vec<Source>, mut left_out: Vec<Skipped>) {
+        let Some(view) = self.active.and_then(|i| self.views.get(i)) else { return };
         // The selection decides where: a gap a "+" chose earlier is not this gesture's.
         let id = view.id;
         let after = view.target_pages().last().map_or(0, |p| p.saturating_add(1));
@@ -200,21 +205,20 @@ impl PdfCraftApp {
             }
             return;
         };
-        if self.apply_edit(edit) {
-            let pages: Vec<usize> = (plan.start..plan.start.saturating_add(plan.pages)).collect();
-            if let Some(view) = self.active.and_then(|i| self.views.get_mut(i)) {
-                view.select_pages(&pages);
-            }
-            if !left_out.is_empty() {
-                let (list, more) = left_out_list(&left_out);
-                if more > 0 {
-                    self.notify_fmt(
-                        "Inserted what could be used. Left out: {list}, and {more} more.",
-                        &[("list", &list), ("more", &more.to_string())],
-                    );
-                } else {
-                    self.notify_fmt("Inserted what could be used. Left out: {list}.", &[("list", &list)]);
-                }
+        if !self.apply_edit(ctx, edit) {
+            // The edit's own refusal is showing.
+            return;
+        }
+        let pages: Vec<usize> = (plan.start..plan.start.saturating_add(plan.pages)).collect();
+        if let Some(view) = self.active.and_then(|i| self.views.get_mut(i)) {
+            view.select_pages(&pages);
+        }
+        if !left_out.is_empty() {
+            let (list, more) = left_out_list(&left_out);
+            if more > 0 {
+                self.notify_fmt("Inserted what could be used. Left out: {list}, and {more} more.", &[("list", &list), ("more", &more.to_string())]);
+            } else {
+                self.notify_fmt("Inserted what could be used. Left out: {list}.", &[("list", &list)]);
             }
         }
     }

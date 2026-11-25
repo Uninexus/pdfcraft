@@ -55,9 +55,6 @@ pub struct Document {
     pub changed_on_open: bool,
     /// Bumped on every change to the working file (edit, undo, redo, save); autosave compares it.
     pub(crate) generation: u64,
-    /// The generation last handed out by `autosave_snapshots`, or another one when storing that
-    /// snapshot failed (`autosave_failed`), so it is due again.
-    pub(crate) snapshot_generation: u64,
     /// Why the document cannot be edited (e.g. encryption), if so.
     pub read_only_reason: Option<String>,
     /// Interactive form fields of the current state (empty without a form).
@@ -104,7 +101,32 @@ pub struct Document {
     pub edit_notices: Vec<EditNotice>,
     /// View ▸ Guides: view state only, never saved (see [`crate::guides`]).
     pub(crate) guides: crate::guides::Guides,
+    /// Comment types (annotation subtypes, see [`COMMENT_TYPES`]) the reader hides on the page:
+    /// view state, never saved, kept when the file is reloaded after a save.
+    pub(crate) hidden_types: std::collections::BTreeSet<String>,
 }
+
+/// The annotation subtypes Comments ▸ Show comment types can hide, in the order a menu lists
+/// them. Form fields and links are not comments and always draw.
+pub const COMMENT_TYPES: &[&str] = &[
+    "Text",
+    "Highlight",
+    "Underline",
+    "StrikeOut",
+    "Squiggly",
+    "FreeText",
+    "Ink",
+    "Line",
+    "Square",
+    "Circle",
+    "Polygon",
+    "PolyLine",
+    "Stamp",
+    "Caret",
+    "FileAttachment",
+    "Sound",
+    "Redact",
+];
 
 /// Something the last successful edit did that the user should hear about, never left silent
 /// (app-agents.md rule 13).
@@ -232,6 +254,21 @@ pub struct TextNotice {
     pub redrawn_elsewhere: bool,
 }
 
+/// A measurement of how the file's bytes are spent, owning what it reads so it can run off the UI thread
+/// ([`Document::space_audit_job`]).
+pub struct SpaceAuditJob {
+    /// The document as the editor holds it; `None` when the document can't be read for editing.
+    cos: Option<pdfcraft_cos::Document>,
+    size: u64,
+}
+
+impl SpaceAuditJob {
+    /// The measurement [`Document::audit_space`] makes; empty when the document can't be read for editing.
+    pub fn run(self) -> Vec<optimize::SpaceUse> {
+        self.cos.map(|cos| optimize::audit_space(&cos, self.size)).unwrap_or_default()
+    }
+}
+
 impl std::fmt::Display for TextNotice {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let ch = format!("\"{}\" (U+{:04X})", self.ch.escape_debug(), u32::from(self.ch));
@@ -327,6 +364,11 @@ impl Document {
     /// PDF Optimizer ▸ Audit space usage.
     pub fn audit_space(&self) -> Vec<optimize::SpaceUse> {
         self.editor.as_ref().map(|e| optimize::audit_space(&e.cos, self.bytes.len() as u64)).unwrap_or_default()
+    }
+
+    /// [`Self::audit_space`] as a job over a copy of the document's state, to run in the background.
+    pub fn space_audit_job(&self) -> SpaceAuditJob {
+        SpaceAuditJob { cos: self.editor.as_ref().map(|e| e.cos.clone()), size: self.bytes.len() as u64 }
     }
 
     /// The backdrop `page` (0-based) paints itself, which hides a background (Add Background).
@@ -853,6 +895,12 @@ impl Document {
     /// Whether comments are hidden (Comments ▸ Hide all comments).
     pub fn comments_hidden(&self) -> bool {
         self.config.hide_comments
+    }
+
+    /// The comment types hidden on the page (Comments ▸ Show comment types), as annotation
+    /// subtypes of [`COMMENT_TYPES`]. Independent of [`Self::comments_hidden`].
+    pub fn hidden_comment_types(&self) -> &std::collections::BTreeSet<String> {
+        &self.hidden_types
     }
 
     /// Whether `Edit::DeleteAnnotation` would delete the annotation at `(page, index)`: the

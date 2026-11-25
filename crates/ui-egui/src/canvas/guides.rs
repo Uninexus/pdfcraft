@@ -1,20 +1,15 @@
-//! View ▸ Show Guides: the document's ruler guides drawn as thin lines over a page.
+//! View > Guides > Show Guides: the document's ruler guides, laid out over a page.
 //!
 //! A guide's position is in points on the displayed page (after `/Rotate`, before the view's own
 //! rotation), measured from the left edge (vertical) or the top edge (horizontal), the space
-//! [`PageXform::norm_to_screen`] takes as `position / page size`. Guides are drawn only: they take
-//! no input, never reach a render for export or print (those do not go through the canvas), and
-//! are not part of any hit test.
+//! [`PageXform::norm_to_screen`] takes as `position / page size`. Guides are drawn only (by
+//! `PageOverlays`, in a theme colour): they take no input, never reach a render for export or print
+//! (those do not go through the canvas), and are not part of any hit test.
 
-use egui::{Color32, Painter, Pos2, Stroke};
+use egui::Pos2;
 use pdfcraft_engine::guides::{Guide, GuideAxis};
 
 use super::xform::PageXform;
-
-/// The line colour: a cyan that reads on white paper and on dark pages alike.
-pub const GUIDE_COLOR: Color32 = Color32::from_rgb(0, 160, 200);
-/// Thin: one screen point.
-const WIDTH: f32 = 1.0;
 
 /// Where `guide` runs on screen, as its two end points, or `None` when its position can't be
 /// placed (not finite) or the page has no size.
@@ -40,15 +35,6 @@ pub(super) fn line(xf: &PageXform, guide: &Guide) -> Option<[Pos2; 2]> {
         return None;
     }
     Some([xf.norm_to_screen(a.0, a.1), xf.norm_to_screen(b.0, b.1)])
-}
-
-/// Draws the guides that belong to `page` (0-based) and lie on it.
-pub(super) fn paint(painter: &Painter, xf: &PageXform, page: usize, guides: &[Guide]) {
-    for guide in guides.iter().filter(|g| g.page == page) {
-        if let Some(points) = line(xf, guide) {
-            painter.line_segment(points, Stroke::new(WIDTH, GUIDE_COLOR));
-        }
-    }
 }
 
 #[cfg(test)]

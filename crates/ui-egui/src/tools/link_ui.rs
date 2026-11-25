@@ -2,25 +2,45 @@
 //! (go to a page, open a web page) in Link Properties; with the Link tool, existing links show
 //! their outlines, a click selects one, a double-click edits it and Delete removes it.
 
-use egui::{Color32, CornerRadius, Pos2, Rect, Stroke};
-use pdfcraft_engine::{Edit, LinkAction, LinkHighlight, LinkItem, LinkStyle, LinkZoom};
+use craft::behavior::kurbo::{BezPath, Point};
+use craft::behavior::{CancelReason, Cursor, CursorIcon, PointerButton, PressPhase, PressState};
+use craft::pages::ui::{PageBody, PlacedPage};
+use craft::theme::Srgba;
+use craft::ui::canvas::{CanvasTool, ToolAction, ToolClaims, ToolContext, ToolKey, ToolPath, ToolPointer};
+use craft::ui::canvas_controls::SelectionOutline;
+use craft::ui::choice::{Checkbox, Radio, RadioGroup};
+use craft::ui::contract::{Bind, Entry, Props as _, Show as _, ShowContainer as _};
+use craft::ui::dialog::{DialogId, DialogResult, DialogStack, StackDialog, dialog_id};
+use craft::ui::display::{Shade, Text};
+use craft::ui::form::{Field, FieldGroup, Help};
+use craft::ui::layout_components::Row;
+use craft::ui::patterns::form_dialogs::FormDialog;
+use craft::ui::pickers::Select;
+use craft::ui::primitives::Draw;
+use craft::ui::runtime::requests::ColorRequest;
+use craft::ui::text::{NumberField, TextField};
+use egui::{Pos2, Rect};
+use pdfcraft_cos::ObjRef;
+use pdfcraft_engine::{
+    Edit, EmbeddedTarget, LaunchTarget, LinkAction, LinkHighlight, LinkItem, LinkStyle, LinkZoom, MAX_EMBEDDED_PAGE, NamedTarget, SAFE_MENU_NAMES,
+    ThreadTarget,
+};
 use pdfcraft_render::{DocInfo, LinkTarget};
 
-use crate::canvas::{DocView, PageToolContext, PageXform};
-use crate::page_cursor::Layer;
-use crate::page_keys::PageKeys;
-use crate::page_router::{Hit, Owner};
-use crate::theme::{self, Tokens};
-use crate::{PdfCraftApp, QuickTool, widgets};
+use crate::PdfCraftApp;
+use crate::canvas::PageSession;
+use crate::canvas::page_overlays::LinkEvent;
+use crate::colour_picker::PickerHost;
+use crate::comments::{RecentColours, palette, to_rgb};
 
-const LINK_BLUE: Color32 = Color32::from_rgb(0x14, 0x73, 0xE6);
 /// How far around a link (screen points) the Link tool finds it, so a thin one can be picked.
-const LINK_TOOL_MARGIN: f32 = 2.0;
+pub(crate) const LINK_TOOL_MARGIN: f32 = 2.0;
+
+/// The least size (screen points, each side) a dragged rectangle has to become a link.
+const MIN_LINK_SIDE: f32 = 4.0;
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct LinkView {
-    /// A link rectangle being drawn: (page, start).
-    pub drag: Option<(usize, Pos2)>,
     pub selected: Option<(usize, usize)>,
     /// The link the last right-click on a page hit (page, index), if any: the canvas
     /// context menu shows the link items only for it, so a right-click elsewhere (on a
@@ -30,8 +50,24 @@ pub struct LinkView {
     /// link (page, index).
     pub open_new: Option<(usize, [f64; 4])>,
     pub open_existing: Option<(usize, usize)>,
-    /// The last click on a link: (time, page, index), to see a second click as a double-click.
-    last_click: Option<(f64, usize, usize)>,
+}
+
+/// What a link does, as Link Properties' Link Action group offers it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum LinkKind {
+    /// Open a web page.
+    #[default]
+    Web,
+    /// Go to a page view.
+    Page,
+    /// Go to an article thread (and a bead of it).
+    Thread,
+    /// Run a menu item from the safe list.
+    Menu,
+    /// Open another PDF file by a relative path.
+    File,
+    /// Go to a page of a PDF file attached to this document.
+    Embedded,
 }
 
 /// Link Properties' working copy.
@@ -41,19 +77,104 @@ pub struct LinkDraft {
     pub rect: [f64; 4],
     /// `None` for a new link.
     pub index: Option<usize>,
+    /// The link's object, for the actions that are set on an object (article, menu item, file).
+    /// `None` for a new link and for an inline one.
+    pub obj: Option<ObjRef>,
     /// Keep an existing action that Link Properties cannot edit.
     pub preserve_action: bool,
-    pub web: bool,
+    pub kind: LinkKind,
     pub url: String,
     /// 1-based target page.
     pub target: usize,
     /// How the target page is shown.
     pub zoom: LinkZoom,
+    /// The article thread's position in the catalog's `/Threads`, counting from 0.
+    pub thread: usize,
+    /// The bead of that thread: 0 for the thread as a whole, else the bead's position counting from 1.
+    pub bead: usize,
+    /// The menu item, as a position in `SAFE_MENU_NAMES`.
+    pub menu: usize,
+    /// The file to open, a relative path to a PDF.
+    pub file: String,
+    /// Whether the file opens in a new window.
+    pub new_window: bool,
     /// The link's action when the dialog opened (`None` for a new link). OK rewrites the action
     /// only when it changed, so an appearance edit keeps a destination's position and kind
     /// (`/XYZ left top`, `/FitR`…) that the dialog doesn't show.
     pub current: Option<LinkAction>,
+    /// The article action the link had when the dialog opened: its thread and bead (counting from 0).
+    pub current_thread: Option<(usize, Option<usize>)>,
+    /// The menu item the link had when the dialog opened, as a position in `SAFE_MENU_NAMES`.
+    pub current_menu: Option<usize>,
+    /// The file the link opened when the dialog opened, and whether in a new window.
+    pub current_file: Option<(String, bool)>,
+    /// The document's attached files, which the go-to-an-attached-file action chooses among.
+    pub attachments: Vec<AttachmentChoice>,
+    /// The attached file to go to, as a position in `attachments`.
+    pub embedded: usize,
+    /// The page of that file, counting from 1.
+    pub embedded_page: usize,
+    /// The attached file and page (counting from 1) the link went to when the dialog opened.
+    pub current_embedded: Option<(String, usize)>,
+    /// The kind of sound, movie, rendition or rich-media action the link has, which the dialog can
+    /// take out but not write.
+    pub media: Option<&'static str>,
+    /// Take that action out when OK is pressed.
+    pub remove_media: bool,
     pub style: LinkStyle,
+}
+
+/// The draft of a new link: a web link to `https://`, with the default style.
+impl Default for LinkDraft {
+    fn default() -> Self {
+        LinkDraft {
+            page: 0,
+            rect: [0.0; 4],
+            index: None,
+            obj: None,
+            preserve_action: false,
+            kind: LinkKind::Web,
+            url: "https://".into(),
+            target: 1,
+            zoom: LinkZoom::FitPage,
+            thread: 0,
+            bead: 0,
+            menu: 0,
+            file: String::new(),
+            new_window: false,
+            current: None,
+            current_thread: None,
+            current_menu: None,
+            current_file: None,
+            attachments: Vec::new(),
+            embedded: 0,
+            embedded_page: 1,
+            current_embedded: None,
+            media: None,
+            remove_media: false,
+            style: LinkStyle::default(),
+        }
+    }
+}
+
+/// One attached file the Link Action group offers to go to.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AttachmentChoice {
+    /// Its key in the document's `/EmbeddedFiles`, which the action names it by.
+    pub key: String,
+    /// Whether it is a PDF file, by its name.
+    pub pdf: bool,
+}
+
+/// One article thread the Link Action group offers.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ThreadChoice {
+    /// Position in the catalog's `/Threads`, counting from 0.
+    pub index: usize,
+    /// Its title, or a number when it has none.
+    pub label: String,
+    /// How many beads it has.
+    pub beads: usize,
 }
 
 /// The zooms Link Properties offers for a page view.
@@ -93,41 +214,23 @@ fn zoom_label(zoom: LinkZoom) -> String {
     }
 }
 
-fn screen_rect(xf: &PageXform, info: &DocInfo, page: usize, r: [f64; 4]) -> Rect {
-    xf.user_rect(info, page, [r[0] as f32, r[1] as f32, r[2] as f32, r[3] as f32])
+/// A user-space rectangle of `placed`'s page on screen.
+pub(crate) fn screen_rect(placed: &PlacedPage, info: &DocInfo, r: [f64; 4]) -> Option<Rect> {
+    let page = info.pages.get(placed.page)?;
+    let [x0, y0] = page.user_to_view(r[0] as f32, r[1] as f32);
+    let [x1, y1] = page.user_to_view(r[2] as f32, r[3] as f32);
+    Some(Rect::from_two_pos(placed.to_screen(Point::new(f64::from(x0), f64::from(y0))), placed.to_screen(Point::new(f64::from(x1), f64::from(y1)))))
 }
 
-fn to_user(xf: &PageXform, info: &DocInfo, page: usize, p: Pos2) -> [f64; 2] {
-    let (vx, vy) = xf.screen_to_view(p);
-    let u = info.pages[page].view_to_user(vx, vy);
-    [u[0] as f64, u[1] as f64]
-}
-
-/// The link under `p` on `page`: the one hit test of links, for the hand, the tip and the press.
-/// Of stacked links, the topmost (the last in `/Annots`, drawn on top). Only the Select tool
-/// follows links and the Link tool edits them (`Layer::reached_by`). The Link tool finds every link
-/// the document has (`links`, the engine's), with a margin around each so a thin one can be
-/// picked, and a drag from one draws a new link. The other tools find the links the renderer can
-/// follow, which have a target (`info.links`). The tip is the link's target.
-pub(crate) fn hit(xf: &PageXform, info: &DocInfo, page: usize, links: &[LinkItem], tool: QuickTool, p: Pos2) -> Option<Hit> {
-    // A press off the page is no page's, so nothing there is a link's, the margin included.
-    if !xf.rect.contains(p) {
-        return None;
-    }
-    let (index, link) = if tool == QuickTool::Link {
-        let index = links.iter().rfind(|l| l.page == page && screen_rect(xf, info, page, l.rect).expand(LINK_TOOL_MARGIN).contains(p))?.index;
-        (index, info.links.iter().find(|l| l.page == page && l.index == index))
-    } else {
-        let link = info.links.iter().rfind(|l| l.page == page && xf.link_contains(info, page, l, p))?;
-        (link.index, Some(link))
-    };
-    let tip = link.map(|l| target_label(info, &l.target));
-    let declines_drag = tool == QuickTool::Link;
-    Some(Hit { tip, declines_drag, ..Hit::new(Owner::Link { index }, Layer::Link, egui::CursorIcon::PointingHand) })
+/// The user-space point of `placed`'s page under the screen point `p`.
+pub(crate) fn to_user(placed: &PlacedPage, info: &DocInfo, p: Pos2) -> Option<[f64; 2]> {
+    let at = placed.to_page(p);
+    let u = info.pages.get(placed.page)?.view_to_user(at.x as f32, at.y as f32);
+    Some([f64::from(u[0]), f64::from(u[1])])
 }
 
 /// What a link's tip says it goes to.
-fn target_label(info: &DocInfo, target: &LinkTarget) -> String {
+pub(crate) fn target_label(info: &DocInfo, target: &LinkTarget) -> String {
     match target {
         LinkTarget::Page(n, _) => crate::i18n::fmt(tl!("Go to page {p}"), &[("p", info.pages.get(*n).map(|p| p.label.as_str()).unwrap_or("?"))]),
         LinkTarget::Uri(u) => u.clone(),
@@ -138,97 +241,508 @@ fn target_label(info: &DocInfo, target: &LinkTarget) -> String {
     }
 }
 
-/// Link tool input on one page: `free` when nobody holds the press and it began on this page,
-/// `owner` the link that holds it (by its `/Annots` index), and `context` the link a right-click is
-/// on. A drag nobody holds draws a new link: a link lets its drag go. Returns `true` when the
-/// gesture belongs to the tool.
-pub(crate) fn page_input(cx: PageToolContext<'_>, free: bool, owner: Option<usize>, context: Option<usize>, view: &mut DocView) -> bool {
-    let PageToolContext { ui, resp, xf, ptr, page, info, .. } = cx;
-    let pointer = ptr.pos;
-    let lv = &mut view.links;
-    if let Some((dp, start)) = lv.drag
-        && dp == page
-    {
-        if resp.drag_stopped() || !ptr.primary_down {
-            lv.drag = None;
-            let end = pointer.unwrap_or(start);
-            let r = Rect::from_two_pos(start, end).intersect(xf.rect);
-            if r.width() >= 4.0 && r.height() >= 4.0 {
-                let (a, b) = (to_user(xf, info, page, r.min), to_user(xf, info, page, r.max));
-                lv.open_new = Some((page, [a[0].min(b[0]), a[1].min(b[1]), a[0].max(b[0]), a[1].max(b[1])]));
+/// The Link tool: a drag from free page space draws the rectangle of a new link, Delete removes the
+/// selected link and Escape unselects it. A press on a link is the page overlay's (`PageLinks` in
+/// edit mode, read by [`link_edit_press`]); a drag that starts on one passes to this tool.
+pub(crate) struct LinkTool<'a> {
+    session: &'a mut PageSession,
+    pages: &'a [PlacedPage],
+    info: &'a DocInfo,
+    /// The canvas background's press of this pass: where a drawn rectangle began.
+    press: PressState,
+}
+
+impl<'a> LinkTool<'a> {
+    /// The tool over the pages on screen this pass.
+    pub(crate) fn new(session: &'a mut PageSession, pages: &'a [PlacedPage], info: &'a DocInfo, press: PressState) -> Self {
+        LinkTool { session, pages, info, press }
+    }
+
+    fn placed(&self, page: usize) -> Option<&PlacedPage> {
+        self.pages.iter().find(|p| p.page == page)
+    }
+
+    /// The rectangle from the press to `pointer`, held to the page it began on.
+    fn drawn(&self, pointer: Pos2) -> Option<(usize, Rect)> {
+        let start = self.press.phase.start()?;
+        if start.button != PointerButton::Primary {
+            return None;
+        }
+        // A press off every page is no page's.
+        let placed = self.pages.iter().find(|p| p.rect.contains(start.origin))?;
+        Some((placed.page, Rect::from_two_pos(start.origin, pointer).intersect(placed.rect)))
+    }
+}
+
+impl CanvasTool for LinkTool<'_> {
+    fn press(&mut self, pointer: &ToolPointer, _cx: &mut ToolContext<'_>) -> ToolAction {
+        if self.pages.iter().any(|p| p.rect.contains(pointer.pos)) { ToolAction::Claimed } else { ToolAction::Ignored }
+    }
+
+    fn drag(&mut self, _pointer: &ToolPointer, _cx: &mut ToolContext<'_>) {}
+
+    fn release(&mut self, pointer: &ToolPointer, _cx: &mut ToolContext<'_>) {
+        let Some((page, r)) = self.drawn(pointer.pos) else { return };
+        // A click that moved nothing draws nothing and leaves the page's selection empty.
+        if r.width() < MIN_LINK_SIDE || r.height() < MIN_LINK_SIDE {
+            self.session.links.selected = None;
+            return;
+        }
+        let Some(placed) = self.placed(page) else { return };
+        let (Some(a), Some(b)) = (to_user(placed, self.info, r.min), to_user(placed, self.info, r.max)) else { return };
+        self.session.links.open_new = Some((page, [a[0].min(b[0]), a[1].min(b[1]), a[0].max(b[0]), a[1].max(b[1])]));
+    }
+
+    fn cancel(&mut self, _reason: CancelReason, _cx: &mut ToolContext<'_>) {}
+
+    fn claims(&self) -> ToolClaims {
+        if self.session.links.selected.is_some() { ToolClaims::NONE.deletes() } else { ToolClaims::NONE }
+    }
+
+    fn key(&mut self, key: &ToolKey, _cx: &mut ToolContext<'_>) -> bool {
+        match key {
+            ToolKey::Delete { .. } => {
+                let Some((page, index)) = self.session.links.selected.take() else { return false };
+                self.session.pending_edit = Some(Edit::DeleteLink { page, index });
+                true
+            }
+            ToolKey::Cancel => self.session.links.selected.take().is_some(),
+            _ => false,
+        }
+    }
+
+    fn paint(&self, _draw: &Draw<'_>, cx: &ToolContext<'_>) {
+        // Only a press that is down shows the rectangle; the release pass has committed it.
+        if !matches!(self.press.phase, PressPhase::Held { .. } | PressPhase::DragStart { .. } | PressPhase::Drag { .. }) {
+            return;
+        }
+        let Some(pointer) = cx.pointer else { return };
+        let Some((_, r)) = self.drawn(pointer.pos) else { return };
+        cx.marching_ants(&[r.left_top(), r.right_top(), r.right_bottom(), r.left_bottom()], true);
+    }
+
+    fn cursor(&self, _cx: &ToolContext<'_>) -> Cursor {
+        Cursor::System(CursorIcon::Crosshair)
+    }
+
+    fn command_form(&self) -> ToolPath {
+        ToolPath::Command("the Link command")
+    }
+}
+
+/// Applies the press the page's link parts reported with the Link tool: a click selects the link, a
+/// second click opens its properties, a secondary press selects it for its menu.
+pub(crate) fn link_edit_press(view: &mut LinkView, event: &LinkEvent) {
+    match *event {
+        LinkEvent::Select { page, index, clicks } => {
+            view.selected = Some((page, index));
+            if clicks >= 2 {
+                view.open_existing = Some((page, index));
             }
         }
-        return true;
-    }
-    // A drag that nobody holds (a link's hit lets its drag go, `PageRouter::drag_began`) draws a
-    // new link from where its press began on this page. egui may see the drag only once the pointer
-    // is past the page's edge.
-    if ptr.drag_started
-        && free
-        && let Some(origin) = ptr.origin.filter(|o| xf.rect.contains(*o))
-    {
-        lv.drag = Some((page, origin));
-        return true;
-    }
-    if !pointer.is_some_and(|p| xf.rect.contains(p)) {
-        return false;
-    }
-    // Over a link, its hit claims the hand.
-    view.cursor.claim(Layer::ToolArea, egui::CursorIcon::Crosshair);
-    if let Some(index) = context {
-        lv.selected = Some((page, index));
-        lv.context = Some((page, index));
-        return true;
-    }
-    // The tool's own click: on a link, or one nobody holds.
-    if (resp.clicked() || resp.double_clicked()) && (free || owner.is_some()) {
-        let now = ui.input(|i| i.time);
-        // A second click on the same link soon after the first is a double-click.
-        let double = resp.double_clicked() || owner.is_some_and(|k| lv.last_click.is_some_and(|(t, p, l)| p == page && l == k && now - t < 0.5));
-        lv.last_click = owner.map(|k| (now, page, k));
-        lv.selected = owner.map(|k| (page, k));
-        if double && let Some(k) = owner {
-            lv.open_existing = Some((page, k));
-            lv.last_click = None;
+        LinkEvent::Context { page, index } => {
+            view.selected = Some((page, index));
+            view.context = Some((page, index));
         }
-        return true;
-    }
-    resp.is_pointer_button_down_on()
-}
-
-/// Outlines of the page's links (selected one bold) and the rectangle being drawn.
-pub(crate) fn paint(painter: &egui::Painter, xf: &PageXform, page: usize, info: &DocInfo, links: &[LinkItem], view: &DocView, pointer: Option<Pos2>) {
-    for l in links.iter().filter(|l| l.page == page) {
-        let r = screen_rect(xf, info, page, l.rect);
-        let selected = view.links.selected == Some((page, l.index));
-        painter.rect_stroke(
-            r,
-            CornerRadius::ZERO,
-            Stroke::new(if selected { 2.0 } else { 1.0 }, LINK_BLUE.gamma_multiply(if selected { 1.0 } else { 0.6 })),
-            egui::StrokeKind::Outside,
-        );
-    }
-    if let (Some((dp, start)), Some(p)) = (view.links.drag, pointer)
-        && dp == page
-    {
-        let r = Rect::from_two_pos(start, p);
-        painter.rect_filled(r, CornerRadius::ZERO, LINK_BLUE.gamma_multiply(0.08));
-        painter.rect_stroke(r, CornerRadius::ZERO, Stroke::new(1.0, LINK_BLUE), egui::StrokeKind::Inside);
+        // Following a link is the page's (`canvas` reads it into the output); it selects nothing.
+        LinkEvent::Follow { .. } => {}
     }
 }
 
-/// Delete removes the selected link; Escape clears the selection. Not while something is over the
-/// pages.
-pub(crate) fn keys(ctx: &egui::Context, keys: PageKeys, view: &mut DocView) {
-    if view.links.selected.is_none() || ctx.egui_wants_keyboard_input() {
+/// Outlines of the document's links over the pages: the selected one solid, the others faint. Shown
+/// under the Link tool only.
+pub(crate) fn link_outlines(ui: &mut egui::Ui, body: &PageBody<'_>, view: &LinkView, links: &[LinkItem], info: &DocInfo) {
+    // A pass with no tool run measures only; the outlines need the pages placed.
+    let (mut selected, mut others) = (Vec::new(), Vec::new());
+    for l in links {
+        let Some(placed) = body.pages.iter().find(|p| p.page == l.page) else { continue };
+        let Some(r) = screen_rect(placed, info, l.rect) else { continue };
+        let mut path = BezPath::new();
+        let [a, b, c, d] = [r.left_top(), r.right_top(), r.right_bottom(), r.left_bottom()].map(|p| body.view.to_doc(p));
+        path.move_to(a);
+        path.line_to(b);
+        path.line_to(c);
+        path.line_to(d);
+        path.close_path();
+        if view.selected == Some((l.page, l.index)) { selected.push(path) } else { others.push(path) }
+    }
+    SelectionOutline::faint(tl!("Links").to_string(), &others).show_at(ui, body.rect);
+    SelectionOutline::solid(tl!("Selected link").to_string(), &selected).show_at(ui, body.rect);
+}
+
+/// Link Properties: the draft of a new or existing link over a form dialog; OK answers the edit it makes.
+pub(crate) struct LinkPropsDialog {
+    id: DialogId,
+    draft: LinkDraft,
+    /// The document's page count, which bounds the Go to a page view target.
+    pages: usize,
+    /// The document's article threads, which the Go to an article thread action chooses among.
+    threads: Vec<ThreadChoice>,
+    /// Whether the dialog is open: bound to the form's open state, so the host's dialog closes with it.
+    open: bool,
+    /// The custom-colour request the Color row raised, for the app to open the colour picker.
+    colour_request: Option<ColorRequest>,
+    /// The session's recent custom colours, which the Color row offers.
+    recent: RecentColours,
+}
+
+impl LinkPropsDialog {
+    /// The dialog editing `draft` in a document of `pages` pages and these article threads.
+    pub(crate) fn new(draft: LinkDraft, pages: usize, threads: Vec<ThreadChoice>, recent: RecentColours) -> Self {
+        LinkPropsDialog { id: dialog_id("linkProps"), draft, pages, threads, open: true, colour_request: None, recent }
+    }
+
+    /// Sets the link's colour: the colour picker's answer.
+    pub(crate) fn set_colour(&mut self, colour: [f64; 3]) {
+        self.draft.style.color = colour;
+    }
+
+    /// The custom-colour request raised since the last call.
+    pub(crate) fn take_colour_request(&mut self) -> Option<ColorRequest> {
+        self.colour_request.take()
+    }
+}
+
+/// Whether a draft can be accepted: a web link needs an address, an article action a thread to go
+/// to and a file action a path `LaunchTarget` takes.
+fn draft_ok(d: &LinkDraft, has_threads: bool) -> bool {
+    d.preserve_action
+        || match d.kind {
+            LinkKind::Web => draft_ok_url(&d.url),
+            LinkKind::Page | LinkKind::Menu => true,
+            LinkKind::Thread => has_threads,
+            LinkKind::File => LaunchTarget::new(d.file.trim(), None).is_ok(),
+            LinkKind::Embedded => embedded_problem(d).is_none(),
+        }
+}
+
+/// The target an attached-file draft goes to: a PDF attachment and a page the engine takes.
+fn embedded_target(d: &LinkDraft) -> Option<EmbeddedTarget> {
+    let choice = d.attachments.get(d.embedded).filter(|a| a.pdf)?;
+    EmbeddedTarget::new(&choice.key, u32::try_from(d.embedded_page).ok()?, None).ok()
+}
+
+/// Why an attached-file draft cannot be accepted, or `None` when it can.
+fn embedded_problem(d: &LinkDraft) -> Option<String> {
+    let Some(choice) = d.attachments.get(d.embedded) else {
+        return Some(tl!("This document has no attachments.").to_string());
+    };
+    if !choice.pdf {
+        return Some(tl!("Choose an attached file that is a PDF file.").to_string());
+    }
+    if !u32::try_from(d.embedded_page).is_ok_and(|p| (1..=MAX_EMBEDDED_PAGE).contains(&p)) {
+        return Some(crate::i18n::fmt(tl!("Type a page number from 1 to {max}."), &[("max", &MAX_EMBEDDED_PAGE.to_string())]).to_string());
+    }
+    embedded_target(d)
+        .is_none()
+        .then(|| tl!("A link cannot name this attached file: its name may have only letters, digits, . _ - ( ) and space.").to_string())
+}
+
+/// Why OK is not available, for the kind of action the draft has.
+fn ok_reason(d: &LinkDraft, has_threads: bool) -> String {
+    match d.kind {
+        LinkKind::Thread if !has_threads => tl!("This document has no article threads.").to_string(),
+        LinkKind::File => tl!("Type a relative path to a PDF file, such as folder/other.pdf.").to_string(),
+        LinkKind::Embedded => embedded_problem(d).unwrap_or_default(),
+        _ => tl!("Type the web address.").to_string(),
+    }
+}
+
+fn entries<T: Clone + PartialEq + std::fmt::Debug + Send + Sync + 'static>(rows: impl IntoIterator<Item = (T, String)>) -> Vec<Entry<T>> {
+    rows.into_iter().map(|(value, label)| Entry::new(value, label)).collect()
+}
+
+/// A row of a labelled select over `rows`: the value picked this pass, if it is not `current`.
+fn pick<T: Clone + PartialEq + std::fmt::Debug + Send + Sync + 'static>(
+    ui: &mut egui::Ui,
+    label: String,
+    current: T,
+    rows: Vec<(T, String)>,
+) -> Option<T> {
+    select_row(ui, label, current, rows, true)
+}
+
+/// [`pick`] that can be switched off, with the row's own field.
+fn select_row<T: Clone + PartialEq + std::fmt::Debug + Send + Sync + 'static>(
+    ui: &mut egui::Ui,
+    label: String,
+    current: T,
+    rows: Vec<(T, String)>,
+    on: bool,
+) -> Option<T> {
+    let list = entries(rows);
+    let mut picked = None;
+    Field::new(label.clone()).enabled(on).show(ui, |ui, _| {
+        picked = Select::new(label.clone(), Bind::given(current.clone()), &list).enabled(on).show(ui).value().cloned();
+    });
+    picked.filter(|p| *p != current)
+}
+
+/// The Link Appearance group.
+fn appearance(ui: &mut egui::Ui, d: &mut LinkDraft, request: &mut Option<ColorRequest>, recent: &RecentColours) {
+    FieldGroup::new(tl!("Link Appearance").to_string()).show(ui, |ui, _| {
+        Text::new(tl!("Link Appearance").to_uppercase()).shade(Shade::Muted).show(ui);
+        let visible = [(true, tl!("Visible Rectangle").to_string()), (false, tl!("Invisible Rectangle").to_string())];
+        if let Some(v) = pick(ui, tl!("Link Type").to_string(), d.style.visible, visible.to_vec()) {
+            d.style.visible = v;
+        }
+        let highlights = LinkHighlight::ALL.into_iter().map(|h| (h, tl!(h.label()).to_string())).collect();
+        if let Some(h) = pick(ui, tl!("Highlight Style").to_string(), d.style.highlight, highlights) {
+            d.style.highlight = h;
+        }
+        if !d.style.visible {
+            return;
+        }
+        let thickness = if d.style.width <= 1.0 {
+            0
+        } else if d.style.width <= 2.0 {
+            1
+        } else {
+            2
+        };
+        let widths = vec![(0usize, tl!("Thin").to_string()), (1, tl!("Medium").to_string()), (2, tl!("Thick").to_string())];
+        if let Some(w) = pick(ui, tl!("Line Thickness").to_string(), thickness, widths) {
+            d.style.width = (w + 1) as f64;
+        }
+        let line = if d.style.dashed {
+            1
+        } else if d.style.underline {
+            2
+        } else {
+            0
+        };
+        let lines = vec![(0usize, tl!("Solid").to_string()), (1, tl!("Dashed").to_string()), (2, tl!("Underline").to_string())];
+        if let Some(l) = pick(ui, tl!("Line Style").to_string(), line, lines) {
+            d.style.dashed = l == 1;
+            d.style.underline = l == 2;
+        }
+        let out = palette(ui, tl!("Color"), Some(d.style.color), "link.colour", recent);
+        // A repeat click on the bound colour changes nothing.
+        if let Some(picked) = out.picked.filter(|c| *c != d.style.color) {
+            d.style.color = picked;
+        }
+        if out.request.is_some() {
+            *request = out.request;
+        }
+    });
+}
+
+/// What the Link Action group needs besides the draft.
+struct ActionCx<'a> {
+    /// The document's page count.
+    pages: usize,
+    /// The document's article threads.
+    threads: &'a [ThreadChoice],
+}
+
+/// The Link Action group.
+fn action(ui: &mut egui::Ui, d: &mut LinkDraft, cx: &ActionCx<'_>) {
+    FieldGroup::new(tl!("Link Action").to_string()).show(ui, |ui, _| {
+        Text::new(tl!("Link Action").to_uppercase()).shade(Shade::Muted).show(ui);
+        if d.preserve_action {
+            Field::new(tl!("Action").to_string())
+                .help(Help::Text(tl!("The existing action will be preserved.").to_string().into()))
+                .show(ui, |_, _| {});
+            if d.media.is_some() {
+                Checkbox::new(Bind::bound(&mut d.remove_media)).label(tl!("Remove this action").to_owned()).show(ui);
+            }
+            return;
+        }
+        let kind = d.kind;
+        // The article, menu item and file actions are set on the link's object, which a new link has not got yet.
+        let existing = d.obj.is_some();
+        let can_embed = existing && !d.attachments.is_empty();
+        let embedded_hint = if kind == LinkKind::Embedded && existing { embedded_problem(d) } else { None };
+        RadioGroup::new(tl!("Link Action").to_string(), Bind::bound(&mut d.kind)).show(ui, |ui, _| {
+            Radio::new(LinkKind::Web).label(tl!("Open a web page").to_string()).show(ui);
+            web_rows(ui, &mut d.url, kind == LinkKind::Web);
+            Radio::new(LinkKind::Page).label(tl!("Go to a page view").to_string()).show(ui);
+            page_rows(ui, &mut d.target, &mut d.zoom, cx.pages, kind == LinkKind::Page);
+            Radio::new(LinkKind::Thread).label(tl!("Go to an article thread").to_string()).enabled(existing).show(ui);
+            thread_rows(ui, &mut d.thread, &mut d.bead, cx.threads, kind == LinkKind::Thread && existing);
+            Radio::new(LinkKind::Menu).label(tl!("Run a menu item").to_string()).enabled(existing).show(ui);
+            menu_rows(ui, &mut d.menu, kind == LinkKind::Menu && existing);
+            Radio::new(LinkKind::File).label(tl!("Open a PDF file").to_string()).enabled(existing).show(ui);
+            file_rows(ui, &mut d.file, &mut d.new_window, kind == LinkKind::File && existing);
+            Radio::new(LinkKind::Embedded).label(tl!("Go to a page in an attached file").to_string()).enabled(can_embed).show(ui);
+            let at = EmbeddedAt { attachments: &d.attachments, hint: embedded_hint.as_deref(), on: kind == LinkKind::Embedded && can_embed };
+            embedded_rows(ui, &at, &mut d.embedded, &mut d.embedded_page);
+        });
+        if !existing {
+            Text::new(tl!("An article, menu item or file action can be set once the link exists: create it, then open its properties.").to_string())
+                .shade(Shade::Muted)
+                .show(ui);
+        }
+    });
+}
+
+/// The web address row of the Link Action group.
+fn web_rows(ui: &mut egui::Ui, url: &mut String, on: bool) {
+    let mut field = Field::new(tl!("Link URL").to_string());
+    if on && !draft_ok_url(url) {
+        field = field.help(Help::Text(tl!("Type the web address.").to_string().into()));
+    }
+    field.show(ui, |ui, _| {
+        TextField::new(tl!("Link URL").to_string(), Bind::bound(&mut *url)).placeholder("https://example.org").enabled(on).show(ui);
+    });
+}
+
+/// The page and zoom rows of the Link Action group.
+fn page_rows(ui: &mut egui::Ui, target: &mut usize, zoom: &mut LinkZoom, pages: usize, on: bool) {
+    Field::new(tl!("Page").to_string()).show(ui, |ui, _| {
+        Row::new().show(ui, |ui, _| {
+            let page = NumberField::new(tl!("Page").to_string(), Bind::given(Some(*target as f64)))
+                .range(1.0..=pages.max(1) as f64)
+                .step(1.0)
+                .enabled(on)
+                .show(ui);
+            if let Some(n) = page.edit.events.landed().cloned().flatten() {
+                *target = (n.round().max(1.0) as usize).min(pages.max(1));
+            }
+            Text::new(crate::i18n::fmt(tl!("of {pages}"), &[("pages", &pages.max(1).to_string())]).to_string()).shade(Shade::Muted).show(ui);
+        });
+    });
+    // The destination's own zoom, past what the dialog offers, stays a choice.
+    let mut zooms = ZOOMS.to_vec();
+    if !zooms.contains(&*zoom) {
+        zooms.push(*zoom);
+    }
+    let current = zooms.iter().position(|z| z == &*zoom).unwrap_or(0);
+    let rows: Vec<(usize, String)> = zooms.iter().enumerate().map(|(i, z)| (i, zoom_label(*z))).collect();
+    let list = entries::<usize>(rows);
+    Field::new(tl!("Zoom").to_string()).show(ui, |ui, _| {
+        let picked = Select::new(tl!("Zoom").to_string(), Bind::given(current), &list).enabled(on).show(ui).value().copied();
+        if let Some(z) = picked.and_then(|i| zooms.get(i)) {
+            *zoom = *z;
+        }
+    });
+}
+
+/// The article thread and bead rows of the Link Action group.
+fn thread_rows(ui: &mut egui::Ui, thread: &mut usize, bead: &mut usize, threads: &[ThreadChoice], on: bool) {
+    if threads.is_empty() {
+        Field::new(tl!("Article").to_string()).help(Help::Text(tl!("This document has no article threads.").to_string().into())).show(ui, |_, _| {});
         return;
     }
-    let del = keys.pressed(ctx, egui::Key::Delete) || keys.pressed(ctx, egui::Key::Backspace);
-    let esc = keys.pressed(ctx, egui::Key::Escape);
-    if del && let Some((page, index)) = view.links.selected.take() {
-        view.pending_edit = Some(Edit::DeleteLink { page, index });
-    } else if esc {
-        view.links.selected = None;
+    let rows = threads.iter().map(|t| (t.index, t.label.clone())).collect();
+    if let Some(t) = select_row(ui, tl!("Article").to_string(), *thread, rows, on) {
+        *thread = t;
+        *bead = 0;
+    }
+    let beads = threads.iter().find(|t| t.index == *thread).map_or(0, |t| t.beads).min(pdfcraft_engine::MAX_ACTION_BEADS);
+    *bead = (*bead).min(beads);
+    let can_pick = on && beads > 0;
+    Field::new(tl!("Bead").to_string()).help(Help::Text(tl!("0 goes to the whole article.").to_string().into())).enabled(can_pick).show(
+        ui,
+        |ui, _| {
+            let edit = NumberField::new(tl!("Bead").to_string(), Bind::given(Some(*bead as f64)))
+                .range(0.0..=beads as f64)
+                .step(1.0)
+                .enabled(can_pick)
+                .show(ui);
+            if let Some(n) = edit.edit.events.landed().cloned().flatten() {
+                *bead = (n.round().max(0.0) as usize).min(beads);
+            }
+        },
+    );
+}
+
+/// The menu item row of the Link Action group: the safe list, nothing typed.
+fn menu_rows(ui: &mut egui::Ui, menu: &mut usize, on: bool) {
+    let rows = SAFE_MENU_NAMES
+        .iter()
+        .copied()
+        .enumerate()
+        .map(|(i, name)| (i, tl!(crate::prepare::menu_item_label(name).unwrap_or(name)).to_string()))
+        .collect();
+    if let Some(m) = select_row(ui, tl!("Menu item").to_string(), *menu, rows, on) {
+        *menu = m;
+    }
+}
+
+/// The file and window rows of the Link Action group.
+fn file_rows(ui: &mut egui::Ui, file: &mut String, new_window: &mut bool, on: bool) {
+    let mut field = Field::new(tl!("File to open").to_string());
+    if on && LaunchTarget::new(file.trim(), None).is_err() {
+        field = field.help(Help::Text(tl!("Type a relative path to a PDF file, such as folder/other.pdf.").to_string().into()));
+    }
+    field.show(ui, |ui, _| {
+        TextField::new(tl!("File to open").to_string(), Bind::bound(&mut *file)).placeholder("other.pdf").enabled(on).show(ui);
+    });
+    Checkbox::new(Bind::bound(&mut *new_window)).label(tl!("Open in a new window").to_owned()).enabled(on).show(ui);
+}
+
+/// What the attached-file rows of the Link Action group show.
+struct EmbeddedAt<'a> {
+    /// The document's attached files.
+    attachments: &'a [AttachmentChoice],
+    /// Why the draft cannot be accepted, when it is this action and cannot.
+    hint: Option<&'a str>,
+    /// Whether this action is the one chosen.
+    on: bool,
+}
+
+/// The attached file and page rows of the Link Action group.
+fn embedded_rows(ui: &mut egui::Ui, at: &EmbeddedAt<'_>, chosen: &mut usize, page: &mut usize) {
+    if at.attachments.is_empty() {
+        Field::new(tl!("Attached file").to_string())
+            .help(Help::Text(tl!("This document has no attachments.").to_string().into()))
+            .show(ui, |_, _| {});
+        return;
+    }
+    let rows = at.attachments.iter().enumerate().map(|(i, a)| (i, a.key.clone())).collect();
+    if let Some(i) = select_row(ui, tl!("Attached file").to_string(), *chosen, rows, at.on) {
+        *chosen = i;
+    }
+    let mut field = Field::new(tl!("Page in the attached file").to_string()).enabled(at.on);
+    if let Some(why) = at.hint {
+        field = field.help(Help::Text(why.to_string().into()));
+    }
+    field.show(ui, |ui, _| {
+        let edit = NumberField::new(tl!("Page in the attached file").to_string(), Bind::given(Some(*page as f64)))
+            .range(1.0..=f64::from(MAX_EMBEDDED_PAGE))
+            .step(1.0)
+            .enabled(at.on)
+            .show(ui);
+        if let Some(n) = edit.edit.events.landed().cloned().flatten() {
+            *page = (n.round().max(1.0) as usize).min(MAX_EMBEDDED_PAGE as usize);
+        }
+    });
+}
+
+/// Whether a typed web address is one a link can take.
+fn draft_ok_url(url: &str) -> bool {
+    url.trim().len() > 3 && url.trim() != "https://"
+}
+
+impl StackDialog for LinkPropsDialog {
+    type Result = Edit;
+
+    fn id(&self) -> DialogId {
+        self.id
+    }
+
+    fn show(&mut self, ui: &mut egui::Ui, _: &DialogStack) -> Option<DialogResult<Edit>> {
+        let title = if self.draft.index.is_some() { tl!("Link Properties") } else { tl!("Create Link") };
+        let LinkPropsDialog { draft, pages, threads, open, colour_request, recent, .. } = self;
+        let has_threads = !threads.is_empty();
+        let reason = ok_reason(draft, has_threads);
+        let form = FormDialog::new(title.to_string(), Bind::bound(&mut *draft)).opened(Bind::bound(open)).ok_reason(reason);
+        let cx = ActionCx { pages: *pages, threads: threads.as_slice() };
+        let shown = form.show(ui, |ui, _, d| {
+            appearance(ui, d, colour_request, recent);
+            action(ui, d, &cx);
+            draft_ok(d, has_threads)
+        });
+        match (shown.accepted, shown.closed) {
+            (Some(d), _) => Some(DialogResult::Ok(edit_for(&d))),
+            (None, Some(_)) => Some(DialogResult::Cancel),
+            (None, None) => None,
+        }
+    }
+
+    fn key(&self) -> Option<&str> {
+        Some("linkProps")
     }
 }
 
@@ -237,47 +751,32 @@ impl PdfCraftApp {
     pub(crate) fn open_link_props(&mut self, page: usize, rect: Option<[f64; 4]>, index: Option<usize>) {
         let Some((_, id)) = self.active_ids() else { return };
         let existing = index.and_then(|i| self.session.get(id).and_then(|d| d.links().iter().find(|l| l.page == page && l.index == i).cloned()));
-        let draft = match existing {
-            Some(l) => LinkDraft {
-                page,
-                rect: l.rect,
-                index,
-                preserve_action: matches!(l.action, LinkAction::Other(_)),
-                web: matches!(l.action, LinkAction::Uri(_)),
-                url: match &l.action {
-                    LinkAction::Uri(u) => u.clone(),
-                    _ => "https://".into(),
-                },
-                target: match l.action {
-                    LinkAction::Page { page, .. } => page + 1,
-                    _ => 1,
-                },
-                zoom: match l.action {
-                    LinkAction::Page { zoom, .. } => zoom,
-                    _ => LinkZoom::FitPage,
-                },
-                current: Some(l.action.clone()),
-                style: l.style,
-            },
-            None => LinkDraft {
-                page,
-                rect: rect.unwrap_or_default(),
-                index: None,
-                preserve_action: false,
-                web: true,
-                url: "https://".into(),
-                target: 1,
-                zoom: LinkZoom::FitPage,
-                current: None,
-                style: LinkStyle::default(),
-            },
+        let draft = match (existing, self.session.get(id)) {
+            (Some(l), Some(doc)) => existing_draft(doc, &l, page, index),
+            _ => LinkDraft { page, rect: rect.unwrap_or_default(), ..LinkDraft::default() },
         };
-        self.link_draft = Some(draft);
-        self.dialog = Some(crate::Dialog::LinkProps);
+        let (pages, threads) = self.session.get(id).map_or((1, Vec::new()), |d| (d.info.pages.len(), thread_choices(d)));
+        crate::dialogs::host::open(self, LinkPropsDialog::new(draft, pages, threads, self.recent_colours.clone()));
+    }
+
+    /// One pass of Link Properties for the app: opens the colour picker the Color row asked for, and
+    /// applies the edit OK answered.
+    // PLAN: pdf-hub-w2's `dialogs/host.rs::results` calls `app.link_props_pass(ctx)`; the pass needs no context, so it calls it without.
+    pub(crate) fn link_props_pass(&mut self, ctx: &egui::Context) {
+        if let Some(request) = self.dialogs.get_mut::<LinkPropsDialog>().and_then(|d| d.take_colour_request()) {
+            self.open_colour_picker(PickerHost::App, request, |app: &mut PdfCraftApp, _: &egui::Context, picked: Srgba| {
+                if let Some(d) = app.dialogs.get_mut::<LinkPropsDialog>() {
+                    d.set_colour(to_rgb(picked));
+                }
+            });
+        }
+        if let Some(DialogResult::Ok(edit)) = self.dialogs.take::<LinkPropsDialog>() {
+            self.apply_edit(ctx, edit);
+        }
     }
 
     /// Create links from URLs in the text of every page.
-    pub fn links_from_urls(&mut self) {
+    pub fn links_from_urls(&mut self, ctx: &egui::Context) {
         let Some((_, id)) = self.active_ids() else { return };
         let found = self.session.find_urls(id);
         if found.is_empty() {
@@ -285,7 +784,7 @@ impl PdfCraftApp {
             return;
         }
         let n = found.len();
-        if self.apply_edit(Edit::AddLinks { links: found, style: LinkStyle::default() }) {
+        if self.apply_edit(ctx, Edit::AddLinks { links: found, style: LinkStyle::default() }) {
             if n == 1 {
                 self.notify_tr("Created 1 link");
             } else {
@@ -295,14 +794,14 @@ impl PdfCraftApp {
     }
 
     /// Remove every link in the active document.
-    pub fn remove_all_links(&mut self) {
+    pub fn remove_all_links(&mut self, ctx: &egui::Context) {
         let Some((_, id)) = self.active_ids() else { return };
         let count = self.session.get(id).map_or(0, |d| d.links().len());
         if count == 0 {
             self.notify_tr("No links to remove");
             return;
         }
-        if self.apply_edit(Edit::RemoveLinks { pages: None }) {
+        if self.apply_edit(ctx, Edit::RemoveLinks { pages: None }) {
             if count == 1 {
                 self.notify_tr("Removed 1 link");
             } else {
@@ -312,155 +811,217 @@ impl PdfCraftApp {
     }
 }
 
-/// Link Properties. Returns (apply, cancel).
-pub(crate) fn body(ui: &mut egui::Ui, d: &mut LinkDraft, pages: usize, t: &Tokens) -> (bool, bool) {
-    ui.set_width(460.0);
-    ui.label(egui::RichText::new(if d.index.is_some() { tl!("Link Properties") } else { tl!("Create Link") }).font(theme::semibold(18.0)));
-    ui.add_space(8.0);
-    widgets::section_title(ui, tl!("Link Appearance"));
-    egui::Grid::new("link-appearance").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
-        ui.label(tl!("Link Type:"));
-        craft_ui::ComboBox::from_id_salt("link-type")
-            .selected_text(if d.style.visible { tl!("Visible Rectangle") } else { tl!("Invisible Rectangle") })
-            .show_ui(ui, |ui| {
-                ui.selectable_value(&mut d.style.visible, true, tl!("Visible Rectangle"));
-                ui.selectable_value(&mut d.style.visible, false, tl!("Invisible Rectangle"));
-            });
-        ui.end_row();
-        ui.label(tl!("Highlight Style:"));
-        craft_ui::ComboBox::from_id_salt("link-hl").selected_text(tl!(d.style.highlight.label())).show_ui(ui, |ui| {
-            for h in LinkHighlight::ALL {
-                ui.selectable_value(&mut d.style.highlight, h, tl!(h.label()));
-            }
-        });
-        ui.end_row();
-        if d.style.visible {
-            ui.label(tl!("Line Thickness:"));
-            craft_ui::ComboBox::from_id_salt("link-w")
-                .selected_text(if d.style.width <= 1.0 {
-                    tl!("Thin")
-                } else if d.style.width <= 2.0 {
-                    tl!("Medium")
-                } else {
-                    tl!("Thick")
-                })
-                .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut d.style.width, 1.0, tl!("Thin"));
-                    ui.selectable_value(&mut d.style.width, 2.0, tl!("Medium"));
-                    ui.selectable_value(&mut d.style.width, 3.0, tl!("Thick"));
-                });
-            ui.end_row();
-            ui.label(tl!("Line Style:"));
-            let mut style = if d.style.dashed {
-                1
-            } else if d.style.underline {
-                2
-            } else {
-                0
-            };
-            craft_ui::ComboBox::from_id_salt("link-s").selected_text(tl!(["Solid", "Dashed", "Underline"][style])).show_ui(ui, |ui| {
-                for (k, l) in ["Solid", "Dashed", "Underline"].iter().enumerate() {
-                    ui.selectable_value(&mut style, k, tl!(l));
-                }
-            });
-            d.style.dashed = style == 1;
-            d.style.underline = style == 2;
-            ui.end_row();
-            ui.label(tl!("Color:"));
-            if let Some(c) = crate::comments::swatch_grid(ui, Some(d.style.color)) {
-                d.style.color = c;
-            }
-            ui.end_row();
-        }
-    });
-    ui.add_space(8.0);
-    widgets::section_title(ui, tl!("Link Action"));
-    if d.preserve_action {
-        ui.label(tl!("The existing action will be preserved."));
-    } else {
-        widgets::radio_value(ui, &mut d.web, true, tl!("Open a web page"));
-        ui.add_enabled_ui(d.web, |ui| {
-            ui.horizontal(|ui| {
-                ui.add_space(24.0);
-                ui.add(crate::widgets::line(&mut d.url).desired_width(360.0).hint_text("https://example.org")).accessible_name(tl!("Link URL"));
-            });
-        });
-        widgets::radio_value(ui, &mut d.web, false, tl!("Go to a page view"));
-        ui.add_enabled_ui(!d.web, |ui| {
-            ui.horizontal(|ui| {
-                ui.add_space(24.0);
-                ui.label(tl!("Page"));
-                ui.add(egui::DragValue::new(&mut d.target).range(1..=pages.max(1)));
-                ui.label(crate::i18n::fmt(tl!("of {name}"), &[("name", &pages.to_string())]));
-            });
-            ui.horizontal(|ui| {
-                ui.add_space(24.0);
-                let label = ui.label(tl!("Zoom"));
-                craft_ui::ComboBox::from_id_salt("link-zoom")
-                    .selected_text(zoom_label(d.zoom))
-                    .show_ui(ui, |ui| {
-                        for z in ZOOMS {
-                            ui.selectable_value(&mut d.zoom, z, zoom_label(z));
-                        }
-                    })
-                    .response
-                    .labelled_by(label.id);
-            });
-        });
-    }
-    let ok = d.preserve_action || !d.web || (d.url.trim().len() > 3 && d.url.trim() != "https://");
-    if !ok {
-        ui.label(egui::RichText::new(tl!("Type the web address.")).small().color(t.text_faint));
-    }
-    ui.add_space(12.0);
-    let (mut a, mut c) = (false, false);
-    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-        if ui.add_enabled_ui(ok, |ui| widgets::pill_button(ui, tl!("OK"), true)).inner.clicked() {
-            a = true;
-        }
-        if widgets::pill_button(ui, tl!("Cancel"), false).clicked() {
-            c = true;
-        }
-    });
-    (a, c)
+/// The article threads of `doc`, for the Link Action group to choose among.
+fn thread_choices(doc: &pdfcraft_engine::Document) -> Vec<ThreadChoice> {
+    doc.article_threads()
+        .threads
+        .into_iter()
+        .map(|t| ThreadChoice {
+            label: t
+                .title
+                .filter(|title| !title.trim().is_empty())
+                .unwrap_or_else(|| crate::i18n::fmt(tl!("Article {n}"), &[("n", &(t.index + 1).to_string())])),
+            index: t.index,
+            beads: t.beads,
+        })
+        .collect()
 }
 
-/// The action a confirmed draft sets.
+/// The attached files of `doc` that are in its `/EmbeddedFiles`, for the Link Action group to choose among.
+fn attachment_choices(doc: &pdfcraft_engine::Document) -> Vec<AttachmentChoice> {
+    let pdf = |s: &str| s.to_lowercase().ends_with(".pdf");
+    doc.info
+        .attachments
+        .iter()
+        .filter_map(|a| match &a.source {
+            pdfcraft_render::AttachmentSource::Document { key } => Some(AttachmentChoice { key: key.clone(), pdf: pdf(&a.name) || pdf(key) }),
+            pdfcraft_render::AttachmentSource::Annotation { .. } => None,
+        })
+        .collect()
+}
+
+/// The draft of an existing link: its page or web address, and, for an article, menu item or file
+/// action the dialog edits, that action. Any other action is kept as it is.
+fn existing_draft(doc: &pdfcraft_engine::Document, l: &LinkItem, page: usize, index: Option<usize>) -> LinkDraft {
+    let mut d = LinkDraft {
+        page,
+        rect: l.rect,
+        index,
+        obj: l.obj,
+        preserve_action: matches!(l.action, LinkAction::Other(_)),
+        kind: if matches!(l.action, LinkAction::Uri(_)) { LinkKind::Web } else { LinkKind::Page },
+        url: match &l.action {
+            LinkAction::Uri(u) => u.clone(),
+            _ => "https://".into(),
+        },
+        target: match l.action {
+            LinkAction::Page { page, .. } => page + 1,
+            _ => 1,
+        },
+        zoom: match l.action {
+            LinkAction::Page { zoom, .. } => zoom,
+            _ => LinkZoom::FitPage,
+        },
+        current: Some(l.action.clone()),
+        attachments: attachment_choices(doc),
+        style: l.style,
+        ..LinkDraft::default()
+    };
+    if let (LinkAction::Other(name), Some(obj)) = (&l.action, l.obj) {
+        read_object_action(doc, obj, name, &mut d);
+    }
+    d
+}
+
+/// Takes the link's article, menu item or file action (`name` is its `/S`) into the draft, when the
+/// dialog can edit it as it stands; otherwise the draft keeps the action as it is.
+fn read_object_action(doc: &pdfcraft_engine::Document, obj: ObjRef, name: &str, d: &mut LinkDraft) {
+    match name {
+        "Thread" => {
+            let read = doc.link_thread_action(obj);
+            if let (true, false, Some(thread)) = (read.settable, read.remote, read.thread) {
+                d.preserve_action = false;
+                d.kind = LinkKind::Thread;
+                d.thread = thread;
+                d.bead = read.bead.map_or(0, |b| b + 1);
+                d.current_thread = Some((thread, read.bead));
+            }
+        }
+        "Named" => {
+            let read = doc.link_named_action(obj);
+            let at = read.name.as_deref().and_then(|n| SAFE_MENU_NAMES.iter().position(|safe| *safe == n));
+            if let (true, true, Some(at)) = (read.settable, read.safe, at) {
+                d.preserve_action = false;
+                d.kind = LinkKind::Menu;
+                d.menu = at;
+                d.current_menu = Some(at);
+            }
+        }
+        "Sound" | "Movie" | "Rendition" | "RichMediaExecute" => {
+            let read = doc.link_media_action(obj);
+            if let (true, true, Some(kind)) = (read.settable, read.is_media, read.kind) {
+                d.media = Some(kind);
+            }
+        }
+        "Launch" => {
+            let read = doc.link_launch_action(obj);
+            if let (true, false, Some(file)) = (read.settable, read.url, read.file.clone())
+                && LaunchTarget::new(&file, None).is_ok()
+            {
+                let new_window = read.new_window.unwrap_or(false);
+                d.preserve_action = false;
+                d.kind = LinkKind::File;
+                d.current_file = Some((file.clone(), new_window));
+                d.file = file;
+                d.new_window = new_window;
+            }
+        }
+        "GoToE" => read_embedded(doc, obj, d),
+        _ => {}
+    }
+}
+
+/// Takes the link's go-to-an-attached-file action into the draft, when it is one the dialog writes:
+/// a page of a PDF attachment of this document, named by its key, and nothing else in it.
+fn read_embedded(doc: &pdfcraft_engine::Document, obj: ObjRef, d: &mut LinkDraft) {
+    let read = doc.link_embedded_action(obj);
+    let (Some(name), Some(page)) = (read.embedded_file.as_deref(), read.destination_page) else { return };
+    let shaped = read.settable
+        && read.exact
+        && read.is_goto_embedded
+        && read.has_target
+        && read.relationship.as_deref() == Some("C")
+        && !read.has_annotation_target
+        && !read.has_nested_target
+        && read.file_kind.is_none()
+        && read.destination_kind == Some("array");
+    let at = d.attachments.iter().position(|a| a.pdf && a.key == name);
+    let page = usize::try_from(page).ok().filter(|p| (1..=MAX_EMBEDDED_PAGE as usize).contains(p));
+    if let (true, Some(at), Some(page)) = (shaped, at, page) {
+        d.preserve_action = false;
+        d.kind = LinkKind::Embedded;
+        d.embedded = at;
+        d.embedded_page = page;
+        d.current_embedded = Some((name.to_string(), page));
+    }
+}
+
+/// The action a confirmed web or page draft sets.
 fn action_for(d: &LinkDraft) -> LinkAction {
-    if d.web { LinkAction::Uri(d.url.trim().to_string()) } else { LinkAction::Page { page: d.target.saturating_sub(1), zoom: d.zoom } }
+    if d.kind == LinkKind::Web {
+        LinkAction::Uri(d.url.trim().to_string())
+    } else {
+        LinkAction::Page { page: d.target.saturating_sub(1), zoom: d.zoom }
+    }
 }
 
-/// The edit for a confirmed draft.
+/// The edit that sets the article, menu item or file action a confirmed draft of an existing link
+/// has, with the name of its undo step, when it differs from the one the link had.
+fn object_action_edit(d: &LinkDraft) -> Option<(&'static str, Edit)> {
+    let link = d.obj?;
+    if d.preserve_action {
+        return (d.media.is_some() && d.remove_media).then_some(("Remove link media action", Edit::RemoveLinkMediaAction { link }));
+    }
+    match d.kind {
+        LinkKind::Web | LinkKind::Page => None,
+        LinkKind::Thread => {
+            let target = ThreadTarget::new(d.thread, d.bead.checked_sub(1)).ok()?;
+            (d.current_thread != Some((target.thread(), target.bead())))
+                .then_some(("Set link article action", Edit::SetLinkThreadAction { link, target: Some(target) }))
+        }
+        LinkKind::Menu => {
+            let target = NamedTarget::new(SAFE_MENU_NAMES.get(d.menu)?).ok()?;
+            (d.current_menu != Some(d.menu)).then_some(("Set link menu action", Edit::SetLinkNamedAction { link, target: Some(target) }))
+        }
+        LinkKind::File => {
+            let file = d.file.trim();
+            let target = LaunchTarget::new(file, Some(d.new_window)).ok()?;
+            (d.current_file.as_ref() != Some(&(file.to_string(), d.new_window)))
+                .then_some(("Set link file action", Edit::SetLinkLaunchAction { link, target: Some(target) }))
+        }
+        LinkKind::Embedded => {
+            let target = embedded_target(d)?;
+            let now = (target.name().to_string(), d.embedded_page);
+            (d.current_embedded.as_ref() != Some(&now))
+                .then_some(("Set link attached-file action", Edit::SetLinkEmbeddedAction { link, target: Some(target) }))
+        }
+    }
+}
+
+/// The edit for a confirmed draft: one undo step, whatever it changes of the link.
 pub(crate) fn edit_for(d: &LinkDraft) -> Edit {
     match d.index {
         None => Edit::AddLink { page: d.page, rect: d.rect, action: action_for(d), style: d.style },
-        Some(index) => Edit::SetLink {
-            page: d.page,
-            index,
-            rect: None,
-            action: (!d.preserve_action).then(|| action_for(d)).filter(|a| d.current.as_ref() != Some(a)),
-            style: Some(d.style),
-        },
+        Some(index) => {
+            let by_value = matches!(d.kind, LinkKind::Web | LinkKind::Page) && !d.preserve_action;
+            let set = Edit::SetLink {
+                page: d.page,
+                index,
+                rect: None,
+                action: by_value.then(|| action_for(d)).filter(|a| d.current.as_ref() != Some(a)),
+                style: Some(d.style),
+            };
+            match object_action_edit(d) {
+                Some((label, edit)) => Edit::Batch { label: label.into(), edits: vec![set, edit] },
+                None => set,
+            }
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{LinkDraft, edit_for, zoom_label};
+    use super::{LinkDraft, LinkKind, edit_for, zoom_label};
     use pdfcraft_engine::{Edit, LinkAction, LinkStyle, LinkZoom};
 
     fn draft(current: LinkAction) -> LinkDraft {
         LinkDraft {
-            page: 0,
-            rect: [0.0; 4],
             index: Some(3),
             preserve_action: matches!(current, LinkAction::Other(_)),
-            web: false,
+            kind: LinkKind::Page,
             url: String::new(),
-            target: 1,
-            zoom: LinkZoom::FitPage,
             current: Some(current),
-            style: LinkStyle::default(),
+            ..LinkDraft::default()
         }
     }
 
@@ -482,6 +1043,143 @@ mod tests {
         d.zoom = LinkZoom::Percent(200.0);
         d.target = 2;
         assert!(matches!(edit_for(&d), Edit::SetLink { action: Some(LinkAction::Page { page: 1, .. }), .. }));
+    }
+
+    fn with_object(kind: LinkKind) -> LinkDraft {
+        LinkDraft {
+            index: Some(0),
+            obj: Some(pdfcraft_cos::ObjRef::new(9, 0)),
+            kind,
+            current: Some(LinkAction::Uri("http://x.test".into())),
+            ..LinkDraft::default()
+        }
+    }
+
+    /// The edits of the one undo step a confirmed draft makes: the link's own, then the object action.
+    fn steps(d: &LinkDraft) -> Vec<Edit> {
+        match edit_for(d) {
+            Edit::Batch { edits, .. } => edits,
+            one => vec![one],
+        }
+    }
+
+    #[test]
+    fn an_article_action_is_one_step_with_the_link_and_names_its_bead_from_one() {
+        let mut d = with_object(LinkKind::Thread);
+        d.thread = 1;
+        d.bead = 2;
+        let edits = steps(&d);
+        assert!(matches!(edits[0], Edit::SetLink { action: None, .. }), "the web address is left for the article action to replace");
+        let Some(Edit::SetLinkThreadAction { target: Some(t), .. }) = edits.get(1) else { panic!("{edits:?}") };
+        assert_eq!((t.thread(), t.bead()), (1, Some(1)), "the dialog counts beads from 1, the file from 0");
+        d.bead = 0;
+        let edits = steps(&d);
+        let Some(Edit::SetLinkThreadAction { target: Some(t), .. }) = edits.get(1) else { panic!("{edits:?}") };
+        assert_eq!(t.bead(), None, "0 is the whole article");
+        // An article action left as it was is not written again.
+        d.current_thread = Some((1, None));
+        assert!(matches!(edit_for(&d), Edit::SetLink { .. }));
+    }
+
+    #[test]
+    fn a_menu_item_is_taken_from_the_safe_list_and_written_once() {
+        let mut d = with_object(LinkKind::Menu);
+        d.menu = 3;
+        let edits = steps(&d);
+        let Some(Edit::SetLinkNamedAction { target: Some(t), .. }) = edits.get(1) else { panic!("{edits:?}") };
+        assert_eq!(t.name(), pdfcraft_engine::SAFE_MENU_NAMES[3]);
+        d.current_menu = Some(3);
+        assert!(matches!(edit_for(&d), Edit::SetLink { .. }), "unchanged: not written again");
+        d.menu = 99;
+        assert!(matches!(edit_for(&d), Edit::SetLink { .. }), "a position past the list writes nothing");
+    }
+
+    #[test]
+    fn a_file_to_open_is_written_only_when_it_is_a_relative_pdf_path() {
+        let mut d = with_object(LinkKind::File);
+        d.file = " docs/other.pdf ".into();
+        d.new_window = true;
+        let edits = steps(&d);
+        let Some(Edit::SetLinkLaunchAction { target: Some(_), .. }) = edits.get(1) else { panic!("{edits:?}") };
+        for bad in ["", "/etc/passwd", "..\\x.pdf", "a.exe", "http://x.test/a.pdf"] {
+            d.file = bad.into();
+            assert!(matches!(edit_for(&d), Edit::SetLink { .. }), "{bad:?} is not written");
+            assert!(!super::draft_ok(&d, true), "{bad:?} is not accepted");
+        }
+    }
+
+    #[test]
+    fn a_new_link_and_an_inline_link_have_no_object_to_hold_an_action() {
+        let mut d = with_object(LinkKind::Menu);
+        d.obj = None;
+        assert!(matches!(edit_for(&d), Edit::SetLink { .. }));
+        d.index = None;
+        assert!(matches!(edit_for(&d), Edit::AddLink { .. }));
+    }
+
+    #[test]
+    fn an_article_action_needs_a_thread_to_go_to() {
+        let d = with_object(LinkKind::Thread);
+        assert!(!super::draft_ok(&d, false));
+        assert!(super::draft_ok(&d, true));
+    }
+
+    #[test]
+    fn a_media_action_is_taken_out_only_when_asked_and_never_written() {
+        let mut d = draft(LinkAction::Other("Sound".into()));
+        d.obj = Some(pdfcraft_cos::ObjRef::new(9, 0));
+        d.media = Some("sound");
+        assert!(matches!(edit_for(&d), Edit::SetLink { action: None, .. }), "kept as it is");
+        d.remove_media = true;
+        let edits = steps(&d);
+        assert!(matches!(edits.get(1), Some(Edit::RemoveLinkMediaAction { .. })), "{edits:?}");
+        d.media = None;
+        assert!(matches!(edit_for(&d), Edit::SetLink { .. }), "an action that is not media is not taken out by this");
+    }
+
+    fn attached(d: &mut LinkDraft) {
+        d.attachments =
+            vec![super::AttachmentChoice { key: "notes.txt".into(), pdf: false }, super::AttachmentChoice { key: "inner.pdf".into(), pdf: true }];
+        d.embedded = 1;
+        d.embedded_page = 3;
+    }
+
+    #[test]
+    fn an_attached_file_page_is_one_step_with_the_link_and_counts_from_one() {
+        let mut d = with_object(LinkKind::Embedded);
+        attached(&mut d);
+        let edits = steps(&d);
+        assert!(matches!(edits[0], Edit::SetLink { action: None, .. }), "the web address is left for the attached-file action to replace");
+        let Some(Edit::SetLinkEmbeddedAction { target: Some(t), .. }) = edits.get(1) else { panic!("{edits:?}") };
+        assert_eq!((t.name(), t.page()), ("inner.pdf", 3), "the dialog and the target both count pages from 1");
+        // An action left as it was is not written again; a changed page is.
+        d.current_embedded = Some(("inner.pdf".into(), 3));
+        assert!(matches!(edit_for(&d), Edit::SetLink { .. }));
+        d.embedded_page = 4;
+        assert!(matches!(steps(&d).get(1), Some(Edit::SetLinkEmbeddedAction { .. })));
+    }
+
+    #[test]
+    fn an_attached_file_is_written_only_when_it_is_a_pdf_the_engine_takes() {
+        let mut d = with_object(LinkKind::Embedded);
+        assert!(!super::draft_ok(&d, true), "a document with no attachments has nothing to go to");
+        assert!(matches!(edit_for(&d), Edit::SetLink { .. }));
+        attached(&mut d);
+        assert!(super::draft_ok(&d, true));
+        d.embedded = 0;
+        assert!(!super::draft_ok(&d, true), "an attachment that is not a PDF is refused");
+        assert!(super::embedded_problem(&d).is_some());
+        assert!(matches!(edit_for(&d), Edit::SetLink { .. }));
+        d.embedded = 1;
+        for page in [0, pdfcraft_engine::MAX_EMBEDDED_PAGE as usize + 1] {
+            d.embedded_page = page;
+            assert!(!super::draft_ok(&d, true), "page {page} is refused");
+            assert!(matches!(edit_for(&d), Edit::SetLink { .. }), "page {page} writes nothing");
+        }
+        d.embedded_page = 1;
+        d.attachments[1].key = "a/b.pdf".into();
+        assert!(!super::draft_ok(&d, true), "a name the engine refuses is not accepted");
+        assert!(matches!(edit_for(&d), Edit::SetLink { .. }));
     }
 
     #[test]

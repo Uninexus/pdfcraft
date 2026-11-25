@@ -1,0 +1,140 @@
+//! A drop-down's option list under its field, as the framework's `PopupList` of document rows.
+
+use craft::behavior::{DisplayOrder, ItemSource};
+// PLAN: assumed `craft::ui::contract::CollectionEvent` re-export of the collection event enum.
+use craft::ui::contract::{Bind, CollectionEvent, LeadOnOpen, Props as _, ShowCollection as _, ShowContainer as _, lead_position, overlay::Anchor};
+use craft::ui::fonts::FontRef;
+use craft::ui::list::{DocumentRows, List, ListRow};
+use craft::ui::popover::{PopupList, PopupListKind};
+use craft::ui::primitives::HAlign;
+use egui::Rect;
+use pdfcraft_engine::FormField;
+
+use super::field_text_size;
+
+/// The option names a list shows, keyed by position: two options can share an export value.
+struct Names<'a>(&'a [&'a str]);
+
+impl DisplayOrder<usize> for Names<'_> {
+    fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    fn key(&self, at: usize) -> usize {
+        at
+    }
+
+    fn index_of(&self, key: &usize) -> Option<usize> {
+        (*key < self.0.len()).then_some(*key)
+    }
+
+    fn text(&self, at: usize) -> Option<std::borrow::Cow<'_, str>> {
+        self.0.get(at).map(|name| std::borrow::Cow::Borrowed(*name))
+    }
+}
+
+impl ItemSource<usize> for Names<'_> {}
+
+/// The list of `field`'s options hung from `rect`, the widget's rectangle on screen, open while `open` is true. Its
+/// rows are the options' shown names in the field's text size (`zoom` screen points per page point) and alignment.
+/// Returns the position of the option activated this pass.
+pub(super) fn choice_list(ui: &mut egui::Ui, field: &FormField, rect: Rect, zoom: f32, open: &mut bool) -> Option<usize> {
+    // An auto size is fitted to the field's first widget: the twins of one field share its text size.
+    let widget = field.widgets.first()?;
+    // Auto-sized text is fitted to what the field shows (its chosen option's shown name), so the rows come out at the
+    // size the field's value is drawn at.
+    let value_text = field.value.first().map_or("", |v| field.options.iter().find(|(e, _)| e == v).map_or(v.as_str(), |(_, d)| d.as_str()));
+    let size = field_text_size(ui.painter(), field, widget, value_text) * zoom;
+    let align = match field.quadding {
+        1 => HAlign::Center,
+        2 => HAlign::End,
+        _ => HAlign::Start,
+    };
+    let names: Vec<&str> = field.options.iter().map(|(_, shown)| shown.as_str()).collect();
+    let source = Names(&names);
+    // The popup names its list: the framework routes the field's list keys (arrows, End, Enter) to a named list only.
+    let list = ui.scope_id().with("pdfcraft.choice-list");
+    let shown = PopupList::new(tl!("Options"), Bind::bound(&mut *open))
+        .kind(PopupListKind::Document)
+        .overlay(|overlay| {
+            let dismiss = overlay.dismiss.focus_left(false);
+            overlay.anchor(Anchor::Rect(rect)).dismiss(dismiss)
+        })
+        .list(list)
+        .show(ui, |ui, _| {
+            List::<usize>::options(tl!("Options"))
+                .id(list)
+                .lead_on_open(LeadOnOpen::Selected)
+                .document_rows(DocumentRows::new(FontRef::proportional(), size, align))
+                .show_items(ui, &source, &mut |key, _| ListRow::new(names.get(*key).copied().unwrap_or_default().to_owned()).option())
+                .events
+        });
+    let mut picked = None;
+    for event in shown.inner.into_iter().flatten() {
+        if let CollectionEvent::Activate(key) = event {
+            picked = Some(key);
+        }
+    }
+    picked
+}
+
+/// The id Auto-Complete's list is shown with, so the framework hands the field's list keys to it and the caller can ask
+/// where its highlight is.
+///
+/// The id holds the field (its object and widget) and the typed text: another field has its own list, other text lists
+/// other entries, and they start with no highlight.
+fn suggestion_id(ui: &egui::Ui, (field, widget): (&FormField, usize), typed: &str) -> egui::Id {
+    ui.scope_id().with(("pdfcraft.suggestion-list", field.obj, widget, typed))
+}
+
+/// The row of Auto-Complete's list the arrow keys have highlighted, as of the last pass; none until one was pressed and
+/// whenever the row is not among the `shown` entries.
+pub(super) fn suggestion_lead(ui: &egui::Ui, at_field: (&FormField, usize), typed: &str, shown: usize) -> Option<usize> {
+    lead_position(ui.ctx(), suggestion_id(ui, at_field, typed)).filter(|at| *at < shown)
+}
+
+/// Auto-Complete's list of earlier entries hung from `rect`, the widget's rectangle on screen, open while `open` is
+/// true: the rows are `offered` in the field's text size (`zoom` screen points per page point) for the text `typed`.
+/// The field keeps the keyboard focus and hands the list the Up and Down keys and Tab, so the highlight moves with the
+/// arrows and Tab takes it; Enter stays the field's (it commits, or the caller takes the highlighted entry on it) and
+/// Escape shuts the list. Returns the position of the entry clicked or taken with Tab this pass.
+pub(super) fn suggestion_list(
+    ui: &mut egui::Ui,
+    (field, widget_index): (&FormField, usize),
+    rect: Rect,
+    zoom: f32,
+    (typed, offered): (&str, &[String]),
+    open: &mut bool,
+) -> Option<usize> {
+    let widget = field.widgets.first()?;
+    let size = field_text_size(ui.painter(), field, widget, typed) * zoom;
+    let names: Vec<&str> = offered.iter().map(String::as_str).collect();
+    let source = Names(&names);
+    let list = suggestion_id(ui, (field, widget_index), typed);
+    let shown = PopupList::new(tl!("Suggestions"), Bind::bound(&mut *open))
+        // The popup itself is per field, so what the framework keeps of a popup (its overlay layer, a dismissal) is not shared with the next field.
+        .id_salt((field.obj, widget_index))
+        .kind(PopupListKind::Document)
+        .overlay(|overlay| {
+            let dismiss = overlay.dismiss.focus_left(false);
+            // Enter stays the field's, and focus stays in the field when the list closes.
+            let focus = overlay.focus.list_enter(false).restore(false);
+            overlay.anchor(Anchor::Rect(rect)).dismiss(dismiss).focus(focus)
+        })
+        .list(list)
+        .show(ui, |ui, _| {
+            List::<usize>::options(tl!("Suggestions"))
+                .id(list)
+                .lead_on_open(LeadOnOpen::Selected)
+                .document_rows(DocumentRows::new(FontRef::proportional(), size, HAlign::Start))
+                .show_items(ui, &source, &mut |key, _| ListRow::new(names.get(*key).copied().unwrap_or_default().to_owned()).option())
+                .events
+        });
+    let mut picked = None;
+    for event in shown.inner.into_iter().flatten() {
+        if let CollectionEvent::Activate(key) = event {
+            picked = Some(key);
+        }
+    }
+    picked
+}

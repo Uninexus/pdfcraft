@@ -11,7 +11,7 @@ use crate::PdfCraftApp;
 impl PdfCraftApp {
     /// Replace the find bar's highlighted match (`all` false) or every match in the document, in
     /// view `i`, with its Replace field's text.
-    pub(crate) fn replace_found(&mut self, i: usize, all: bool) {
+    pub(crate) fn replace_found(&mut self, ctx: &egui::Context, i: usize, all: bool) {
         let Some(view) = self.views.get(i) else { return };
         let Some(find) = view.find.as_ref() else { return };
         if find.case_query.trim().is_empty() {
@@ -20,25 +20,25 @@ impl PdfCraftApp {
         let query = Replace {
             find: find.case_query.clone(),
             with: find.replacement.clone(),
-            case_sensitive: find.case_sensitive,
-            whole_words: find.whole_words,
+            case_sensitive: find.options.match_case,
+            whole_words: find.options.whole_word,
             substitute_font: find.substitute_font,
         };
         let Some(doc) = self.session.get(view.id) else { return };
         let (pages, which, found) = if all {
             // What the find bar holds on each page it has searched, so matches no paragraph
             // holds (a form field, a comment) are counted rather than lost.
-            let mut found: BTreeMap<usize, usize> = view.texts.keys().map(|p| (*p, 0)).collect();
-            for (p, _) in &find.matches {
-                let n = found.entry(*p).or_insert(0);
+            let mut found: BTreeMap<usize, usize> = view.session.texts.keys().map(|p| (*p, 0)).collect();
+            for m in find.matches.matches() {
+                let n = found.entry(m.page).or_insert(0);
                 *n = n.saturating_add(1);
             }
             ((0..doc.info.pages.len()).collect::<Vec<_>>(), Which::All, Some(found))
         } else {
             // The highlighted match, by where its first and last glyphs are drawn.
-            let Some((page, range)) = find.current.and_then(|c| find.matches.get(c)).cloned() else { return };
+            let Some((page, range)) = find.matches.current_match().map(|m| (m.page, m.range.clone())) else { return };
             let centre = |g: usize| {
-                view.texts.get(&page).and_then(|t| t.glyphs.get(g)).map(|g| [(g.rect[0] + g.rect[2]) / 2.0, (g.rect[1] + g.rect[3]) / 2.0])
+                view.session.texts.get(&page).and_then(|t| t.glyphs.get(g)).map(|g| [(g.rect[0] + g.rect[2]) / 2.0, (g.rect[1] + g.rect[3]) / 2.0])
             };
             let (Some(start), Some(end)) = (centre(range.start), centre(range.end.saturating_sub(1))) else { return };
             (vec![page], Which::At { page, start, end }, None)
@@ -51,7 +51,7 @@ impl PdfCraftApp {
             }
         };
         if let Some(edit) = plan.edit.clone()
-            && !self.apply_edit(edit)
+            && !self.apply_edit(ctx, edit)
         {
             return;
         }
@@ -82,7 +82,7 @@ fn outcome(plan: &Replacement, all: bool, substitute_font: bool) -> Option<Strin
             "{n} paragraph rewritten in a substitute font ({font})",
             "{n} paragraphs rewritten in a substitute font ({font})",
         );
-        hint = crate::i18n::fmt(&sentence, &[("font", &plan.substitute_fonts.join(", "))]);
+        hint = crate::i18n::fmt(&sentence, &[("font", &plan.substitute_fonts.join(", ")), ("n", &plan.substituted_paragraphs.to_string())]);
     }
     // New rows go below the paragraph and nothing else moves, so say where that can matter.
     if plan.grown > 0 {
@@ -101,14 +101,7 @@ fn outcome(plan: &Replacement, all: bool, substitute_font: bool) -> Option<Strin
     let offer = !substitute_font && plan.skipped.contains_key(&pdfcraft_engine::find_replace::Skip::MissingGlyphs);
     if !all {
         let mut message = if skipped > 0 { crate::i18n::fmt(tl!("Not replaced: {why}"), &[("why", &why)]) } else { String::new() };
-        for extra in [
-            hint,
-            if offer {
-                tl!("Turn on \"Use a substitute font if the font lacks letters\" in Find options to replace anyway").to_string()
-            } else {
-                String::new()
-            },
-        ] {
+        for extra in [hint, if offer { offer_text().to_string() } else { String::new() }] {
             if !extra.is_empty() {
                 if !message.is_empty() {
                     message.push_str(". ");
@@ -135,7 +128,12 @@ fn outcome(plan: &Replacement, all: bool, substitute_font: bool) -> Option<Strin
     }
     if offer {
         message.push_str(". ");
-        message.push_str(tl!("Turn on \"Use a substitute font if the font lacks letters\" in Find options to replace anyway"));
+        message.push_str(offer_text());
     }
     Some(message)
+}
+
+/// Said when matches were left alone for missing letters and the option is off.
+fn offer_text() -> &'static str {
+    tl!("Turn on \"Use a substitute font if the font lacks letters\" under Replace with to replace anyway")
 }
