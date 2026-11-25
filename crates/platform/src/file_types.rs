@@ -19,8 +19,8 @@
 //!
 //! The work is split so it can be tested everywhere: [`registration_plan`] is a pure function of
 //! the executable's path, and only the Windows executor runs `reg.exe` (by its full path under
-//! `%SystemRoot%\System32`, with arguments rather than a shell string, as `owner_only` does for
-//! the other tools Windows ships, without a console window; the registry API itself would need `unsafe`). It does not
+//! `%SystemRoot%\System32`, with arguments rather than a shell string and without a console window; the registry API itself
+//! would need `unsafe`). It does not
 //! broadcast `SHChangeNotify`, which needs the Windows API, so Explorer may show a new icon or an
 //! "Open with" entry only after it is restarted or the user signs in again.
 
@@ -213,7 +213,7 @@ mod imp {
 /// Whether a deletion counts as done: it succeeded, or it failed because there was nothing to
 /// delete (`still_present` is the answer of a query for that very key or value afterwards). A
 /// failure while the thing is still there is a real one (access denied, a policy lock).
-#[cfg_attr(not(windows), allow(dead_code))]
+#[cfg(any(windows, test))]
 fn deletion_settled(deleted: bool, still_present: bool) -> bool {
     deleted || !still_present
 }
@@ -223,11 +223,32 @@ mod imp {
     use super::{FileTypeError, Plan, check_plan, deletion_settled};
     use std::process::Stdio;
 
+    /// `%SystemRoot%` when it is an absolute path, else `C:\Windows`: a relative value in the environment
+    /// must not decide which program runs.
+    fn system_root() -> std::path::PathBuf {
+        std::env::var_os("SystemRoot")
+            .map(std::path::PathBuf::from)
+            .filter(|p| p.is_absolute())
+            .unwrap_or_else(|| std::path::PathBuf::from(r"C:\Windows"))
+    }
+
+    /// A Windows tool by its full path under `%SystemRoot%\System32`, never found through the search
+    /// path, and without the console window a console program would otherwise get from this
+    /// windowed app (`CREATE_NO_WINDOW`; the pipes `output()` reads are not affected).
+    fn system_tool(relative: &str) -> std::process::Command {
+        use std::os::windows::process::CommandExt as _;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let root = system_root();
+        let mut command = std::process::Command::new(root.join("System32").join(relative));
+        command.creation_flags(CREATE_NO_WINDOW);
+        command
+    }
+
     /// Runs `reg.exe` with `args`, without a console window and by its full path, and says
     /// whether it succeeded with the start of its error text (at most 300 characters). Standard
     /// output is discarded: nothing here needs it.
     fn reg(args: &[&str]) -> Result<(bool, String), FileTypeError> {
-        let output = crate::owner_only::system_tool("reg.exe")
+        let output = system_tool("reg.exe")
             .args(args)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
@@ -288,19 +309,15 @@ mod imp {
 
     pub fn open_settings() -> Result<(), FileTypeError> {
         // Explorer starts a URI and needs no console; the exit code of the short-lived launcher
-        // means nothing. The page that lists this app, else the plain Default apps page.
-        let root = std::env::var_os("SystemRoot").map_or_else(|| std::path::PathBuf::from(r"C:\Windows"), std::path::PathBuf::from);
-        let start = |uri: &str| {
-            std::process::Command::new(root.join("explorer.exe"))
-                .arg(uri)
-                .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .spawn()
-                .map(drop)
-        };
-        start(super::DEFAULT_APPS_APP_URI)
-            .or_else(|_| start(super::DEFAULT_APPS_URI))
+        // means nothing, and it starts for any URI, so there is no second page to fall back to: it opens
+        // the page that lists this app (Windows shows the plain Default apps list where it can't).
+        std::process::Command::new(system_root().join("explorer.exe"))
+            .arg(super::DEFAULT_APPS_APP_URI)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .map(drop)
             .map_err(|e| FileTypeError::Registry(format!("Settings could not be opened: {e}")))
     }
 }

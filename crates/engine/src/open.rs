@@ -404,7 +404,6 @@ impl Session {
             dirty: false,
             changed_on_open: false,
             generation: 0,
-            snapshot_generation: 0,
             read_only_reason,
             form: Arc::new(form),
             marker_scan: OnceLock::new(),
@@ -428,6 +427,7 @@ impl Session {
             xfa_warnings: Vec::new(),
             edit_notices: Vec::new(),
             guides: Default::default(),
+            hidden_types: Default::default(),
         }
     }
 }

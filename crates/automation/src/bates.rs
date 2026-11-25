@@ -37,13 +37,7 @@ impl Automation {
             u8::try_from(digits).ok().filter(|d| (1..=12).contains(d)).ok_or_else(|| ToolError::InvalidArgs("digits must be from 1 to 12".into()))?;
         let prefix = args.opt_str("prefix")?.unwrap_or("");
         let suffix = args.opt_str("suffix")?.unwrap_or("");
-        if prefix.chars().count() > 128
-            || suffix.chars().count() > 128
-            || prefix.contains('#')
-            || suffix.contains('#')
-            || prefix.contains(">>")
-            || suffix.contains(">>")
-        {
+        if !pdfcraft_engine::bates_batch::affixes_ok(prefix, suffix) {
             return Err(ToolError::InvalidArgs("prefix and suffix must be at most 128 characters and cannot contain # or >>".into()));
         }
         let dry_run = args.opt_bool("dry_run")?.unwrap_or(false);
@@ -153,7 +147,7 @@ impl Automation {
                 results.push(json!({"input":plan.input,"output":plan.output,"status":"error","pages":plan.pages,"first":plan.first,"last":plan.last,"error":"input changed after preflight; page count differs"}));
                 continue;
             }
-            let template = format!("<<Bates Number#{digits}#{}#{prefix}#{suffix}>>", plan.first);
+            let template = pdfcraft_engine::bates_batch::template(digits, plan.first, prefix, suffix);
             let mut settings = HeaderFooter::default();
             settings.text[4] = template;
             let pages: Vec<usize> = (0..plan.pages).collect();

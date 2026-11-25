@@ -312,6 +312,25 @@ impl Session {
         Ok((bytes, report.merged, report.optimize.images_refused))
     }
 
+    /// The optimization of Optimize Multiple Files and of `doc_batch`'s optimize step, on one file that is not open:
+    /// `bytes` is opened in this session, optimized with `images` for colour and grey images and `mono` for
+    /// black-and-white ones (everything else as Reduce File Size has it), and closed again. A result that is not
+    /// smaller than `bytes` is dropped and `bytes` itself is returned. Errors are worded for the user.
+    pub fn optimize_smaller(
+        &mut self,
+        name: &str,
+        bytes: Arc<Vec<u8>>,
+        images: optimize::ImageSettings,
+        mono: optimize::MonoSettings,
+    ) -> Result<Arc<Vec<u8>>, String> {
+        let id = self.open(name, None, bytes.clone(), None).map_err(|e| e.to_string())?;
+        let settings = optimize::Settings { color: images, gray: images, mono, ..Default::default() };
+        let result = self.optimized_bytes(id, &settings, &[]).map_err(|e| e.to_string());
+        self.close(id);
+        let (candidate, _) = result?;
+        Ok(if candidate.len() < bytes.len() { candidate } else { bytes })
+    }
+
     /// Optimize PDF ▸ Advanced optimization: `settings` for images and objects, plus Remove
     /// Hidden Information's `discard` categories (user data). A full rewrite: signed documents
     /// are refused. The open document is not changed. This is [`Self::optimize_job`] run in

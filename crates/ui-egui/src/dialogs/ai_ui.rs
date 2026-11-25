@@ -1,43 +1,102 @@
-//! Ask AI Assistant: a question about the active document, answered by the model Preferences names.
+//! The AI Assistant window: a question about the active document (Ask, Summarize, Translate), or a request to change it
+//! (Edit), answered by the model Preferences names.
 //!
-//! The text of the pages (all, or the current one) goes to the configured OpenAI-compatible server
-//! when Ask is pressed, and to nowhere else. The request runs on a background thread
-//! ([`crate::ai_settings`]'s `Task`), so the window never freezes.
+//! The text of the pages goes to the configured server when the button is pressed, and to nowhere else. Requests run on
+//! a background thread ([`crate::ai_settings`]'s `Task`), so the window never freezes. Edit asks the model for a list
+//! of changes, shows it, and changes nothing until Apply is pressed; the changes are ordinary undo steps and nothing is
+//! saved. The window is beside the dialog host, like the JavaScript console, so it reads the app directly.
 
+use craft::theme::variant::{Tone, Variant};
+use craft::ui::buttons::{Button, Link};
+use craft::ui::choice::Checkbox;
+use craft::ui::contract::{Bind, Entry, Props as _, Show as _, ShowContainer as _};
+use craft::ui::dialog::Dialog;
+use craft::ui::display::{Shade, Spinner, Text};
+use craft::ui::notices::{Notice, NoticeLayout};
+use craft::ui::runtime::env::Label;
+use craft::ui::sections::{DialogRole, FooterButton};
+use craft::ui::style::TypeRole;
+use craft::ui::text::{SelectableText, TextField};
+use pdfcraft_ai::agent::{PlanRequest, PlannedCall};
+use pdfcraft_engine::ai_edit;
+use serde_json::Value;
+
+use crate::PdfCraftApp;
 use crate::persist::ai::page_texts;
-use crate::{Dialog, PdfCraftApp, widgets};
 
-/// What the dialog asks the model to do with the pages.
+/// What the window asks the model to do with the pages.
 #[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
-pub(crate) enum Mode {
+pub enum Mode {
     #[default]
     Ask,
     Summarize,
     Translate,
+    Edit,
 }
 
-/// The instruction sent for `mode`: the typed question, the fixed summary request, or the
-/// translation request for the typed language. `None` while the needed text is missing.
+impl Mode {
+    pub const ALL: [Mode; 4] = [Mode::Ask, Mode::Summarize, Mode::Translate, Mode::Edit];
+
+    fn label(self) -> String {
+        match self {
+            Mode::Ask => tl!("Ask").to_string(),
+            Mode::Summarize => tl!("Summarize").to_string(),
+            Mode::Translate => tl!("Translate").to_string(),
+            Mode::Edit => tl!("Edit").to_string(),
+        }
+    }
+}
+
+/// The instruction sent for `mode`: the typed question, the fixed summary request, or the translation request for the
+/// typed language. `None` while the needed text is missing (and for Edit, which sends the typed request its own way).
 pub(crate) fn instruction(mode: Mode, question: &str, language: &str) -> Option<String> {
     match mode {
         Mode::Ask => Some(question.trim().to_owned()).filter(|q| !q.is_empty()),
         Mode::Summarize => Some(pdfcraft_ai::SUMMARY_QUESTION.to_owned()),
         Mode::Translate => pdfcraft_ai::translate_question(language),
+        Mode::Edit => None,
     }
 }
 
-/// The Ask dialog's own fields; the answer lives with the settings (`PdfCraftApp::ai`).
+/// One change the model proposes.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Step {
+    pub tool: String,
+    pub args: Value,
+    pub why: String,
+    pub summary: String,
+    pub removes: bool,
+}
+
+/// What the model proposed for an Edit request; nothing in the document has changed.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct EditPlan {
+    pub message: String,
+    pub steps: Vec<Step>,
+    /// The request this answers, for the heading.
+    pub request: String,
+}
+
+/// The window's own fields; the answers live with the settings (`PdfCraftApp::ai`).
 #[derive(Default)]
-pub(crate) struct Draft {
-    pub(crate) mode: Mode,
-    pub(crate) question: String,
+pub struct Draft {
+    pub mode: Mode,
+    pub question: String,
     /// The language Translate writes in, as typed.
-    pub(crate) language: String,
-    pub(crate) current_page: bool,
+    pub language: String,
+    pub current_page: bool,
+    /// What Edit is asked to do, as typed.
+    pub request: String,
     /// Preferences ▸ AI Assistant: the port a local model server listens on, as typed.
-    pub(crate) port: String,
+    pub port: String,
     /// What the shown answer was asked: the question and a description of the pages sent.
     asked: Option<(String, String)>,
+    /// The changes Apply would make, once the model has proposed them.
+    pub(crate) plan: Option<EditPlan>,
+    /// How many Undo steps the last Apply made, until they are undone or another request starts.
+    pub(crate) applied: Option<usize>,
+    /// Why the last Apply or Undo failed.
+    pub(crate) apply_error: Option<String>,
 }
 
 /// The OpenAI-compatible address of a model server on this computer, for a port the user typed
@@ -83,94 +142,177 @@ pub(crate) fn pages_label(current_page: Option<usize>) -> String {
     }
 }
 
-/// The dialog's content. Returns `true` to close the dialog.
-pub(crate) fn body(ui: &mut egui::Ui, app: &mut PdfCraftApp) -> bool {
-    ui.heading(tl!("AI Assistant"));
-    ui.horizontal(|ui| {
-        ui.selectable_value(&mut app.ai_draft.mode, Mode::Ask, tl!("Ask"));
-        ui.selectable_value(&mut app.ai_draft.mode, Mode::Summarize, tl!("Summarize"));
-        ui.selectable_value(&mut app.ai_draft.mode, Mode::Translate, tl!("Translate"));
-    });
-    let Some((view, id)) = app.active_ids() else {
-        ui.label(tl!("Open a document to ask about it."));
-        return false;
-    };
-    let Some(doc) = app.session.get(id) else { return true };
-    if let Err(error) = doc.check_copying() {
-        ui.label(error.to_string());
-        return false;
-    }
-    app.ai.ask.poll();
-    let running = app.ai.ask.is_running();
-    let problem = app.ai.problem_with_config();
-    let current = app.views[view].current;
-    let url = app.ai.effective().base_url;
+/// What a footer or body button asks for.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Action {
+    Run,
+    Cancel,
+    Copy,
+    Apply,
+    UndoApplied,
+    Preferences,
+}
 
-    if problem.is_some() {
-        ui.add_space(4.0);
-        ui.label(tl!("The AI assistant is not set up yet. Choose a server and a model, or sign in with ChatGPT, in Preferences."));
-        if widgets::pill_button(ui, tl!("Open Preferences"), true).clicked() {
-            // Close this dialog and open Preferences. Returning `false` kept this dialog open, and
-            // the dialog code then put it back over the Preferences that was just asked for.
-            app.dialog = Some(Dialog::Preferences);
-            return true;
-        }
-        ui.add_space(8.0);
-    } else {
-        let target = if app.ai.provider == pdfcraft_ai::Provider::ChatGpt { tl!("OpenAI (your ChatGPT plan)").to_owned() } else { url };
-        ui.label(crate::i18n::fmt(
-            tl!("When you press the button, the text of the pages goes to {url}. Nothing is sent before."),
-            &[("url", &target)],
-        ));
+impl PdfCraftApp {
+    /// Opens the AI Assistant window in `mode`, or leaves the open one and switches it to `mode`.
+    pub(crate) fn open_ai(&mut self, mode: Mode) {
+        self.ai_draft.mode = mode;
+        self.ai_open = true;
     }
-    ui.add_space(6.0);
-    match app.ai_draft.mode {
-        Mode::Ask => {
-            ui.add(
-                widgets::block(&mut app.ai_draft.question)
-                    .desired_rows(3)
-                    .desired_width(f32::INFINITY)
-                    .hint_text(tl!("Ask a question about this document")),
-            );
-        }
-        Mode::Summarize => {
-            ui.label(tl!("Writes a short summary with the key points and page numbers."));
-        }
-        Mode::Translate => {
-            ui.add(widgets::line(&mut app.ai_draft.language).desired_width(240.0).hint_text(tl!("Language, for example Spanish")).char_limit(60));
-        }
-    }
-    ui.add(widgets::checkbox(&mut app.ai_draft.current_page, tl!("Current page only")));
-    ui.add_space(6.0);
-    let mut ask = false;
-    ui.horizontal(|ui| {
-        let ready = problem.is_none() && !running && instruction(app.ai_draft.mode, &app.ai_draft.question, &app.ai_draft.language).is_some();
-        let label = match app.ai_draft.mode {
-            Mode::Ask => tl!("Ask"),
-            Mode::Summarize => tl!("Summarize"),
-            Mode::Translate => tl!("Translate"),
+
+    /// The command ids: `ai.ask`, `ai.summary`, `ai.translate`, `ai.edit`.
+    pub(crate) fn open_ai_for(&mut self, command: &str) {
+        let mode = match command {
+            "ai.summary" => Mode::Summarize,
+            "ai.translate" => Mode::Translate,
+            "ai.edit" => Mode::Edit,
+            _ => Mode::Ask,
         };
-        ask = ui.add_enabled_ui(ready, |ui| widgets::pill_button(ui, label, true)).inner.clicked();
-        if running {
-            ui.spinner();
-            ui.label(tl!("Waiting for the answer…"));
-            if ui.button(tl!("Cancel")).clicked() {
-                app.ai.ask.cancel();
+        self.open_ai(mode);
+    }
+
+    /// Test seam: shows `steps` as if the model had proposed them for `request`, with the check's own summaries.
+    #[doc(hidden)]
+    pub fn ai_propose_for_test(&mut self, request: &str, steps: &[(&str, Value)]) -> Result<(), String> {
+        let (_, id) = self.active_ids().ok_or("no document")?;
+        let shape = ai_edit::Shape::of(&self.session, id).ok_or("no document")?;
+        let calls: Vec<(String, Value)> = steps.iter().map(|(t, a)| ((*t).to_owned(), a.clone())).collect();
+        let summaries = ai_edit::check(&shape, &calls)?;
+        let steps = calls
+            .into_iter()
+            .zip(summaries)
+            .map(|((tool, args), summary)| Step { removes: ai_edit::removes_content(&tool), tool, args, why: String::new(), summary })
+            .collect();
+        self.ai_draft.plan = Some(EditPlan { message: String::new(), steps, request: request.to_owned() });
+        Ok(())
+    }
+
+    /// Test seam: Apply as the window's button does. Returns the error shown, if any.
+    #[doc(hidden)]
+    pub fn ai_apply_for_test(&mut self, ctx: &egui::Context) -> Option<String> {
+        self.apply_ai_plan(ctx);
+        self.ai_draft.apply_error.clone()
+    }
+
+    /// Test seam: the window's "Undo these changes".
+    #[doc(hidden)]
+    pub fn ai_undo_for_test(&mut self, ctx: &egui::Context) {
+        self.undo_ai_changes(ctx);
+    }
+
+    /// Asks the model for the changes `request` needs. Nothing is changed.
+    fn start_edit_plan(&mut self, ctx: &egui::Context, request: String) {
+        self.ai_draft.plan = None;
+        self.ai_draft.applied = None;
+        self.ai_draft.apply_error = None;
+        let Some((_, id)) = self.active_ids() else { return };
+        let Some(doc) = self.session.get(id) else { return };
+        let Some(shape) = ai_edit::Shape::of(&self.session, id) else { return };
+        let source = doc.export_source();
+        let pages: Vec<usize> = (0..source.pages.min(200)).collect();
+        let more = source.pages > pages.len();
+        let config = self.ai.effective();
+        let asked = request.clone();
+        self.ai.plan.start(ctx, false, move || {
+            let texts = page_texts(source, &pages)?;
+            let context = pdfcraft_ai::document_context(&texts);
+            let mut text = String::new();
+            for (page, body) in &context.included {
+                text.push_str(&format!("--- Page {page} ---\n{body}\n"));
+            }
+            if context.cut || more {
+                text.push_str("[The document text was cut here to fit the size limit.]\n");
+            }
+            if text.trim().is_empty() {
+                text.push_str("[No text could be read from the pages.]\n");
+            }
+            let description = format!("{} page(s)", shape.pages);
+            let catalog = ai_edit::catalog();
+            let req = PlanRequest { instruction: &request, document: &description, text_context: &text, catalog: &catalog };
+            let check = |calls: &[PlannedCall]| ai_edit::check(&shape, &calls.iter().map(|c| (c.tool.clone(), c.args.clone())).collect::<Vec<_>>());
+            let plan = pdfcraft_ai::agent::plan(&config, &req, &check).map_err(|e| e.to_string())?;
+            let steps = plan
+                .calls
+                .into_iter()
+                .zip(plan.summaries)
+                .map(|(c, summary)| Step { removes: ai_edit::removes_content(&c.tool), tool: c.tool, args: c.args, why: c.why, summary })
+                .collect();
+            Ok(EditPlan { message: plan.message, steps, request: asked })
+        });
+    }
+
+    /// Makes the changes the model proposed, one undo step each, all or none. Nothing is saved.
+    pub(crate) fn apply_ai_plan(&mut self, ctx: &egui::Context) {
+        let Some(plan) = self.ai_draft.plan.clone() else { return };
+        self.ai_draft.apply_error = None;
+        let Some((_, id)) = self.active_ids() else { return };
+        let calls: Vec<(String, Value)> = plan.steps.iter().map(|s| (s.tool.clone(), s.args.clone())).collect();
+        let depth = |app: &Self| app.session.get(id).map_or(0, |d| d.undo_depth());
+        let start = depth(self);
+        // The whole list is checked against the document as it is now, so a document that changed since the proposal
+        // refuses it before anything runs.
+        let checked = ai_edit::Shape::of(&self.session, id).ok_or_else(|| "the document is gone".to_owned()).and_then(|s| ai_edit::check(&s, &calls));
+        if let Err(e) = checked {
+            self.ai_draft.apply_error = Some(e);
+            return;
+        }
+        for (at, (tool, args)) in calls.iter().enumerate() {
+            let edits = match ai_edit::Shape::of(&self.session, id)
+                .zip(self.session.get(id))
+                .ok_or_else(|| "the document is gone".to_owned())
+                .and_then(|(shape, doc)| ai_edit::plan_step(tool, args, &shape, Some(&doc.info)))
+            {
+                Ok((edits, _)) => edits,
+                Err(e) => {
+                    self.rollback_ai(ctx, id, start);
+                    self.ai_draft.apply_error = Some(crate::i18n::fmt(
+                        tl!("Step {n} could not be made: {why} The earlier steps were undone."),
+                        &[("n", &(at + 1).to_string()), ("why", &e)],
+                    ));
+                    return;
+                }
+            };
+            for edit in edits {
+                if !self.apply_edit(ctx, edit) {
+                    self.rollback_ai(ctx, id, start);
+                    self.ai_draft.apply_error =
+                        Some(crate::i18n::fmt(tl!("Step {n} could not be made. The earlier steps were undone."), &[("n", &(at + 1).to_string())]));
+                    return;
+                }
             }
         }
-    });
-    if ask {
+        let made = depth(self).saturating_sub(start);
+        self.ai_draft.plan = None;
+        self.ai_draft.applied = Some(made);
+        self.notify_tr("The changes were made. Undo takes them back; nothing is saved yet.");
+    }
+
+    /// Undoes what Apply did.
+    pub(crate) fn undo_ai_changes(&mut self, ctx: &egui::Context) {
+        let Some(count) = self.ai_draft.applied.take() else { return };
+        for _ in 0..count {
+            self.undo(ctx);
+        }
+    }
+
+    fn rollback_ai(&mut self, ctx: &egui::Context, id: pdfcraft_engine::DocId, start: usize) {
+        while self.session.get(id).map_or(0, |d| d.undo_depth()) > start {
+            let before = self.session.get(id).map_or(0, |d| d.undo_depth());
+            self.undo(ctx);
+            if self.session.get(id).map_or(0, |d| d.undo_depth()) >= before {
+                break;
+            }
+        }
+    }
+
+    /// Sends the question to the model on a background thread.
+    fn start_ai_question(&mut self, ctx: &egui::Context, question: String, heading: String, pages: Vec<usize>, label: String) {
+        let Some((_, id)) = self.active_ids() else { return };
+        let Some(doc) = self.session.get(id) else { return };
         let source = doc.export_source();
-        let pages: Vec<usize> = if app.ai_draft.current_page { vec![current] } else { (0..source.pages).collect() };
-        let question = instruction(app.ai_draft.mode, &app.ai_draft.question, &app.ai_draft.language).unwrap_or_default();
-        let heading = match app.ai_draft.mode {
-            Mode::Ask => question.clone(),
-            Mode::Summarize => tl!("Summary").to_owned(),
-            Mode::Translate => format!("{} {}", tl!("Translation into"), app.ai_draft.language.trim()),
-        };
-        app.ai_draft.asked = Some((heading, pages_label(app.ai_draft.current_page.then_some(current))));
-        let config = app.ai.effective();
-        app.ai.ask.start(ui.ctx(), app.run_inline, move || {
+        self.ai_draft.asked = Some((heading, label));
+        let config = self.ai.effective();
+        self.ai.ask.start(ctx, false, move || {
             // The web build cannot call the endpoint, so don't read every page just to say so.
             if cfg!(target_arch = "wasm32") {
                 return pdfcraft_ai::chat(&config, &[]).map(|reply| reply.content).map_err(|e| e.to_string());
@@ -179,60 +321,307 @@ pub(crate) fn body(ui: &mut egui::Ui, app: &mut PdfCraftApp) -> bool {
             pdfcraft_ai::chat(&config, &pdfcraft_ai::document_messages(&question, &texts)).map(|reply| reply.content).map_err(|e| e.to_string())
         });
     }
-    let page_count = app.views[view].page_count();
-    let mut jump = None;
-    match app.ai.ask.result() {
-        Some(Ok(answer)) => {
-            ui.separator();
-            if let Some((question, pages)) = &app.ai_draft.asked {
-                ui.label(egui::RichText::new(format!("{question} ({pages})")).weak());
-            }
-            egui::ScrollArea::vertical().id_salt("ai-answer").max_height(280.0).auto_shrink([false, true]).show(ui, |ui| {
-                jump = answer_with_links(ui, answer, page_count);
-            });
-            if ui.button(tl!("Copy answer")).clicked() {
-                ui.ctx().copy_text(answer.clone());
+}
+
+/// The 1-based pages an answer cites (`(p. 20)`, `pages 3 and 5`), once each in order, for the links under it.
+fn cited_pages(answer: &str, page_count: usize) -> Vec<usize> {
+    use pdfcraft_ai::refs::{Segment, split_page_references};
+    let mut out: Vec<usize> = Vec::new();
+    for segment in split_page_references(answer, page_count) {
+        if let Segment::Page(p) = segment
+            && !out.contains(&p)
+        {
+            out.push(p);
+        }
+    }
+    out
+}
+
+/// Shows the AI Assistant window while it is open, and carries out what its buttons asked for.
+pub(crate) fn show(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
+    if !app.ai_open {
+        return;
+    }
+    // Preferences takes over (opened from anywhere, not only this window's button); a question about unsaved work
+    // is answered first, and the window comes back after it.
+    if app.preferences.is_some() {
+        app.ai_open = false;
+        return;
+    }
+    if app.close_guard.is_some() {
+        return;
+    }
+    let ctx = ui.ctx().clone();
+    app.ai.ask.poll();
+    app.ai.plan.poll();
+    // A proposal the model has made is kept for review.
+    if let Some(Ok(plan)) = app.ai.plan.result().cloned() {
+        app.ai.plan.cancel();
+        app.ai_draft.plan = Some(plan);
+    }
+    let mut open = true;
+    let mut picked: Option<Action> = None;
+    let mut mode = app.ai_draft.mode;
+    let mut question = app.ai_draft.question.clone();
+    let mut language = app.ai_draft.language.clone();
+    let mut request = app.ai_draft.request.clone();
+    let mut current_page_only = app.ai_draft.current_page;
+    let active = app.active_ids();
+    let page_count = active.map_or(0, |(view, _)| app.views[view].page_count());
+    let mut jump: Option<usize> = None;
+    {
+        let app_ref: &PdfCraftApp = app;
+        Dialog::new(tl!("AI Assistant")).opened(Bind::bound(&mut open)).buttons([FooterButton::new(tl!("Close"), DialogRole::Cancel)]).show(
+            ui,
+            |ui, _cx| {
+                let entries: Vec<Entry<Mode>> = Mode::ALL.into_iter().map(|m| Entry::new(m, m.label())).collect();
+                craft::ui::choice::Segmented::new(tl!("What to do"), Bind::bound(&mut mode), &entries).show(ui);
+                let inputs = Inputs {
+                    mode,
+                    question: &mut question,
+                    language: &mut language,
+                    request: &mut request,
+                    current_page_only: &mut current_page_only,
+                    page_count,
+                    picked: &mut picked,
+                    jump: &mut jump,
+                };
+                body(ui, app_ref, inputs);
+            },
+        );
+    }
+    app.ai_draft.mode = mode;
+    app.ai_draft.question = question;
+    app.ai_draft.language = language;
+    app.ai_draft.request = request;
+    app.ai_draft.current_page = current_page_only;
+    if let (Some(page), Some((view, _))) = (jump, active) {
+        app.views[view].go_to_page(page.saturating_sub(1));
+    }
+    match picked {
+        Some(Action::Run) => run(app, &ctx),
+        Some(Action::Cancel) => {
+            app.ai.ask.cancel();
+            app.ai.plan.cancel();
+        }
+        Some(Action::Copy) => {
+            if let Some(Ok(answer)) = app.ai.ask.result().cloned()
+                && app.put_text(&answer)
+            {
+                app.notify_tr("Answer copied");
             }
         }
-        Some(Err(error)) => {
-            ui.separator();
-            ui.colored_label(ui.visuals().error_fg_color, error.as_str());
+        Some(Action::Apply) => app.apply_ai_plan(&ctx),
+        Some(Action::UndoApplied) => app.undo_ai_changes(&ctx),
+        Some(Action::Preferences) => {
+            app.ai_open = false;
+            app.open_preferences_at("ai");
+            return;
         }
         None => {}
     }
-    if let Some(page) = jump {
-        app.views[view].go_to_page(page.saturating_sub(1));
+    if !open {
+        app.ai_open = false;
+        app.ai.ask.cancel();
+        app.ai.plan.cancel();
     }
-    false
 }
 
-/// The answer's text, with each page it cites ("(p. 20)", "pages 3 and 5") as a link. Returns the
-/// 1-based page that was clicked. Without citations it is one selectable label.
-fn answer_with_links(ui: &mut egui::Ui, answer: &str, page_count: usize) -> Option<usize> {
-    use pdfcraft_ai::refs::{Segment, split_page_references};
-    let segments = split_page_references(answer, page_count);
-    if !segments.iter().any(|s| matches!(s, Segment::Page(_))) {
-        ui.add(egui::Label::new(answer).selectable(true));
-        return None;
+/// Starts what the main button asks for in the current mode.
+fn run(app: &mut PdfCraftApp, ctx: &egui::Context) {
+    let Some((view, _)) = app.active_ids() else { return };
+    let current = app.views[view].current();
+    let mode = app.ai_draft.mode;
+    if mode == Mode::Edit {
+        let request = app.ai_draft.request.trim().to_owned();
+        if !request.is_empty() {
+            app.start_edit_plan(ctx, request);
+        }
+        return;
     }
-    let mut clicked = None;
-    ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing.x = 0.0;
-        for segment in &segments {
-            match segment {
-                Segment::Text(text) => {
-                    ui.add(egui::Label::new(text.as_str()).selectable(true));
-                }
-                Segment::Page(page) => {
-                    let hint = crate::i18n::fmt(tl!("Go to page {n}"), &[("n", &page.to_string())]);
-                    if ui.link(page.to_string()).on_hover_text(hint).clicked() {
-                        clicked = Some(*page);
-                    }
-                }
+    let Some(question) = instruction(mode, &app.ai_draft.question, &app.ai_draft.language) else { return };
+    let source_pages = app.views[view].page_count();
+    let pages: Vec<usize> = if app.ai_draft.current_page { vec![current] } else { (0..source_pages).collect() };
+    let heading = match mode {
+        Mode::Summarize => tl!("Summary").to_owned(),
+        Mode::Translate => format!("{} {}", tl!("Translation into"), app.ai_draft.language.trim()),
+        _ => question.clone(),
+    };
+    let label = pages_label(app.ai_draft.current_page.then_some(current));
+    app.start_ai_question(ctx, question, heading, pages, label);
+}
+
+/// What one pass of the window reads and writes besides the app.
+struct Inputs<'a> {
+    mode: Mode,
+    question: &'a mut String,
+    language: &'a mut String,
+    request: &'a mut String,
+    current_page_only: &'a mut bool,
+    page_count: usize,
+    /// The button that was pressed.
+    picked: &'a mut Option<Action>,
+    /// The cited page that was clicked.
+    jump: &'a mut Option<usize>,
+}
+
+fn body(ui: &mut egui::Ui, app: &PdfCraftApp, inputs: Inputs<'_>) {
+    let Inputs { mode, question, language, request, current_page_only, page_count, picked, jump } = inputs;
+    let Some((_, id)) = app.active_ids() else {
+        Text::new(tl!("Open a document to use the AI assistant.")).shade(Shade::Muted).show(ui);
+        return;
+    };
+    let Some(doc) = app.session.get(id) else { return };
+    if let Err(error) = doc.check_copying() {
+        Text::new(error.to_string()).tone(Tone::Bad).show(ui);
+        return;
+    }
+    let running = app.ai.ask.is_running() || app.ai.plan.is_running();
+    let problem = app.ai.problem_with_config();
+    if problem.is_some() {
+        Notice::new(
+            Tone::Warn,
+            Label::from(tl!("The AI assistant is not set up yet. Choose a server and a model, or sign in with ChatGPT, in Preferences.").to_string()),
+        )
+        .layout(NoticeLayout::Inline)
+        .show(ui);
+        if Button::new(tl!("Open Preferences")).show(ui).clicked() {
+            *picked = Some(Action::Preferences);
+        }
+    } else {
+        let target = if app.ai.provider == pdfcraft_ai::Provider::ChatGpt {
+            tl!("OpenAI (your ChatGPT plan)").to_owned()
+        } else {
+            app.ai.effective().base_url
+        };
+        let line =
+            crate::i18n::fmt(tl!("When you press the button, the text of the pages goes to {url}. Nothing is sent before."), &[("url", &target)]);
+        Text::new(line).role(TypeRole::Caption).shade(Shade::Muted).show(ui);
+    }
+    match mode {
+        Mode::Ask => {
+            TextField::new(tl!("Question"), Bind::bound(question)).placeholder(tl!("Ask a question about this document")).lines(3).show(ui);
+        }
+        Mode::Summarize => {
+            Text::new(tl!("Writes a short summary with the key points and page numbers.")).show(ui);
+        }
+        Mode::Translate => {
+            TextField::new(tl!("Language"), Bind::bound(language)).placeholder(tl!("Language, for example Spanish")).limit(60).show(ui);
+        }
+        Mode::Edit => {
+            Text::new(tl!(
+                "Say what to change, for example: rotate pages 3 to 5, or delete the blank pages. You see the changes before they are made."
+            ))
+            .show(ui);
+            TextField::new(tl!("What should change?"), Bind::bound(request))
+                .placeholder(tl!("Rotate pages 3 to 5 by 90 degrees"))
+                .lines(3)
+                .limit(2_000)
+                .show(ui);
+            if let Some(why) = &doc.read_only_reason {
+                Notice::new(Tone::Warn, Label::from(why.to_string())).layout(NoticeLayout::Inline).show(ui);
+            }
+        }
+    }
+    if mode != Mode::Edit {
+        Checkbox::new(Bind::bound(current_page_only)).label(tl!("Current page only").to_owned()).show(ui);
+    }
+    let ready = problem.is_none()
+        && !running
+        && match mode {
+            Mode::Edit => !request.trim().is_empty() && doc.read_only_reason.is_none(),
+            _ => instruction(mode, question, language).is_some(),
+        };
+    let run_label = match mode {
+        Mode::Ask => tl!("Ask"),
+        Mode::Summarize => tl!("Summarize"),
+        Mode::Translate => tl!("Translate"),
+        Mode::Edit => tl!("Suggest changes"),
+    };
+    ui.horizontal(|ui| {
+        if Button::new(run_label).variant(Variant::PRIMARY).enabled(ready).show(ui).clicked() {
+            *picked = Some(Action::Run);
+        }
+        if running {
+            Spinner::new().show(ui);
+            Text::new(tl!("Waiting for the answer…")).show(ui);
+            if Button::new(tl!("Cancel")).show(ui).clicked() {
+                *picked = Some(Action::Cancel);
             }
         }
     });
-    clicked
+    if mode == Mode::Edit {
+        edit_result(ui, app, picked);
+        return;
+    }
+    match app.ai.ask.result() {
+        Some(Ok(answer)) => {
+            if let Some((heading, pages)) = &app.ai_draft.asked {
+                Text::new(format!("{heading} ({pages})")).role(TypeRole::Caption).shade(Shade::Muted).show(ui);
+            }
+            SelectableText::new(tl!("Answer"), answer).multiline().show(ui);
+            let cited = cited_pages(answer, page_count);
+            if !cited.is_empty() {
+                Text::new(tl!("Pages cited")).role(TypeRole::Caption).shade(Shade::Muted).show(ui);
+                ui.horizontal_wrapped(|ui| {
+                    for page in cited {
+                        let hint = crate::i18n::fmt(tl!("Go to page {n}"), &[("n", &page.to_string())]);
+                        if Link::new(hint).show(ui).clicked() {
+                            *jump = Some(page);
+                        }
+                    }
+                });
+            }
+            if Button::new(tl!("Copy answer")).show(ui).clicked() {
+                *picked = Some(Action::Copy);
+            }
+        }
+        Some(Err(error)) => {
+            Notice::new(Tone::Bad, Label::from(error.clone())).layout(NoticeLayout::Inline).show(ui);
+        }
+        None => {}
+    }
+}
+
+/// The Edit tab's result: the model's message, the list of changes, and the buttons that make or undo them.
+fn edit_result(ui: &mut egui::Ui, app: &PdfCraftApp, picked: &mut Option<Action>) {
+    if let Some(Err(error)) = app.ai.plan.result() {
+        Notice::new(Tone::Bad, Label::from(error.clone())).layout(NoticeLayout::Inline).show(ui);
+    }
+    if let Some(error) = &app.ai_draft.apply_error {
+        Notice::new(Tone::Bad, Label::from(error.clone())).layout(NoticeLayout::Inline).show(ui);
+    }
+    if let Some(count) = app.ai_draft.applied {
+        let line = crate::i18n::fmt(tl!("Done: {n} change(s) made. Nothing is saved yet."), &[("n", &count.to_string())]);
+        Notice::new(Tone::Good, Label::from(line)).layout(NoticeLayout::Inline).show(ui);
+        if Button::new(tl!("Undo these changes")).show(ui).clicked() {
+            *picked = Some(Action::UndoApplied);
+        }
+    }
+    let Some(plan) = &app.ai_draft.plan else { return };
+    if !plan.message.is_empty() {
+        Text::new(plan.message.clone()).show(ui);
+    }
+    if plan.steps.is_empty() {
+        Text::new(tl!("No change is proposed.")).shade(Shade::Muted).show(ui);
+        return;
+    }
+    Text::new(tl!("Proposed changes")).role(TypeRole::Heading).show(ui);
+    for (i, step) in plan.steps.iter().enumerate() {
+        let mut line = format!("{}. {}", i + 1, step.summary);
+        if !step.why.is_empty() {
+            line.push_str(&format!(" ({})", step.why));
+        }
+        Text::new(line).show(ui);
+    }
+    if plan.steps.iter().any(|s| s.removes) {
+        Notice::new(Tone::Warn, Label::from(tl!("Some of these changes remove content. Undo takes them back until you save.").to_string()))
+            .layout(NoticeLayout::Inline)
+            .show(ui);
+    }
+    if Button::new(tl!("Make these changes")).variant(Variant::PRIMARY).show(ui).clicked() {
+        *picked = Some(Action::Apply);
+    }
 }
 
 #[cfg(test)]
@@ -274,11 +663,18 @@ mod tests {
         assert!(instruction(Mode::Summarize, "", "").expect("summary").contains("Summarize"));
         assert_eq!(instruction(Mode::Translate, "", " "), None);
         assert!(instruction(Mode::Translate, "", "French").expect("translate").contains("into French"));
+        assert_eq!(instruction(Mode::Edit, "x", "y"), None, "Edit sends its own request");
     }
 
     #[test]
     fn the_answer_heading_names_the_pages_sent() {
         assert_eq!(pages_label(None), "All pages");
         assert_eq!(pages_label(Some(2)), "Page 3");
+    }
+
+    #[test]
+    fn cited_pages_are_listed_once_each_in_order_and_only_when_they_exist() {
+        assert_eq!(cited_pages("See (p. 3), then pages 5 and 3 (p. 99).", 10), vec![3, 5]);
+        assert!(cited_pages("No citations here.", 10).is_empty());
     }
 }

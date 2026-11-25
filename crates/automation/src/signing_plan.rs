@@ -26,7 +26,7 @@ fn bad(m: impl Into<String>) -> ToolError {
     ToolError::InvalidArgs(m.into())
 }
 
-pub(crate) use pdfcraft_organize::signing_plan::{MAX_RECIPIENTS, MAX_SIDECAR_BYTES};
+pub(crate) use pdfcraft_organize::signing_plan::MAX_RECIPIENTS;
 
 /// What every result says, so no one reads a plan as a sent request.
 pub(crate) const NOTE: &str = "This is a local record kept in a file beside the PDF. It does not send the document, notify anyone or collect \
@@ -36,7 +36,7 @@ pub(crate) const NOTE: &str = "This is a local record kept in a file beside the 
 pub(crate) const SIGN_NOTE: &str = "The plan does not check who holds the digital ID: the signature is made with the ID you gave, whoever it belongs to, \
      and its certificate is not compared with the recipient's address (identity_checked is false). Nothing was sent and nobody was told; the plan is a local record.";
 
-pub(crate) use pdfcraft_organize::signing_plan::{Event, Plan, Recipient, Role, Status, plan_bytes, plan_from_bytes};
+pub(crate) use pdfcraft_organize::signing_plan::{Event, Plan, Recipient, Role, Status, plan_bytes};
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]

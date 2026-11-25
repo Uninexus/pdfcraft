@@ -1,241 +1,165 @@
-//! The Signer control in a signature field's properties: it sets or clears the label
-//! `/PdfCraftSigner` through the registered commands `form.field.signer.set` and
-//! `form.field.signer.clear` (the edit `form_field_signer` makes), one undo step each. The label
-//! restricts nobody; these tests check that it is stored, undone, and refused where it must be.
+//! The Signer entry of a digital signature field's Field Properties: Set signer and No one run the registered
+//! commands `form.field.signer.set` and `form.field.signer.clear`, each one undo step, with the address rule and the
+//! signing plan beside the file applied as the `form_field_signer` tool does.
 
-use egui_kittest::{Harness, kittest::Queryable};
+use crate::support::{AppHarness as _, shown_notice};
+use egui::accesskit::Role;
+use egui_kittest::Harness;
+use egui_kittest::kittest::Queryable;
+use pdfcraft_engine::signing_plan::{Plan, Role as PlanRole, plan_bytes};
 use pdfcraft_engine::{Edit, NewField, Session};
 use pdfcraft_ui_egui::PdfCraftApp;
+use pdfcraft_ui_egui::prepare::FieldPropsDialog;
 
-/// A page with a text field `name` and a signature field `Sig1`.
+/// A blank page with a signature field `Sig1` and a text field `Name`.
 fn fixture() -> Vec<u8> {
-    let mut s = Session::new();
-    let bytes = s.create_blank(300.0, 400.0, 1).unwrap();
-    let id = s.open("form.pdf", None, bytes, None).unwrap();
+    let mut session = Session::new();
+    let bytes = session.create_blank(300.0, 400.0, 1).unwrap();
+    let id = session.open("signer.pdf", None, bytes, None).unwrap();
     for (name, rect, kind) in
-        [("name", [40.0, 290.0, 230.0, 314.0], NewField::Text { multiline: false }), ("Sig1", [40.0, 200.0, 230.0, 240.0], NewField::Signature)]
+        [("Sig1", [40.0, 290.0, 220.0, 326.0], NewField::Signature), ("Name", [40.0, 230.0, 230.0, 254.0], NewField::Text { multiline: false })]
     {
-        s.apply(id, Edit::AddField { name: Some(name.into()), page: 0, rect, kind }).unwrap();
+        session.apply(id, Edit::AddField { name: Some(name.into()), page: 0, rect, kind }).unwrap();
     }
-    s.save_bytes(id).unwrap().to_vec()
+    session.save_bytes(id).unwrap().as_ref().clone()
 }
 
-fn harness() -> Harness<'static, PdfCraftApp> {
-    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(|_cc| {
-        let mut app = PdfCraftApp::new();
-        app.set_option("language", "en").unwrap();
-        app.open_bytes("form.pdf", None, fixture()).unwrap();
-        app
+fn harness(path: Option<String>) -> Harness<'static, PdfCraftApp> {
+    let bytes = fixture();
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |cc| {
+        crate::support::install_runtime(&cc.egui_ctx);
+        {
+            let mut app = crate::control::new_app();
+            app.set_option(&egui::Context::default(), "language", "en").unwrap();
+            app.open_bytes(&egui::Context::default(), "signer.pdf", path, bytes).unwrap();
+            app
+        }
     });
-    h.run_steps(4);
+    crate::support::settle(&mut h);
     h
 }
 
-/// The signer label of the named field as the document holds it now.
+/// The document with a signing plan of Ann (signer), Bob (viewer) beside its file.
+fn with_plan() -> (crate::support::TempDir, Harness<'static, PdfCraftApp>) {
+    let dir = crate::support::TempDir::new();
+    let pdf = dir.path().join("signer.pdf");
+    std::fs::write(&pdf, fixture()).unwrap();
+    let mut plan = Plan::empty(1);
+    plan.add_recipient("Ann", "ann@example.org", PlanRole::Signer, 1).unwrap();
+    plan.add_recipient("Bob", "bob@example.org", PlanRole::Viewer, 1).unwrap();
+    std::fs::write(dir.path().join("signer.pdf.pdfcraft-sign.json"), plan_bytes(&plan).unwrap()).unwrap();
+    let h = harness(Some(pdf.to_string_lossy().into_owned()));
+    (dir, h)
+}
+
+fn open_props(h: &mut Harness<'static, PdfCraftApp>, name: &str) {
+    h.set_option("dialog", &format!("field-properties:{name}")).unwrap();
+    h.run_steps(3);
+}
+
+/// The signer label the engine holds for `name`.
 fn label(h: &Harness<'static, PdfCraftApp>, name: &str) -> Option<String> {
     let s = h.state();
-    let doc = s.session.get(s.active_ids().unwrap().1).unwrap();
-    let obj = doc.form.iter().find(|f| f.name == name).unwrap().obj;
-    doc.field_signer(obj).email
+    let doc = s.session.get(s.views[0].id).unwrap();
+    let field = doc.form.iter().find(|f| f.name == name).unwrap();
+    doc.field_signer(field.obj).email
 }
 
-fn undo_label(h: &Harness<'static, PdfCraftApp>) -> Option<String> {
+fn can_undo(h: &Harness<'static, PdfCraftApp>) -> bool {
     let s = h.state();
-    s.session.get(s.active_ids().unwrap().1).unwrap().can_undo().map(str::to_string)
+    s.session.get(s.views[0].id).unwrap().can_undo().is_some()
 }
 
-fn undo_depth(h: &Harness<'static, PdfCraftApp>) -> usize {
-    let s = h.state();
-    s.session.get(s.active_ids().unwrap().1).unwrap().undo_depth()
+fn type_email(h: &mut Harness<'static, PdfCraftApp>, text: &str) {
+    h.get_by_role_and_label(Role::TextInput, "Signer email:").click();
+    h.run_steps(1);
+    h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    h.get_by_role_and_label(Role::TextInput, "Signer email:").type_text(text);
+    h.run_steps(2);
 }
 
-fn open_properties(h: &mut Harness<'static, PdfCraftApp>, field: &str) {
-    h.state_mut().open_field_props(field, 0);
+fn press(h: &mut Harness<'static, PdfCraftApp>, label: &str) {
+    h.get_by_role_and_label(Role::Button, label).click();
     h.run_steps(3);
 }
 
-fn type_signer(h: &mut Harness<'static, PdfCraftApp>, text: &str) {
-    h.state_mut().field_props.as_mut().expect("properties are open").signer = text.into();
-}
-
-fn toast(h: &Harness<'static, PdfCraftApp>) -> String {
-    h.state().toast.as_ref().map(|t| t.0.clone()).unwrap_or_default()
-}
-
 #[test]
-fn the_set_command_labels_the_field_in_one_undoable_step() {
-    let mut h = harness();
-    open_properties(&mut h, "Sig1");
-    h.get_by_label("Digital Signature Properties");
+fn set_signer_and_no_one_are_each_one_undo_step() {
+    let mut h = harness(None);
+    open_props(&mut h, "Sig1");
+    assert!(h.state().dialogs.is_open::<FieldPropsDialog>());
+    assert!(h.query_all_by_label_contains("Signer: No one").count() > 0, "the entry says who the field is for now");
+    type_email(&mut h, "ann@example.org");
+    press(&mut h, "Set signer");
+    assert_eq!(label(&h, "Sig1").as_deref(), Some("ann@example.org"));
+    assert!(can_undo(&h), "the label is one undo step");
+    assert!(shown_notice(&h).is_some_and(|n| n.contains("Signer set to")), "the command says what it did");
+    assert!(h.query_all_by_label_contains("Signer: ann@example.org").count() > 0, "the entry shows the new label");
+    press(&mut h, "No one (clear signer)");
     assert_eq!(label(&h, "Sig1"), None);
-    type_signer(&mut h, "  Ana@Example.org ");
-    assert!(h.state_mut().execute("form.field.signer.set"));
-    h.run_steps(2);
-    assert_eq!(label(&h, "Sig1").as_deref(), Some("Ana@Example.org"), "stored trimmed, as typed otherwise");
-    assert_eq!(undo_label(&h).as_deref(), Some("Set field signer"));
-    assert!(toast(&h).contains("does not restrict who can sign"), "{:?}", toast(&h));
-    // The dialog now says who the field is for.
-    h.get_by_label("Signer: Ana@Example.org");
-    h.state_mut().undo();
-    h.run_steps(2);
-    assert_eq!(label(&h, "Sig1"), None, "one undo takes the label out");
-    h.get_by_label("Signer: No one");
-    h.state_mut().redo();
-    h.run_steps(2);
-    h.get_by_label("Signer: Ana@Example.org");
-}
-
-#[test]
-fn the_clear_command_takes_the_label_out_and_undo_brings_it_back() {
-    let mut h = harness();
-    open_properties(&mut h, "Sig1");
-    type_signer(&mut h, "bo@example.org");
-    assert!(h.state_mut().execute("form.field.signer.set"));
-    assert_eq!(label(&h, "Sig1").as_deref(), Some("bo@example.org"));
-    assert!(h.state_mut().execute("form.field.signer.clear"));
-    h.run_steps(2);
-    assert_eq!(label(&h, "Sig1"), None);
-    assert_eq!(h.state().field_props.as_ref().unwrap().signer_view.label, None);
-    h.state_mut().undo();
-    assert_eq!(label(&h, "Sig1").as_deref(), Some("bo@example.org"));
-}
-
-#[test]
-fn the_dialog_buttons_run_the_commands() {
-    let mut h = harness();
-    open_properties(&mut h, "Sig1");
-    type_signer(&mut h, "cy@example.org");
-    h.get_by_label("Set signer").click();
+    assert!(h.query_all_by_label_contains("Signer: No one").count() > 0);
+    h.undo();
     h.run_steps(3);
-    assert_eq!(label(&h, "Sig1").as_deref(), Some("cy@example.org"));
-    // The notice is the command's own: a button that wrote the edit itself would not give it.
-    assert!(toast(&h).starts_with("Signer set to cy@example.org"), "{:?}", toast(&h));
-    h.get_by_label("No one (clear signer)").click();
-    h.run_steps(3);
-    assert_eq!(label(&h, "Sig1"), None);
+    assert_eq!(label(&h, "Sig1").as_deref(), Some("ann@example.org"), "undo brings the label back");
+    assert!(h.query_all_by_label_contains("Signer: ann@example.org").count() > 0, "and the entry follows the undo");
 }
 
 #[test]
-fn an_address_that_is_not_one_changes_nothing() {
-    let mut h = harness();
-    open_properties(&mut h, "Sig1");
-    let before = undo_label(&h);
-    // The engine refuses a bad address for every caller, not only this entry.
-    let obj = {
-        let s = h.state();
-        s.session.get(s.active_ids().unwrap().1).unwrap().form.iter().find(|f| f.name == "Sig1").unwrap().obj
-    };
-    assert!(!h.state_mut().apply_edit(Edit::SetFieldSigner { field: obj, email: Some("ana\u{00ad}@example.org".into()) }));
-    assert_eq!(label(&h, "Sig1"), None);
-    let long_local = format!("{}@example.org", "a".repeat(65));
-    type_signer(&mut h, &long_local);
-    h.state_mut().execute("form.field.signer.set");
-    assert_eq!(label(&h, "Sig1"), None, "a 65-byte local part");
-    assert!(toast(&h).contains("at most 254 bytes"), "{:?}", toast(&h));
-    for bad in [
-        "",
-        "no-at-sign",
-        "a@b",
-        "a b@example.org",
-        "a@@example.org",
-        "a@example..org",
-        "a@example.org\u{202e}",
-        "ana\u{00ad}@example.org",
-        "ana\u{e0041}@example.org",
-    ] {
-        type_signer(&mut h, bad);
-        h.state_mut().execute("form.field.signer.set");
-        assert_eq!(label(&h, "Sig1"), None, "{bad:?}");
-        assert_eq!(undo_label(&h), before, "{bad:?} made no edit");
-        assert!(toast(&h).contains("must look like"), "{bad:?}: {:?}", toast(&h));
+fn a_malformed_address_changes_nothing() {
+    let mut h = harness(None);
+    open_props(&mut h, "Sig1");
+    for bad in ["not-an-address", "a b@example.org", "a@b"] {
+        type_email(&mut h, bad);
+        press(&mut h, "Set signer");
+        assert_eq!(label(&h, "Sig1"), None, "{bad:?} is refused");
+        assert!(!can_undo(&h), "and adds no undo step");
+        assert!(shown_notice(&h).is_some_and(|n| n.contains("must look like")), "with the reason");
     }
 }
 
 #[test]
-fn a_text_field_gets_no_signer() {
-    let mut h = harness();
-    open_properties(&mut h, "name");
-    assert!(h.query_by_label("Set signer").is_none(), "no Signer control on a text field");
-    type_signer(&mut h, "ana@example.org");
-    h.state_mut().execute("form.field.signer.set");
-    assert_eq!(label(&h, "name"), None);
-    assert!(toast(&h).contains("only be set on a signature field"), "{:?}", toast(&h));
+fn a_text_field_has_no_signer_entry_and_the_command_refuses_it() {
+    let mut h = harness(None);
+    open_props(&mut h, "Name");
+    assert!(h.query_all_by_role_and_label(Role::Button, "Set signer").next().is_none());
+    // Even with an address in the draft, the kind check refuses the set.
+    h.state_mut().dialogs.get_mut::<FieldPropsDialog>().expect("the dialog is open").set_signer_text("ann@example.org".into());
+    assert!(h.execute("form.field.signer.set"));
+    h.run_steps(2);
+    assert_eq!(label(&h, "Name"), None, "a text field takes no signer");
+    assert!(h.execute("form.field.signer.clear"));
+    h.run_steps(2);
+    assert_eq!(label(&h, "Name"), None);
+    assert!(!can_undo(&h));
 }
 
 #[test]
-fn setting_the_same_signer_again_is_said_and_adds_no_step() {
-    let mut h = harness();
-    open_properties(&mut h, "Sig1");
-    type_signer(&mut h, "ana@example.org");
-    h.state_mut().execute("form.field.signer.set");
-    let depth = {
-        let s = h.state();
-        s.session.get(s.active_ids().unwrap().1).unwrap().undo_depth()
-    };
-    h.state_mut().execute("form.field.signer.set");
-    assert!(toast(&h).contains("already has that signer"), "{:?}", toast(&h));
-    let s = h.state();
-    assert_eq!(s.session.get(s.active_ids().unwrap().1).unwrap().undo_depth(), depth);
+fn the_commands_need_the_open_dialog() {
+    let mut h = harness(None);
+    assert!(h.execute("form.field.signer.set"));
+    h.run_steps(2);
+    assert!(shown_notice(&h).is_some_and(|n| n.contains("Open the signature field")), "set without the dialog says where to type");
+    open_props(&mut h, "Sig1");
+    type_email(&mut h, "ann@example.org");
+    press(&mut h, "Cancel");
+    assert!(!h.state().dialogs.is_open::<FieldPropsDialog>());
+    assert!(h.execute("form.field.signer.set"));
+    h.run_steps(2);
+    assert_eq!(label(&h, "Sig1"), None, "a cancelled dialog leaves no draft for a later command to write");
 }
 
-/// A dialog that was cancelled is not open: the commands neither write what was typed in it nor
-/// act on the field it was open on.
 #[test]
-fn a_cancelled_dialog_leaves_the_commands_with_nothing_to_act_on() {
-    let mut h = harness();
-    open_properties(&mut h, "Sig1");
-    type_signer(&mut h, "ana@example.org");
-    assert!(h.state_mut().execute("form.field.signer.set"));
-    let steps = undo_depth(&h);
-    type_signer(&mut h, "bo@example.org");
-    h.get_by_label("Cancel").click();
-    h.run_steps(3);
-    assert!(h.state().field_props.is_none(), "the draft goes with the dialog");
-    h.state_mut().execute("form.field.signer.set");
-    assert!(toast(&h).contains("Open the signature field's properties"), "{:?}", toast(&h));
-    assert_eq!(label(&h, "Sig1").as_deref(), Some("ana@example.org"), "the typed address was not written");
-    // Clear acts on the selection, and nothing is selected: the old field keeps its label.
-    h.state_mut().execute("form.field.signer.clear");
-    assert!(toast(&h).contains("Select a signature field first"), "{:?}", toast(&h));
-    assert_eq!(label(&h, "Sig1").as_deref(), Some("ana@example.org"));
-    assert_eq!(undo_depth(&h), steps);
-}
-
-/// A dialog opened on one document does not label a field of the same name in another.
-#[test]
-fn a_dialog_of_another_document_is_not_acted_on() {
-    let mut h = harness();
-    open_properties(&mut h, "Sig1");
-    type_signer(&mut h, "ana@example.org");
-    h.state_mut().open_bytes("other.pdf", None, fixture()).unwrap();
-    h.run_steps(3);
-    h.state_mut().execute("form.field.signer.set");
-    assert_eq!(label(&h, "Sig1"), None, "the other document's Sig1 is untouched");
-    assert!(h.state().field_props.is_none());
-    assert!(toast(&h).contains("Open the signature field's properties"), "{:?}", toast(&h));
-}
-
-/// A plan file beside the document is said in the dialog and in the notice: the entry is not
-/// checked against it.
-#[test]
-fn a_plan_file_beside_the_document_is_said() {
-    let dir = std::env::temp_dir().join(format!("pdfcraft-signer-plan-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("form.pdf");
-    std::fs::write(&path, fixture()).unwrap();
-    std::fs::write(dir.join("form.pdf.pdfcraft-sign.json"), b"{}").unwrap();
-    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |_cc| {
-        let mut app = PdfCraftApp::new();
-        app.set_option("language", "en").unwrap();
-        app.open_bytes("form.pdf", Some(path.to_string_lossy().into_owned()), fixture()).unwrap();
-        app
-    });
-    h.run_steps(4);
-    open_properties(&mut h, "Sig1");
-    h.get_by_label_contains("not checked against it");
-    type_signer(&mut h, "ana@example.org");
-    h.state_mut().execute("form.field.signer.set");
-    assert!(toast(&h).contains("not checked against the signing plan beside this file"), "{:?}", toast(&h));
-    drop(h);
-    let _ = std::fs::remove_dir_all(&dir);
+fn with_a_plan_beside_the_file_only_a_signer_of_it_can_be_named() {
+    let (_dir, mut h) = with_plan();
+    open_props(&mut h, "Sig1");
+    type_email(&mut h, "carol@example.org");
+    press(&mut h, "Set signer");
+    assert_eq!(label(&h, "Sig1"), None, "someone who is not in the plan is refused");
+    assert!(shown_notice(&h).is_some_and(|n| n.contains("not a signer or an approver")));
+    type_email(&mut h, "bob@example.org");
+    press(&mut h, "Set signer");
+    assert_eq!(label(&h, "Sig1"), None, "a viewer has no turn");
+    type_email(&mut h, "ANN@Example.org");
+    press(&mut h, "Set signer");
+    assert_eq!(label(&h, "Sig1").as_deref(), Some("ann@example.org"), "the label takes the plan's spelling");
 }

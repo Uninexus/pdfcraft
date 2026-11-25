@@ -108,15 +108,7 @@ impl<'a> Recipe<'a> {
                     bytes = result.bytes;
                     continue;
                 }
-                "optimize" => {
-                    let id = session.open(name, None, bytes.clone(), None).map_err(failed)?;
-                    let settings = optimize::Settings { color: self.images, gray: self.images, mono: self.mono, ..Default::default() };
-                    let (candidate, _) = session.optimized_bytes(id, &settings, &[])?;
-                    session.close(id);
-                    if candidate.len() < bytes.len() {
-                        bytes = candidate;
-                    }
-                }
+                "optimize" => bytes = session.optimize_smaller(name, bytes, self.images, self.mono).map_err(failed)?,
                 "pdfa" => {
                     let id = session.open(name, None, bytes.clone(), None).map_err(failed)?;
                     let converted = session.with_own_js_output(id, |s| s.apply(id, Edit::ConvertPdfA { level: self.pdfa }));

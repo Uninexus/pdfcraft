@@ -4,7 +4,7 @@
 //! in `/P` and its rectangle in `/R`.
 //!
 //! This module lists the threads and takes one away by its position, and does nothing else: it
-//! adds no thread or bead, changes no title, and reads no bead's page or rectangle. A removal
+//! adds no thread or bead, changes no title, and reads only the first bead's page, no rectangle. A removal
 //! takes the thread's entry out of `/Threads` only: the thread dictionary, its beads and the
 //! `/B` arrays of the pages that list those beads are left as they are, so the beads stay in the
 //! file unreferenced by `/Threads`.
@@ -46,6 +46,8 @@ pub struct Thread {
     pub beads_capped: bool,
     /// The last bead's `/N` leads back to `/F`, as a thread's ring does.
     pub closed: bool,
+    /// The 1-based page of the first bead (`/F`), when its `/P` is a reference to a page of this document.
+    pub first_page: Option<usize>,
 }
 
 /// What [`read_article_threads`] read.
@@ -119,6 +121,15 @@ fn walk_beads(doc: &Document, thread: &Dict) -> (usize, bool, bool) {
     (MAX_BEADS_WALKED, true, false)
 }
 
+/// The 1-based page the first bead of `thread` names in its `/P`, when that is a page of the document. `pages` is the
+/// page list, read the first time a thread needs it.
+fn first_page(doc: &Document, thread: &Dict, pages: &mut Option<Vec<ObjRef>>) -> Option<usize> {
+    let first = thread.get(b"F").and_then(|o| o.as_ref())?;
+    let page = doc.get(first).as_dict().and_then(|bead| bead.get(b"P").and_then(|o| o.as_ref()))?;
+    let all = pages.get_or_insert_with(|| crate::pages(doc).map(|p| p.into_iter().map(|p| p.obj).collect()).unwrap_or_default());
+    all.iter().position(|p| *p == page).map(|i| i + 1)
+}
+
 fn title(doc: &Document, thread: &Dict) -> (Option<String>, bool) {
     let info = thread.get(b"I").map(|o| held(doc, o));
     let text = info.as_deref().and_then(Object::as_dict).and_then(|d| d.get(b"Title")).map(|o| held(doc, o));
@@ -139,16 +150,17 @@ pub fn read_article_threads(doc: &Document) -> Threads {
         let items = array.unwrap_or_default();
         out.count = items.len();
         out.truncated = items.len() > MAX_LISTED_THREADS;
+        let mut pages: Option<Vec<ObjRef>> = None;
         for (index, item) in items.iter().enumerate().take(MAX_LISTED_THREADS) {
             let value = held(doc, item);
-            let (title, title_exact, beads) = match value.as_dict() {
+            let (title, title_exact, beads, first_page) = match value.as_dict() {
                 Some(d) => {
                     let (t, whole) = title(doc, d);
-                    (t, whole, walk_beads(doc, d))
+                    (t, whole, walk_beads(doc, d), first_page(doc, d, &mut pages))
                 }
-                None => (None, true, (0, false, false)),
+                None => (None, true, (0, false, false), None),
             };
-            out.threads.push(Thread { index, title, title_exact, beads: beads.0, beads_capped: beads.1, closed: beads.2 });
+            out.threads.push(Thread { index, title, title_exact, beads: beads.0, beads_capped: beads.1, closed: beads.2, first_page });
         }
         out
     })

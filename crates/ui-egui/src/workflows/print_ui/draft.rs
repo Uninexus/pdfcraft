@@ -31,11 +31,8 @@ pub const IMAGE_DPI: [f64; 3] = [150.0, 300.0, 600.0];
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct PrintDraft {
-    pub printers: Vec<spool::Printer>,
     /// The unit the sheet size is shown in (Preferences).
     pub units: crate::units::Unit,
-    /// The printers are still being listed in the background (see [`PrinterSource`]).
-    pub printers_loading: bool,
     /// The user chose the printer, so a list arriving late doesn't move it to the default.
     pub printer_picked: bool,
     /// `None` = Save as PDF.
@@ -74,11 +71,14 @@ pub struct PrintDraft {
     pub orientation: Orientation,
     pub content: Content,
     /// Include a summary of the comments: summary pages for the comments on the printed pages
-    /// follow the sheets (off by default; not with Booklet, Poster, Label or a selected area).
+    /// follow the sheets (off by default, and per job; not with Booklet, Poster, Label or a
+    /// selected area).
     pub comment_summary: bool,
-    /// Why the open document can't take a comment summary (it withholds copying, or allows only
-    /// low-resolution printing); read when the dialog opens.
-    pub comment_summary_doc_block: Option<&'static str>,
+    /// The open document withholds copying, which the summary needs; read when the dialog opens.
+    pub comment_summary_no_copying: bool,
+    /// The open document allows only low-resolution printing, whose pages are pictures; read when
+    /// the dialog opens.
+    pub comment_summary_low_resolution: bool,
     /// Print as image (Acrobat's Advanced Print Setup) at `dpi`.
     pub as_image: bool,
     pub dpi: f64,
@@ -114,12 +114,8 @@ pub struct PrintDraft {
     /// The printer whose options are being read in the background (CUPS runs `lpoptions`,
     /// which a stuck CUPS can hold up; #1818). The panel says so meanwhile.
     pub driver_options_loading: Option<String>,
-    /// Properties… asked for this printer's options; the app starts the read on the next frame.
-    pub read_options_for: Option<String>,
     /// The printer whose papers and default paper are being read in the background.
     pub papers_loading: Option<String>,
-    /// A printer change requested reading papers; the app starts the read on the next frame.
-    pub read_papers_for: Option<String>,
     /// Whether each printer's driver takes two-sided settings, as read in the background for
     /// the printer picked (see [`TwoSidedSource`](super::TwoSidedSource)); `None` when it couldn't be read.
     pub two_sided: std::collections::BTreeMap<String, Option<bool>>,
@@ -131,9 +127,7 @@ pub struct PrintDraft {
 impl Default for PrintDraft {
     fn default() -> Self {
         PrintDraft {
-            printers: Vec::new(),
             units: Default::default(),
-            printers_loading: false,
             printer_picked: false,
             printer: None,
             copies: 1,
@@ -165,7 +159,8 @@ impl Default for PrintDraft {
             orientation: Orientation::Auto,
             content: Content::DocumentAndMarkups,
             comment_summary: false,
-            comment_summary_doc_block: None,
+            comment_summary_no_copying: false,
+            comment_summary_low_resolution: false,
             as_image: false,
             dpi: 300.0,
             paper: 0,
@@ -184,9 +179,7 @@ impl Default for PrintDraft {
             crops: Vec::new(),
             crop_pages: None,
             driver_options_loading: None,
-            read_options_for: None,
             papers_loading: None,
-            read_papers_for: None,
             two_sided: Default::default(),
             setups: Vec::new(),
         }
@@ -214,7 +207,7 @@ impl PrintDraft {
     /// printer's media sizes and default paper are still being read in the background off the GUI thread.
     pub fn papers_loading(&self) -> bool {
         let Some(p) = self.printer.as_deref() else { return false };
-        !self.paper_overridden && (self.papers_loading.as_deref() == Some(p) || self.read_papers_for.as_deref() == Some(p))
+        !self.paper_overridden && self.papers_loading.as_deref() == Some(p)
     }
 
     /// Reset an automatically selected custom paper to a standard preset on printer change.
@@ -437,7 +430,7 @@ impl PrintDraft {
     }
 
     /// The printer printed to last, while `printers` still lists it (#2001).
-    pub fn last_printer<'a>(&self, printers: &'a [spool::Printer]) -> Option<&'a spool::Printer> {
+    pub fn last_printer<'a>(&self, printers: &'a [craft::print::ui::Printer]) -> Option<&'a craft::print::ui::Printer> {
         let (last, _) = self.setups.first()?;
         printers.iter().find(|p| p.name == *last)
     }
@@ -531,8 +524,7 @@ impl PrintDraft {
     /// knows; on Windows it lists the queues without asking their drivers (#3554), and the answer
     /// for the printer picked arrives in [`PrintDraft::two_sided`].
     pub fn printer_two_sided(&self) -> Option<bool> {
-        let p = self.printers.iter().find(|p| self.printer.as_ref() == Some(&p.name))?;
-        p.two_sided.or_else(|| self.two_sided.get(&p.name).copied().flatten())
+        self.two_sided.get(self.printer.as_ref()?).copied().flatten()
     }
 
     /// The Two-sided choice as the chosen printer can take it: long or short edge is left out for
@@ -585,28 +577,46 @@ impl PrintDraft {
 
 impl PrintDraft {
     /// Why the summary of the comments can't join this job, when it can't: the document's
-    /// permissions, or a layout whose sheets have no place for the summary pages (Booklet,
-    /// Poster, Label, a selected area), Print as image (pictures), or, in a browser, the browser's
-    /// own print dialog, which is handed the document's sheets only.
-    pub fn comment_summary_blocked(&self) -> Option<&'static str> {
-        if let Some(reason) = self.comment_summary_doc_block {
-            return Some(reason);
+    /// permissions, a layout whose sheets have no place for the summary pages (Booklet, Poster,
+    /// Label, a selected area), Print as image (pictures), or, in a browser, the browser's own print
+    /// dialog, which is handed the document's sheets only.
+    pub fn comment_summary_blocked(&self) -> Option<String> {
+        if self.comment_summary_no_copying {
+            return Some(tl!("The document's security settings don't allow copying, which the summary needs.").to_string());
         }
-        if self.area.is_some() || !matches!(self.handling, Handling::Size | Handling::Multiple) {
-            return Some("Not available with Booklet, Poster, Label or a selected area.");
+        if self.comment_summary_low_resolution {
+            return Some(tl!("The document only allows low-resolution printing, whose pages are pictures.").to_string());
+        }
+        if self.which == Which::Area || !matches!(self.handling, Handling::Size | Handling::Multiple) {
+            return Some(tl!("Not available with Booklet, Poster, Label or a selected area.").to_string());
         }
         if self.as_image {
-            return Some("Not available with Print as image, which prints pictures.");
+            return Some(tl!("Not available with Print as image, which prints pictures.").to_string());
         }
         #[cfg(target_arch = "wasm32")]
         if self.printer.as_deref() == Some(crate::web_print::BROWSER_PRINTER) {
-            return Some("Not available when printing from the browser; use Save as PDF.");
+            return Some(tl!("Not available when printing from the browser; use Save as PDF.").to_string());
         }
         None
     }
 
-    /// [`Self::comment_summary_blocked`] is `None`.
-    pub fn comment_summary_possible(&self) -> bool {
-        self.comment_summary_blocked().is_none()
+    /// The reason Print refuses this draft when it asks for a summary that can't join the job.
+    pub fn comment_summary_refusal(&self) -> Result<(), String> {
+        match self.comment_summary_blocked() {
+            Some(reason) if self.comment_summary => Err(reason),
+            _ => Ok(()),
+        }
+    }
+
+    /// Unticks the summary when it can't join the job, so a greyed-out ticked box never applies.
+    pub fn drop_blocked_comment_summary(&mut self) {
+        if self.comment_summary_blocked().is_some() {
+            self.comment_summary = false;
+        }
+    }
+
+    /// Whether the job asks for a summary and none of [`Self::comment_summary_blocked`]'s reasons applies.
+    pub fn comment_summary_wanted(&self) -> bool {
+        self.comment_summary && self.comment_summary_blocked().is_none()
     }
 }

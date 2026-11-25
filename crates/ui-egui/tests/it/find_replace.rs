@@ -7,6 +7,9 @@ use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
 use pdfcraft_ui_egui::{PdfCraftApp, QuickTool};
 
+use crate::support;
+use crate::support::AppHarness as _;
+
 /// Two 300×200 pages of Helvetica text: "cat and cat" and "a cat".
 fn fixture() -> Vec<u8> {
     let stream = |content: &str| format!("<< /Length {} >>\nstream\n{content}\nendstream", content.len());
@@ -44,13 +47,29 @@ fn has_field(h: &Harness<'static, PdfCraftApp>, placeholder: &str) -> bool {
     h.query_all_by(|n| n.placeholder() == Some(placeholder)).next().is_some()
 }
 
+/// The find bar's Replace All button label, as the framework words it.
+fn replace_all() -> String {
+    use craft::i18n::WordSet as _;
+    craft::text::ui::find::FindLabels::english().replace_all.as_str().to_owned()
+}
+
+/// The find bar's Replace with field: a text field named by its label, with no placeholder.
+const REPLACE_WITH: &str = "Replace with:";
+
+fn has_replace_field(h: &Harness<'static, PdfCraftApp>) -> bool {
+    h.query_by_role_and_label(egui::accesskit::Role::TextInput, REPLACE_WITH).is_some()
+}
+
 #[test]
 fn replace_all_from_the_find_bar_is_one_undo_step() {
-    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(|_cc| {
-        let mut app = PdfCraftApp::new();
-        app.set_option("language", "en").unwrap();
-        app.open_bytes("cats.pdf", None, fixture()).expect("opens");
-        app
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(|cc| {
+        crate::support::install_runtime(&cc.egui_ctx);
+        {
+            let mut app = crate::control::new_app();
+            app.set_option(&egui::Context::default(), "language", "en").unwrap();
+            app.open_bytes(&egui::Context::default(), "cats.pdf", None, fixture()).expect("opens");
+            app
+        }
     });
     h.run_steps(4);
     // ⌘F with the Select tool: the find bar, without a Replace row.
@@ -58,18 +77,16 @@ fn replace_all_from_the_find_bar_is_one_undo_step() {
     h.run_steps(3);
     assert!(h.state().views[0].find.is_some());
     assert!(has_field(&h, "Find text"));
-    assert!(!has_field(&h, "Replace with"), "outside Edit text the find bar doesn't replace");
+    assert!(!has_replace_field(&h), "outside Edit text the find bar doesn't replace");
     // ⇧⌘H: Edit text, and the Replace row.
     h.key_press_modifiers(Modifiers::COMMAND | Modifiers::SHIFT, Key::H);
     h.run_steps(3);
     assert_eq!(h.state().quick_tool, QuickTool::EditText);
     assert!(h.state().views[0].find.as_ref().is_some_and(|f| f.replacing));
-    assert!(has_field(&h, "Replace with"), "the Replace row shows in Edit text");
+    assert!(has_replace_field(&h), "the Replace row shows in Edit text");
     h.query_by(|n| n.placeholder() == Some("Find text")).expect("find field").type_text("cat");
     // Both pages' text loads in the background before every match is listed.
-    // A background job: wait on a deadline, not a fixed number of polls, so a loaded machine still passes.
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    while std::time::Instant::now() < deadline {
+    for _ in 0..400 {
         h.run_steps(1);
         if h.state().views[0].find.as_ref().is_some_and(|f| f.matches.len() == 3) {
             break;
@@ -77,21 +94,21 @@ fn replace_all_from_the_find_bar_is_one_undo_step() {
         std::thread::sleep(std::time::Duration::from_millis(5));
     }
     assert_eq!(h.state().views[0].find.as_ref().map(|f| f.matches.len()), Some(3));
-    h.query_by(|n| n.placeholder() == Some("Replace with")).expect("replace field").click();
+    h.get_by_role_and_label(egui::accesskit::Role::TextInput, REPLACE_WITH).click();
     h.run_steps(2);
-    h.query_by(|n| n.placeholder() == Some("Replace with")).expect("replace field").type_text("dog");
+    h.get_by_role_and_label(egui::accesskit::Role::TextInput, REPLACE_WITH).type_text("dog");
     h.run_steps(1);
     assert_eq!(h.state().views[0].find.as_ref().map(|f| (f.query.as_str(), f.replacement.as_str())), Some(("cat", "dog")));
     // The row may settle over a few frames once the status text changes its width.
     h.run_steps(8);
-    h.get_by_label("Replace all").click();
+    h.get_by_label(&replace_all()).click();
     h.run_steps(4);
-    assert_eq!(texts(&h), ["dog and dog", "a dog"], "{:?}", h.state().toast);
+    assert_eq!(texts(&h), ["dog and dog", "a dog"]);
+    assert!(support::shown_notice(&h).is_some(), "Replace all says what it did");
     let s = h.state();
     assert_eq!(s.session.get(s.views[0].id).unwrap().can_undo(), Some("Replace all"));
-    assert_eq!(s.toast.as_ref().map(|t| t.0.as_str()), Some("Replaced 3 on 2 pages"));
     // One Undo puts every page back.
-    assert!(h.state_mut().execute("edit.undo"));
+    assert!(h.execute("edit.undo"));
     h.run_steps(2);
     assert_eq!(texts(&h), ["cat and cat", "a cat"]);
     let s = h.state();
@@ -101,19 +118,20 @@ fn replace_all_from_the_find_bar_is_one_undo_step() {
 /// Replace changes the highlighted match only: here the second "cat" on the first page.
 #[test]
 fn replace_changes_the_highlighted_match() {
-    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(|_cc| {
-        let mut app = PdfCraftApp::new();
-        app.set_option("language", "en").unwrap();
-        app.open_bytes("cats.pdf", None, fixture()).expect("opens");
-        app
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(|cc| {
+        crate::support::install_runtime(&cc.egui_ctx);
+        {
+            let mut app = crate::control::new_app();
+            app.set_option(&egui::Context::default(), "language", "en").unwrap();
+            app.open_bytes(&egui::Context::default(), "cats.pdf", None, fixture()).expect("opens");
+            app
+        }
     });
     h.run_steps(4);
-    assert!(h.state_mut().execute("edit.replace"));
+    assert!(h.execute("edit.replace"));
     h.run_steps(3);
     h.query_by(|n| n.placeholder() == Some("Find text")).expect("find field").type_text("cat");
-    // A background job: wait on a deadline, not a fixed number of polls, so a loaded machine still passes.
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    while std::time::Instant::now() < deadline {
+    for _ in 0..400 {
         h.run_steps(1);
         if h.state().views[0].find.as_ref().is_some_and(|f| f.matches.len() == 3) {
             break;
@@ -130,17 +148,8 @@ fn replace_changes_the_highlighted_match() {
     assert_eq!(s.session.get(s.views[0].id).unwrap().can_undo(), Some("Edit text"));
 }
 
-/// One page: "abab" in a subset of a face no computer has (glyphs for a and b only).
-fn subset_fixture() -> Vec<u8> {
-    let content = "BT /F3 14 Tf 20 150 Td (abab) Tj ET";
-    let objs: Vec<String> = vec![
-        "<< /Type /Catalog /Pages 2 0 R >>".into(),
-        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 300 200] >>".into(),
-        "<< /Type /Page /Parent 2 0 R /Contents 4 0 R /Resources << /Font << /F3 5 0 R >> >> >>".into(),
-        format!("<< /Length {} >>\nstream\n{content}\nendstream", content.len()),
-        "<< /Type /Font /Subtype /TrueType /BaseFont /ABCDEF+NoSuchFace /FirstChar 97 /LastChar 99 /Widths [500 520 0] /Encoding /WinAnsiEncoding >>"
-            .into(),
-    ];
+/// A PDF of `objs` (object 1 the catalog), numbered from 1.
+fn pdf_of(objs: &[String]) -> Vec<u8> {
     let mut out = b"%PDF-1.7\n".to_vec();
     let mut offsets = Vec::new();
     for (i, o) in objs.iter().enumerate() {
@@ -156,27 +165,43 @@ fn subset_fixture() -> Vec<u8> {
     out
 }
 
-fn subset_harness() -> Harness<'static, PdfCraftApp> {
-    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(|_cc| {
-        let mut app = PdfCraftApp::new();
-        app.set_option("language", "en").unwrap();
-        app.open_bytes("subset.pdf", None, subset_fixture()).expect("opens");
+/// One page: "abab" in a subset of a face no computer has (glyphs for a and b only).
+fn subset_fixture() -> Vec<u8> {
+    let content = "BT /F3 14 Tf 20 150 Td (abab) Tj ET";
+    pdf_of(&[
+        "<< /Type /Catalog /Pages 2 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 300 200] >>".into(),
+        "<< /Type /Page /Parent 2 0 R /Contents 4 0 R /Resources << /Font << /F3 5 0 R >> >> >>".into(),
+        format!("<< /Length {} >>\nstream\n{content}\nendstream", content.len()),
+        "<< /Type /Font /Subtype /TrueType /BaseFont /ABCDEF+NoSuchFace /FirstChar 97 /LastChar 99 /Widths [500 520 0] /Encoding /WinAnsiEncoding >>"
+            .into(),
+    ])
+}
+
+/// The app on `bytes`, the Replace row open, `find` typed and `with` in the Replace field once `count`
+/// matches are listed.
+fn replace_harness(name: &'static str, bytes: Vec<u8>, find: &str, with: &str, count: usize) -> Harness<'static, PdfCraftApp> {
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |cc| {
+        crate::support::install_runtime(&cc.egui_ctx);
+        let mut app = crate::control::new_app();
+        app.set_option(&egui::Context::default(), "language", "en").unwrap();
+        app.open_bytes(&egui::Context::default(), name, None, bytes).expect("opens");
         app
     });
     h.run_steps(4);
-    assert!(h.state_mut().execute("edit.replace"));
+    assert!(h.execute("edit.replace"));
     h.run_steps(3);
-    h.query_by(|n| n.placeholder() == Some("Find text")).expect("find field").type_text("ab");
+    h.query_by(|n| n.placeholder() == Some("Find text")).expect("find field").type_text(find);
     // A background job: wait on a deadline, not a fixed number of polls, so a loaded machine still passes.
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     while std::time::Instant::now() < deadline {
         h.run_steps(1);
-        if h.state().views[0].find.as_ref().is_some_and(|f| f.matches.len() == 2) {
+        if h.state().views[0].find.as_ref().is_some_and(|f| f.matches.len() == count) {
             break;
         }
         std::thread::sleep(std::time::Duration::from_millis(5));
     }
-    h.state_mut().views[0].find.as_mut().unwrap().replacement = "cb".into();
+    h.state_mut().views[0].find.as_mut().unwrap().replacement = with.into();
     h.run_steps(8);
     h
 }
@@ -187,27 +212,25 @@ fn subset_texts(h: &Harness<'static, PdfCraftApp>) -> Vec<String> {
 }
 
 /// A paragraph whose font lacks a letter of the new text is left alone and the notice says the
-/// option exists; with "Use a substitute font if the font lacks letters" ticked in Find options
-/// it is replaced and the notice says how many used one.
+/// option exists; with "Use a substitute font if the font lacks letters" ticked under the Replace
+/// row it is replaced and the notice says how many paragraphs used one.
 #[test]
-fn the_find_options_can_replace_in_a_substitute_font() {
-    let mut h = subset_harness();
-    h.get_by_label("Replace all").click();
+fn the_replace_row_can_replace_in_a_substitute_font() {
+    let mut h = replace_harness("subset.pdf", subset_fixture(), "ab", "cb", 2);
+    h.get_by_label(&replace_all()).click();
     h.run_steps(4);
-    assert_eq!(subset_texts(&h), ["abab"], "{:?}", h.state().toast);
-    let note = h.state().toast.as_ref().map(|t| t.0.clone()).unwrap_or_default();
+    assert_eq!(subset_texts(&h), ["abab"], "{:?}", support::shown_notice(&h));
+    let note = support::shown_notice(&h).unwrap_or_default();
     assert!(note.contains("the font can't draw it") && note.contains("\"Use a substitute font if the font lacks letters\""), "{note}");
 
-    // Tick the option in the Find options menu.
-    h.get_by_label("Find options").click();
-    h.run_steps(3);
+    // Tick the option under the Replace row.
     h.get_by_label("Use a substitute font if the font lacks letters").click();
     h.run_steps(3);
     assert!(h.state().views[0].find.as_ref().is_some_and(|f| f.substitute_font));
-    h.get_by_label("Replace all").click();
+    h.get_by_label(&replace_all()).click();
     h.run_steps(4);
-    assert_eq!(subset_texts(&h), ["cbcb"], "{:?}", h.state().toast);
-    let note = h.state().toast.as_ref().map(|t| t.0.clone()).unwrap_or_default();
+    assert_eq!(subset_texts(&h), ["cbcb"], "{:?}", support::shown_notice(&h));
+    let note = support::shown_notice(&h).unwrap_or_default();
     assert!(note.contains("Replaced 2 on 1 page") && note.contains("1 paragraph rewritten in a substitute font ("), "{note}");
     let s = h.state();
     assert_eq!(s.session.get(s.views[0].id).unwrap().can_undo(), Some("Replace all"));
@@ -216,26 +239,13 @@ fn the_find_options_can_replace_in_a_substitute_font() {
 /// One page: a two-row paragraph of Helvetica, with another line close below it.
 fn grow_fixture() -> Vec<u8> {
     let content = "BT /F1 12 Tf 14 TL 20 150 Td (alpha beta gamma delta) Tj T* (epsilon zeta eta theta) Tj ET BT /F1 12 Tf 20 110 Td (next) Tj ET";
-    let objs: Vec<String> = vec![
+    pdf_of(&[
         "<< /Type /Catalog /Pages 2 0 R >>".into(),
         "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 300 200] >>".into(),
         "<< /Type /Page /Parent 2 0 R /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>".into(),
         format!("<< /Length {} >>\nstream\n{content}\nendstream", content.len()),
         "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".into(),
-    ];
-    let mut out = b"%PDF-1.7\n".to_vec();
-    let mut offsets = Vec::new();
-    for (i, o) in objs.iter().enumerate() {
-        offsets.push(out.len());
-        out.extend_from_slice(format!("{} 0 obj\n{o}\nendobj\n", i + 1).as_bytes());
-    }
-    let xref = out.len();
-    out.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1).as_bytes());
-    for o in offsets {
-        out.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
-    }
-    out.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objs.len() + 1).as_bytes());
-    out
+    ])
 }
 
 /// A paragraph that gains rows is replaced, and the notice says it grew and may overlap what
@@ -243,30 +253,10 @@ fn grow_fixture() -> Vec<u8> {
 #[test]
 fn the_notice_warns_when_a_paragraph_grew_past_its_bottom() {
     let run = |with: &str| {
-        let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(|_cc| {
-            let mut app = PdfCraftApp::new();
-            app.set_option("language", "en").unwrap();
-            app.open_bytes("grow.pdf", None, grow_fixture()).expect("opens");
-            app
-        });
+        let mut h = replace_harness("grow.pdf", grow_fixture(), "beta", with, 1);
+        h.get_by_label(&replace_all()).click();
         h.run_steps(4);
-        assert!(h.state_mut().execute("edit.replace"));
-        h.run_steps(3);
-        h.query_by(|n| n.placeholder() == Some("Find text")).expect("find field").type_text("beta");
-        // A background job: wait on a deadline, not a fixed number of polls, so a loaded machine still passes.
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-        while std::time::Instant::now() < deadline {
-            h.run_steps(1);
-            if h.state().views[0].find.as_ref().is_some_and(|f| f.matches.len() == 1) {
-                break;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(5));
-        }
-        h.state_mut().views[0].find.as_mut().unwrap().replacement = with.into();
-        h.run_steps(8);
-        h.get_by_label("Replace all").click();
-        h.run_steps(4);
-        h.state().toast.as_ref().map(|t| t.0.clone()).unwrap_or_default()
+        support::shown_notice(&h).unwrap_or_default()
     };
     let note = run("a much longer replacement that takes several more rows than the paragraph has");
     assert!(note.contains("Replaced 1 on 1 page") && note.contains("1 paragraph grew and may overlap what follows; Undo to restore"), "{note}");

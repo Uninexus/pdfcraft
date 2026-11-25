@@ -8839,6 +8839,55 @@ fn comment_checkmarks_locks_hiding_and_summaries_through_tools() {
     assert!(matches!(a.call("comments_summarize", &json!({ "doc": doc, "sort": "colour" })), Err(ToolError::InvalidArgs(_))));
 }
 
+/// `comments_hide` with `types` hides the comments of those types only in what `page_render`
+/// draws, apart from Hide all comments (a view setting: the file doesn't change).
+#[test]
+fn hiding_comment_types_hides_those_comments_only_through_tools() {
+    let dir = workdir("hide-comment-types");
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "a.pdf" }))["doc"].as_u64().unwrap();
+    ok(&mut a, "comment_add", json!({ "doc": doc, "page": 1, "type": "rectangle", "rect": [20, 20, 60, 60], "author": "Ada" }));
+    ok(&mut a, "comment_add", json!({ "doc": doc, "page": 1, "type": "oval", "rect": [100, 20, 140, 60], "author": "Ada" }));
+    // Marks on the page inside a box (points from the top-left), where the page is white.
+    let marks = |a: &mut Automation, x0: u32, x1: u32| {
+        let (w, _, px) = a.render_pixels(doc, 1, 1.0).unwrap();
+        let mut n = 0;
+        for y in 15..65 {
+            for x in x0..x1 {
+                let i = ((y * w + x) * 4) as usize;
+                n += usize::from(px.as_ref()[i..i + 3] != [255, 255, 255]);
+            }
+        }
+        n
+    };
+    let (square, circle) = ((15, 65), (95, 145));
+    assert!(marks(&mut a, square.0, square.1) > 0 && marks(&mut a, circle.0, circle.1) > 0, "both comments draw");
+
+    let r = ok(&mut a, "comments_hide", json!({ "doc": doc, "types": ["square"] }));
+    assert_eq!((r["hidden"].clone(), r["hidden_types"].clone()), (json!(true), json!(["Square"])), "{r}");
+    assert_eq!(marks(&mut a, square.0, square.1), 0, "rectangles are hidden");
+    assert!(marks(&mut a, circle.0, circle.1) > 0, "ovals still draw");
+
+    // Hiding all comments is its own setting: showing it again keeps the hidden type hidden.
+    ok(&mut a, "comments_hide", json!({ "doc": doc }));
+    ok(&mut a, "comments_hide", json!({ "doc": doc, "hidden": false }));
+    assert_eq!(marks(&mut a, square.0, square.1), 0, "the type stays hidden");
+    assert!(marks(&mut a, circle.0, circle.1) > 0);
+
+    let r = ok(&mut a, "comments_hide", json!({ "doc": doc, "types": [], "hidden": false }));
+    assert_eq!(r["hidden_types"], json!([]), "{r}");
+    assert!(marks(&mut a, square.0, square.1) > 0, "an empty list with hidden false shows every type");
+
+    for (args, what) in [
+        (json!({ "doc": doc, "types": ["Sparkle"] }), "an unknown type"),
+        (json!({ "doc": doc, "types": "Highlight" }), "a string for the list"),
+        (json!({ "doc": doc, "types": [7] }), "a number for a type"),
+        (json!({ "doc": doc, "types": [] }), "hiding no type"),
+    ] {
+        assert!(matches!(a.call("comments_hide", &args), Err(ToolError::InvalidArgs(_))), "{what} must be refused");
+    }
+}
+
 /// Text the standard fonts can't draw is never written as `?` silently, through the tools. A form
 /// value, a button caption, a text box and Fill & Sign text are kept as typed (as Acrobat keeps
 /// them) and the result's `warnings` names the character; a form also asks other viewers to

@@ -158,7 +158,7 @@ impl AiConfig {
     }
 
     /// Writes the settings atomically. On Unix the file is readable by its owner only, because it
-    /// can hold an API key; on Windows the caller restricts it (`pdfcraft_platform::owner_only`).
+    /// can hold an API key; on Windows the caller restricts it (`craft::platform::owner_only`).
     pub fn save(&self, path: &Path) -> Result<()> {
         let fail = |e: std::io::Error| AiError::Config(format!("cannot save AI settings {}: {e}", path.display()));
         let body = json!({ "provider": self.provider.as_str(), "base_url": self.base_url, "api_key": self.api_key, "model": self.model, "timeout_secs": self.timeout_secs });

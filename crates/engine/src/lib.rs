@@ -15,6 +15,8 @@
 pub mod actions;
 pub mod ai_edit;
 pub mod autotag;
+pub mod bates_batch;
+pub mod bookmark_json;
 mod bookmarks;
 pub mod build_info;
 pub mod camera;
@@ -52,6 +54,7 @@ pub mod open_parameters;
 pub mod optimizer;
 mod page_filter;
 mod pictures;
+pub mod plan_audit;
 pub mod print_raster;
 pub mod printcheck;
 mod protection;
@@ -65,6 +68,7 @@ pub mod signature_audit;
 pub mod signature_image;
 pub mod signature_scan;
 mod sources;
+pub mod split_name;
 pub mod spooler;
 mod stamp_preview;
 #[cfg(test)]
@@ -126,6 +130,7 @@ pub use pdfcraft_organize::signature_seed::{
     Change as SeedChange, DIGEST_METHODS as SEED_DIGEST_METHODS, ENTRIES as SEED_ENTRIES, Entry as SeedEntry, MAX_ENTRIES as MAX_SEED_ENTRIES,
     MAX_TEXT_CHARS as MAX_SEED_TEXT_CHARS, SUB_FILTERS as SEED_SUB_FILTERS, SeedList, SeedSpec,
 };
+pub use pdfcraft_organize::signing_handoff;
 pub use pdfcraft_organize::signing_plan;
 pub use pdfcraft_organize::thread_action::{
     Change as ThreadActionChange, MAX_BEADS as MAX_ACTION_BEADS, MAX_THREADS as MAX_ACTION_THREADS, ThreadTarget,
@@ -203,7 +208,7 @@ use comments::comment_list;
 pub use comments::{SummarySort, comment_kind, comment_summary, comment_summary_pages, comment_type_name};
 #[cfg(test)]
 use document::page_runs;
-pub use document::{Document, EditNotice, MakeAccessible, TextNotice, display_bytes_for, render_password_for};
+pub use document::{COMMENT_TYPES, Document, EditNotice, MakeAccessible, TextNotice, display_bytes_for, render_password_for};
 use document::{carry_verdict_marks, display_bytes, info_fields, recovered_render_password, same_pages, shown_under_redactions, undrawn_notices};
 pub use edit::{BATCH_LABELS, EDIT_LABELS, Edit};
 pub use error::{EditError, SourceProblem};

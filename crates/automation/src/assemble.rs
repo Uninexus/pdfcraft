@@ -538,7 +538,11 @@ impl Automation {
         let doc = self.doc(a)?;
         let id = doc.id;
         let stem = Path::new(&doc.name).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "part".into());
-        let template = a.opt_str("name_template")?.map(crate::split_name::Template::parse).transpose()?;
+        let template = a
+            .opt_str("name_template")?
+            .map(pdfcraft_engine::split_name::Template::parse)
+            .transpose()
+            .map_err(|e| ToolError::InvalidArgs(e.to_string()))?;
         let bookmarks = a.opt_bool("bookmarks")?.unwrap_or(false);
         let max_mb = a.opt_num("max_mb")?;
         let chosen = [a.get("every").is_some(), a.get("before").is_some(), bookmarks, max_mb.is_some()].iter().filter(|x| **x).count();
@@ -586,14 +590,14 @@ impl Automation {
                 };
                 // A file name is at most 255 bytes: keep the base to 200, cut between characters, which leaves room for ".pdf" and a -N suffix.
                 // A stem such as "nul.x" makes the base a Windows device name, which is guarded here too.
-                base = crate::split_name::guard_device_name(&base);
-                if let Some((end, _)) = base.char_indices().find(|(at, c)| at + c.len_utf8() > crate::split_name::MAX_BASE_BYTES) {
+                base = pdfcraft_engine::split_name::guard_device_name(&base);
+                if let Some((end, _)) = base.char_indices().find(|(at, c)| at + c.len_utf8() > pdfcraft_engine::split_name::MAX_BASE_BYTES) {
                     base.truncate(end);
                 }
                 // A name_template replaces that name; one that leaves nothing usable keeps it.
                 if let Some(t) = &template {
                     let bookmark = placeholder_titles.iter().find(|t| t.0 + 1 == *first).map_or("", |t| t.1.as_str());
-                    let info = crate::split_name::PartInfo { name: &stem, bookmark, number: i + 1, first: *first, last: *last };
+                    let info = pdfcraft_engine::split_name::PartInfo { name: &stem, bookmark, number: i + 1, first: *first, last: *last };
                     if let Some(named) = t.apply(&info) {
                         base = named;
                     }
@@ -602,7 +606,7 @@ impl Automation {
                 // Equal titles (or titles that sanitize alike) get -2, -3, ... so no part overwrites another; compared case-insensitively.
                 let mut unique = file;
                 let mut n = 1;
-                while !used.insert(crate::split_name::fold_key(&unique)) {
+                while !used.insert(pdfcraft_engine::split_name::fold_key(&unique)) {
                     n += 1;
                     unique = format!("{base}-{n}.pdf");
                 }
