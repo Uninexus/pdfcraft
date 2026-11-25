@@ -5,7 +5,7 @@
 
 use craft::theme::variant::Tone;
 use craft::ui::buttons::Button;
-use craft::ui::contract::{Bind, Outcome as _, Props as _, Show as _, ShowContainer as _};
+use craft::ui::contract::{Bind, Props as _, Show as _, ShowContainer as _};
 use craft::ui::dialog::{DialogId, DialogResult, DialogStack, StackDialog, dialog_id};
 use craft::ui::display::{Shade, Text};
 use craft::ui::form::Field;
@@ -180,10 +180,12 @@ impl StackDialog for ReferenceXObjectsDialog {
                             .role(TypeRole::Caption)
                             .shade(Shade::Muted)
                             .show(ui);
-                    } else if Button::new(tl!("Remove Reference").to_string()).enabled(shown.modifiable).id_salt(row.index).show(ui).clicked() {
-                        *action = Some(row.index);
                     }
                 });
+                // Outside the field, so the button keeps its own name: inside, the field names its control after the row.
+                if row.removable && Button::new(tl!("Remove Reference").to_string()).enabled(shown.modifiable).id_salt(row.index).show(ui).clicked() {
+                    *action = Some(row.index);
+                }
             }
             if shown.truncated || shown.capped {
                 let listed = shown.rows.len();
