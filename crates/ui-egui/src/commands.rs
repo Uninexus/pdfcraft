@@ -1008,6 +1008,8 @@ impl PdfCraftApp {
             "a11y.autotag_fields" => self.autotag_form_fields(ctx),
             "a11y.tags" => self.choose_right_panel(Some(RightPanel::Tags)),
             "a11y.make_accessible" => crate::a11y_ui::open_make_accessible(self, ctx),
+            "a11y.role_map" => crate::dialogs::role_class_map::open_role_map(self, ctx),
+            "a11y.class_map" => crate::dialogs::role_class_map::open_class_map(self, ctx),
             "a11y.reading_options" => self.open_properties(ctx, PropsTab::Advanced),
             "redact.mark" => {
                 self.quick_tool = crate::QuickTool::Redact;

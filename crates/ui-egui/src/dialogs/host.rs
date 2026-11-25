@@ -94,6 +94,12 @@ fn results(app: &mut PdfCraftApp, ctx: &egui::Context) {
     if let Some(fields) = param_ok(app, super::field_copies_ui::KEY) {
         super::field_copies_ui::finish(ctx, app, &fields);
     }
+    if let Some(fields) = param_ok(app, super::role_class_map::ROLE_KEY) {
+        super::role_class_map::finish_role_map(ctx, app, &fields);
+    }
+    if let Some(fields) = param_ok(app, super::role_class_map::CLASS_KEY) {
+        super::role_class_map::finish_class_map(ctx, app, &fields);
+    }
     if let Some(fields) = param_ok(app, "form.duplicate_field") {
         super::duplicate_field::finish(ctx, app, &fields);
     }

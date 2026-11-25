@@ -98,6 +98,7 @@ mod recovery;
 mod redact;
 mod redact_pattern;
 mod reload;
+mod role_class_map;
 mod scan_clean;
 mod script_noop;
 mod search_position;
