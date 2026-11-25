@@ -73,6 +73,7 @@ mod ocr;
 mod office_batch;
 mod open_action;
 mod optimize;
+mod optimize_batch;
 mod organize_drag;
 mod page_view;
 mod pageboxes;

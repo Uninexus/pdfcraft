@@ -8188,11 +8188,11 @@ title = "Optimize multiple files"
 area = "K"
 tier = "P2"
 milestone = "M13"
-status = "partial"
-commands = []
+status = "shipped"
+commands = ["optimize.batch"]
 tools = ["doc_batch"]
-evidence = ["apps/pdfcraft-cli/tests/it/batch.rs::cli_batch_reports_partial_failure_and_continues_into_subfolders"]
-notes = "Headless and CLI only: doc_batch with the optimize step (`pdfcraft-cli batch --steps optimize`, or `convert,optimize` as the cited test runs) over files and folders. No GUI batch dialog, no report file, no parallel workers, no resume. See docs/cli-batch.md."
+evidence = ["crates/ui-egui/tests/it/optimize_batch.rs::every_file_is_written_to_the_chosen_folder_no_larger_than_it_was", "crates/ui-egui/tests/it/optimize_batch.rs::a_file_that_is_not_a_pdf_is_named_as_failed_and_the_others_still_run", "crates/ui-egui/tests/it/optimize_batch.rs::nothing_is_reported_as_optimized_when_every_file_fails", "crates/ui-egui/tests/it/optimize_batch.rs::a_name_already_in_the_folder_is_never_replaced", "apps/pdfcraft-cli/tests/it/batch.rs::cli_batch_reports_partial_failure_and_continues_into_subfolders"]
+notes = "File > Optimize multiple files… opens a dialog with a file list (Browse, Remove, reorder) and a switch to also take the PDFs of a folder, with its subfolders when that is on. After OK it asks for the folder to take PDFs from (when asked), then for the folder to write to, and optimizes each file on a background worker with Reduce File Size settings, with a progress card and Cancel. This is the same engine step as doc_batch's optimize step (Session::optimize_smaller); a copy that is not smaller keeps the file's own bytes. A file that cannot be read or optimized is named with its reason in the closing message and the others carry on; nothing is reported as optimized when every file fails. Copies never replace a file (a taken name gets (2), (3)); the originals are not changed. Output is flat: subfolder structure is not kept. Up to 1000 files, 512 MB each. Not in the GUI: choosing the image resolution or quality (doc_batch takes ppi and quality), a report file, parallel workers, resume, a per-file results window (the closing message lists successes as a count and each failure by name), keeping the folder layout. The folder walk is covered by no GUI test. Not in the browser. Headless: doc_batch (pdfcraft-cli batch --steps optimize); see docs/cli-batch.md."
 
 [[feature]]
 id = "optimize.preflight"

@@ -327,6 +327,7 @@ pub static TOOL_GROUPS: &[ToolGroup] = &[
             items: &[
                 item("Reduce file size", "file-down", "optimize.reduce", Ready),
                 item("Advanced optimization", "settings-2", "optimize.advanced", Ready),
+                item("Optimize multiple files", "files", "optimize.batch", Ready),
                 item("Audit space usage", "gauge", "optimize.audit", Planned("M11")),
             ],
         }],
