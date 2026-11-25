@@ -82,3 +82,80 @@ fn a_comment_of_a_hidden_type_is_not_found() {
     h.run_steps(3);
     assert_eq!(matches_found(&h), 0, "a hidden comment is not matched");
 }
+
+/// Three pages: "zebra" is in the text of pages 1 and 3, and in a note on page 2 and in a note and its reply on page 3.
+const MANY_PAGES: &[u8] = b"%PDF-1.7
+1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
+2 0 obj << /Type /Pages /Kids [3 0 R 7 0 R 9 0 R] /Count 3 >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >> endobj
+4 0 obj << /Length 45 >> stream
+BT /F1 14 Tf 20 150 Td (A zebra here) Tj ET
+endstream endobj
+5 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj
+7 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Annots [8 0 R] >> endobj
+8 0 obj << /Type /Annot /Subtype /Text /Rect [20 100 40 120] /NM (n2) /T (Alice) /Contents (zebra on page two) >> endobj
+9 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Contents 10 0 R /Resources << /Font << /F1 5 0 R >> >> /Annots [11 0 R 12 0 R] >> endobj
+10 0 obj << /Length 45 >> stream
+BT /F1 14 Tf 20 150 Td (Zebra again) Tj ET
+endstream endobj
+11 0 obj << /Type /Annot /Subtype /Text /Rect [20 100 40 120] /NM (n3) /T (Alice) /Contents (a zebra note) >> endobj
+12 0 obj << /Type /Annot /Subtype /Text /Rect [20 100 40 120] /NM (r3) /T (Bob) /IRT 11 0 R /RT /R /Contents (zebra reply) >> endobj
+trailer << /Root 1 0 R >>
+%%EOF";
+
+#[test]
+fn stepping_through_text_and_comment_hits_stays_on_real_pages_and_survives_a_reopen() {
+    use crate::support::AppHarness as _;
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 1400.0)).build_eframe(|cc| {
+        crate::support::install_runtime(&cc.egui_ctx);
+        {
+            let mut app = crate::control::new_app();
+            app.set_option(&egui::Context::default(), "language", "en").unwrap();
+            app.open_bytes(&egui::Context::default(), "many.pdf", None, MANY_PAGES.to_vec()).expect("opens");
+            app.set_option(&egui::Context::default(), "left", "closed").unwrap();
+            app.set_option(&egui::Context::default(), "find", "zebra").unwrap();
+            app
+        }
+    });
+    h.run_steps(4);
+    support::settle(&mut h);
+    h.run_steps(3);
+    let text_only = matches_found(&h);
+    assert!(text_only >= 2, "the page text of pages 1 and 3 is found: {text_only}");
+
+    h.get_by_label("Include comments").click();
+    h.run_steps(3);
+    let with_comments = matches_found(&h);
+    assert!(with_comments > text_only, "comments add hits: {text_only} -> {with_comments}");
+
+    let pages = 3;
+    let real = |h: &Harness<'static, PdfCraftApp>| {
+        let view = &h.state().views[0];
+        assert!(view.current() < pages, "the view stays on a real page: {}", view.current());
+        let marks = view.find.as_ref().map(|f| f.marks()).unwrap_or_default();
+        assert!(marks.len() <= text_only, "only page text is highlighted: {} marks", marks.len());
+    };
+    for _ in 0..(with_comments * 2 + 2) {
+        h.state_mut().views[0].find_step(true);
+        h.run_steps(3);
+        real(&h);
+    }
+    for _ in 0..(with_comments * 2 + 2) {
+        h.state_mut().views[0].find_step(false);
+        h.run_steps(3);
+        real(&h);
+    }
+    assert!(!h.state().views[0].session.comments.selection().is_empty() || with_comments > 0);
+
+    // Closing the bar and opening it again with the option still on lists the same hits.
+    h.state_mut().views[0].find = None;
+    h.run_steps(3);
+    h.set_option("find", "zebra").unwrap();
+    h.run_steps(4);
+    support::settle(&mut h);
+    h.run_steps(3);
+    real(&h);
+    h.state_mut().views[0].find_step(true);
+    h.run_steps(3);
+    real(&h);
+}

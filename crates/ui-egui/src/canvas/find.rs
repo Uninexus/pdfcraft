@@ -142,7 +142,7 @@ impl DocView {
             f.matches.set_page(COMMENT_PAGE_BASE + i, Vec::<std::ops::Range<usize>>::new());
         }
         for i in 0..hits.len() {
-            f.matches.set_page(COMMENT_PAGE_BASE + i, vec![0usize..1]);
+            f.matches.set_page(COMMENT_PAGE_BASE + i, std::iter::once(0usize..1).collect::<Vec<_>>());
         }
         f.comment_hits = hits;
     }

@@ -1,7 +1,6 @@
 //! Document Properties ▸ Advanced ▸ Fast web view: Yes for a linearized file whose dictionary
 //! still holds, No for an ordinary one.
 
-use crate::support::AppHarness as _;
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
 use pdfcraft_ui_egui::PdfCraftApp;
@@ -75,8 +74,12 @@ fn harness(pdf: Vec<u8>) -> Harness<'static, PdfCraftApp> {
 
 /// What the Fast web view row says: its label and value as the accessibility tree has them.
 fn row_text(h: &Harness<'static, PdfCraftApp>) -> String {
+    use egui_kittest::kittest::NodeT as _;
     h.query_all_by(|n| n.label().is_some_and(|l| l.starts_with("Fast web view")))
-        .map(|n| format!("{} {}", n.label().unwrap_or_default(), n.value().unwrap_or_default()))
+        .map(|n| {
+            let node = n.accesskit_node();
+            format!("{} {}", node.label().unwrap_or_default(), node.value().unwrap_or_default())
+        })
         .collect::<Vec<_>>()
         .join(" | ")
 }
