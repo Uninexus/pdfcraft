@@ -26,6 +26,7 @@ pub(crate) mod prompts;
 pub(crate) mod properties;
 pub(super) mod protect;
 pub(super) mod readiness_ui;
+pub(crate) mod role_class_map;
 pub(crate) mod rename_ui;
 pub(crate) mod shortcuts;
 pub(crate) mod signature;

@@ -542,6 +542,7 @@ impl DockPanels<PanelId> for Panels<'_> {
             PanelId::Pages => super::pages::tools_menu(&*self.app),
             PanelId::Layers => super::layers::menu_rows(&*self.app),
             PanelId::Bookmarks => super::bookmarks::options_menu(&*self.app),
+            PanelId::Tags => crate::dialogs::role_class_map::options_menu(),
             _ => Vec::new(),
         }
     }
