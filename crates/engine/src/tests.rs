@@ -16402,9 +16402,14 @@ fn viewer_pixel(s: &Session, id: DocId, x: u32, y: u32) -> [u8; 4] {
 fn hiding_a_comment_type_hides_those_comments_only_and_never_changes_the_file() {
     let (mut s, id) = session_with(1);
     s.apply(id, rect_comment(0, [80.0, 80.0, 120.0, 120.0])).unwrap();
-    let Edit::AddAnnotation(mut oval) = rect_comment(0, [140.0, 80.0, 180.0, 120.0]) else { unreachable!() };
-    oval.shape = Shape::Oval { rect: [140.0, 80.0, 180.0, 120.0] };
-    s.apply(id, Edit::AddAnnotation(oval)).unwrap();
+    let oval = Edit::AddAnnotation(NewAnnotation {
+        page: 0,
+        shape: Shape::Oval { rect: [140.0, 80.0, 180.0, 120.0] },
+        style: Style { color: [1.0, 0.0, 0.0], opacity: 1.0, width: 2.0, fill: Some([1.0, 0.0, 0.0]), ..Style::default() },
+        contents: "Look here".into(),
+        author: "Reviewer".into(),
+    });
+    s.apply(id, oval).unwrap();
     let drawn = |s: &Session, x| viewer_pixel(s, id, x, 100)[1] < 40;
     assert!(drawn(&s, 100) && drawn(&s, 160), "both comments draw");
     let saved = s.get(id).unwrap().bytes.clone();

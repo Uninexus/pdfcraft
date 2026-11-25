@@ -986,19 +986,6 @@ fn border_shape(a: &Args) -> Result<Option<BorderShape>> {
         .transpose()
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn colours_parse_by_hex_and_name() {
-        assert_eq!(parse_color("#FF0000").unwrap(), [1.0, 0.0, 0.0]);
-        assert_eq!(parse_color("black").unwrap(), [0.0, 0.0, 0.0]);
-        assert!(parse_color("#12").is_err() && parse_color("chartreuse").is_err());
-        assert_eq!(hex([1.0, 0.5, 0.0]), "#FF8000");
-    }
-}
-
 /// The most comment type names `comments_hide` takes at once.
 const MAX_COMMENT_TYPES: usize = 64;
 
@@ -1020,4 +1007,17 @@ fn comment_types(a: &Args) -> Result<Option<Vec<String>>> {
         out.push((*known).to_owned());
     }
     Ok(Some(out))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn colours_parse_by_hex_and_name() {
+        assert_eq!(parse_color("#FF0000").unwrap(), [1.0, 0.0, 0.0]);
+        assert_eq!(parse_color("black").unwrap(), [0.0, 0.0, 0.0]);
+        assert!(parse_color("#12").is_err() && parse_color("chartreuse").is_err());
+        assert_eq!(hex([1.0, 0.5, 0.0]), "#FF8000");
+    }
 }
