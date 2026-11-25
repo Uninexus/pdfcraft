@@ -558,5 +558,18 @@ pub fn tool_for(a: &Annotation) -> Option<CommentTool> {
     })
 }
 
+/// The document's info as the page's comment code reads it: without the comments of a type hidden on the page
+/// (Comments ▸ Show comment types), so such a comment is as unreachable as with Hide all comments: not hit, selected,
+/// tipped or opened. Borrowed as it is when no type is hidden.
+pub(crate) fn comment_info(doc: &pdfcraft_engine::Document) -> std::borrow::Cow<'_, DocInfo> {
+    let hidden = doc.hidden_comment_types();
+    if hidden.is_empty() {
+        return std::borrow::Cow::Borrowed(&doc.info);
+    }
+    let mut info = doc.info.clone();
+    info.annotations.retain(|a| !hidden.contains(&a.subtype));
+    std::borrow::Cow::Owned(info)
+}
+
 #[cfg(test)]
 mod tests;

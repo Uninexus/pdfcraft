@@ -1710,7 +1710,8 @@ pub fn document_area_at(app: &mut PdfCraftApp, index: usize, rect: Rect, ui: &mu
     }
     apply_notice(app, ui.ctx(), index, notice);
     let doc = app.session.get(doc_id)?;
-    let info = &doc.info;
+    let shown_info = comments::comment_info(doc);
+    let info = &*shown_info;
     if info.pages.is_empty() {
         let _ = Text::new(tl!("This document has no pages.")).show(ui);
         return None;
@@ -1988,7 +1989,8 @@ pub fn document_area_at(app: &mut PdfCraftApp, index: usize, rect: Rect, ui: &mu
     // The clipboard is read when Paste is invoked, so its menu stays enabled while the document is open.
     let can_paste_image = true;
     let doc = app.session.get(doc_id)?;
-    let info = &doc.info;
+    let shown_info = comments::comment_info(doc);
+    let info = &*shown_info;
     let view = &mut app.views[index];
     // The in-place editors and comment windows over the pages, in their old order, mapped through this pass's
     // placement.
