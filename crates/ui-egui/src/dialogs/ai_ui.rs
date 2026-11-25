@@ -500,7 +500,11 @@ fn body(ui: &mut egui::Ui, app: &PdfCraftApp, inputs: Inputs<'_>) {
     }
     match mode {
         Mode::Ask => {
-            TextField::new(tl!("Question"), Bind::bound(question)).placeholder(tl!("Ask a question about this document")).lines(3).show(ui);
+            TextField::new(tl!("Question"), Bind::bound(question))
+                .placeholder(tl!("Ask a question about this document"))
+                .lines(3)
+                .width_chars(72)
+                .show(ui);
         }
         Mode::Summarize => {
             Text::new(tl!("Writes a short summary with the key points and page numbers.")).show(ui);
@@ -516,6 +520,7 @@ fn body(ui: &mut egui::Ui, app: &PdfCraftApp, inputs: Inputs<'_>) {
             TextField::new(tl!("What should change?"), Bind::bound(request))
                 .placeholder(tl!("Rotate pages 3 to 5 by 90 degrees"))
                 .lines(3)
+                .width_chars(72)
                 .limit(2_000)
                 .show(ui);
             if let Some(why) = &doc.read_only_reason {
