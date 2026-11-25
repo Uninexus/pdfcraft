@@ -16386,3 +16386,47 @@ fn the_font_list_warning_survives_refresh_fonts() {
     session.refresh_fonts(id);
     assert_eq!(flagged(&session), 1, "{:?}", session.get(id).unwrap().info.warnings);
 }
+
+/// The pixel of page 1 at `(x, y)` (points from the lower left) as the viewer draws it, with its
+/// view settings (hidden comments, hidden comment types).
+fn viewer_pixel(s: &Session, id: DocId, x: u32, y: u32) -> [u8; 4] {
+    let doc = s.get(id).unwrap();
+    let mut r = pdfcraft_render::PageRenderer::new(doc.display.clone(), s.render_config(id).unwrap());
+    let out = r.render(pdfcraft_render::RenderRequest { page: 0, scale: 1.0, ..Default::default() });
+    assert!(out.error.is_none(), "{:?}", out.error);
+    let i = (((300 - y) * out.width + x) * 4) as usize;
+    out.rgba[i..i + 4].try_into().unwrap()
+}
+
+#[test]
+fn hiding_a_comment_type_hides_those_comments_only_and_never_changes_the_file() {
+    let (mut s, id) = session_with(1);
+    s.apply(id, rect_comment(0, [80.0, 80.0, 120.0, 120.0])).unwrap();
+    let Edit::AddAnnotation(mut oval) = rect_comment(0, [140.0, 80.0, 180.0, 120.0]) else { unreachable!() };
+    oval.shape = Shape::Oval { rect: [140.0, 80.0, 180.0, 120.0] };
+    s.apply(id, Edit::AddAnnotation(oval)).unwrap();
+    let drawn = |s: &Session, x| viewer_pixel(s, id, x, 100)[1] < 40;
+    assert!(drawn(&s, 100) && drawn(&s, 160), "both comments draw");
+    let saved = s.get(id).unwrap().bytes.clone();
+
+    let square: std::collections::BTreeSet<String> = ["Square".to_owned()].into();
+    assert!(s.set_hidden_comment_types(id, square.clone()));
+    assert!(!s.set_hidden_comment_types(id, square), "the same set changes nothing");
+    assert!(!drawn(&s, 100), "rectangles are hidden");
+    assert!(drawn(&s, 160), "ovals still draw");
+    assert!(!s.get(id).unwrap().comments_hidden(), "Hide all comments is a setting of its own");
+    assert_eq!(s.get(id).unwrap().bytes, saved, "the file doesn't change");
+
+    // The hidden type follows edits: a rectangle added afterwards is hidden too.
+    s.apply(id, rect_comment(0, [20.0, 80.0, 60.0, 120.0])).unwrap();
+    assert!(!drawn(&s, 40), "a new rectangle is hidden");
+    assert!(drawn(&s, 160));
+
+    // It survives reloading the file, and showing every type brings the rectangles back.
+    let bytes = s.get(id).unwrap().bytes.clone();
+    s.reload(id, bytes).unwrap();
+    assert!(s.get(id).unwrap().hidden_comment_types().contains("Square"));
+    assert!(!drawn(&s, 100), "still hidden after the reload");
+    assert!(s.set_hidden_comment_types(id, Default::default()));
+    assert!(drawn(&s, 100) && drawn(&s, 160) && drawn(&s, 40));
+}

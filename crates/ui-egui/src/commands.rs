@@ -865,6 +865,28 @@ impl PdfCraftApp {
                     }
                 }
             }
+            "comment.show_all_types" => {
+                if let Some(i) = active {
+                    let id = self.views[i].id;
+                    if self.session.set_hidden_comment_types(id, Default::default()) {
+                        self.views[i].invalidate_content();
+                    }
+                }
+            }
+            toggle if pdfcraft_engine::commands::COMMENT_TYPE_COMMANDS.iter().any(|(command, _)| *command == toggle) => {
+                let subtype =
+                    pdfcraft_engine::commands::COMMENT_TYPE_COMMANDS.iter().find(|(command, _)| *command == toggle).map(|(_, subtype)| *subtype);
+                if let (Some(i), Some(subtype)) = (active, subtype) {
+                    let id = self.views[i].id;
+                    let mut types = self.session.get(id).map(|d| d.hidden_comment_types().clone()).unwrap_or_default();
+                    if !types.remove(subtype) {
+                        types.insert(subtype.to_owned());
+                    }
+                    if self.session.set_hidden_comment_types(id, types) {
+                        self.views[i].invalidate_content();
+                    }
+                }
+            }
             "export.docx" => self.export_office_dialog(ctx, pdfcraft_engine::compare::OfficeFormat::Docx),
             "export.pptx" => self.export_office_dialog(ctx, pdfcraft_engine::compare::OfficeFormat::Pptx),
             "export.html" => self.export_office_dialog(ctx, pdfcraft_engine::compare::OfficeFormat::Html),

@@ -416,6 +416,51 @@ pub(crate) fn show(
     }
 }
 
+/// The comment type as the "Show comment types" menu names it, for an annotation subtype.
+fn type_label(subtype: &str) -> String {
+    match subtype {
+        "Text" => tl!("Note").to_string(),
+        "Highlight" => tl!("Highlight").to_string(),
+        "Underline" => tl!("Underline").to_string(),
+        "StrikeOut" => tl!("Strikethrough").to_string(),
+        "Squiggly" => tl!("Squiggly underline").to_string(),
+        "FreeText" => tl!("Text box").to_string(),
+        "Ink" => tl!("Drawing").to_string(),
+        "Line" => tl!("Line").to_string(),
+        "Square" => tl!("Rectangle").to_string(),
+        "Circle" => tl!("Oval").to_string(),
+        "Polygon" => tl!("Polygon").to_string(),
+        "PolyLine" => tl!("Polyline").to_string(),
+        "Stamp" => tl!("Stamp").to_string(),
+        "Caret" => tl!("Insert text").to_string(),
+        "FileAttachment" => tl!("Attachment").to_string(),
+        "Sound" => tl!("Sound").to_string(),
+        "Redact" => tl!("Redaction mark").to_string(),
+        other => other.to_string(),
+    }
+}
+
+/// The "…" menu's "Show comment types" rows: a check for each type the document has (and each type
+/// still hidden, so it can be shown again), and Show all while any is hidden. Empty when the
+/// document has no comments of a type to show or hide.
+fn type_rows(doc: &pdfcraft_engine::Document) -> Vec<Entry<&'static str>> {
+    let hidden = doc.hidden_comment_types();
+    let present =
+        |subtype: &str| hidden.contains(subtype) || doc.info.annotations.iter().any(|a| a.is_comment() && !a.is_reply() && a.subtype == subtype);
+    let mut rows: Vec<Entry<&'static str>> = pdfcraft_engine::commands::COMMENT_TYPE_COMMANDS
+        .iter()
+        .filter(|(_, subtype)| present(subtype))
+        .map(|(command, subtype)| Entry::new(*command, type_label(subtype)).checked(!hidden.contains(*subtype)))
+        .collect();
+    if rows.is_empty() {
+        return rows;
+    }
+    rows.insert(0, Entry::heading(tl!("Show comment types").to_string()));
+    rows.push(Entry::new("comment.show_all_types", tl!("Show all comment types").to_string()).enabled(!hidden.is_empty()));
+    rows.push(Entry::separator());
+    rows
+}
+
 /// The Comments panel header's filter and "…" buttons, with their menus. Returns the command of
 /// the "…" menu row picked, for the caller to run.
 pub(crate) fn header(
@@ -428,15 +473,16 @@ pub(crate) fn header(
     let (list, _) = threads(doc, prefs);
     let more = IconButton::new(IconSpec::svg(IconId::new("more"))).label(tl!("More options").to_string()).show(ui);
     let hide_all = if doc.comments_hidden() { tl!("Show all comments") } else { tl!("Hide all comments") };
-    let rows = [
-        Entry::new("comment.hide_all", hide_all.to_string()).enabled(enabled("comment.hide_all")),
+    let mut rows = vec![Entry::new("comment.hide_all", hide_all.to_string()).enabled(enabled("comment.hide_all"))];
+    rows.extend(type_rows(doc));
+    rows.extend([
         Entry::new("comment.summarize", tl!("Create PDF comment summary…").to_string()).enabled(enabled("comment.summarize")),
         Entry::new("comment.export", tl!("Export all to data file…").to_string()).enabled(enabled("comment.export")),
         Entry::new("comment.import", tl!("Import comments…").to_string()).enabled(enabled("comment.import")),
         // Into the pages, for good once saved: apart from the list's other commands.
         Entry::separator(),
         Entry::new("comment.flatten", tl!("Flatten comments").to_string()).enabled(enabled("comment.flatten")),
-    ];
+    ]);
     let command = comments_more_menu(ui, &more, &list, &mut view.session.comments.panel, &rows);
     let filter = IconButton::new(IconSpec::svg(IconId::new("funnel")))
         .label(tl!("Filter comments").to_string())

@@ -762,11 +762,39 @@ impl Automation {
     pub(crate) fn comments_hide(&mut self, a: &Args) -> Result<Value> {
         let id = self.doc(a)?.id;
         let hidden = a.opt_bool("hidden")?.unwrap_or(true);
+        if let Some(types) = comment_types(a)? {
+            return self.comment_types_hide(id, &types, hidden);
+        }
         if self.session.set_hide_comments(id, hidden) {
             // The cached renderer drew with the old setting; page_render must read it again.
             self.renderers.remove(&id);
         }
         Ok(json!({ "hidden": hidden }))
+    }
+
+    /// `comments_hide` with `types`: hide (or, with `hidden` false, show again) the comments of those
+    /// types only. An empty list with `hidden` false shows every type. Returns the types now hidden.
+    fn comment_types_hide(&mut self, id: pdfcraft_engine::DocId, types: &[String], hidden: bool) -> Result<Value> {
+        let mut now = self.session.get(id).map(|d| d.hidden_comment_types().clone()).unwrap_or_default();
+        if types.is_empty() {
+            if hidden {
+                return Err(ToolError::InvalidArgs("types must name at least one comment type to hide".into()));
+            }
+            now.clear();
+        }
+        for t in types {
+            if hidden {
+                now.insert(t.clone());
+            } else {
+                now.remove(t);
+            }
+        }
+        let listed: Vec<String> = now.iter().cloned().collect();
+        if self.session.set_hidden_comment_types(id, now) {
+            // The cached renderer drew with the old setting; page_render must read it again.
+            self.renderers.remove(&id);
+        }
+        Ok(json!({ "hidden": hidden, "hidden_types": listed }))
     }
 
     pub(crate) fn comments_summarize(&mut self, a: &Args) -> Result<Value> {
@@ -969,4 +997,27 @@ mod tests {
         assert!(parse_color("#12").is_err() && parse_color("chartreuse").is_err());
         assert_eq!(hex([1.0, 0.5, 0.0]), "#FF8000");
     }
+}
+
+/// The most comment type names `comments_hide` takes at once.
+const MAX_COMMENT_TYPES: usize = 64;
+
+/// The `types` argument of `comments_hide`: annotation subtypes (see `pdfcraft_engine::COMMENT_TYPES`),
+/// matched without regard to case and given back in their canonical spelling.
+fn comment_types(a: &Args) -> Result<Option<Vec<String>>> {
+    let Some(v) = a.get("types") else { return Ok(None) };
+    let wrong = || Args::wrong("types", "an array of comment type names");
+    let list = v.as_array().ok_or_else(wrong)?;
+    if list.len() > MAX_COMMENT_TYPES {
+        return Err(ToolError::InvalidArgs(format!("types must have at most {MAX_COMMENT_TYPES} names")));
+    }
+    let mut out = Vec::new();
+    for item in list {
+        let name = item.as_str().ok_or_else(wrong)?;
+        let Some(known) = pdfcraft_engine::COMMENT_TYPES.iter().find(|t| t.eq_ignore_ascii_case(name.trim())) else {
+            return Err(ToolError::InvalidArgs(format!("unknown comment type {name:?}; one of {}", pdfcraft_engine::COMMENT_TYPES.join(", "))));
+        };
+        out.push((*known).to_owned());
+    }
+    Ok(Some(out))
 }

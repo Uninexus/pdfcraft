@@ -171,6 +171,28 @@ const VIEW: Option<&str> = Some("View");
 const PAGES: Option<&str> = Some("Pages");
 const HELP: Option<&str> = Some("Help");
 
+/// The commands that show or hide one comment type on the page, with the annotation subtype each
+/// toggles (a member of [`crate::COMMENT_TYPES`]).
+pub const COMMENT_TYPE_COMMANDS: &[(&str, &str)] = &[
+    ("comment.toggle_type.text", "Text"),
+    ("comment.toggle_type.highlight", "Highlight"),
+    ("comment.toggle_type.underline", "Underline"),
+    ("comment.toggle_type.strikeout", "StrikeOut"),
+    ("comment.toggle_type.squiggly", "Squiggly"),
+    ("comment.toggle_type.freetext", "FreeText"),
+    ("comment.toggle_type.ink", "Ink"),
+    ("comment.toggle_type.line", "Line"),
+    ("comment.toggle_type.square", "Square"),
+    ("comment.toggle_type.circle", "Circle"),
+    ("comment.toggle_type.polygon", "Polygon"),
+    ("comment.toggle_type.polyline", "PolyLine"),
+    ("comment.toggle_type.stamp", "Stamp"),
+    ("comment.toggle_type.caret", "Caret"),
+    ("comment.toggle_type.attachment", "FileAttachment"),
+    ("comment.toggle_type.sound", "Sound"),
+    ("comment.toggle_type.redact", "Redact"),
+];
+
 /// Every command, in menu order.
 pub const COMMANDS: &[CommandSpec] = &[
     // The tools' bare-key chords: V selects, H pans.
@@ -341,6 +363,24 @@ pub const COMMANDS: &[CommandSpec] = &[
     c("comment.stamp", "Add a stamp", None, None, Annotate, "stamp"),
     c("comment.export", "Export all comments to data file…", None, None, HasComments, "file-output"),
     c("comment.hide_all", "Hide all comments", None, None, Document, "eye_off"),
+    c("comment.show_all_types", "Show all comment types", None, None, Document, "eye_off"),
+    c("comment.toggle_type.text", "Show or hide Note comments", None, None, Document, "eye_off"),
+    c("comment.toggle_type.highlight", "Show or hide Highlight comments", None, None, Document, "eye_off"),
+    c("comment.toggle_type.underline", "Show or hide Underline comments", None, None, Document, "eye_off"),
+    c("comment.toggle_type.strikeout", "Show or hide Strikethrough comments", None, None, Document, "eye_off"),
+    c("comment.toggle_type.squiggly", "Show or hide Squiggly underline comments", None, None, Document, "eye_off"),
+    c("comment.toggle_type.freetext", "Show or hide Text box comments", None, None, Document, "eye_off"),
+    c("comment.toggle_type.ink", "Show or hide Drawing comments", None, None, Document, "eye_off"),
+    c("comment.toggle_type.line", "Show or hide Line comments", None, None, Document, "eye_off"),
+    c("comment.toggle_type.square", "Show or hide Rectangle comments", None, None, Document, "eye_off"),
+    c("comment.toggle_type.circle", "Show or hide Oval comments", None, None, Document, "eye_off"),
+    c("comment.toggle_type.polygon", "Show or hide Polygon comments", None, None, Document, "eye_off"),
+    c("comment.toggle_type.polyline", "Show or hide Polyline comments", None, None, Document, "eye_off"),
+    c("comment.toggle_type.stamp", "Show or hide Stamp comments", None, None, Document, "eye_off"),
+    c("comment.toggle_type.caret", "Show or hide Insert text comments", None, None, Document, "eye_off"),
+    c("comment.toggle_type.attachment", "Show or hide Attachment comments", None, None, Document, "eye_off"),
+    c("comment.toggle_type.sound", "Show or hide Sound comments", None, None, Document, "eye_off"),
+    c("comment.toggle_type.redact", "Show or hide Redaction mark comments", None, None, Document, "eye_off"),
     c("comment.summarize", "Summarize comments", None, None, HasComments, "file-text"),
     c("form.import_data", "Import form data…", None, None, HasFields, "file-input"),
     c("form.export_data", "Export form data…", None, None, HasFields, "file-output"),
