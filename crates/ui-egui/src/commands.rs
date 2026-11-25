@@ -715,6 +715,7 @@ impl PdfCraftApp {
     fn run_edit_command(&mut self, ctx: &egui::Context, id: &str, active: Option<usize>) -> Option<bool> {
         match id {
             "edit.attach" => self.attach_file_dialog(),
+            "attachment.associate" => crate::dialogs::associated_files::start(self),
             "edit.undo" => self.undo(ctx),
             "edit.redo" => self.redo(ctx),
             "edit.find" => {

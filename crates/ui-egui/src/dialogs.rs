@@ -6,6 +6,7 @@ use crate::PdfCraftApp;
 mod about;
 pub(crate) mod ai_prefs;
 pub(crate) mod ai_ui;
+pub(crate) mod associated_files;
 pub(crate) mod attachment_description;
 pub mod bookmark_styles_ui;
 pub(super) mod comment_props;

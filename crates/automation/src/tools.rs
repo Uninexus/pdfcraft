@@ -260,6 +260,7 @@ pub fn tools() -> Vec<ToolDef> {
             .ro()
             .with(schema(json!({"doc": doc()}), &["doc"])),
         t("af_add", "Add an associated file", "Embed the file at path as an attachment and associate it with the document: its file specification (/Type /Filespec with /F, /UF and /EF) gets /AFRelationship and joins the catalog's /AF, so it also appears in the Attachments panel. A file of unknown type is stored as application/octet-stream; `warnings` says so when the document declares PDF/A-1 or PDF/A-2, which restrict embedded files. relationship (required): Source, Data, Alternative, Supplement, FormData, Schema or Unspecified; EncryptedPayload and any other name are refused. At most 256 associated files and 33554432 bytes per file; refused with nothing changed when the catalog's /AF is not an array. name defaults to the file's name (made unique); returns its index in /AF. Needs permission to modify the document. One undo step.")
+            .cmd("attachment.associate")
             .with(schema(
                 json!({
                     "doc": doc(), "path": {"type": "string"}, "name": {"type": "string"}, "description": {"type": "string"},
