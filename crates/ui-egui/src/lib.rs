@@ -123,6 +123,7 @@ use dialogs::convert_colours_ui;
 use dialogs::hairlines_ui;
 use dialogs::javascripts_ui;
 use dialogs::marks_ui;
+pub use dialogs::model3d_ui::ModelWindow as Model3dWindow;
 use dialogs::pageboxes;
 use dialogs::printer_marks_ui;
 use dialogs::readiness_ui;
@@ -684,6 +685,8 @@ pub struct PdfCraftApp {
     pub signing_plan: Option<SigningPlanDraft>,
     /// The signature audit report or the signer labels report, while its window is open (`dialogs::signature_report_ui`).
     pub signature_report: Option<SignatureReport>,
+    /// The 3D model window of the current page, while it is open (`dialogs::model3d_ui`).
+    pub model3d: Option<Model3dWindow>,
     /// The JavaScript console.
     pub js_console: js_ui::JsConsole,
     #[cfg(not(target_arch = "wasm32"))]

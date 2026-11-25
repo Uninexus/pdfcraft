@@ -29,6 +29,9 @@ pdfcraft-content = { workspace = true }
 pdfcraft-ocr = { workspace = true }
 pdfcraft-ai = { workspace = true }
 pdfcraft-render = { workspace = true }
+# The 3D model window draws a page's PRC model with the same GUI-free renderer as the `model_render` tool.
+pdfcraft-prc-render = { workspace = true }
+craft-prc = { workspace = true }
 pdfcraft-model = { workspace = true }
 pdfcraft-platform = { workspace = true }
 egui = { workspace = true, features = ["bytemuck", "default_fonts", "monochrome_emoji_fonts"] }

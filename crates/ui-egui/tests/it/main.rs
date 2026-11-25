@@ -68,6 +68,7 @@ mod links;
 mod make_accessible;
 mod marks;
 mod min_window;
+mod model3d_view;
 mod new_window;
 mod object_selection;
 mod ocr;

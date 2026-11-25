@@ -225,6 +225,8 @@ pub const COMMANDS: &[CommandSpec] = &[
     c("view.layout.single", "Single page", None, None, Document, "file-text"),
     c("view.layout.two_up", "Two-page view", None, None, Document, "columns-2"),
     c("view.continuous", "Continuous scrolling", None, None, Document, "swap_vertical"),
+    // The 3D model of the current page in a window that turns, zooms and pans it (PRC models only).
+    c("view.model3d", "3D model…", None, None, Document, "box"),
     c("view.page_gaps", "Show gaps between pages", None, None, Document, "swap_vertical"),
     // View > Guides > Show Guides and Clear Guides: ruler guides (view state, never saved or printed)
     // drawn over the pages. The View menu lists them in a submenu of its own, so `menu = None`.

@@ -413,6 +413,7 @@ impl PdfCraftApp {
             "file.revert" => self.ask_revert(),
             "file.properties" => self.open_properties(ctx, PropsTab::Description),
             "file.word_count" => self.open_word_count(),
+            "view.model3d" => self.open_model_3d(),
             "protect.properties" => self.open_properties(ctx, PropsTab::Security),
             // A restricted document's security changes once its permissions password is entered.
             "protect.password" | "protect.remove" if self.active_ids().and_then(|(_, id)| self.session.get(id)).is_some_and(|d| d.can_unlock()) => {
