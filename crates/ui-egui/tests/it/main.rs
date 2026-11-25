@@ -21,6 +21,7 @@ mod accessibility;
 mod actions;
 mod ai;
 mod animate;
+mod articles_panel;
 mod attach_picker_target;
 mod attachment_row;
 mod bates_multi;

@@ -6,6 +6,7 @@ use pdfcraft_engine::catalog::{self, Availability, TOOL_GROUPS, ToolGroup, ToolI
 use crate::{LeftPanel, PdfCraftApp, RightPanel};
 
 pub(super) mod all_tools_ui;
+mod articles;
 mod attachments;
 pub(crate) mod bookmarks;
 pub(super) mod comments_panel;

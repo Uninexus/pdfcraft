@@ -39,6 +39,7 @@ pub fn panel_body(app: &mut PdfCraftApp, ui: &mut egui::Ui, cx: &mut BodyCx<'_>,
         RightPanel::Fields => super::fields::show(app, ui),
         RightPanel::Search => super::search_ui::show(app, ui),
         RightPanel::Destinations => super::destinations::show(app, ui, cx),
+        RightPanel::Articles => super::articles::show(app, ui, cx),
         _ => PanelResult::default(),
     };
     let mut sig_action: Option<crate::sign_ui::PanelAction> = None;

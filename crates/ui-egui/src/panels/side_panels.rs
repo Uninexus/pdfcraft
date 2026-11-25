@@ -1,4 +1,4 @@
-//! The dock around the page: the Tools panel, the toolbar rail and the twelve side panels
+//! The dock around the page: the Tools panel, the toolbar rail and the thirteen side panels
 //! ([`crate::RightPanel`]) as panels of one [`Workspace`], shown by a [`DockArea`].
 //!
 //! The workspace is the one record of which panels are open and where they sit. Settings written
@@ -63,10 +63,12 @@ pub enum PanelId {
     Compare,
     /// [`RightPanel::Destinations`].
     Destinations,
+    /// [`RightPanel::Articles`].
+    Articles,
 }
 
 /// The side panels, in the order the rail lists them.
-const SIDE: [PanelId; 12] = [
+const SIDE: [PanelId; 13] = [
     PanelId::Comments,
     PanelId::Bookmarks,
     PanelId::Pages,
@@ -79,6 +81,7 @@ const SIDE: [PanelId; 12] = [
     PanelId::Search,
     PanelId::Compare,
     PanelId::Destinations,
+    PanelId::Articles,
 ];
 
 impl PanelId {
@@ -100,6 +103,7 @@ impl PanelId {
             Self::Search => "search",
             Self::Compare => "compare",
             Self::Destinations => "destinations",
+            Self::Articles => "articles",
         }
     }
 
@@ -123,6 +127,7 @@ impl PanelId {
             Self::Search => RightPanel::Search,
             Self::Compare => RightPanel::Compare,
             Self::Destinations => RightPanel::Destinations,
+            Self::Articles => RightPanel::Articles,
             Self::Tools | Self::Toolbar | Self::Document => return None,
         })
     }
@@ -144,6 +149,7 @@ impl From<RightPanel> for PanelId {
             RightPanel::Search => Self::Search,
             RightPanel::Compare => Self::Compare,
             RightPanel::Destinations => Self::Destinations,
+            RightPanel::Articles => Self::Articles,
         }
     }
 }
@@ -353,6 +359,7 @@ fn side_label(panel: RightPanel) -> String {
         RightPanel::Search => "Search",
         RightPanel::Compare => "Compare",
         RightPanel::Destinations => "Destinations",
+        RightPanel::Articles => "Articles",
     };
     crate::i18n::t(title).to_owned()
 }
@@ -372,6 +379,7 @@ fn side_icon(panel: RightPanel) -> &'static str {
         RightPanel::Search => "search",
         RightPanel::Compare => "git-compare",
         RightPanel::Destinations => "pin",
+        RightPanel::Articles => "columns-3",
     }
 }
 
@@ -590,7 +598,7 @@ pub(crate) fn rail_anchor(app: &PdfCraftApp) -> Option<PanelId> {
         SIDE.contains(panel)
             && match panel {
                 PanelId::Accessibility => checked || open == Some(*panel),
-                PanelId::Search | PanelId::Compare | PanelId::Destinations => open == Some(*panel),
+                PanelId::Search | PanelId::Compare | PanelId::Destinations | PanelId::Articles => open == Some(*panel),
                 _ => true,
             }
     })
@@ -621,7 +629,7 @@ pub fn dock(app: &mut PdfCraftApp, ui: &mut Ui) {
     let checked = app.active_ids().is_some_and(|(_, id)| app.a11y.report.as_ref().is_some_and(|(d, _)| *d == id));
     let listed = |panel: &PanelId| match panel {
         PanelId::Accessibility => checked || open == Some(*panel),
-        PanelId::Search | PanelId::Compare | PanelId::Destinations => open == Some(*panel),
+        PanelId::Search | PanelId::Compare | PanelId::Destinations | PanelId::Articles => open == Some(*panel),
         _ => true,
     };
     let inset = app.notice_inset;

@@ -192,6 +192,7 @@ fn open(p: RightPanel) -> (Harness<'static, PdfCraftApp>, &'static str) {
         RightPanel::Signatures => "signatures",
         RightPanel::Tags => "tags",
         RightPanel::Destinations => "destinations",
+        RightPanel::Articles => "articles",
         RightPanel::Accessibility => {
             let mut h = harness("none");
             assert!(h.execute("a11y.check"));
@@ -258,6 +259,7 @@ fn every_panel_matches_its_snapshot() {
             RightPanel::Accessibility => "Accessibility Checker",
             RightPanel::Tags => "Tags",
             RightPanel::Destinations => "Destinations",
+            RightPanel::Articles => "Articles",
             RightPanel::Search => "Search",
             RightPanel::Compare => "Compare",
         };

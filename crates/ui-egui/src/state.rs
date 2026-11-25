@@ -56,6 +56,8 @@ pub enum RightPanel {
     Compare,
     /// The named destinations of the document.
     Destinations,
+    /// The article threads of the document.
+    Articles,
 }
 
 /// Quick-action bar tools (the vertical floating strip).

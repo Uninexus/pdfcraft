@@ -75,6 +75,7 @@ pub(crate) fn right(app: &PdfCraftApp) -> Option<RightPanel> {
         RightPanel::Search,
         RightPanel::Compare,
         RightPanel::Destinations,
+        RightPanel::Articles,
     ]
     .into_iter()
     .find(|panel| format!("{panel:?}") == open)
