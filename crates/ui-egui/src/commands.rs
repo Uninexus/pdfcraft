@@ -454,6 +454,7 @@ impl PdfCraftApp {
             "doc.compare" => crate::compare_ui::open_compare_dialog(self, ctx),
             "standards.pdfa" => self.open_pdfa(),
             "standards.reference_xobjects" => self.open_reference_xobjects(),
+            "edit.media_actions" => self.open_media_actions(),
             "actions.wizard" => crate::actions_ui::open_wizard(self, ctx, None),
             "actions.distribution" => crate::actions_ui::open_wizard(self, ctx, Some("Prepare for Distribution")),
             "actions.optimize_scans" => crate::actions_ui::open_wizard(self, ctx, Some("Optimize Scanned Documents")),

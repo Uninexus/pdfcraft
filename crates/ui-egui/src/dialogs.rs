@@ -17,6 +17,7 @@ pub(super) mod hairlines_ui;
 pub(crate) mod host;
 pub(super) mod javascripts_ui;
 pub(super) mod marks_ui;
+pub(super) mod media_actions_ui;
 pub(super) mod model3d_ui;
 pub(crate) mod page_dialogs;
 pub(crate) mod page_props;

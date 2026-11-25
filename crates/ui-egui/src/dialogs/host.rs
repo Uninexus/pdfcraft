@@ -74,6 +74,7 @@ fn results(app: &mut PdfCraftApp, ctx: &egui::Context) {
     app.protect_pass(ctx);
     app.pdfa_pass(ctx);
     app.reference_xobjects_pass(ctx);
+    app.media_actions_pass(ctx);
     app.word_count_pass(ctx);
     app.prompts_pass(ctx);
     app.attachment_description_pass(ctx);

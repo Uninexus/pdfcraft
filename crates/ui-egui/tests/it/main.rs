@@ -67,6 +67,7 @@ mod link_object_actions;
 mod links;
 mod make_accessible;
 mod marks;
+mod media_actions_ui;
 mod min_window;
 mod model3d_view;
 mod new_window;
