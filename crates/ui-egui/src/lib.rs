@@ -195,6 +195,7 @@ use workflows::ocr_verify;
 use workflows::ocr_web;
 use workflows::office_batch;
 pub use workflows::office_batch::OfficeConverter;
+use workflows::optimize_batch_ui;
 use workflows::optimize_ui;
 use workflows::print_paper;
 use workflows::print_ui;
@@ -737,6 +738,9 @@ pub struct PdfCraftApp {
     /// Edit ▸ Bates numbering on several files: the running job.
     pub bates_multi_run: Option<bates_multi_ui::BatesRun>,
     pub(crate) bates_multi_jobs: Queue<(), bates_multi_ui::BatesOutcome>,
+    /// File ▸ Optimize multiple files: the running job.
+    pub optimize_batch_run: Option<optimize_batch_ui::OptimizeBatchRun>,
+    pub(crate) optimize_batch_jobs: Queue<(), optimize_batch_ui::OptimizeBatchOutcome>,
     /// Word, Excel and PowerPoint files being converted to PDF for Insert, Combine and Create.
     pub office_run: Option<office_batch::OfficeRun>,
     pub(crate) office_jobs: Queue<(), office_batch::OfficeOutcome>,

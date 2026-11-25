@@ -462,6 +462,7 @@ impl PdfCraftApp {
             "create.images" => self.create_from_images_dialog(),
             "create.clipboard" => self.create_from_clipboard(),
             "optimize.reduce" => self.reduce_file_size(ctx),
+            "optimize.batch" => self.open_optimize_batch(ctx),
             "help.shortcuts" => self.open_shortcuts(ctx),
             "help.default_app" => self.set_up_default_app(),
             "help.default_app.remove" => self.remove_default_app(),

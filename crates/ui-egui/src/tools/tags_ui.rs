@@ -324,9 +324,49 @@ pub(crate) fn panel(
         } else if artifact {
             Some(Edit::MarkTagArtifact { object: tag.object })
         } else {
-            None
+            table_edit(ui, tag, can_edit && !dirty)
         },
     )
+}
+
+/// The table actions for the selected tag: turn a layout table into blocks, or make a cell a
+/// header or data cell and set a header's scope. Each is one undoable edit.
+fn table_edit(ui: &mut Ui, tag: &TagInfo, can_edit: bool) -> Option<Edit> {
+    let is_cell = tag.kind == "TH" || tag.kind == "TD";
+    if tag.kind != "Table" && !is_cell {
+        return None;
+    }
+    if !can_edit {
+        Text::new(tl!("Table changes need a document that can be modified and tag properties without unsaved changes.")).shade(Shade::Muted).show(ui);
+    }
+    let kind = |value: &str| Edit::SetTagProperty { object: tag.object, property: TagProperty::Type, value: Some(value.to_owned()) };
+    let scope = |value: Option<&str>| Edit::SetTagProperty { object: tag.object, property: TagProperty::Scope, value: value.map(str::to_owned) };
+    if tag.kind == "Table" {
+        let clicked = Button::new(tl!("Convert layout table to blocks")).enabled(can_edit).show(ui).response().clicked();
+        return clicked.then_some(Edit::LayoutTableToBlocks { object: tag.object });
+    }
+    if tag.kind == "TD" {
+        let clicked = Button::new(tl!("Make header cell")).enabled(can_edit).show(ui).response().clicked();
+        return clicked.then(|| kind("TH"));
+    }
+    let make_data = Button::new(tl!("Make data cell")).enabled(can_edit).show(ui).response().clicked();
+    let row = Button::new(tl!("Header scope: Row")).enabled(can_edit).show(ui).response().clicked();
+    let column = Button::new(tl!("Header scope: Column")).enabled(can_edit).show(ui).response().clicked();
+    let both = Button::new(tl!("Header scope: Both")).enabled(can_edit).show(ui).response().clicked();
+    let none = Button::new(tl!("Header scope: None")).enabled(can_edit && tag.scope.is_some()).show(ui).response().clicked();
+    if make_data {
+        Some(kind("TD"))
+    } else if row {
+        Some(scope(Some("Row")))
+    } else if column {
+        Some(scope(Some("Column")))
+    } else if both {
+        Some(scope(Some("Both")))
+    } else if none {
+        Some(scope(None))
+    } else {
+        None
+    }
 }
 
 fn visible_tags<'a>(tags: &'a [TagInfo], query: &str, collapsed: &BTreeSet<ObjRef>) -> Vec<&'a TagInfo> {

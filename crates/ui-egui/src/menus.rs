@@ -114,6 +114,7 @@ const FILE: &[&str] = &[
     SEP,
     "optimize.reduce",
     "optimize.advanced",
+    "optimize.batch",
     SEP,
     "file.properties",
     "file.word_count",
@@ -334,7 +335,7 @@ impl PdfCraftApp {
                 nodes.push(node);
                 match after.as_str() {
                     "page.combine" => nodes.push(Node::submenu(tl!("Create"), list(CREATE, &mut used))),
-                    "optimize.advanced" => {
+                    "optimize.batch" => {
                         nodes.push(Node::submenu(tl!("Export"), list(EXPORT, &mut used)));
                         nodes.push(Node::Separator);
                         nodes.push(Node::submenu(tl!("Protect"), list(PROTECT, &mut used)));
