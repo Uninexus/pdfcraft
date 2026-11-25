@@ -1985,7 +1985,9 @@ pub fn document_area_at(app: &mut PdfCraftApp, index: usize, rect: Rect, ui: &mu
     let (visible_pages, rest_pages) = text_demand(view, out.visible.clone(), chosen == QuickTool::Hand);
     view.want_text(&app.session, &visible_pages, &rest_pages);
 
-    find_bar(view, info.pages.len(), rect, tool == QuickTool::EditText && can_modify, ui);
+    if let Some(doc) = app.session.get(doc_id) {
+        find_bar(view, doc, rect, tool == QuickTool::EditText && can_modify, ui);
+    }
     // The clipboard is read when Paste is invoked, so its menu stays enabled while the document is open.
     let can_paste_image = true;
     let doc = app.session.get(doc_id)?;

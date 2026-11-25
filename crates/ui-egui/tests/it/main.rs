@@ -52,6 +52,7 @@ mod export;
 mod field_signer;
 mod field_triggers;
 mod fill_sign;
+mod find_comments;
 mod find_replace;
 mod folder_search;
 mod folders;
