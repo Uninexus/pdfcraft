@@ -63,6 +63,7 @@ mod layer_actions;
 mod legacy_settings;
 mod link_object_actions;
 mod links;
+mod make_accessible;
 mod marks;
 mod min_window;
 mod new_window;

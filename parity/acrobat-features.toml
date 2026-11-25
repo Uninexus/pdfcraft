@@ -9713,11 +9713,11 @@ title = "Make Accessible guided action"
 area = "M"
 tier = "P1"
 milestone = "M13"
-status = "partial"
-commands = []
+status = "shipped"
+commands = ["a11y.make_accessible"]
 tools = ["accessibility_make_accessible"]
-evidence = ["crates/automation/tests/it/automation.rs::make_accessible_applies_the_safe_fixes_in_one_undoable_step"]
-notes = "Headless only: accessibility_make_accessible runs the checker and applies, as one undoable step, the safe fixes for failing rules (title with title-bar display, document language when given, structure tab order), then reports the rules still failing and those left for manual review. It writes no tags and does not certify accessibility. Headless review sidecar tools save and reopen human decisions against the exact working PDF SHA-256. Missing: the guided GUI action, a language prompt, and step-by-step remediation of tags, alternate text and tables."
+evidence = ["crates/automation/tests/it/automation.rs::make_accessible_applies_the_safe_fixes_in_one_undoable_step", "crates/ui-egui/tests/it/make_accessible.rs::make_accessible_fixes_title_and_language_in_one_undo_step", "crates/ui-egui/tests/it/make_accessible.rs::make_accessible_with_nothing_to_fix_adds_no_undo_step"]
+notes = "Prepare for accessibility > Make Accessible… opens a dialog with the document language (offered from the document, checked as a language tag) and runs accessibility_make_accessible's fixes as one undo step: the title with title-bar display, the language when none is set, and structure tab order. The Accessibility panel then shows the new report and a notice says how many issues were fixed and how many still need attention; a read-only document is refused and a document with nothing to fix adds no undo step. It writes no tags and does not certify accessibility. Headless review sidecar tools save and reopen human decisions against the exact working PDF SHA-256. Missing: step-by-step remediation of tags, alternate text and tables."
 
 [[feature]]
 id = "a11y.setup-assistant"

@@ -20,6 +20,7 @@ use craft::ui::menu::Menu;
 use craft::ui::notices::{Notice, NoticeAction, NoticeIcon};
 use craft::ui::patterns::form_dialogs::{DialogFields, FormDialog, HostedParamDialog, Param, ParamDialog, ParamKind};
 use craft::ui::primitives::{IconSpec, has_icon};
+use craft::ui::runtime::env::Label;
 use craft::ui::sections::Section;
 use craft::ui::text::{AltText, AltTextField};
 use egui::Ui;
@@ -182,6 +183,43 @@ pub(crate) fn open_a11y_options(app: &mut PdfCraftApp, ctx: &egui::Context) {
     app.dialogs.open(HostedParamDialog::new(ctx, "a11y.options", fields, move |fields| options_dialog(fields, pages, current)));
 }
 
+/// The key of the Make Accessible dialog.
+const MAKE_KEY: &str = "a11y.make_accessible";
+
+/// The Make Accessible dialog over its values: the language to give a document that has none.
+fn make_dialog(fields: &mut DialogFields) -> ParamDialog<'_> {
+    let language = fields.text("language").unwrap_or_default().trim().to_owned();
+    let valid = language.is_empty() || pdfcraft_engine::language_tag(Some(&language)).is_some();
+    let note = if valid {
+        tl!(
+            "Sets the document title and shows it in the title bar, sets the document language when it has none, and makes every page tab in structure order, for each check that fails now. It does not add tags or alternate text and does not make the document accessible by itself."
+        )
+    } else {
+        tl!("Enter a language tag like en-US or fr-CA.")
+    };
+    let params = vec![Param::new("language", tl!("Document language"), ParamKind::text("")).hint(tl!("e.g. en-US").to_string())];
+    ParamDialog::new(MAKE_KEY, tl!("Make Accessible"), params)
+        .values(Bind::bound(fields))
+        .ok_label(Label::from(tl!("Make accessible")))
+        .ok_enabled(valid)
+        .footer_note(Label::from(note))
+}
+
+/// Opens the Make Accessible dialog, its language the document's own.
+pub(crate) fn open_make_accessible(app: &mut PdfCraftApp, ctx: &egui::Context) {
+    let Some((_, id)) = app.active_ids() else { return };
+    let Some(doc) = app.session.get(id) else { return };
+    let changeable = doc.allows_modification() && doc.read_only_reason.is_none();
+    let language = doc.initial_view().language.unwrap_or_default();
+    if !changeable {
+        app.notify_tr("This document is read-only, so it can't be made accessible");
+        return;
+    }
+    let mut fields = DialogFields::new();
+    fields.set("language", language);
+    crate::dialogs::host::open(app, HostedParamDialog::new(ctx, MAKE_KEY, fields, make_dialog));
+}
+
 /// What the dialogs of this module answered: called once a pass, after the host ran.
 pub(crate) fn pass(ctx: &egui::Context, app: &mut PdfCraftApp) {
     if let Some(DialogResult::Ok(result)) = app.dialogs.take_by_id::<HostedParamDialog>(dialog_id("a11y.options")) {
@@ -202,6 +240,10 @@ pub(crate) fn pass(ctx: &egui::Context, app: &mut PdfCraftApp) {
         // Starting again forgets the skips made in this document.
         app.a11y_skipped.retain(|(doc, _)| *doc != id);
         app.run_accessibility_check();
+    }
+    if let Some(DialogResult::Ok(result)) = app.dialogs.take_by_id::<HostedParamDialog>(dialog_id(MAKE_KEY)) {
+        let language = result.fields.text("language").unwrap_or_default().trim().to_owned();
+        app.run_make_accessible(ctx, &language);
     }
     if let Some(DialogResult::Ok(answer)) = app.dialogs.take::<AltTextDialog>() {
         app.save_alt_text(ctx, answer);
@@ -565,6 +607,41 @@ impl PdfCraftApp {
         if self.a11y_options.create_report {
             self.show_accessibility_report();
         }
+    }
+
+    /// Make Accessible: the safe fixes for the failing rules as one undo step (`language` is the
+    /// one to give a document that has none, empty for none), then the checker's report again
+    /// with how many were fixed and how many still need attention.
+    pub(crate) fn run_make_accessible(&mut self, ctx: &egui::Context, language: &str) {
+        let Some((_, id)) = self.active_ids() else { return };
+        let plan = match self.session.get(id).map(|d| d.make_accessible(Some(language).filter(|l| !l.is_empty()))) {
+            Some(Ok(plan)) => plan,
+            Some(Err(e)) => return self.notify_error(e),
+            None => return,
+        };
+        let fixed = plan.fixed;
+        if let Some(edit) = plan.edit
+            && !self.apply_edit(ctx, edit)
+        {
+            return;
+        }
+        // The panel shows the result, whether or not anything changed.
+        self.run_accessibility_check();
+        let Some((_, report)) = self.a11y.report.as_ref().filter(|(d, _)| *d == id) else { return };
+        let still = report.count(Status::Failed);
+        let fixed = fixed.iter().filter(|r| report.result(**r).is_none_or(|x| x.status != Status::Failed)).count();
+        let lang = crate::i18n::current();
+        if fixed == 0 && still == 0 {
+            self.notify_tr("Nothing needed fixing");
+            return;
+        }
+        let done = if fixed == 0 {
+            tl!("Nothing needed fixing").to_string()
+        } else {
+            crate::i18n::trn(lang, fixed as u64, "Fixed {n} issue", "Fixed {n} issues")
+        };
+        let left = crate::i18n::trn(lang, still as u64, "{n} still needs attention", "{n} still need attention");
+        self.notify(crate::i18n::fmt(tl!("{fixed}; {left}"), &[("fixed", &done), ("left", &left)]));
     }
 
     /// Save the accessibility report (HTML) for the last check, checking first if needed.

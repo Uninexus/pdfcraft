@@ -486,6 +486,7 @@ pub static TOOL_GROUPS: &[ToolGroup] = &[
                 item("Find untagged content", "search", "a11y.find_untagged", Ready),
                 item("Open accessibility report", "file-text", "a11y.report", Ready),
                 item("Add alternate text", "image", "a11y.alt_text", Ready),
+                item("Make accessible", "accessibility", "a11y.make_accessible", Ready),
                 item("Tags panel", "tag", "a11y.tags", Ready),
                 item("Fix reading order", "list_numbered", "a11y.reading_order", Planned("M12")),
             ],
