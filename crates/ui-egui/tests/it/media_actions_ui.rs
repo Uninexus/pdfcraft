@@ -21,6 +21,8 @@ fn screens_pdf(with_screens: bool) -> Vec<u8> {
         "<< /Type /Annot /Subtype /Screen /Rect [0 20 10 30] /A << /S /Sound >> >>".to_string(),
         "<< /Type /Annot /Subtype /Screen /Rect [0 40 10 50] /A << /S /URI /URI (http://a.example/) >> >>".to_string(),
     ];
+    // The window lists every screen annotation object of the file, so a file without any must not hold them at all.
+    let bodies = if with_screens { &bodies[..] } else { &bodies[..3] };
     let mut out = b"%PDF-1.7\n".to_vec();
     let mut offsets = Vec::new();
     for (i, body) in bodies.iter().enumerate() {
