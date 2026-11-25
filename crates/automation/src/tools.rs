@@ -132,6 +132,11 @@ impl T {
 
 /// Every tool, in a stable order.
 pub fn tools() -> Vec<ToolDef> {
+    // A build with `PDFCRAFT_NO_AI` set registers none of the AI assistant's tools.
+    all_tools().into_iter().filter(|t| pdfcraft_engine::AI_ENABLED || !t.name.starts_with("ai_")).collect()
+}
+
+fn all_tools() -> Vec<ToolDef> {
     let save_out = json!({ "type": "string", "description": "File to write. Omit to open the result as a new unsaved document instead." });
     let open = json!({ "type": "boolean", "description": "Also open the result as a new document (default: only when out is omitted). A value that is not true or false is refused before out is written. If opening the result then fails, out has already been written and the error is returned." });
     vec![

@@ -339,7 +339,7 @@ fn cited_pages(answer: &str, page_count: usize) -> Vec<usize> {
 
 /// Shows the AI Assistant window while it is open, and carries out what its buttons asked for.
 pub(crate) fn show(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
-    if !app.ai_open {
+    if !pdfcraft_engine::AI_ENABLED || !app.ai_open {
         return;
     }
     // Preferences takes over (opened from anywhere, not only this window's button); a question about unsaved work

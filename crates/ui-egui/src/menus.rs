@@ -308,15 +308,19 @@ impl PdfCraftApp {
         let mac = crate::commands::mac_shortcuts(ctx);
         let mut used: Vec<&str> = Vec::new();
         let list = |ids: &[&'static str], used: &mut Vec<&'static str>| -> Vec<Node> {
-            ids.iter()
-                .map(|&id| {
-                    if id == SEP {
-                        return Node::Separator;
+            let mut nodes: Vec<Node> = Vec::new();
+            for &id in ids.iter().filter(|id| pdfcraft_engine::AI_ENABLED || !id.starts_with("ai.")) {
+                if id == SEP {
+                    // A build without the AI assistant can leave two separators side by side.
+                    if !matches!(nodes.last(), Some(Node::Separator)) {
+                        nodes.push(Node::Separator);
                     }
-                    used.push(id);
-                    self.menu_item(id, None, mac)
-                })
-                .collect()
+                    continue;
+                }
+                used.push(id);
+                nodes.push(self.menu_item(id, None, mac));
+            }
+            nodes
         };
         let mut file = {
             let mut nodes = Vec::new();

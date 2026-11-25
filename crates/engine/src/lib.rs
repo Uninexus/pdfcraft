@@ -12,6 +12,10 @@
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+/// Whether this build offers the AI assistant. A build with `PDFCRAFT_NO_AI` set at compile time
+/// registers no `ai.` command or `ai_` tool and shows no AI window, tool group or preferences page.
+pub const AI_ENABLED: bool = option_env!("PDFCRAFT_NO_AI").is_none();
+
 pub mod actions;
 pub mod ai_edit;
 pub mod autotag;
