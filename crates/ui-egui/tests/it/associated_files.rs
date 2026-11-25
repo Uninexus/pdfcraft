@@ -116,7 +116,9 @@ fn attach(h: &mut Harness<'static, PdfCraftApp>, relationship: &str, description
 
 /// The text of the row of the attachment called `name`: its name followed by its details.
 fn row_text(h: &Harness<'static, PdfCraftApp>, name: &str) -> String {
+    use egui_kittest::kittest::NodeT as _;
     h.get_by(|node| node.role() == Role::ListItem && node.label().is_some_and(|text| text.starts_with(name)) && !node.is_hidden())
+        .accesskit_node()
         .label()
         .unwrap_or_default()
         .to_string()
