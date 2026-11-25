@@ -49,6 +49,7 @@ mod document_links;
 mod editing;
 mod editor_taps;
 mod export;
+mod fast_web_view;
 mod field_signer;
 mod field_triggers;
 mod fill_sign;
