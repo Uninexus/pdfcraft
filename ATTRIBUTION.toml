@@ -2107,3 +2107,13 @@ kind = "icon"
 usage = "UI icon, embedded via crates/ui-egui/src/icon_data.rs"
 sha256 = "327d197328f9feb1f88c36c9db04e9b00fe717d877459f92fcd892f5e4c349fa"
 
+[[asset]]
+path = "assets/icons/box.svg"
+title = "Lucide icon \"box\""
+author = "Lucide Contributors (portions Cole Bemis, Feather)"
+source = "https://github.com/lucide-icons/lucide (npm lucide-static 1.49.0, icons/box.svg)"
+licence = "ISC AND MIT"
+licence_file = "assets/icons/LICENSE-lucide.txt"
+kind = "icon"
+usage = "UI icon, embedded via crates/ui-egui/src/icons.rs"
+sha256 = "3cc38c5f0db2f284a38ec9e5cca5bc82b6810ced83b7b57362ac45253fd7edb4"

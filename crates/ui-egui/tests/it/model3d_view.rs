@@ -110,7 +110,13 @@ fn dragging_scrolling_and_the_arrow_keys_move_the_view() {
     h.run_steps(1);
     one_frame(
         &mut h,
-        [egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta: egui::vec2(0.0, 120.0), modifiers: egui::Modifiers::NONE }],
+        [egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(0.0, 120.0),
+            phase: egui::TouchPhase::Move,
+            modifiers: egui::Modifiers::NONE,
+            source: egui::MouseWheelSource::Unknown,
+        }],
     );
     h.run_steps(4);
     let zoomed = hash(&h);
@@ -127,7 +133,7 @@ fn dragging_scrolling_and_the_arrow_keys_move_the_view() {
 fn a_page_without_a_model_or_with_a_u3d_one_says_so_plainly() {
     let session = pdfcraft_engine::Session::new();
     let blank = session.create_blank(200.0, 200.0, 1).unwrap();
-    let mut h = open_window(blank.as_ref().clone());
+    let h = open_window(blank.as_ref().clone());
     let window = h.state().model3d.as_ref().expect("the window opens");
     assert!(!window.has_model());
     assert_eq!(window.message(), Some("This page has no 3D model."));

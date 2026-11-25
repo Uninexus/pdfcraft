@@ -25,6 +25,7 @@ const ICONS: &[(&str, &[u8])] = &[
     icon!("bell"),
     icon!("book-open"),
     icon!("bookmark-plus"),
+    icon!("box"),
     icon!("braces"),
     icon!("camera"),
     icon!("check-circle-2"),
