@@ -584,7 +584,7 @@ const fn select_commands<const N: usize>() -> [CommandSpec; N] {
     out
 }
 
-const KEPT_COMMANDS: [CommandSpec; kept_commands()] = select_commands();
+static KEPT_COMMANDS: [CommandSpec; kept_commands()] = select_commands();
 
 /// Every command, in menu order. A build with `PDFCRAFT_NO_AI` set leaves out the `ai.` ones, so no
 /// menu, palette, tool list or `command_run` reaches them.
