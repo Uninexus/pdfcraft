@@ -60,6 +60,7 @@ mod folders;
 mod fonts;
 mod forms;
 mod identity;
+mod ink_manager;
 mod insert_clipboard;
 mod javascript;
 mod javascripts_window;

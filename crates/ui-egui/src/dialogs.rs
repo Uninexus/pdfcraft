@@ -15,6 +15,7 @@ pub(crate) mod duplicate_field;
 pub(crate) mod field_copies_ui;
 pub(super) mod hairlines_ui;
 pub(crate) mod host;
+pub(super) mod ink_manager_ui;
 pub(super) mod javascripts_ui;
 pub(super) mod marks_ui;
 pub(super) mod media_actions_ui;
