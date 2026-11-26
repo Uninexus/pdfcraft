@@ -453,6 +453,7 @@ impl PdfCraftApp {
             "optimize.advanced" => crate::optimize_ui::open_optimizer(self, ctx),
             "doc.compare" => crate::compare_ui::open_compare_dialog(self, ctx),
             "standards.pdfa" => self.open_pdfa(),
+            "standards.pdfx_verify" => self.open_pdfx_verify(),
             "standards.reference_xobjects" => self.open_reference_xobjects(),
             "edit.media_actions" => self.open_media_actions(),
             "actions.wizard" => crate::actions_ui::open_wizard(self, ctx, None),
