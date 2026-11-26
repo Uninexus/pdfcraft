@@ -36,7 +36,8 @@ unknown-git = "deny"
 # Shared UI, PDF components and spooler; Cargo.toml pins immutable revisions. craft-print pins
 # storytold's winprint fork (Windows printing, #1107) to an immutable revision of its own.
 allow-git = [
-    "https://github.com/storytold/craft-libs",
+    # This fork's craft-libs (docs/development.md, "Shared libraries").
+    "https://github.com/Uninexus/craft-libs",
     "https://github.com/storytold/winprint.rs",
     # The reviewed egui 0.37 and winit 0.30.13 fork revisions (immutable pins in Cargo.toml).
     "https://github.com/storytold/egui",

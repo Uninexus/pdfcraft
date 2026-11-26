@@ -6,7 +6,7 @@ use std::process::Command;
 
 use serde_json::Value;
 
-const SHARED_REV: &str = "0a6e42b80bfd586aee6ee1144aa98cf1ea37a844";
+const SHARED_REV: &str = "ce7563e70bb6e1f4a556b6ab14479d8a33df2884";
 const PACKAGES: &[(&str, &str)] = &[
     ("craft-pdf", "0.1.0"),
     ("hayro", "0.7.1"),
@@ -40,7 +40,7 @@ fn validate(root: &Path, metadata: &Value) -> Result<(), String> {
         }
         matches.first().copied().ok_or_else(|| format!("missing {name}"))
     };
-    let source = format!("git+https://github.com/storytold/craft-libs?rev={SHARED_REV}#{SHARED_REV}");
+    let source = format!("git+https://github.com/Uninexus/craft-libs?rev={SHARED_REV}#{SHARED_REV}");
     for &(name, version) in PACKAGES {
         let package = one_package(name)?;
         if package.get("version").and_then(Value::as_str) != Some(version) || package.get("source").and_then(Value::as_str) != Some(source.as_str()) {

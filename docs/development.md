@@ -170,6 +170,15 @@ digit-prefixed `*.conf` files, in lexical order; backups and disabled files are 
 limits each config to 1 MiB, visits at most 256 config files/directories, and bounds include depth
 to 16 and directory entries to 32,768. Cyclic includes are skipped.
 
+## Shared libraries (craft-libs)
+
+This fork takes every craft-libs crate from [Uninexus/craft-libs](https://github.com/Uninexus/craft-libs),
+a fork of storytold/craft-libs, at one revision pinned in `Cargo.toml`. The fork adds one change
+on top of the upstream revision: a titled dock panel header is inset by the panel padding, and a
+dock column with an empty column bar no longer draws it. The change is to be offered upstream;
+once storytold/craft-libs has it, point the dependencies back there. `xtask/src/pdf_deps.rs` and
+`deny.toml` name the same source.
+
 ## Fonts and attribution
 
 - `CRAFT_FONTS_DIR=<craft-fonts checkout> cargo build` makes `crates/fonts/build.rs` embed the
