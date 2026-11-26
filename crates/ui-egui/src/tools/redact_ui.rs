@@ -262,7 +262,7 @@ impl PdfCraftApp {
         let config = pdfcraft_render::RenderConfig { password: doc.password.as_deref().map(std::sync::Arc::from), ..Default::default() };
         let mut r = pdfcraft_render::PageRenderer::new(doc.bytes.clone(), config);
         let mut edits = Vec::new();
-        let author = self.comment_prefs.author.clone();
+        let author = self.comment_author();
         for (page, page_info) in doc.info.pages.iter().enumerate() {
             let out = r.render(pdfcraft_render::RenderRequest { page, kind: pdfcraft_render::RequestKind::Text, scale: 1.0, ..Default::default() });
             let Some(text) = out.text else { continue };
@@ -296,7 +296,7 @@ impl PdfCraftApp {
     pub fn redact_pages(&mut self, ctx: &egui::Context, pages: &[usize]) {
         let Some((_, id)) = self.active_ids() else { return };
         let Some(doc) = self.session.get(id) else { return };
-        let author = self.comment_prefs.author.clone();
+        let author = self.comment_author();
         let edits: Vec<Edit> = pages
             .iter()
             .filter_map(|&p| {

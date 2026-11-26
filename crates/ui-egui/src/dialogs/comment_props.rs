@@ -361,7 +361,7 @@ impl PdfCraftApp {
             shape,
             style: self.comment_prefs.style(tool),
             contents: String::new(),
-            author: self.comment_prefs.author.clone(),
+            author: self.comment_author(),
         });
         // A one-shot tool: back to Select unless pinned (apply_edit acts on this).
         if let Some((i, _)) = self.active_ids() {

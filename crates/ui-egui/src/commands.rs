@@ -751,7 +751,7 @@ impl PdfCraftApp {
                             .into_iter()
                             .map(|(page, quads)| {
                                 let style = self.comment_prefs.style(tool);
-                                let author = self.comment_prefs.author.clone();
+                                let author = self.comment_author();
                                 let shape = pdfcraft_engine::Shape::TextMarkup { kind, quads };
                                 Edit::AddAnnotation(pdfcraft_engine::NewAnnotation { page, shape, style, contents: String::new(), author })
                             })
@@ -1050,7 +1050,7 @@ impl PdfCraftApp {
                 if let Some(i) = active
                     && let Some(doc) = self.session.get(self.views[i].id)
                 {
-                    let author = self.comment_prefs.author.clone();
+                    let author = self.comment_author();
                     // Pages still to be read are marked when they are, by the Redact tool now
                     // picked; a page that could not be read refuses the whole selection.
                     match self.views[i].tool_marks(crate::QuickTool::Redact, true, None, true, &doc.info) {

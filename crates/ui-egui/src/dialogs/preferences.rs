@@ -111,6 +111,8 @@ struct PrefsDraft {
     single_key_accelerators: bool,
     author: String,
     identity_email: String,
+    login_name: String,
+    author_from_login_name: bool,
     form_tooltips: bool,
     form_autocomplete: bool,
     field_highlight_color: Option<[u8; 3]>,
@@ -155,6 +157,8 @@ impl PrefsDraft {
             single_key_accelerators: app.single_key_accelerators,
             author: app.comment_prefs.author.clone(),
             identity_email: app.identity_email.clone(),
+            login_name: app.session.identity().login_name.clone(),
+            author_from_login_name: app.session.identity().author_from_login_name,
             form_tooltips: app.form_tooltips,
             form_autocomplete: app.session.form_autocomplete(),
             field_highlight_color: app.field_highlight_color,
@@ -204,6 +208,8 @@ impl PrefsDraft {
             single_key_accelerators: false,
             author: prefs.author,
             identity_email: String::new(),
+            login_name: String::new(),
+            author_from_login_name: false,
             form_tooltips: true,
             form_autocomplete: engine.form_autocomplete(),
             field_highlight_color: None,
@@ -581,6 +587,8 @@ impl PreferencesModel for Prefs<'_> {
             ("view.single_key", PrefValue::Bool(v)) => d.single_key_accelerators = v,
             ("identity.name", PrefValue::Text(v)) => d.author = v.chars().take(crate::MAX_AUTHOR_CHARS).collect(),
             ("identity.email", PrefValue::Text(v)) => d.identity_email = v.chars().take(crate::MAX_AUTHOR_CHARS).collect(),
+            ("identity.login_name", PrefValue::Text(v)) => d.login_name = v.chars().take(crate::MAX_AUTHOR_CHARS).collect(),
+            ("identity.use_login_name", PrefValue::Bool(v)) => d.author_from_login_name = v,
             ("forms.highlight", PrefValue::Bool(v)) => d.highlight_fields = v,
             ("forms.highlight_color", PrefValue::Color(c)) => d.field_highlight_color = Some([c.0[0], c.0[1], c.0[2]]),
             ("forms.required_color", PrefValue::Color(c)) => d.required_field_color = Some([c.0[0], c.0[1], c.0[2]]),
@@ -749,6 +757,8 @@ impl PreferencesModel for Prefs<'_> {
             "identity" => {
                 d.author = fresh.author;
                 d.identity_email = fresh.identity_email;
+                d.login_name = fresh.login_name;
+                d.author_from_login_name = fresh.author_from_login_name;
             }
             "forms" => {
                 d.highlight_fields = fresh.highlight_fields;
@@ -837,6 +847,7 @@ impl PreferencesDraft for Prefs<'_> {
         self.app.single_key_accelerators = d.single_key_accelerators;
         self.app.comment_prefs.author = d.author;
         self.app.identity_email = d.identity_email.trim().chars().take(crate::MAX_AUTHOR_CHARS).collect();
+        self.app.session.set_login_name(&d.login_name, d.author_from_login_name);
         self.app.form_tooltips = d.form_tooltips;
         self.app.session.set_form_autocomplete(d.form_autocomplete);
         self.app.field_highlight_color = d.field_highlight_color;
@@ -1000,6 +1011,10 @@ impl Prefs<'_> {
                 .help(tl!("Also the text a typed signature starts from. It starts as your login name.")),
             RowSpec::new("identity.email", tl!("Email"), RowKind::Text(d.identity_email.as_str()))
                 .help(tl!("Written as the contact information of digital signatures you add.")),
+            RowSpec::new("identity.login_name", tl!("Login name"), RowKind::Text(d.login_name.as_str()))
+                .help(tl!("Used as the author of new comments only while the box below is ticked.")),
+            RowSpec::new("identity.use_login_name", tl!("Use the login name as the author of new comments"), RowKind::Bool(d.author_from_login_name))
+                .help(tl!("Needs a login name; without one, the name above is used.")),
         ];
         PageSpec::new("identity", tl!("Identity"), rows)
     }

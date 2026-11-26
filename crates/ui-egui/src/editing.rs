@@ -1038,7 +1038,7 @@ impl PdfCraftApp {
             }
             return true;
         }
-        let author = self.comment_prefs.author.clone();
+        let author = self.comment_author();
         let rotation = self.session.get(id).map_or(0, |doc| crate::comments::page_rotation(&doc.info, tb.page));
         let look = crate::fill_sign::TypedLook { color: tb.color, border: tb.border };
         let edit = crate::fill_sign::typed_with(tb.page, tb.at, &text, tb.size, rotation, &author, look);

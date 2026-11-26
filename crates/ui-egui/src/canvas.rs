@@ -1800,14 +1800,15 @@ pub fn document_area_at(app: &mut PdfCraftApp, index: usize, rect: Rect, ui: &mu
     let mut body_out = BodyOut::default();
     let date_text = crate::date_text_for_pdf(&app.session);
     // The dynamic stamps' lines, filled in for now: the built-in ones write the default line, a custom stamp its own.
-    let by_line = app.session.stamp_line(crate::stamps_ui::DEFAULT_LINE, &app.comment_prefs.author);
+    let author_name = app.comment_author();
+    let by_line = app.session.stamp_line(crate::stamps_ui::DEFAULT_LINE, &author_name);
     let custom_line = match tool {
         QuickTool::CustomStamp(i) => app
             .custom_stamps
             .get(i)
             .and_then(|stamp| stamp.line.as_deref())
             .filter(|line| !line.trim().is_empty())
-            .map(|line| app.session.stamp_line(line, &app.comment_prefs.author)),
+            .map(|line| app.session.stamp_line(line, &author_name)),
         _ => None,
     };
     let custom_stamp = match tool {
@@ -1836,7 +1837,7 @@ pub fn document_area_at(app: &mut PdfCraftApp, index: usize, rect: Rect, ui: &mu
         navigation,
         host: &app.host,
         wake: &app.wake,
-        author: &app.comment_prefs.author,
+        author: &author_name,
         comment_prefs: &app.comment_prefs,
         date_text: &date_text,
         fill: page_tools::FillPrefs {
@@ -2194,7 +2195,7 @@ fn apply_frame_requests(app: &mut PdfCraftApp, ctx: &egui::Context, index: usize
         app.notify_tr("Part of the selected text is on a page whose text could not be read, so nothing was marked for redaction. Mark that page with a box instead.");
     }
     if let Some((made_by, marks, head)) = app.views[index].session.pending_marks.take() {
-        let author = app.comment_prefs.author.clone();
+        let author = app.comment_author();
         let edits: Vec<pdfcraft_engine::Edit> = marks
             .into_iter()
             .map(|(page, quads)| {

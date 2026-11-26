@@ -41,6 +41,14 @@ fn from_name<T: serde::de::DeserializeOwned>(name: &str) -> Option<T> {
 }
 
 impl PdfCraftApp {
+    /// The author new comments, stamps, measurements and redaction marks carry: the login name
+    /// when Preferences ▸ Identity asks for it and one is set (the same session state the
+    /// `identity` tool writes), else the name.
+    pub(crate) fn comment_author(&self) -> String {
+        let id = self.session.identity();
+        if id.author_from_login_name && !id.login_name.is_empty() { id.login_name.clone() } else { self.comment_prefs.author.clone() }
+    }
+
     /// The canvas's navigation choices: the scroll speed, the middle-button direction and whether zooms and wheel
     /// notches ease. The rest keep the framework's defaults.
     pub(crate) fn navigation_options(&self) -> craft::ui::canvas::NavigationOptions {
@@ -199,6 +207,8 @@ impl PdfCraftApp {
             always_default_view: Some(self.always_default_view),
             highlight_fields: Some(self.highlight_fields),
             identity_email: Some(self.identity_email.clone()),
+            login_name: Some(self.session.identity().login_name.clone()),
+            author_from_login_name: Some(self.session.identity().author_from_login_name),
             form_tooltips: Some(self.form_tooltips),
             form_autocomplete: Some(self.session.form_autocomplete()),
             form_entries: self.remember_entries_on_disk.then(|| json_text(&self.session.form_entries().entries())).flatten(),
@@ -521,6 +531,12 @@ impl PdfCraftApp {
         // Settings are untrusted: the email is trimmed and cut like the name.
         if let Some(email) = b.identity_email.as_deref() {
             self.identity_email = email.trim().chars().take(MAX_AUTHOR_CHARS).collect();
+        }
+        if b.login_name.is_some() || b.author_from_login_name.is_some() {
+            let now = self.session.identity().clone();
+            let login = b.login_name.as_deref().map_or(now.login_name.as_str(), str::trim);
+            let login: String = login.chars().take(MAX_AUTHOR_CHARS).collect();
+            self.session.set_login_name(&login, b.author_from_login_name.unwrap_or(now.author_from_login_name));
         }
         if let Some(on) = b.form_tooltips {
             self.form_tooltips = on;
