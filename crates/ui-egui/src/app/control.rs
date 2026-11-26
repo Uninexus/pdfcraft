@@ -607,6 +607,7 @@ impl PdfCraftApp {
             "compare-files" => crate::compare_ui::open_compare_dialog(self, ctx),
             "action-wizard" => crate::actions_ui::open_wizard(self, ctx, None),
             "pdfa" => self.open_pdfa(),
+            "pdfx-verify" => self.open_pdfx_verify(),
             "signature" => {
                 let initials = field == Some("initials");
                 let editing = if initials { self.initials.is_some() } else { self.signature.is_some() };
