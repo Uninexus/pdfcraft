@@ -97,6 +97,7 @@ mod pinned_tools;
 mod pointer;
 mod portfolio;
 mod preferences;
+mod prefs_login_name;
 mod prepare;
 mod print;
 mod print_custom_paper_names;

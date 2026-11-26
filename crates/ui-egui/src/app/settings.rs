@@ -101,6 +101,9 @@ pub struct Behavior {
     pub highlight_fields: Option<bool>,
     /// Preferences > Identity > Email, the contact information of new digital signatures.
     pub identity_email: Option<String>,
+    /// Preferences > Identity > Login name, the author of new comments when `author_from_login_name` is on.
+    pub login_name: Option<String>,
+    pub author_from_login_name: Option<bool>,
     /// Preferences > Forms: a field's tooltip shows on hover.
     pub form_tooltips: Option<bool>,
     /// Preferences > Forms > Auto-Complete: Basic (on) or Off.
@@ -633,6 +636,8 @@ pub fn import_json(text: &str) -> (PdfCraftSettings, Vec<SectionError>) {
             always_default_view: r.bool("always_default_view"),
             highlight_fields: r.bool("highlight_fields"),
             identity_email: r.string("identity_email"),
+            login_name: r.string("login_name"),
+            author_from_login_name: r.bool("author_from_login_name"),
             form_tooltips: r.bool("form_tooltips"),
             form_autocomplete: r.bool("form_autocomplete"),
             form_entries: r.text("form_entries"),
