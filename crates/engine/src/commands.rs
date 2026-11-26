@@ -193,8 +193,7 @@ pub const COMMENT_TYPE_COMMANDS: &[(&str, &str)] = &[
     ("comment.toggle_type.redact", "Redact"),
 ];
 
-/// Every command, in menu order.
-pub const COMMANDS: &[CommandSpec] = &[
+const ALL_COMMANDS: &[CommandSpec] = &[
     // The tools' bare-key chords: V selects, H pans.
     c("view.select_tool", "Select", None, Some(Shortcut { command: false, shift: false, mac_ctrl: false, key: "V" }), Document, "mouse_pointer_2"),
     c("view.hand_tool", "Hand", None, Some(Shortcut { command: false, shift: false, mac_ctrl: false, key: "H" }), Document, "hand"),
@@ -553,6 +552,44 @@ pub const COMMANDS: &[CommandSpec] = &[
     c("prefs.comment.reset_defaults", "Reset comment tool colours and sizes", None, None, Nothing, "eraser"),
 ];
 
+/// Whether `id` belongs to the AI assistant, which a build without it leaves out.
+const fn is_ai(id: &str) -> bool {
+    let b = id.as_bytes();
+    b.len() >= 3 && b[0] == b'a' && b[1] == b'i' && b[2] == b'.'
+}
+
+const fn kept_commands() -> usize {
+    let mut n = 0;
+    let mut i = 0;
+    while i < ALL_COMMANDS.len() {
+        if crate::AI_ENABLED || !is_ai(ALL_COMMANDS[i].id) {
+            n += 1;
+        }
+        i += 1;
+    }
+    n
+}
+
+const fn select_commands<const N: usize>() -> [CommandSpec; N] {
+    let mut out = [ALL_COMMANDS[0]; N];
+    let mut n = 0;
+    let mut i = 0;
+    while i < ALL_COMMANDS.len() {
+        if crate::AI_ENABLED || !is_ai(ALL_COMMANDS[i].id) {
+            out[n] = ALL_COMMANDS[i];
+            n += 1;
+        }
+        i += 1;
+    }
+    out
+}
+
+static KEPT_COMMANDS: [CommandSpec; kept_commands()] = select_commands();
+
+/// Every command, in menu order. A build with `PDFCRAFT_NO_AI` set leaves out the `ai.` ones, so no
+/// menu, palette, tool list or `command_run` reaches them.
+pub const COMMANDS: &[CommandSpec] = &KEPT_COMMANDS;
+
 pub fn command(id: &str) -> Option<&'static CommandSpec> {
     COMMANDS.iter().find(|c| c.id == id)
 }
@@ -686,5 +723,16 @@ mod tests {
         s.apply(id, crate::Edit::RotatePages { pages: vec![0], degrees: 90 }).unwrap();
         assert!(is_enabled(undo, &s, Some(id)));
         assert_eq!(current_label(undo, &s, Some(id)), "Undo Rotate page");
+    }
+
+    #[test]
+    fn the_ai_commands_and_tool_entries_are_present_exactly_when_the_build_has_the_assistant() {
+        let has_command = COMMANDS.iter().any(|c| c.id.starts_with("ai."));
+        assert_eq!(has_command, crate::AI_ENABLED);
+        let has_entry =
+            crate::catalog::TOOL_GROUPS.iter().flat_map(|g| g.sections.iter().flat_map(|s| s.items.iter())).any(|i| i.command.starts_with("ai."));
+        assert_eq!(has_entry, crate::AI_ENABLED);
+        let has_group = crate::catalog::group("ai").is_some();
+        assert_eq!(has_group, crate::AI_ENABLED);
     }
 }

@@ -425,7 +425,7 @@ impl PdfCraftApp {
             "prepress.convert_colors" => self.open_convert_colours(ctx),
             "prepress.hairlines" => self.open_fix_hairlines(ctx),
             "prepress.readiness" => self.open_print_readiness(),
-            "ai.ask" | "ai.summary" | "ai.translate" | "ai.edit" => self.open_ai_for(id),
+            "ai.ask" | "ai.summary" | "ai.translate" | "ai.edit" if pdfcraft_engine::AI_ENABLED => self.open_ai_for(id),
             "tools.javascripts" => crate::javascripts_ui::open(self),
             "sign.plan.show" => self.show_signing_plan(),
             "sign.audit_report" => self.open_signature_audit(),

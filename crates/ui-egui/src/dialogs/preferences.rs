@@ -496,7 +496,7 @@ impl Prefs<'_> {
 
 impl PreferencesModel for Prefs<'_> {
     fn pages(&self) -> Vec<PageSpec<'_>> {
-        vec![
+        let mut pages = vec![
             self.general_page(),
             self.appearance_page(),
             self.documents_page(),
@@ -505,8 +505,11 @@ impl PreferencesModel for Prefs<'_> {
             self.forms_page(),
             self.fill_sign_page(),
             self.javascript_page(),
-            self.ai_page(),
-        ]
+        ];
+        if pdfcraft_engine::AI_ENABLED {
+            pages.push(self.ai_page());
+        }
+        pages
     }
 
     fn set(&mut self, key: &str, value: PrefValue) {

@@ -72,7 +72,7 @@ const ORANGE: [u8; 3] = [0xE8, 0x8A, 0x1A];
 const TEAL: [u8; 3] = [0x14, 0x9C, 0xA8];
 const PINK: [u8; 3] = [0xD6, 0x3B, 0x8F];
 
-pub static TOOL_GROUPS: &[ToolGroup] = &[
+const ALL_GROUPS: &[ToolGroup] = &[
     ToolGroup {
         id: "export",
         label: "Export a PDF",
@@ -556,6 +556,43 @@ pub static TOOL_GROUPS: &[ToolGroup] = &[
     },
 ];
 
+/// Whether `id` is the AI assistant's group, which a build without the assistant leaves out.
+const fn is_ai_group(id: &str) -> bool {
+    let b = id.as_bytes();
+    b.len() == 2 && b[0] == b'a' && b[1] == b'i'
+}
+
+const fn kept_groups() -> usize {
+    let mut n = 0;
+    let mut i = 0;
+    while i < ALL_GROUPS.len() {
+        if crate::AI_ENABLED || !is_ai_group(ALL_GROUPS[i].id) {
+            n += 1;
+        }
+        i += 1;
+    }
+    n
+}
+
+const fn select_groups<const N: usize>() -> [ToolGroup; N] {
+    let mut out = [ALL_GROUPS[0]; N];
+    let mut n = 0;
+    let mut i = 0;
+    while i < ALL_GROUPS.len() {
+        if crate::AI_ENABLED || !is_ai_group(ALL_GROUPS[i].id) {
+            out[n] = ALL_GROUPS[i];
+            n += 1;
+        }
+        i += 1;
+    }
+    out
+}
+
+const KEPT_GROUPS: [ToolGroup; kept_groups()] = select_groups();
+
+/// The tool groups of the All tools view. A build with `PDFCRAFT_NO_AI` set leaves out the AI assistant's.
+pub static TOOL_GROUPS: &[ToolGroup] = &KEPT_GROUPS;
+
 pub fn group(id: &str) -> Option<&'static ToolGroup> {
     TOOL_GROUPS.iter().find(|g| g.id == id)
 }
@@ -569,12 +606,15 @@ pub struct ToolCategory {
     pub groups: &'static [&'static str],
 }
 
+const CUSTOMIZE: &[&str] = &["actions", "javascript", "search_index"];
+const CUSTOMIZE_WITH_AI: &[&str] = &["actions", "javascript", "search_index", "ai"];
+
 pub static TOOL_CATEGORIES: &[ToolCategory] = &[
     ToolCategory { label: "Create & Edit", groups: &["create", "edit", "export", "combine", "organize", "scan", "compress"] },
     ToolCategory { label: "Review & Compare", groups: &["comment", "stamp", "compare", "measure"] },
     ToolCategory { label: "Forms & Signatures", groups: &["fill_sign", "form", "certificate"] },
     ToolCategory { label: "Protect & Standardize", groups: &["protect", "redact", "accessibility", "standards", "print_production"] },
-    ToolCategory { label: "Customize & Automate", groups: &["actions", "javascript", "search_index", "ai"] },
+    ToolCategory { label: "Customize & Automate", groups: if crate::AI_ENABLED { CUSTOMIZE_WITH_AI } else { CUSTOMIZE } },
 ];
 
 #[cfg(test)]

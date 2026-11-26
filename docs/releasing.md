@@ -40,6 +40,10 @@ Linux, Flatpak, FreeBSD and web jobs build and check everything, the signing job
 environment's branch rule, and the draft-release job (which needs them) is skipped, so nothing is
 published (`gh workflow run release.yml --ref <branch>`).
 
+## Building without the AI assistant
+
+To build without the AI assistant, set `PDFCRAFT_NO_AI=1` when building. The `ai.` commands, the `ai_` automation tools, the AI tool group, the AI Assistant window and its Preferences page are then left out; the code stays in the tree.
+
 ## What gets built
 
 | Platform | Artifacts | Built on |
