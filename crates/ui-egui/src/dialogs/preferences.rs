@@ -105,6 +105,9 @@ struct PrefsDraft {
     always_default_view: bool,
     text_links: bool,
     units: Unit,
+    /// Preferences > Grid: the page grid, in points, and the unit its numbers are shown in.
+    grid: pdfcraft_engine::guides::Grid,
+    grid_unit: Unit,
     blank_paper: crate::paper::Paper,
     scroll_speed: ScrollSpeed,
     invert_middle_drag: bool,
@@ -149,6 +152,8 @@ impl PrefsDraft {
             always_default_view: app.always_default_view,
             text_links: app.text_links,
             units: app.units,
+            grid: crate::grid_prefs::effective(&app.session),
+            grid_unit: app.grid_unit,
             blank_paper: app.blank_paper,
             scroll_speed: app.scroll_speed,
             invert_middle_drag: app.invert_middle_drag,
@@ -198,6 +203,8 @@ impl PrefsDraft {
             always_default_view: false,
             text_links: true,
             units: Unit::default(),
+            grid: crate::grid_prefs::default_grid(),
+            grid_unit: Unit::default(),
             blank_paper: crate::paper::Paper::system(),
             scroll_speed: ScrollSpeed::default(),
             invert_middle_drag: false,
@@ -500,6 +507,7 @@ impl PreferencesModel for Prefs<'_> {
             self.general_page(),
             self.appearance_page(),
             self.documents_page(),
+            self.grid_page(),
             self.identity_page(),
             self.comment_page(),
             self.forms_page(),
@@ -575,6 +583,11 @@ impl PreferencesModel for Prefs<'_> {
             ("view.always", PrefValue::Bool(v)) => d.always_default_view = v,
             ("view.text_links", PrefValue::Bool(v)) => d.text_links = v,
             ("view.units", PrefValue::Choice(id)) => d.units = lookup(&unit_table(), &id).unwrap_or(d.units),
+            ("grid.unit", PrefValue::Choice(id)) => d.grid_unit = lookup(&unit_table(), &id).unwrap_or(d.grid_unit),
+            ("grid.spacing", PrefValue::Float(v)) => d.grid.spacing = v / d.grid_unit.per_point(),
+            ("grid.subdivisions", PrefValue::Int(v)) => d.grid.subdivisions = u32::try_from(v).unwrap_or(0),
+            ("grid.offset_x", PrefValue::Float(v)) => d.grid.offset_x = v / d.grid_unit.per_point(),
+            ("grid.offset_y", PrefValue::Float(v)) => d.grid.offset_y = v / d.grid_unit.per_point(),
             ("view.paper", PrefValue::Choice(id)) => d.blank_paper = lookup(&paper_table(), &id).unwrap_or(d.blank_paper),
             ("view.scroll_speed", PrefValue::Choice(id)) => d.scroll_speed = lookup(&speed_table(), &id).unwrap_or(d.scroll_speed),
             ("view.invert_middle", PrefValue::Bool(v)) => d.invert_middle_drag = v,
@@ -619,6 +632,13 @@ impl PreferencesModel for Prefs<'_> {
                     }
                 }
             });
+            return false;
+        }
+        if key == "grid.check" {
+            // The engine's own refusal, shown while the draft's grid is one it would not store.
+            if let Err(e) = self.draft.grid.check() {
+                Notice::new(Tone::Bad, Label::from(e.to_string())).layout(NoticeLayout::Inline).announce(Politeness::Polite).show(ui);
+            }
             return false;
         }
         if key == "forms.entries" {
@@ -746,6 +766,10 @@ impl PreferencesModel for Prefs<'_> {
                 d.invert_middle_drag = fresh.invert_middle_drag;
                 d.single_key_accelerators = fresh.single_key_accelerators;
             }
+            "grid" => {
+                d.grid = fresh.grid;
+                d.grid_unit = fresh.grid_unit;
+            }
             "identity" => {
                 d.author = fresh.author;
                 d.identity_email = fresh.identity_email;
@@ -791,12 +815,14 @@ impl PreferencesDraft for Prefs<'_> {
     }
 
     fn can_ok(&self) -> bool {
-        self.texts.today.is_ok()
+        self.texts.today.is_ok() && self.draft.grid.check().is_ok()
     }
 
     fn apply(&mut self) -> Result<(), String> {
         let d = self.draft.clone();
         self.app.date_text(Some(&d.date_format))?;
+        // A grid the engine refuses is never stored: the window stays open with the reason.
+        d.grid.check().map_err(|e| e.to_string())?;
         let old_defaults = self.app.view_defaults;
         let old_always = self.app.always_default_view;
 
@@ -832,6 +858,11 @@ impl PreferencesDraft for Prefs<'_> {
         self.app.always_default_view = d.always_default_view;
         self.app.text_links = d.text_links;
         self.app.units = d.units;
+        self.app.grid_unit = d.grid_unit;
+        // Only a grid that was changed becomes the session's preference, so an untouched page leaves it unset.
+        if d.grid != crate::grid_prefs::effective(&self.app.session) {
+            self.app.session.set_grid_preference(Some(d.grid)).map_err(|e| e.to_string())?;
+        }
         self.app.scroll_speed = d.scroll_speed;
         self.app.invert_middle_drag = d.invert_middle_drag;
         self.app.single_key_accelerators = d.single_key_accelerators;
@@ -991,6 +1022,27 @@ impl Prefs<'_> {
                 .help(tl!("Z picks Marquee zoom and G picks Snapshot. V (Select) and H (Hand) always work.")),
         ];
         PageSpec::new("documents", tl!("Documents and view"), rows)
+    }
+
+    fn grid_page(&self) -> PageSpec<'_> {
+        let d = &*self.draft;
+        let k = d.grid_unit.per_point();
+        // The fields take any number in the unit, so a value the engine refuses can be typed and its reason read.
+        let wide = 1.0e9;
+        let decimals = 3;
+        let rows = vec![
+            choice_row("grid.unit", tl!("Grid unit"), d.grid_unit, &unit_table()),
+            RowSpec::new("grid.spacing", tl!("Grid spacing"), RowKind::float(d.grid.spacing * k, 0.0..=wide, decimals))
+                .help(tl!("The distance between main grid lines. View > Show Grid draws the grid over the pages.")),
+            RowSpec::new("grid.subdivisions", tl!("Subdivisions"), RowKind::int(i64::from(d.grid.subdivisions), 0..=1000))
+                .help(tl!("The equal parts each spacing is divided into; 1 draws main lines only.")),
+            RowSpec::new("grid.offset_x", tl!("Horizontal offset"), RowKind::float(d.grid.offset_x * k, -wide..=wide, decimals))
+                .help(tl!("Where a vertical line runs, measured from the page's left edge.")),
+            RowSpec::new("grid.offset_y", tl!("Vertical offset"), RowKind::float(d.grid.offset_y * k, -wide..=wide, decimals))
+                .help(tl!("Where a horizontal line runs, measured from the page's top edge.")),
+            RowSpec::new("grid.check", tl!("Grid problem"), RowKind::CustomRows).visible(d.grid.check().is_err()),
+        ];
+        PageSpec::new("grid", tl!("Grid"), rows)
     }
 
     fn identity_page(&self) -> PageSpec<'_> {

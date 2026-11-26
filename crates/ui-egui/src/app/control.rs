@@ -230,6 +230,11 @@ impl PdfCraftApp {
                 "off" => v.show_guides = false,
                 _ => return Err("guides must be on or off".into()),
             },
+            ("grid", Some(v)) => match value {
+                "on" => v.show_grid = true,
+                "off" => v.show_grid = false,
+                _ => return Err("grid must be on or off".into()),
+            },
             ("full-screen-escape", _) => {
                 self.full_screen_escape_exits = match value {
                     "on" => true,

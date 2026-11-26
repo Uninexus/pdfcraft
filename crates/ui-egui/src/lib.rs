@@ -48,6 +48,7 @@ pub use combine_ui::{CombineView, Lock as CombineLock, SortKey};
 pub use dialogs::readiness_ui::{ReadinessEdit, ReadinessField, ReadinessOptions};
 mod commands;
 pub mod control;
+mod grid_prefs;
 mod menus;
 mod properties_session;
 /// Header & footer / watermark / background dialog types (tests and automation).
@@ -336,6 +337,8 @@ pub struct PdfCraftApp {
     pub remember_entries_on_disk: bool,
     /// The unit page sizes and margins are shown in (Preferences ▸ Documents and view).
     pub units: units::Unit,
+    /// The unit Preferences ▸ Grid shows its spacing and offsets in (the grid itself is in points, in the session).
+    pub grid_unit: units::Unit,
     /// The paper Create ▸ Blank page makes (#5644): the system region's.
     pub blank_paper: paper::Paper,
     /// Explicit CLI/control mode lasts for this session and is never persisted.

@@ -241,8 +241,8 @@ pub const MAX_GRID_OFFSET: f64 = 1_000_000.0;
 
 /// A grid of lines over a page, in the guides' frame: vertical lines are measured from the page's
 /// left edge, horizontal ones from its top edge. Lines run every `spacing / subdivisions` points
-/// and one of each runs through the offset. The page is the displayed one, after `/Rotate` and `/UserUnit`, as for guides. This is the arithmetic of a snap-to-grid only: nothing
-/// draws or stores a grid.
+/// and one of each runs through the offset. The page is the displayed one, after `/Rotate` and `/UserUnit`, as for guides. This is the arithmetic of a snap-to-grid and of the app's View > Show Grid, which draws it on screen
+/// only.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Grid {
     /// Points between two main lines.

@@ -173,6 +173,7 @@ const DISPLAY: &[&str] = &[
     "view.fit_one_page",
 ];
 const GUIDES: &[&str] = &["view.show_guides", "view.clear_guides"];
+const GRID: &[&str] = &["view.show_grid"];
 const THEMES: &[&str] = &["view.theme.system", "view.theme.light", "view.theme.dark"];
 const PANES: &[&str] = &["view.side_panel", "view.tools_pane", "view.split"];
 const PANE_COMMANDS: &[&str] = &["comment.list", "form.fields", "ui.dock.reset"];
@@ -376,8 +377,9 @@ impl PdfCraftApp {
             Node::submenu(tl!("Page navigation"), list(NAVIGATION, &mut used)),
             Node::submenu(tl!("Page display"), list(DISPLAY, &mut used)),
             Node::submenu(tl!("Guides"), list(GUIDES, &mut used)),
-            Node::Separator,
         ];
+        view.extend(list(GRID, &mut used));
+        view.push(Node::Separator);
         view.extend(list(PANES, &mut used));
         view.push(Node::submenu(
             tl!("Side panels"),
