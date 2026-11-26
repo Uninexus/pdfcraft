@@ -45,6 +45,7 @@ mod create;
 mod date_format;
 mod destinations_panel;
 mod dialog_chrome;
+mod document_actions;
 mod document_links;
 mod editing;
 mod editor_taps;

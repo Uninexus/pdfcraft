@@ -1053,6 +1053,17 @@ impl PdfCraftApp {
         }
     }
 
+    /// Close a tab that is going away for good: the document's Will Close actions run first (not while another tab of
+    /// the document stays open), then [`Self::close_tab`]. What they change goes with the document.
+    pub fn close_tab_running_actions(&mut self, ctx: &egui::Context, index: usize) {
+        if let Some(closing) = self.views.get(index).map(|v| v.id)
+            && self.views.iter().filter(|v| v.id == closing).count() == 1
+        {
+            self.run_document_actions(ctx, closing, pdfcraft_engine::js::DocumentScriptEvent::WillClose);
+        }
+        self.close_tab(index);
+    }
+
     pub fn close_tab(&mut self, index: usize) {
         if index >= self.views.len() {
             return;
