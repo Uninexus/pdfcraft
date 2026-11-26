@@ -420,6 +420,7 @@ const ALL_GROUPS: &[ToolGroup] = &[
                 item("Add printer marks", "ruler", "prepress.marks", Ready),
                 item("Fix hairlines", "minus", "prepress.hairlines", Ready),
                 item("Print readiness", "file-check", "prepress.readiness", Ready),
+                item("Ink Manager", "palette", "print.ink_manager", Ready),
             ],
         }],
     },
