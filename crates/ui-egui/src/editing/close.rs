@@ -31,7 +31,7 @@ impl PdfCraftApp {
             }
             self.begin_close(ctx, CloseScope::Close, vec![id]);
         } else {
-            self.close_tab(index);
+            self.close_tab_running_actions(ctx, index);
         }
     }
 
@@ -43,7 +43,7 @@ impl PdfCraftApp {
         }
         for i in (0..self.views.len()).rev() {
             if !self.has_unsaved_work(i) {
-                self.close_tab(i);
+                self.close_tab_running_actions(ctx, i);
             }
         }
         let dirty = self.dirty_documents();
@@ -192,6 +192,16 @@ impl PdfCraftApp {
             return CloseDecision::Hold;
         }
         self.shutdown_recovery();
+        // The window closes with the documents still open: each one's Will Close actions run first.
+        let mut open: Vec<DocId> = Vec::new();
+        for id in self.views.iter().map(|v| v.id) {
+            if !open.contains(&id) {
+                open.push(id);
+            }
+        }
+        for id in open {
+            self.run_document_actions(ctx, id, pdfcraft_engine::js::DocumentScriptEvent::WillClose);
+        }
         CloseDecision::Close
     }
 
@@ -325,7 +335,7 @@ impl PdfCraftApp {
                 }
                 return;
             }
-            self.close_tab(i);
+            self.close_tab_running_actions(ctx, i);
         }
         if !current {
             return;
@@ -346,7 +356,7 @@ impl PdfCraftApp {
         if self.hold_close_for_ocr_review(index) {
             return true;
         }
-        self.close_tab(index);
+        self.close_tab_running_actions(ctx, index);
         false
     }
 

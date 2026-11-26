@@ -581,10 +581,23 @@ impl PdfCraftApp {
                 }
                 self.send_to_printer(printer, bytes, job)
             }
-            None => self.save_print_pdf(&name, bytes, no_summary),
+            None => self.save_print_pdf(id, &name, bytes, no_summary),
         }?;
         self.after_print(to_printer, no_summary);
+        // A job handed to the spooler (or a download or browser print started) has been sent; a save that is still
+        // asking where to write runs Did Print once the file is written.
+        if sent == PrintStart::Sent {
+            self.run_did_print(ctx, id);
+        }
         Ok(sent)
+    }
+
+    /// Run the document's Did Print actions after the print-ready file was written or the job was sent, where printing
+    /// is allowed (Will Print does not run otherwise either). A failing action is reported and nothing is undone.
+    fn run_did_print(&mut self, ctx: &egui::Context, id: pdfcraft_engine::DocId) {
+        if self.session.get(id).is_some_and(|d| d.allows_printing()) {
+            self.run_document_actions(ctx, id, pdfcraft_engine::js::DocumentScriptEvent::DidPrint);
+        }
     }
 
     /// The print-ready PDF for `settings`, with the summary of the comments when the draft asks for one and can have it,
@@ -720,10 +733,10 @@ impl PdfCraftApp {
     /// Print ▸ Save as PDF on the desktop: ask where, and write on a later frame. The write
     /// answers the dialog's held OK; a cancelled pick gives the OK back with the settings kept.
     #[cfg(not(target_arch = "wasm32"))]
-    fn save_print_pdf(&mut self, name: &str, bytes: Vec<u8>, no_summary: bool) -> Result<PrintStart, String> {
+    fn save_print_pdf(&mut self, id: pdfcraft_engine::DocId, name: &str, bytes: Vec<u8>, no_summary: bool) -> Result<PrintStart, String> {
         let stem = name.trim_end_matches(".pdf").trim_end_matches(".PDF");
         let request = craft::host::PickRequest::save("print").file_name(format!("{stem} (print).pdf")).filter("PDF", &["pdf"]);
-        self.pick_file(request, None, move |app, _, picked| {
+        self.pick_file(request, None, move |app, ctx, picked| {
             let answer = match picked {
                 // A picker that can't open refuses the held OK; only a cancel gives it back.
                 craft::host::Picked::Unavailable(reason) => Err(reason),
@@ -738,6 +751,7 @@ impl PdfCraftApp {
                         Ok(_) => {
                             let saved = crate::i18n::fmt(tl!("Saved the print-ready PDF to {path}"), &[("path", &path.display().to_string())]);
                             app.notify(with_summary_notice(saved, no_summary));
+                            app.run_did_print(ctx, id);
                             Ok(())
                         }
                         Err(e) => {
@@ -758,7 +772,7 @@ impl PdfCraftApp {
     /// Print ▸ Save as PDF in a browser: download it, as Save does (#170). There is no folder to
     /// choose and no file system to write to.
     #[cfg(target_arch = "wasm32")]
-    fn save_print_pdf(&mut self, name: &str, bytes: Vec<u8>, no_summary: bool) -> Result<PrintStart, String> {
+    fn save_print_pdf(&mut self, _id: pdfcraft_engine::DocId, name: &str, bytes: Vec<u8>, no_summary: bool) -> Result<PrintStart, String> {
         let stem = name.trim_end_matches(".pdf").trim_end_matches(".PDF");
         let file = format!("{stem} (print).pdf");
         match self.host.files().write(std::path::Path::new(&file), &bytes, craft::host::WriteIntent::SaveAs) {

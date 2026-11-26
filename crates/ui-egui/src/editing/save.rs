@@ -550,6 +550,8 @@ impl PdfCraftApp {
                     view.redactions_undone_after_save = 0;
                     view.saved_redactions_cut_off = false;
                 }
+                // Did Save runs once the file is written: what it changes is not in the file and stays as an unsaved change.
+                self.run_document_actions(ctx, id, pdfcraft_engine::js::DocumentScriptEvent::DidSave);
                 true
             }
             Err(e) => {
