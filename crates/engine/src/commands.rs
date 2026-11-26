@@ -386,6 +386,7 @@ const ALL_COMMANDS: &[CommandSpec] = &[
     c("standards.pdfa", "PDF/A…", None, None, Document, "file-check"),
     c("edit.media_actions", "Media Actions…", None, None, Document, "film"),
     c("standards.pdfx_verify", "Verify PDF/X…", None, None, Document, "file-check"),
+    c("standards.pdf20_structure", "PDF 2.0 structure…", None, None, Document, "file-check"),
     c("standards.reference_xobjects", "Reference XObjects…", None, None, Document, "file-check"),
     c("actions.wizard", "Action Wizard…", None, None, Nothing, "list-checks"),
     c("actions.distribution", "Prepare for distribution…", None, None, Nothing, "send"),

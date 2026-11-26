@@ -608,6 +608,7 @@ impl PdfCraftApp {
             "action-wizard" => crate::actions_ui::open_wizard(self, ctx, None),
             "pdfa" => self.open_pdfa(),
             "pdfx-verify" => self.open_pdfx_verify(),
+            "pdf20-structure" => self.open_pdf20_structure(),
             // Through the command, so it is refused with no document open, as the menu is.
             "ink-manager" => {
                 self.execute(ctx, "print.ink_manager");
