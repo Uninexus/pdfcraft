@@ -455,6 +455,7 @@ impl PdfCraftApp {
             "doc.compare" => crate::compare_ui::open_compare_dialog(self, ctx),
             "standards.pdfa" => self.open_pdfa(),
             "standards.pdfx_verify" => self.open_pdfx_verify(),
+            "standards.pdf20_structure" => self.open_pdf20_structure(),
             "standards.reference_xobjects" => self.open_reference_xobjects(),
             "edit.media_actions" => self.open_media_actions(),
             "actions.wizard" => crate::actions_ui::open_wizard(self, ctx, None),

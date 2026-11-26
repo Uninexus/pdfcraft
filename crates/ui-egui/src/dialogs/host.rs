@@ -74,6 +74,7 @@ fn results(app: &mut PdfCraftApp, ctx: &egui::Context) {
     app.protect_pass(ctx);
     app.pdfa_pass(ctx);
     app.pdfx_verify_pass();
+    app.pdf20_structure_pass();
     app.reference_xobjects_pass(ctx);
     app.ink_manager_pass(ctx);
     app.media_actions_pass(ctx);

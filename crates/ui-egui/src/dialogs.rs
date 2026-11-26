@@ -23,6 +23,7 @@ pub(super) mod model3d_ui;
 pub(crate) mod page_dialogs;
 pub(crate) mod page_props;
 pub(super) mod pageboxes;
+pub(super) mod pdf20_structure_ui;
 pub(super) mod pdfx_verify_ui;
 mod pin_tools;
 pub(super) mod preferences;

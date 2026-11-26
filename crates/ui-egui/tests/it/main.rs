@@ -88,6 +88,7 @@ mod pageboxes;
 mod panel_snapshots;
 mod paragraph_spacing;
 mod paste_ownership;
+mod pdf20_structure;
 mod pdf_links;
 mod pdfx_verify;
 mod pickers;

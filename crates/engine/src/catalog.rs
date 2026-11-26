@@ -507,6 +507,7 @@ const ALL_GROUPS: &[ToolGroup] = &[
             items: &[
                 item("Save as PDF/A", "file-check", "standards.pdfa", Ready),
                 item("Verify PDF/X", "file-check", "standards.pdfx_verify", Ready),
+                item("PDF 2.0 structure", "file-check", "standards.pdf20_structure", Ready),
                 item("Reference XObjects", "file-check", "standards.reference_xobjects", Ready),
                 item("Save as PDF/X", "file-check", "standards.pdfx", Planned("M11")),
                 item("Save as PDF/UA", "accessibility", "standards.pdfua", Planned("M11")),
