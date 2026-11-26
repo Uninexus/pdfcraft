@@ -574,6 +574,11 @@ impl PdfCraftApp {
                     view.show_guides = !view.show_guides;
                 }
             }
+            "view.show_grid" => {
+                if let Some(view) = active.and_then(|i| self.views.get_mut(i)) {
+                    view.show_grid = !view.show_grid;
+                }
+            }
             "view.clear_guides" => {
                 if let Some((_, doc)) = self.active_ids() {
                     match self.session.clear_guides(doc, None) {

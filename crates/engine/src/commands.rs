@@ -253,6 +253,8 @@ const ALL_COMMANDS: &[CommandSpec] = &[
     // drawn over the pages. The View menu lists them in a submenu of its own, so `menu = None`.
     c("view.show_guides", "Show Guides", None, None, Document, "ruler"),
     c("view.clear_guides", "Clear Guides", None, None, Document, "eraser"),
+    // View > Show Grid: the page grid of Preferences > Grid (view state, never saved or printed) drawn over the pages.
+    c("view.show_grid", "Show Grid", None, None, Document, "ruler"),
     c("view.layout.cover", "Show cover page in two-page view", None, None, TwoPageView, "bookmark"),
     // Acrobat's view modes, a page display and a zoom at once (the rail's Page display menu).
     c("view.fit_width_scrolling", "Fit to width scrolling", None, None, Document, "swap_horizontal"),
@@ -667,7 +669,7 @@ mod tests {
 
     #[test]
     fn the_guide_commands_are_registered_for_the_palette_and_need_a_document() {
-        for id in ["view.show_guides", "view.clear_guides"] {
+        for id in ["view.show_guides", "view.clear_guides", "view.show_grid"] {
             let spec = command(id).unwrap_or_else(|| panic!("{id} is not registered"));
             assert!(matches!(spec.needs, Needs::Document), "{id}");
         }
@@ -675,6 +677,7 @@ mod tests {
         assert!(!is_enabled(command("view.show_guides").unwrap(), &s, None));
         assert_eq!(command("view.show_guides").unwrap().label, "Show Guides");
         assert_eq!(command("view.clear_guides").unwrap().label, "Clear Guides");
+        assert_eq!(command("view.show_grid").unwrap().label, "Show Grid");
     }
 
     #[test]

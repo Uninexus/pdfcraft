@@ -190,11 +190,17 @@ impl PdfCraftApp {
             as_image: Some(d.as_image),
             dpi: Some(d.dpi),
         };
+        let grid = self.session.grid_preference();
         let behavior = settings::Behavior {
             default_page_gaps: Some(self.view_defaults.page_gaps),
             full_screen_fill: Some(self.full_screen_fill),
             full_screen_escape_exits: Some(self.full_screen_escape_exits),
             units: Some(self.units),
+            grid_spacing: grid.map(|g| g.spacing),
+            grid_subdivisions: grid.map(|g| g.subdivisions),
+            grid_offset_x: grid.map(|g| g.offset_x),
+            grid_offset_y: grid.map(|g| g.offset_y),
+            grid_unit: Some(self.grid_unit),
             blank_paper: Some(self.blank_paper.token().to_string()),
             always_default_view: Some(self.always_default_view),
             highlight_fields: Some(self.highlight_fields),
@@ -507,6 +513,21 @@ impl PdfCraftApp {
         }
         if let Some(units) = b.units {
             self.units = units;
+        }
+        if let Some(unit) = b.grid_unit {
+            self.grid_unit = unit;
+        }
+        // Settings are untrusted: a grid the engine refuses is dropped and the default stays.
+        if let Some(spacing) = b.grid_spacing {
+            let grid = pdfcraft_engine::guides::Grid {
+                spacing,
+                subdivisions: b.grid_subdivisions.unwrap_or(1),
+                offset_x: b.grid_offset_x.unwrap_or(0.0),
+                offset_y: b.grid_offset_y.unwrap_or(0.0),
+            };
+            if self.session.set_grid_preference(Some(grid)).is_err() {
+                log::warn!("ignoring a saved grid the engine refuses");
+            }
         }
         // Settings are untrusted: a name that is neither paper keeps the current one.
         if let Some(paper) = b.blank_paper.as_deref().and_then(crate::paper::Paper::from_token) {

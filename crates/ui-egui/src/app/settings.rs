@@ -85,6 +85,16 @@ pub struct Behavior {
     /// Esc leaves full screen (off leaves it to ⌘L / Ctrl+L only).
     pub full_screen_escape_exits: Option<bool>,
     pub units: Option<crate::units::Unit>,
+    /// Preferences > Grid: points between two main lines; absent is the default grid (TOML has no null).
+    pub grid_spacing: Option<f64>,
+    /// Preferences > Grid: equal parts a main spacing is divided into.
+    pub grid_subdivisions: Option<u32>,
+    /// Preferences > Grid: where a vertical line runs from the left edge, in points.
+    pub grid_offset_x: Option<f64>,
+    /// Preferences > Grid: where a horizontal line runs from the top edge, in points.
+    pub grid_offset_y: Option<f64>,
+    /// Preferences > Grid: the unit its numbers are shown in.
+    pub grid_unit: Option<crate::units::Unit>,
     /// The paper Create > Blank page makes: `letter` or `a4`.
     pub blank_paper: Option<String>,
     pub always_default_view: Option<bool>,
@@ -614,6 +624,11 @@ pub fn import_json(text: &str) -> (PdfCraftSettings, Vec<SectionError>) {
             full_screen_fill: r.bool("full_screen_fill"),
             full_screen_escape_exits: r.bool("full_screen_escape_exits"),
             units: r.typed("units"),
+            grid_spacing: r.f64("grid_spacing"),
+            grid_subdivisions: r.typed("grid_subdivisions"),
+            grid_offset_x: r.f64("grid_offset_x"),
+            grid_offset_y: r.f64("grid_offset_y"),
+            grid_unit: r.typed("grid_unit"),
             blank_paper: r.string("blank_paper"),
             always_default_view: r.bool("always_default_view"),
             highlight_fields: r.bool("highlight_fields"),

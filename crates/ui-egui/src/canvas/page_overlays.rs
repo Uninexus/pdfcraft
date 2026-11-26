@@ -16,7 +16,7 @@ use craft::ui::contract::{Access, Animate as _, Common, Component, Cx, MeasureCx
 use craft::ui::primitives::{Draw, IconSpec, PaintShape, StrokeColor, StrokeWidth, TextRun};
 use craft::ui::style::{ComponentStyle, DataColor, Metrics, StyleColor, StyleCx, TypeRole};
 use egui::{Color32, CornerRadius, Rect, Response, Vec2, pos2};
-use pdfcraft_engine::guides::Guide;
+use pdfcraft_engine::guides::{Grid, Guide};
 use pdfcraft_engine::{Document, FormFieldKind, LinkItem};
 use pdfcraft_render::{DocInfo, Link, LinkTarget};
 
@@ -32,6 +32,9 @@ const FLASH_SECONDS: f64 = 1.6;
 /// How much of its colour a compare mark paints with, as an opacity beside [`FLASH_SECONDS`]: the mark's colour is
 /// data, so its fade is a documented constant of the overlay, and it tints the page without hiding what it marks.
 const COMPARE_SHARE: f32 = 0.28;
+/// How much of the grid colour a subdivision line and a main line show.
+const GRID_MINOR_SHARE: f32 = 0.3;
+const GRID_MAJOR_SHARE: f32 = 0.6;
 
 /// What a link family does with a click.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -441,6 +444,8 @@ pub struct PageOverlaysStyle {
     flash: StyleColor,
     /// A ruler guide's line.
     guide: StyleColor,
+    /// The page grid's lines.
+    grid: StyleColor,
     /// The sign tab's chip.
     tab_fill: StyleColor,
     /// The sign tab's icon and label.
@@ -481,6 +486,8 @@ pub(crate) struct PageOverlays<'a> {
     flash: &'a mut Option<(usize, [f32; 4], f64)>,
     /// The ruler guides of the document (all pages; this page's are drawn), empty unless they are shown.
     guides: &'a [Guide],
+    /// The page grid, `None` unless View > Show Grid is on.
+    grid: Option<Grid>,
     /// Acrobat's "Highlight existing fields".
     #[prop]
     highlight_fields: bool,
@@ -519,6 +526,7 @@ impl<'a> PageOverlays<'a> {
             compare,
             flash,
             guides: &[],
+            grid: None,
             highlight_fields: false,
             field_color: None,
             required_color: None,
@@ -530,6 +538,12 @@ impl<'a> PageOverlays<'a> {
     /// The ruler guides to draw over the page: a guide that is not on this page, or lies past its edge, is skipped.
     pub(crate) fn guides(mut self, guides: &'a [Guide]) -> Self {
         self.guides = guides;
+        self
+    }
+
+    /// The page grid to draw over the page, lines past the page's edge skipped.
+    pub(crate) fn grid(mut self, grid: Option<Grid>) -> Self {
+        self.grid = grid;
         self
     }
 }
@@ -557,6 +571,7 @@ impl Component for PageOverlays<'_> {
             required_edge: cx.color(colors.status.bad.solid),
             flash: cx.color(colors.accent.solid),
             guide: cx.color(colors.status.info.solid),
+            grid: cx.color(colors.accent.solid),
             tab_fill: cx.color(colors.accent.solid),
             tab_ink: cx.color(colors.text.on_accent),
             tones,
@@ -581,6 +596,7 @@ impl Component for PageOverlays<'_> {
         if self.highlight_fields {
             self.paint_field_highlights(&draw, style);
         }
+        self.paint_grid(&draw, style);
         self.paint_guides(&draw, style);
         self.paint_compare_marks(&draw, style);
         self.paint_flash(&draw, cx);
@@ -649,6 +665,20 @@ impl PageOverlays<'_> {
                 });
                 draw.stroke(&outline, width, edge);
             }
+        }
+    }
+
+    /// The page grid, as thin lines under the guides; main lines show stronger than subdivisions. Drawn only: no
+    /// input, never in an export or print.
+    fn paint_grid(&self, draw: &Draw<'_>, style: &PageOverlaysStyle) {
+        let Some(grid) = self.grid else { return };
+        let lines = super::grid::lines(&self.xf, &grid);
+        for (major, share) in [(false, GRID_MINOR_SHARE), (true, GRID_MAJOR_SHARE)] {
+            draw.faded(share, |draw| {
+                for line in lines.iter().filter(|l| l.major == major) {
+                    draw.stroke(&PaintShape::Path(line.points.to_vec()), StrokeWidth::Thin, style.grid);
+                }
+            });
         }
     }
 

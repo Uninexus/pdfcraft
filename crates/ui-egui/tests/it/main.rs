@@ -59,6 +59,7 @@ mod folder_search;
 mod folders;
 mod fonts;
 mod forms;
+mod grid;
 mod identity;
 mod ink_manager;
 mod insert_clipboard;

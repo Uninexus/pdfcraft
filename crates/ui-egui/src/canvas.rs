@@ -35,6 +35,7 @@ pub(crate) mod bars;
 mod cache;
 pub(super) mod crop;
 mod find;
+mod grid;
 mod guides;
 pub(super) mod image_pick;
 mod navigation;
@@ -188,6 +189,9 @@ pub struct DocView {
     /// View > Guides > Show Guides: draw this document's ruler guides over its pages. View state: never
     /// saved, and not part of an edit; off when a tab opens.
     pub show_guides: bool,
+    /// View > Show Grid: draw the page grid (Preferences > Grid) over its pages. View state: never saved, and
+    /// not part of an edit; off when a tab opens.
+    pub show_grid: bool,
     pub organize: bool,
     pub page_input: String,
     /// Text was typed into the page box since it last showed a page's label: while the box keeps the focus,
@@ -602,6 +606,7 @@ impl DocView {
             canvas: None,
             middle_scrolling: false,
             show_guides: false,
+            show_grid: false,
             organize: false,
             page_input: "1".into(),
             page_input_draft: false,
@@ -686,6 +691,7 @@ impl DocView {
         fresh.view = self.view.clone();
         fresh.organize = self.organize;
         fresh.show_guides = self.show_guides;
+        fresh.show_grid = self.show_grid;
         fresh.thumbnail_zoom = self.thumbnail_zoom;
         fresh.notice_dismissed = self.notice_dismissed;
         fresh.cut_notice_dismissed = std::mem::take(&mut self.cut_notice_dismissed);
@@ -727,6 +733,7 @@ impl DocView {
         v.view.go_to(self.view.current);
         v.page_input = self.page_input.clone();
         v.show_guides = self.show_guides;
+        v.show_grid = self.show_grid;
         v.notice_dismissed = self.notice_dismissed;
         v.scripts_off_noted = self.scripts_off_noted;
         v.full_screen_fill = self.full_screen_fill;
@@ -924,6 +931,8 @@ struct PageBodyCx<'a> {
     find_marks: &'a [TextMark],
     /// The ruler guides to draw (none unless View > Guides > Show Guides is on).
     guides: &'a [pdfcraft_engine::guides::Guide],
+    /// The page grid to draw (none unless View > Show Grid is on).
+    grid: Option<pdfcraft_engine::guides::Grid>,
     table_preview: Option<&'a crate::field_table_ui::Preview>,
 }
 
@@ -1448,7 +1457,8 @@ fn page_body(ui: &mut egui::Ui, body: &PageBody<'_>, callbacks: &mut PageCallbac
     for (page, xf, page_tabs) in &tabs {
         let mut overlays = PageOverlays::new(*page, *xf, cx.doc, page_tabs, &session.compare_marks, &mut session.flash)
             .highlight_fields(session.highlight_fields)
-            .guides(cx.guides);
+            .guides(cx.guides)
+            .grid(cx.grid);
         if let Some(colour) = cx.field_highlight_color {
             overlays = overlays.field_color(colour);
         }
@@ -1742,6 +1752,7 @@ pub fn document_area_at(app: &mut PdfCraftApp, index: usize, rect: Rect, ui: &mu
     let can_modify = doc.allows_modification();
     let form = doc.form.clone();
     let guides = if app.views[index].show_guides { app.session.guides(doc_id, None).unwrap_or_default() } else { Vec::new() };
+    let grid = app.views[index].show_grid.then(|| crate::grid_prefs::effective(&app.session));
     let paper = app.session.reading_colors(doc_id).and_then(|c| c.params).map_or(Color32::WHITE, |p| {
         let [r, g, b] = p.background;
         Color32::from_rgb(r, g, b)
@@ -1888,6 +1899,7 @@ pub fn document_area_at(app: &mut PdfCraftApp, index: usize, rect: Rect, ui: &mu
         units: app.units,
         find_marks: &find_marks,
         guides: &guides,
+        grid,
         table_preview: table_preview.as_ref(),
     };
     let source = DocPages::new(&app.session, doc_id).rotated(state.rotation).revisions(revisions).reports(reports);
