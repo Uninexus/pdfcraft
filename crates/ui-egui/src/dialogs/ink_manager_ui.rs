@@ -257,7 +257,8 @@ impl StackDialog for InkManagerDialog {
                 });
                 // Outside the field, so the button keeps its own name: inside, the field names its control after the row.
                 let label = crate::i18n::fmt(tl!("Alias {name}"), &[("name", &ink.name)]);
-                if Button::new(label).enabled(shown.modifiable && ink.aliasable).id_salt(at).show(ui).clicked() {
+                // Its own salt: the row's field already takes `at`, and one id cannot serve two widgets in a pass.
+                if Button::new(label).enabled(shown.modifiable && ink.aliasable).id_salt(("ink-alias", at)).show(ui).clicked() {
                     *from = Some(ink.name.clone());
                     *existing = None;
                 }
