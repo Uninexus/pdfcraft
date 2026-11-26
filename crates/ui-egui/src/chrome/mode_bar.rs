@@ -43,13 +43,21 @@ impl DisplayOrder<usize> for ModeTabs {
 
 impl ItemSource<usize> for ModeTabs {}
 
+/// How far the in-window menus drop to centre on the mode strip's line: half of what the strip's bar is taller than them.
+const MENU_DROP: f32 = 8.0;
+
 /// Draw the menus, the mode strip and the buttons after it, then the command palette over them.
 pub(super) fn show(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
     let hidden = app.hidden_interface();
     let menus = app.native_menu.is_none() && !hidden.menubar;
     Row::new().show(ui, |ui, _| {
         if menus {
-            app.menu_bar_ui(ui);
+            // The compact menu bar is shorter than the mode strip's bar and the row puts children at its top: lower it
+            // by half the difference, so the menu names sit on the tabs' and the search field's centre line.
+            ui.vertical(|ui| {
+                ui.add_space(MENU_DROP);
+                app.menu_bar_ui(ui);
+            });
         }
         // Production replaces the search field with its icon when the field cannot keep its minimum width.
         let compact_search = ui.available_width() < 140.0 + 116.0;
