@@ -93,3 +93,25 @@ fn opening_preferences_from_anywhere_closes_the_ai_window() {
     h.run_steps(3);
     assert!(!h.state().ai_open, "two windows are not stacked");
 }
+
+/// The window's Open Preferences names a page far down the long Preferences column: that page is brought into view and
+/// its first control holds the keyboard focus.
+#[test]
+fn open_preferences_in_the_ai_window_lands_on_the_ai_settings() {
+    use egui::accesskit::Role;
+    let mut h = harness(1);
+    assert!(h.execute("ai.ask"));
+    h.run_steps(3);
+    h.get_by_role_and_label(Role::Button, "Open Preferences").click();
+    h.run_steps(12);
+    let screen = h.ctx.content_rect();
+    let heading = h
+        .query_all_by(|node| node.role() == Role::Label && node.value().as_deref() == Some("AI Assistant"))
+        .map(|node| node.rect())
+        .next()
+        .expect("the AI Assistant heading");
+    assert!(screen.contains_rect(heading), "{heading:?} is outside {screen:?}");
+    let focused = h.get_by(|node| node.is_focused()).rect();
+    assert!(screen.contains_rect(focused), "the focus {focused:?} is outside {screen:?}");
+    assert!(focused.top() > heading.top(), "the focus {focused:?} is above the heading {heading:?}");
+}

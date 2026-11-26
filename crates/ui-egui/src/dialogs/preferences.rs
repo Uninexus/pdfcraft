@@ -9,7 +9,7 @@ use craft::theme::variant::Tone;
 use craft::theme_store::SelectionChange;
 use craft::theme_store::ui::AppearancePage;
 use craft::ui::buttons::Button;
-use craft::ui::contract::{Bind, Entry, Politeness, Props as _, SaveKey, Show as _};
+use craft::ui::contract::{Bind, Entry, Lazy, Politeness, Props as _, SaveKey, Show as _};
 use craft::ui::dialog::DialogHost;
 use craft::ui::notices::{Notice, NoticeLayout};
 use craft::ui::patterns::preferences::{
@@ -43,6 +43,50 @@ pub struct PreferencesSession {
     answers: Answers,
     /// The button that asked "are you sure?" and is waiting for the answer.
     confirm: Option<Confirming>,
+    /// The page the window was just asked to show, until it is in view and holds the focus.
+    jump: Option<Jump>,
+}
+
+/// A request to show one page of the long window, carried over its first passes.
+struct Jump {
+    /// The id the page's `PageSpec` has.
+    page: String,
+    /// The passes the window has been shown since the request.
+    passes: u8,
+}
+
+impl Jump {
+    /// The row that ends the page before the asked-for one; the column scrolls it to its start while the request
+    /// lasts, so the asked-for page's title is just below the top.
+    const REVEAL: &'static str = "jump.reveal";
+    /// The cards have no settled height while the window opens, so the scroll is asked for on this many passes.
+    const SCROLL: u8 = 4;
+    /// The pass on which the page's first control takes the keyboard focus; the request ends after it.
+    const FOCUS: u8 = Self::SCROLL + 1;
+    /// The row that marks the start of the page's controls while the request lasts.
+    const ANCHOR: &'static str = "jump.anchor";
+}
+
+/// Draws nothing at the end of the page before the asked-for one and asks the column to start its view there.
+fn reveal_anchor(ui: &mut Ui, jump: &Jump) {
+    ui.ctx().request_repaint();
+    Lazy::new(Jump::REVEAL, 0.0).reveal(jump.passes <= Jump::SCROLL).show(ui, |_| {});
+}
+
+/// Draws nothing where the asked-for page's controls start. On the focus pass it takes the focus and passes it to the
+/// next focusable widget, which is the page's first control.
+fn jump_anchor(ui: &mut Ui, jump: &Jump) {
+    ui.ctx().request_repaint();
+    if jump.passes != Jump::FOCUS {
+        return;
+    }
+    let id = egui::Id::unique("pdfcraft.preferences.jump");
+    ui.memory_mut(|memory| {
+        memory.request_focus(id);
+        memory.move_focus(egui::FocusDirection::Next);
+    });
+    let at = egui::Rect::from_min_size(ui.cursor().min, egui::Vec2::ZERO);
+    ui.interact(at, id, egui::Sense::focusable_noninteractive());
 }
 
 /// A Preferences button that acts at once and has asked for confirmation first.
@@ -76,6 +120,7 @@ impl PreferencesSession {
             host: DialogHost::new(),
             answers: Answers::default(),
             confirm: None,
+            jump: None,
         }
     }
 }
@@ -240,11 +285,15 @@ impl PdfCraftApp {
         }
     }
 
-    /// Opens Preferences, or leaves the open window as it is, showing the page `page` (the id its `PageSpec` has).
+    /// Opens Preferences, or keeps the open window, and brings the page `page` (the id its `PageSpec` has) into view
+    /// with the focus on its first control.
     pub(crate) fn open_preferences_at(&mut self, page: &str) {
         self.open_preferences();
         if let Some(session) = self.preferences.as_mut() {
             session.state.selected = page.to_string();
+            // A search could hide the page.
+            session.state.search.clear();
+            session.jump = Some(Jump { page: page.to_string(), passes: 0 });
         }
     }
 
@@ -253,10 +302,14 @@ impl PdfCraftApp {
         let Some(mut session) = self.preferences.take() else {
             return;
         };
-        let PreferencesSession { state, draft, selection, host, answers, confirm } = &mut session;
+        let PreferencesSession { state, draft, selection, host, answers, confirm, jump } = &mut session;
+        if let Some(pending) = jump.as_mut() {
+            pending.passes = pending.passes.saturating_add(1);
+        }
         let ctx = ui.ctx().clone();
         let output = {
             let mut prefs = Prefs::new(self, draft, selection, host, answers, confirm, &ctx);
+            prefs.jump = jump.as_ref();
             // The colours Highlight fields and Required field border show while they follow the theme.
             let (field_theme, required_theme) = {
                 let env = craft::ui::runtime::env::Env::of(ui);
@@ -281,6 +334,9 @@ impl PdfCraftApp {
                     queue.push((key, colour));
                 }
             });
+        }
+        if session.jump.as_ref().is_some_and(|jump| jump.passes >= Jump::FOCUS) {
+            session.jump = None;
         }
         if output.closed.is_none() {
             self.preferences = Some(session);
@@ -358,6 +414,7 @@ struct Prefs<'a> {
     confirm: &'a mut Option<Confirming>,
     ctx: &'a egui::Context,
     texts: Texts,
+    jump: Option<&'a Jump>,
 }
 
 impl<'a> Prefs<'a> {
@@ -371,7 +428,7 @@ impl<'a> Prefs<'a> {
         ctx: &'a egui::Context,
     ) -> Self {
         let texts = Texts::new(app, draft, ctx);
-        Self { app, draft, selection, host, answers, confirm, ctx, texts }
+        Self { app, draft, selection, host, answers, confirm, ctx, texts, jump: None }
     }
 }
 
@@ -523,6 +580,18 @@ impl PreferencesModel for Prefs<'_> {
         if pdfcraft_engine::AI_ENABLED {
             pages.push(self.ai_page());
         }
+        if let Some(jump) = self.jump
+            && let Some(at) = pages.iter().position(|page| page.id == jump.page)
+        {
+            // The first page needs no scroll: the window opens at the top.
+            if let Some(group) = at.checked_sub(1).and_then(|before| pages.get_mut(before)).and_then(|page| page.groups.last_mut()) {
+                group.rows.push(RowSpec::new(Jump::REVEAL, "", RowKind::CustomRows));
+            }
+            // A custom page draws its own anchor.
+            if let Some(group) = pages.get_mut(at).filter(|page| !page.custom).and_then(|page| page.groups.first_mut()) {
+                group.rows.insert(0, RowSpec::new(Jump::ANCHOR, "", RowKind::CustomRows));
+            }
+        }
         pages
     }
 
@@ -623,6 +692,13 @@ impl PreferencesModel for Prefs<'_> {
     }
 
     fn custom_row(&mut self, ui: &mut Ui, key: &str) -> bool {
+        if key == Jump::ANCHOR || key == Jump::REVEAL {
+            if let Some(jump) = self.jump {
+                let draw = if key == Jump::ANCHOR { jump_anchor } else { reveal_anchor };
+                draw(ui, jump);
+            }
+            return false;
+        }
         if key == "ai.panel" {
             // The AI settings are kept in `ai.json`, not in the draft: each field is applied as it is typed.
             crate::dialogs::ai_prefs::panel(ui, self.app);
@@ -722,6 +798,9 @@ impl PreferencesModel for Prefs<'_> {
     fn custom_page(&mut self, ui: &mut Ui, page: &str) -> bool {
         if page != "appearance" {
             return false;
+        }
+        if let Some(jump) = self.jump.filter(|jump| jump.page == page) {
+            jump_anchor(ui, jump);
         }
         let before = self.selection.clone();
         // PdfCraft keeps its own appearance and no favourite themes (L-224).
