@@ -3,7 +3,7 @@
 //! never says a namespace or a part tree is valid.
 
 use craft::theme::variant::Tone;
-use craft::ui::contract::{Bind, Props as _, Show as _, ShowContainer as _};
+use craft::ui::contract::{Bind, Show as _};
 use craft::ui::dialog::{DialogId, DialogResult, DialogStack, StackDialog, dialog_id};
 use craft::ui::display::{Shade, Text};
 use craft::ui::notices::{Notice, NoticeLayout};
