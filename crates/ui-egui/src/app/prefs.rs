@@ -500,20 +500,8 @@ impl PdfCraftApp {
         }
     }
 
-    /// Switches for reopening, window chrome and file watching.
-    fn apply_behavior(&mut self, b: &settings::Behavior) {
-        if let Some(show) = b.default_page_gaps {
-            self.view_defaults.page_gaps = show;
-        }
-        if let Some(fill) = b.full_screen_fill {
-            self.full_screen_fill = fill;
-        }
-        if let Some(exits) = b.full_screen_escape_exits {
-            self.full_screen_escape_exits = exits;
-        }
-        if let Some(units) = b.units {
-            self.units = units;
-        }
+    /// The page grid and the unit its Preferences page shows it in.
+    fn apply_grid(&mut self, b: &settings::Behavior) {
         if let Some(unit) = b.grid_unit {
             self.grid_unit = unit;
         }
@@ -529,6 +517,23 @@ impl PdfCraftApp {
                 log::warn!("ignoring a saved grid the engine refuses");
             }
         }
+    }
+
+    /// Switches for reopening, window chrome and file watching.
+    fn apply_behavior(&mut self, b: &settings::Behavior) {
+        if let Some(show) = b.default_page_gaps {
+            self.view_defaults.page_gaps = show;
+        }
+        if let Some(fill) = b.full_screen_fill {
+            self.full_screen_fill = fill;
+        }
+        if let Some(exits) = b.full_screen_escape_exits {
+            self.full_screen_escape_exits = exits;
+        }
+        if let Some(units) = b.units {
+            self.units = units;
+        }
+        self.apply_grid(b);
         // Settings are untrusted: a name that is neither paper keeps the current one.
         if let Some(paper) = b.blank_paper.as_deref().and_then(crate::paper::Paper::from_token) {
             self.blank_paper = paper;
