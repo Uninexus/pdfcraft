@@ -504,6 +504,16 @@ impl PdfCraftApp {
         }
     }
 
+    /// The login name and whether new comments are authored with it; a key that is missing keeps what is set.
+    fn apply_login_name(&mut self, b: &settings::Behavior) {
+        if b.login_name.is_some() || b.author_from_login_name.is_some() {
+            let now = self.session.identity().clone();
+            let login = b.login_name.as_deref().map_or(now.login_name.as_str(), str::trim);
+            let login: String = login.chars().take(MAX_AUTHOR_CHARS).collect();
+            self.session.set_login_name(&login, b.author_from_login_name.unwrap_or(now.author_from_login_name));
+        }
+    }
+
     /// Switches for reopening, window chrome and file watching.
     fn apply_behavior(&mut self, b: &settings::Behavior) {
         if let Some(show) = b.default_page_gaps {
@@ -532,12 +542,7 @@ impl PdfCraftApp {
         if let Some(email) = b.identity_email.as_deref() {
             self.identity_email = email.trim().chars().take(MAX_AUTHOR_CHARS).collect();
         }
-        if b.login_name.is_some() || b.author_from_login_name.is_some() {
-            let now = self.session.identity().clone();
-            let login = b.login_name.as_deref().map_or(now.login_name.as_str(), str::trim);
-            let login: String = login.chars().take(MAX_AUTHOR_CHARS).collect();
-            self.session.set_login_name(&login, b.author_from_login_name.unwrap_or(now.author_from_login_name));
-        }
+        self.apply_login_name(b);
         if let Some(on) = b.form_tooltips {
             self.form_tooltips = on;
         }

@@ -1758,6 +1758,8 @@ pub fn document_area_at(app: &mut PdfCraftApp, index: usize, rect: Rect, ui: &mu
         .filter(|focus| crate::forms_ui::focused_field(focus, &form).is_some_and(crate::forms_ui::autocompletes))
         .map(|focus| app.session.suggest_form_entries(&focus.text))
         .unwrap_or_default();
+    // Read before the view is borrowed: the stamp lines below name this author.
+    let author_name = app.comment_author();
     let view = &mut app.views[index];
     // PLAN: assumed `page_tools::seen_tool(&PageSession, QuickTool) -> QuickTool`, the placing rule `page_tool`
     // applies (copied comments on the pointer make the page see Select), so the parts gate on the same tool.
@@ -1800,7 +1802,6 @@ pub fn document_area_at(app: &mut PdfCraftApp, index: usize, rect: Rect, ui: &mu
     let mut body_out = BodyOut::default();
     let date_text = crate::date_text_for_pdf(&app.session);
     // The dynamic stamps' lines, filled in for now: the built-in ones write the default line, a custom stamp its own.
-    let author_name = app.comment_author();
     let by_line = app.session.stamp_line(crate::stamps_ui::DEFAULT_LINE, &author_name);
     let custom_line = match tool {
         QuickTool::CustomStamp(i) => app
