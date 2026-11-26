@@ -19,6 +19,7 @@ use craft::ui::text::TextField;
 use super::right::PanelResult;
 use crate::PdfCraftApp;
 use crate::folder_search_ui::Action;
+use crate::open_docs_search_ui::Action as OpenDocsAction;
 
 /// Glyphs of context shown on each side of a match.
 const CONTEXT: usize = 36;
@@ -59,7 +60,13 @@ pub(crate) fn show(app: &mut PdfCraftApp, ui: &mut egui::Ui) -> PanelResult {
     let mut result = PanelResult::default();
     let Some((index, id)) = app.active_ids() else { return result };
     let pages = app.session.get(id).map_or(0, |d| d.info.pages.len());
+    let names: Vec<(u64, String)> = if app.open_docs_search.on {
+        (0..app.views.len()).filter_map(|i| Some((app.views.get(i)?.view_key(), crate::canvas::tab_label(app, i)?))).collect()
+    } else {
+        Vec::new()
+    };
     let folder = &mut app.folder_search;
+    let open_docs = &mut app.open_docs_search;
     let Some(view) = app.views.get_mut(index) else { return result };
     let searched = view.session.texts.len() + view.session.text_failed.len();
     let Some(find) = view.find.as_mut() else { return result };
@@ -79,6 +86,13 @@ pub(crate) fn show(app: &mut PdfCraftApp, ui: &mut egui::Ui) -> PanelResult {
     if before != (find.options.whole_word, find.options.match_case) {
         find.case_query.clear();
     }
+    if open_docs.on {
+        let (query, case, whole) = (find.query.clone(), find.options.match_case, find.options.whole_word);
+        let can_search = !query.trim().is_empty();
+        open_docs.pass(&mut app.views, &app.session, &names, &query, case, whole);
+        let action = crate::open_docs_search_ui::section(ui, open_docs, can_search);
+        return apply_open_docs(app, action, result);
+    }
     if folder.on {
         let can_search = !find.query.trim().is_empty();
         let submitted = field.submitted && can_search && folder.folder.is_some() && !folder.running();
@@ -90,6 +104,9 @@ pub(crate) fn show(app: &mut PdfCraftApp, ui: &mut egui::Ui) -> PanelResult {
     }
     if Button::new(tl!("Search all PDFs in a folder…").to_string()).show(ui).clicked() {
         result.command = Some("edit.search_folder");
+    }
+    if Button::new(tl!("Search all open documents").to_string()).show(ui).clicked() {
+        open_docs.on = true;
     }
     if find.query != find.case_query {
         view.rerun_find();
@@ -181,7 +198,26 @@ fn apply(app: &mut PdfCraftApp, action: Option<Action>, mut result: PanelResult)
         Some(Action::Search) => app.start_folder_search(),
         Some(Action::Stop) => app.cancel_folder_search(),
         Some(Action::ThisDocument) => app.folder_search.on = false,
+        Some(Action::OpenDocuments) => {
+            app.folder_search.on = false;
+            app.open_docs_search.on = true;
+        }
         Some(Action::Open(path, page)) => app.open_search_result(&path, page),
+        None => {}
+    }
+    result
+}
+
+/// What the All open documents scope's buttons and results asked for, done.
+fn apply_open_docs(app: &mut PdfCraftApp, action: Option<OpenDocsAction>, result: PanelResult) -> PanelResult {
+    match action {
+        Some(OpenDocsAction::ThisDocument) => {
+            app.open_docs_search.on = false;
+            for view in &mut app.views {
+                view.session.hold_text = false;
+            }
+        }
+        Some(OpenDocsAction::Go(key, page)) => app.go_to_open_doc_result(key, page),
         None => {}
     }
     result

@@ -109,6 +109,8 @@ pub(crate) enum Action {
     Stop,
     /// Back to searching the document.
     ThisDocument,
+    /// Search every open document.
+    OpenDocuments,
     /// Open this file at the 0-based page.
     Open(PathBuf, usize),
 }
@@ -128,6 +130,7 @@ impl PdfCraftApp {
         }
         self.choose_right_panel(Some(crate::RightPanel::Search));
         self.folder_search.on = true;
+        self.open_docs_search.on = false;
         self.pick_first(PickRequest::folder("search.folder").title(tl!("Choose a folder to search").to_string()), None, |app, _, dir| {
             app.folder_search.folder = Some(dir);
             app.folder_search.on = true;
@@ -336,6 +339,9 @@ pub(crate) fn section(ui: &mut egui::Ui, fs: &mut FolderSearch, can_search: bool
         }
         if Button::new(tl!("Search this document").to_string()).show(ui).clicked() {
             action = Some(Action::ThisDocument);
+        }
+        if Button::new(tl!("Search all open documents").to_string()).show(ui).clicked() {
+            action = Some(Action::OpenDocuments);
         }
     });
     if let Some(error) = &fs.error {

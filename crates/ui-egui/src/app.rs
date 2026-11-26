@@ -489,6 +489,7 @@ impl PdfCraftApp {
             office_run: None,
             office_converter: None,
             folder_search: Default::default(),
+            open_docs_search: Default::default(),
             page_clipboard: None,
             comment_clipboard: None,
             object_clipboard: None,

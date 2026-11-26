@@ -111,6 +111,7 @@ mod reload;
 mod role_class_map;
 mod scan_clean;
 mod script_noop;
+mod search_open_docs;
 mod search_position;
 mod side_panels;
 mod signature_lock_seed;
