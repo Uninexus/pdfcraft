@@ -4,7 +4,7 @@ use crate::support::AppHarness as _;
 use egui::Pos2;
 use egui::accesskit::Role;
 use egui_kittest::Harness;
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT, Queryable};
 use pdfcraft_engine::LinkAction;
 use pdfcraft_ui_egui::PdfCraftApp;
 
@@ -273,4 +273,42 @@ fn a_link_takes_the_view_chosen_in_the_document() {
     let dest = &text[text.rfind("/XYZ").expect("an XYZ destination")..];
     let operands: Vec<&str> = dest.split([' ', ']']).skip(1).take(3).collect();
     assert!(operands.iter().all(|v| v.parse::<f64>().is_ok()), "{operands:?}");
+}
+
+/// The view bar by keys: Tab reaches Set link view and Cancel, and Enter on one answers the bar.
+#[test]
+fn tab_reaches_the_link_view_bar() {
+    let mut h = harness();
+    assert!(h.execute("edit.link"));
+    let (a, b) = (at(&h, 40.0, 300.0), at(&h, 160.0, 320.0));
+    drag(&mut h, a, b);
+    h.get_by_label("Go to a page view").click();
+    h.run_steps(3);
+    h.get_by_label("Choose the view in the document…").scroll_to_me();
+    h.run_steps(3);
+    h.get_by_label("Choose the view in the document…").click();
+    h.run_steps(4);
+    let focused = |h: &Harness<'static, PdfCraftApp>| h.query_by(|n| n.is_focused()).and_then(|n| n.accesskit_node().label());
+    let mut reached = Vec::new();
+    for _ in 0..200 {
+        h.key_press(egui::Key::Tab);
+        h.run_steps(2);
+        if let Some(label) = focused(&h).filter(|l| l == "Set link view" || l == "Cancel") {
+            reached.push(label);
+        }
+        if reached.iter().any(|l| l == "Cancel") && reached.iter().any(|l| l == "Set link view") {
+            break;
+        }
+    }
+    assert!(reached.iter().any(|l| l == "Set link view") && reached.iter().any(|l| l == "Cancel"), "{reached:?}");
+    for _ in 0..200 {
+        if focused(&h).as_deref() == Some("Set link view") {
+            break;
+        }
+        h.key_press_modifiers(egui::Modifiers::SHIFT, egui::Key::Tab);
+        h.run_steps(2);
+    }
+    h.key_press(egui::Key::Enter);
+    h.run_steps(4);
+    h.get_by_role_and_label(Role::Dialog, "Create Link");
 }

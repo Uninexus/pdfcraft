@@ -5,6 +5,7 @@
 use crate::support::{AppHarness as _, RecordingClipboard, shown_notice};
 use craft::platform::clipboard::ClipboardImage;
 use egui_kittest::Harness;
+use egui_kittest::kittest::Queryable;
 use pdfcraft_engine::Session;
 use pdfcraft_ui_egui::PdfCraftApp;
 
@@ -97,4 +98,22 @@ fn the_pages_menu_lists_it() {
     crate::support::menu_row(&h, "Insert pages from clipboard").click();
     h.run_steps(3);
     assert_eq!(sizes(&h).len(), 3, "the menu row ran the command");
+}
+
+/// The page grid's menu puts the clipboard before the page, the first one included.
+#[test]
+fn the_page_menu_inserts_before_a_page() {
+    let image = ClipboardImage { width: 40, height: 20, rgba: [200, 30, 30, 255].repeat(40 * 20) };
+    let mut h = harness(RecordingClipboard::holding_image(image));
+    h.state_mut().views[0].organize = true;
+    h.run_steps(4);
+    crate::support::settle(&mut h);
+    h.get_by_label("Page 1").click_secondary();
+    h.run_steps(4);
+    h.get_by_label("Insert pages from clipboard before").click();
+    h.run_steps(4);
+    let after = sizes(&h);
+    assert_eq!(after.len(), 3);
+    assert!(after[0].0 > after[0].1, "the picture is the first page: {after:?}");
+    assert_eq!(h.state().views[0].target_pages(), [0]);
 }

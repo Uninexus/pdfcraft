@@ -143,6 +143,12 @@ fn page_menu(ui: &mut egui::Ui, view: &mut DocView, editable: bool) {
     if MenuItem::new(tl!("Paste after")).enabled(editable).show(ui).ran {
         view.pending_action = Some(ViewAction::PastePages);
     }
+    // The command puts the clipboard after the selection; this is the way to put it before, the first page included.
+    if MenuItem::new(tl!("Insert pages from clipboard before")).enabled(editable && cfg!(not(target_arch = "wasm32"))).show(ui).ran
+        && let Some(&at) = view.target_pages().first()
+    {
+        view.pending_action = Some(ViewAction::InsertFromClipboardAt(at));
+    }
 }
 
 /// Organize pages: the page operations bar over a thumbnail grid (Acrobat's Organize Pages view). Click picks,

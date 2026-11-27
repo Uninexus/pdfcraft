@@ -1,5 +1,6 @@
 //! Pages ▸ Insert pages from clipboard (`page.insert_clipboard`): the picture or the copied files on the system
-//! clipboard become pages after the selection, all as one undo step, with the new pages selected.
+//! clipboard become pages after the selection (or, from the page grid's menu, before it), all as one undo step, with the
+//! new pages selected.
 //!
 //! The clipboard is read through the app's clipboard service (`PdfCraftApp::clipboard`), never the operating system
 //! directly, so the tests give it a stand-in. A file that can't be used is named and left out; nothing usable says what
@@ -91,6 +92,11 @@ impl PdfCraftApp {
     /// current page), in order, as one undo step, and are selected. What can't be used doesn't stop the rest, and is
     /// named.
     pub(crate) fn insert_from_clipboard(&mut self, ctx: &egui::Context) {
+        self.insert_from_clipboard_at(ctx, None);
+    }
+
+    /// [`Self::insert_from_clipboard`] at gap `at` (0 = before the first page), or after the selection.
+    pub(crate) fn insert_from_clipboard_at(&mut self, ctx: &egui::Context, at: Option<usize>) {
         if cfg!(target_arch = "wasm32") {
             self.notify_tr("Inserting from the clipboard is not available in the browser");
             return;
@@ -143,15 +149,15 @@ impl PdfCraftApp {
                 Err(e) => return self.notify_error(e),
             },
         }
-        self.insert_converting_sources(ctx, sources, left_out);
+        self.insert_converting_sources(ctx, at, sources, left_out);
     }
 
     /// [`Self::insert_sources_as_one_step`] once the Office files among `sources` are converted, in the background; one
     /// that can't be converted is left out and named with the rest.
-    fn insert_converting_sources(&mut self, ctx: &egui::Context, sources: Vec<Source>, mut left_out: Vec<Skipped>) {
+    fn insert_converting_sources(&mut self, ctx: &egui::Context, at: Option<usize>, sources: Vec<Source>, mut left_out: Vec<Skipped>) {
         let docs: Vec<Source> = sources.iter().filter(|(name, bytes)| crate::office_batch::is_office(name, bytes)).cloned().collect();
         if docs.is_empty() {
-            return self.insert_sources_as_one_step(ctx, sources, left_out);
+            return self.insert_sources_as_one_step(ctx, at, sources, left_out);
         }
         let Some((_, id)) = self.active_ids() else { return };
         let target = self.pick_target(Some(id));
@@ -176,18 +182,18 @@ impl PdfCraftApp {
                         None => {}
                     }
                 }
-                app.insert_sources_as_one_step(&ctx, ready, left_out);
+                app.insert_sources_as_one_step(&ctx, at, ready, left_out);
             }),
         );
     }
 
-    /// Insert `sources` (name, bytes) after the selection as one edit and select them; `left_out` is what could not be
+    /// Insert `sources` (name, bytes) at gap `at`, or after the selection, as one edit and select them; `left_out` is what could not be
     /// read already. Says what was left out.
-    fn insert_sources_as_one_step(&mut self, ctx: &egui::Context, sources: Vec<Source>, mut left_out: Vec<Skipped>) {
+    fn insert_sources_as_one_step(&mut self, ctx: &egui::Context, at: Option<usize>, sources: Vec<Source>, mut left_out: Vec<Skipped>) {
         let Some(view) = self.active.and_then(|i| self.views.get(i)) else { return };
-        // The selection decides where: a gap a "+" chose earlier is not this gesture's.
+        // This gesture decides where: a gap a "+" chose earlier is not its.
         let id = view.id;
-        let after = view.target_pages().last().map_or(0, |p| p.saturating_add(1));
+        let after = at.unwrap_or_else(|| view.target_pages().last().map_or(0, |p| p.saturating_add(1)));
         let plan = self.session.plan_insert(id, after, sources);
         left_out.extend(plan.skipped);
         let Some(edit) = plan.edit else {
