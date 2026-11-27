@@ -996,6 +996,22 @@ fn signing_can_lock_all_form_fields() {
     let doc = s.session.get(s.views[0].id).unwrap();
     assert!(doc.signatures.iter().any(|x| x.signed));
     assert!(doc.bytes.windows(8).any(|w| w == b"FieldMDP"), "the signature locks the fields");
+    // A click on the locked field says so, and nothing opens to type into.
+    h.state_mut().quick_tool = QuickTool::Select;
+    h.run_steps(4);
+    let spot = at(&h, 100.0, 50.0);
+    h.hover_at(spot);
+    h.run_steps(1);
+    h.drag_at(spot);
+    h.run_steps(1);
+    h.drop_at(spot);
+    h.run_steps(3);
+    let said = support::shown_notice(&h).expect("the lock is said");
+    assert!(said.contains("is locked by the signature in"), "{said}");
+    h.event(egui::Event::Text("typed".into()));
+    h.run_steps(3);
+    let held = h.state().session.get(h.state().views[0].id).unwrap().form[0].value.clone();
+    assert!(held.is_empty(), "{held:?}");
     // Changing a locked field is refused, and says why.
     let name = h.state().session.get(h.state().views[0].id).unwrap().form[0].name.clone();
     let edit = pdfcraft_engine::Edit::SetFieldValue { name, value: pdfcraft_engine::FieldValue::Text("changed".into()) };

@@ -73,6 +73,9 @@ pub(crate) struct SuggestHidden {
 #[derive(Clone, Debug, Default)]
 pub struct FormView {
     pub focus: Option<Focus>,
+    /// The focused field last asked about its lock: its name, the document's edit generation, and the signature
+    /// field that locks it. Asking reads the form, so it isn't asked again every pass.
+    pub(crate) lock: Option<(String, u64, Option<String>)>,
     /// Where Auto-Complete's list was dismissed (Escape, or an entry taken): it stays shut in that field until its text
     /// changes, and is forgotten when the focus moves to another field.
     pub(crate) suggest_hidden: Option<SuggestHidden>,
@@ -121,6 +124,8 @@ pub enum FormNotice {
     Security,
     /// A read-only field was clicked (its name).
     ReadOnly(String),
+    /// A field a signature locks was clicked (its name, and the signature field's).
+    Locked(String, String),
     /// A push button with no action was clicked (its name).
     NoAction(String),
 }
@@ -173,6 +178,15 @@ impl TextFrame {
     fn paint_galley(self, painter: &egui::Painter, pos: egui::Pos2, galley: std::sync::Arc<egui::Galley>, color: Color32) {
         painter.add(egui::epaint::TextShape::new(self.on_screen(pos), galley, color).with_angle(self.angle()));
     }
+}
+
+/// The signature field whose lock keeps what `f` holds as signed. Buttons hold nothing, and signing a locked
+/// signature field is refused where signing starts.
+pub(crate) fn signature_locks(doc: &pdfcraft_engine::Document, f: &FormField) -> Option<String> {
+    if matches!(f.kind, FormFieldKind::PushButton | FormFieldKind::Signature) {
+        return None;
+    }
+    doc.signature_locking(&f.name)
 }
 
 fn fillable(f: &FormField) -> bool {
@@ -488,7 +502,9 @@ pub(crate) fn field_press(
     let Owner::Field { field, widget: wi } = press.owner else { return };
     let form = doc.form.as_slice();
     let Some((f, w)) = form.get(field).and_then(|f| f.widgets.get(wi).map(|w| (f, w))) else { return };
-    let usable = usable(f, w, allowed);
+    // A field a signature locks takes no press: no script, no editor. The click then says why.
+    let locked = matches!(press.phase, PressPhase::Down { .. }) && signature_locks(doc, f).is_some();
+    let usable = usable(f, w, allowed) && !locked;
     match &press.phase {
         PressPhase::Down { start, .. } => {
             // The press runs the widget's Mouse Down JavaScript, as in Acrobat (#269).
@@ -537,6 +553,8 @@ fn clicked(
     }
     match f.kind {
         _ if f.read_only() || w.read_only => session.forms.notice = Some(FormNotice::ReadOnly(f.name.clone())),
+        // Said before anything is typed, not after.
+        _ if let Some(by) = signature_locks(doc, f) => session.forms.notice = Some(FormNotice::Locked(f.name.clone(), by)),
         FormFieldKind::PushButton => match &f.button {
             Some(a) => session.forms.button = Some((f.name.clone(), pdfcraft_engine::js::field_object_id(f.obj), a.clone())),
             // Its press already ran its mouse-down action.

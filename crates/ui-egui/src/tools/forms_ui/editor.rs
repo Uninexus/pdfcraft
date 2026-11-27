@@ -392,6 +392,18 @@ pub(crate) fn show(ui: &mut egui::Ui, body: &PageBody<'_>, session: &mut PageSes
     if f.read_only() || w.read_only {
         return None;
     }
+    // A field a signature locks gets no editor, however the focus reached it; it is said once.
+    let generation = doc.edit_generation();
+    if session.forms.lock.as_ref().is_none_or(|(name, at, _)| *name != f.name || *at != generation) {
+        let by = super::signature_locks(doc, f);
+        if let Some(by) = &by {
+            session.forms.notice = Some(super::FormNotice::Locked(f.name.clone(), by.clone()));
+        }
+        session.forms.lock = Some((f.name.clone(), generation, by));
+    }
+    if session.forms.lock.as_ref().is_some_and(|(_, _, by)| by.is_some()) {
+        return None;
+    }
     let combo = f.kind == FormFieldKind::Combo;
     let types = f.kind == FormFieldKind::Text || (combo && editable_combo(f));
     let mut ended = None;
