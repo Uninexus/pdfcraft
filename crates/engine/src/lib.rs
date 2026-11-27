@@ -32,6 +32,7 @@ mod comments;
 pub mod compare;
 mod copy_image;
 pub use copy_image::{PagePicture, picture_at};
+mod arrange;
 pub mod dates;
 mod document;
 mod edit;
@@ -168,6 +169,7 @@ pub use pdfcraft_edit::{Backdrop, BlockKey, BlockStyle, PageImage, RangeStyle, T
 pub use pdfcraft_measure as measure;
 pub use pdfcraft_xfa::Report as XfaLayout;
 
+pub use arrange::{ArrangeOp, plan_offsets};
 pub use object_clip::{ObjectClip, ObjectClipboard};
 pub use pdfcraft_edit::{EditableObject, MAX_MOVE_OBJECTS, ObjectKind, ObjectTarget};
 

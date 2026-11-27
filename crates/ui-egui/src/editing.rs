@@ -1141,6 +1141,7 @@ fn re_resolve_image_selection(
 fn content_page(edit: &Edit) -> Option<usize> {
     match edit {
         Edit::MoveObjects { page, .. }
+        | Edit::ArrangeObjects { page, .. }
         | Edit::DeleteObjects { page, .. }
         | Edit::EditTextLine { page, .. }
         | Edit::EditTextBlock { page, .. }

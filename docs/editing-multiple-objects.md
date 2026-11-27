@@ -45,7 +45,7 @@ contain at most 1,000 items; pages with more than 10,000 recognised objects are 
 selection. Content streams must decode completely within 64 MiB each and 128 MiB per page, with
 a 1,024-level graphics-state limit and 100,000 content operations. These limits apply to both the
 original page and the moved result; unreadable or missing streams are refused. Moving between pages,
-arbitrary paths, inline images, group resizing, align/distribute,
+arbitrary paths, inline images, group resizing,
 and vertical or clipping text are outside this operation's scope. A refusal changes nothing.
 
 Added streams move by changing their outer placement, preserving drawing bytes, fonts, crop paths,
@@ -58,6 +58,15 @@ strings and kerning are replayed with temporary numeric `TJ` adjustments and tex
 performs the original glyph advances, so following unselected text keeps its position. Paragraph
 indices can change when detection groups lines differently after a move. The UI remaps its own
 selection only when the new geometry matches uniquely; other document edits clear stale selection.
+
+## Align and distribute
+
+With two or more items selected, right-click for **Align objects** (left, horizontal centers, right,
+top, vertical centers, bottom: to the selection's bounds) and, with three or more, **Distribute
+objects** (horizontally or vertically: equal gaps, the outermost two stay). The same commands
+(`arrange.align_left` ... `arrange.distribute_vertical`) are in the Edit a PDF tool list, and the
+`objects_align` tool does it headlessly. Layout works on displayed rectangles, so a rotated page
+aligns what you see. Each command is one undo step and keeps the selection.
 
 ## Engine
 

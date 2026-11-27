@@ -141,6 +141,8 @@ pub const EDIT_LABELS: &[&str] = &[
     "Load document font",
     "Move object",
     "Move objects",
+    "Align objects",
+    "Distribute objects",
     "Move image",
     "Transform image",
     "Rotate image",
@@ -345,6 +347,7 @@ impl Edit {
             Edit::PrepareText { .. } => Label::of("Prepare grouped text"),
             Edit::RegisterTextFont { .. } => Label::of("Load document font"),
             Edit::MoveObjects { objects, .. } => plural("Move object", "Move objects", objects.len()),
+            Edit::ArrangeObjects { op, .. } => Label::of(if op.distributes() { "Distribute objects" } else { "Align objects" }),
             Edit::EditPageImage { change, .. } => Label::of(match change {
                 ImageEdit::Move(_) => "Move image",
                 ImageEdit::Transform(_) => "Transform image",

@@ -794,6 +794,7 @@ impl Automation {
             "links_remove" => self.links_remove(&a)?,
             "object_list" => self.object_list(&a)?,
             "object_move" => self.object_move(&a)?,
+            "objects_align" => self.objects_align(&a)?,
             "object_copy" => self.object_copy(&a)?,
             "object_paste" => self.object_paste(&a)?,
             "content_list" => self.content_list(&a)?,

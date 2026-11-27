@@ -156,6 +156,15 @@ fn every_registered_command_is_implemented() {
             use pdfcraft_engine::{Edit, PrinterMarks};
             app.apply_edit(&egui::Context::default(), Edit::AddPrinterMarks { pages: vec![0], settings: PrinterMarks::default(), replace: false });
         }
+        // Arranging needs several objects selected, out of line with each other.
+        if spec.id.starts_with("arrange.") {
+            use pdfcraft_engine::{AddedText, Edit};
+            for rect in [[40.0, 180.0, 90.0, 200.0], [80.0, 120.0, 150.0, 140.0], [20.0, 30.0, 60.0, 50.0]] {
+                let text = AddedText { text: "Label".into(), rect, ..Default::default() };
+                assert!(app.apply_edit(&egui::Context::default(), Edit::AddText { page: 0, text }));
+            }
+            assert!(app.select_page_objects_for_test(0) >= 3, "{}", spec.id);
+        }
         // Copying comments needs a selected comment; pasting needs copied ones.
         if matches!(spec.id, "comment.copy" | "comment.paste") {
             let shape = pdfcraft_engine::Shape::Rectangle { rect: [10.0, 10.0, 50.0, 50.0] };

@@ -36,6 +36,22 @@ pub(crate) struct ObjectSelection {
     marquee_mods: Mods,
 }
 
+impl crate::PdfCraftApp {
+    /// Selects every object of `page` of the active tab together, as a marquee over the whole page does, and returns
+    /// how many: for tests of the commands that act on a selection.
+    #[doc(hidden)]
+    pub fn select_page_objects_for_test(&mut self, page: usize) -> usize {
+        let Some((i, id)) = self.active_ids() else { return 0 };
+        let Some(doc) = self.session.get(id) else { return 0 };
+        let objects = &mut self.views[i].session.objects;
+        let Ok(found) = objects.inventory(doc, page) else { return 0 };
+        objects.clear();
+        objects.page = Some(page);
+        objects.selected = found;
+        objects.selected.len()
+    }
+}
+
 impl ObjectSelection {
     pub fn count(&self) -> usize {
         self.selected.len()
@@ -164,6 +180,23 @@ impl ObjectSelection {
         }
         self.pending = Some(expected);
         Edit::MoveObjects { page, objects: self.selected.iter().map(|o| o.target).collect(), offset }
+    }
+
+    /// The edit that aligns or distributes the selected objects, if any has to move. The selection
+    /// follows the objects to where the edit puts them.
+    pub(crate) fn arrange(&mut self, doc: &Document, op: pdfcraft_engine::ArrangeOp) -> Result<Option<Edit>, String> {
+        let (page, targets) = self.selection().ok_or("select objects first")?;
+        let edit = doc.arrange_objects(page, &targets, op)?;
+        if let Some(Edit::ArrangeObjects { moves, .. }) = &edit {
+            let mut expected = self.selected.clone();
+            for object in &mut expected {
+                if let Some((_, o)) = moves.iter().find(|(t, _)| *t == object.target) {
+                    object.rect = [object.rect[0] + o[0], object.rect[1] + o[1], object.rect[2] + o[0], object.rect[3] + o[1]];
+                }
+            }
+            self.pending = Some(expected);
+        }
+        Ok(edit)
     }
 
     /// The objects of `page` that can be selected together, as `doc.editable_objects` lists them, or

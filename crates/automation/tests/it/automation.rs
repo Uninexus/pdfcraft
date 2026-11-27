@@ -13410,6 +13410,44 @@ fn mixed_objects_move_through_tools_with_generation_and_one_undo() {
     assert!(page_text(&mut a, reopened)[0].contains("Added label"));
 }
 
+/// Align and distribute through the tool: three added labels line up on their left edge and spread
+/// with equal gaps, each as one undo step.
+#[test]
+fn objects_align_and_distribute_through_the_tool_in_one_undo_step() {
+    let dir = workdir("objects-align");
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({"path":"a.pdf"}))["doc"].as_u64().unwrap();
+    for rect in [[20, 20, 90, 40], [60, 100, 140, 120], [35, 300, 95, 320]] {
+        ok(&mut a, "page_add_text", json!({"doc":doc,"page":1,"text":"Label","rect":rect}));
+    }
+    let rects = |a: &mut Automation| -> Vec<[f64; 4]> {
+        let inventory = ok(a, "object_list", json!({"doc":doc,"page":1}));
+        let mut found: Vec<[f64; 4]> = inventory["objects"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|o| o["kind"] == "added")
+            .map(|o| std::array::from_fn(|i| o["rect"][i].as_f64().unwrap()))
+            .collect();
+        found.sort_by(|x, y| x[1].total_cmp(&y[1]));
+        found
+    };
+    let start = rects(&mut a);
+    assert_eq!(start.len(), 3);
+    let added = json!([{"kind":"added","index":1},{"kind":"added","index":2},{"kind":"added","index":3}]);
+    ok(&mut a, "objects_align", json!({"doc":doc,"page":1,"objects":added,"kind":"left"}));
+    let lefts = rects(&mut a);
+    assert!(lefts.iter().all(|r| (r[0] - start.iter().map(|s| s[0]).fold(f64::INFINITY, f64::min)).abs() < 0.05), "{lefts:?}");
+    ok(&mut a, "edit_undo", json!({"doc":doc}));
+    assert_eq!(rects(&mut a), start, "one undo restores every rectangle");
+    ok(&mut a, "objects_align", json!({"doc":doc,"page":1,"objects":added,"kind":"distribute_vertical"}));
+    let spread = rects(&mut a);
+    let (first, second) = (spread[1][1] - spread[0][3], spread[2][1] - spread[1][3]);
+    assert!((first - second).abs() < 0.05, "{spread:?}");
+    assert_eq!((spread[0], spread[2]), (start[0], start[2]), "the outer objects stay");
+    assert!(a.call("objects_align", &json!({"doc":doc,"page":1,"objects":[{"kind":"added","index":1}],"kind":"left"})).is_err());
+}
+
 /// Edit a PDF's ⌘A, ⌘C / ⌘X and ⌘V headlessly: every object of a page copied, pasted into
 /// another document and onto its own page (stepped down and right), and cut as one undo step.
 #[test]

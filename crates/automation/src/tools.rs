@@ -367,6 +367,13 @@ fn all_tools() -> Vec<ToolDef> {
                 "all":{"type":"boolean","description":"Every object on the page, instead of objects."},
                 "offset":{"type":"array","items":{"type":"number"},"minItems":2,"maxItems":2},
                 "generation":{"type":"integer","minimum":0,"description":"Use generation returned by object_list to reject a stale selection."}}), &["doc","page","offset"])),
+        t("objects_align", "Align or distribute objects", "Align 2 or more (distribute: 3 or more) references from object_list, or with all: true every object on the page, as one undo step. kind left/center/right/top/middle/bottom lines them up on the selection's bounds in displayed page space; distribute_horizontal/distribute_vertical gives equal gaps between them and keeps the outermost two where they are. Returns how many objects moved (0 when they were already in place). Same limits and refusals as object_move; a bad or stale reference changes nothing.")
+            .with(schema(json!({"doc":doc(),"page":{"type":"integer","minimum":1},
+                "kind":{"type":"string","enum":["left","center","right","top","middle","bottom","distribute_horizontal","distribute_vertical"]},
+                "objects":{"type":"array","minItems":2,"maxItems":1000,"uniqueItems":true,"items":{
+                    "type":"object","properties":{"kind":{"type":"string","enum":["added","text","image"]},"index":{"type":"integer","minimum":1}},"required":["kind","index"],"additionalProperties":false}},
+                "all":{"type":"boolean","description":"Every object on the page, instead of objects."},
+                "generation":{"type":"integer","minimum":0,"description":"Use generation returned by object_list to reject a stale selection."}}), &["doc","page","kind"])),
         t("object_copy", "Copy or cut objects together", "Edit ▸ Copy (cut: Cut) of 1–1000 mixed references from object_list, or with all: true every object on the page, as ⌘A then ⌘C select and copy them in Edit a PDF. The copy keeps their content operators and every resource they use (fonts, images, ExtGStates, colour spaces, patterns, shadings) and is kept for object_paste into any open document, also after this one changes or closes. cut then deletes them as one undo step. Refused when the document doesn't allow copying (cut: or changes), or when text used as a clipping path is drawn before them. Returns the count copied and their text.")
             .with(schema(json!({"doc":doc(),"page":{"type":"integer","minimum":1},
                 "objects":{"type":"array","minItems":1,"maxItems":1000,"uniqueItems":true,"items":{

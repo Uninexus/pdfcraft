@@ -801,6 +801,7 @@ impl Session {
                     | Edit::PasteContent { .. }
                     | Edit::EditPageImage { .. }
             ) || matches!(e, Edit::MoveObjects { objects, .. } | Edit::DeleteObjects { objects, .. } if objects.iter().any(|o| o.kind == ObjectKind::Added))
+                || matches!(e, Edit::ArrangeObjects { moves, .. } if moves.iter().any(|(o, _)| o.kind == ObjectKind::Added))
         });
         let touches_marks = edit.is_none_or(|e| {
             matches!(

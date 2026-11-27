@@ -280,6 +280,8 @@ impl PdfCraftApp {
                 }))
             && (spec.needs != commands::Needs::TwoPageView || self.active.and_then(|i| self.views.get(i)).is_some_and(crate::DocView::cover_applies))
             && match spec.id {
+                arrange if pdfcraft_engine::ArrangeOp::from_command(arrange).is_some() => pdfcraft_engine::ArrangeOp::from_command(arrange)
+                    .is_some_and(|op| self.active.and_then(|i| self.views.get(i)).is_some_and(|v| v.session.objects.count() >= op.needs())),
                 "comment.copy" => self.active.and_then(|i| self.views.get(i)).is_some_and(|v| v.session.comments.primary().is_some()),
                 "comment.paste" => self.comment_clipboard.is_some(),
                 "view.previous_view" => self.active.and_then(|i| self.views.get(i)).is_some_and(|v| !v.back.is_empty()),
@@ -308,8 +310,40 @@ impl PdfCraftApp {
         done
     }
 
+    /// Whether the open document's own state lets `spec` run, leaving the view's selection aside.
+    fn command_enabled_by_document(&self, spec: &CommandSpec) -> bool {
+        commands::is_enabled(spec, &self.session, self.active_ids().map(|(_, id)| id))
+    }
+
+    /// Align or distribute the objects selected together in Edit a PDF, as one undo step.
+    fn arrange_selected_objects(&mut self, ctx: &egui::Context, op: pdfcraft_engine::ArrangeOp) -> bool {
+        let Some((i, id)) = self.active_ids() else { return false };
+        let Some(doc) = self.session.get(id) else { return false };
+        match self.views[i].session.objects.arrange(doc, op) {
+            Ok(Some(edit)) => self.apply_edit(ctx, edit),
+            Ok(None) => {
+                self.notify_tr("The objects are already in place");
+                false
+            }
+            Err(_) => {
+                self.notify_tr("These objects could not be arranged. Select them again and try once more.");
+                false
+            }
+        }
+    }
+
     /// Why the command can't run right now, for the user.
     fn disabled_reason(&self, spec: &CommandSpec) -> String {
+        if let Some(op) = pdfcraft_engine::ArrangeOp::from_command(spec.id)
+            && self.active.is_some()
+            && self.command_enabled_by_document(spec)
+        {
+            return if op.distributes() {
+                tl!("Select three or more objects first").to_string()
+            } else {
+                tl!("Select two or more objects first").to_string()
+            };
+        }
         match spec.needs {
             commands::Needs::Undo => tl!("Nothing to undo").to_string(),
             commands::Needs::Redo => tl!("Nothing to redo").to_string(),
@@ -735,6 +769,11 @@ impl PdfCraftApp {
             "attachment.associate" => crate::dialogs::associated_files::start(self),
             "edit.undo" => self.undo(ctx),
             "edit.redo" => self.redo(ctx),
+            arrange if pdfcraft_engine::ArrangeOp::from_command(arrange).is_some() => {
+                if let Some(op) = pdfcraft_engine::ArrangeOp::from_command(arrange) {
+                    return Some(self.arrange_selected_objects(ctx, op));
+                }
+            }
             "edit.find" => {
                 if let Some(i) = active {
                     self.views[i].open_find();

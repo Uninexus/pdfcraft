@@ -418,6 +418,26 @@ impl Automation {
         Ok(result)
     }
 
+    /// Align or distribute objects of one page together, as one undo step: the engine's
+    /// `Document::arrange_objects`, which the Edit a PDF commands use too.
+    pub(crate) fn objects_align(&mut self, a: &Args) -> Result<Value> {
+        let page = self.page(a)?;
+        let targets = self.object_targets(a, page)?;
+        let name = a.opt_str("kind")?.ok_or_else(|| bad("kind is required"))?;
+        let op = pdfcraft_engine::ArrangeOp::from_name(name)
+            .ok_or_else(|| bad("kind must be left, center, right, top, middle, bottom, distribute_horizontal or distribute_vertical"))?;
+        let edit = self.doc(a)?.arrange_objects(page, &targets, op).map_err(failed)?;
+        let Some(edit) = edit else {
+            let mut result = self.applied(a)?;
+            result["moved"] = json!(0);
+            return Ok(result);
+        };
+        let moved = if let Edit::ArrangeObjects { moves, .. } = &edit { moves.len() } else { 0 };
+        let mut result = self.apply(a, edit)?;
+        result["moved"] = json!(moved);
+        Ok(result)
+    }
+
     /// Edit ▸ Copy (or with `cut`, Cut) of objects selected together, kept for object_paste into
     /// any open document. A cut then deletes them as one undo step.
     pub(crate) fn object_copy(&mut self, a: &Args) -> Result<Value> {
