@@ -70,12 +70,18 @@ pub(crate) struct SuggestHidden {
     pub(crate) text: String,
 }
 
+/// What the kept locked names were read from: the document's edit generation, and how many signatures are signed and
+/// invalid.
+type LockStamp = (u64, usize, usize);
+
 #[derive(Clone, Debug, Default)]
 pub struct FormView {
     pub focus: Option<Focus>,
     /// The focused field last asked about its lock: its name, the document's edit generation, and the signature
     /// field that locks it. Asking reads the form, so it isn't asked again every pass.
     pub(crate) lock: Option<(String, u64, Option<String>)>,
+    /// Every locked field's name, kept for drawing while the document's generation and signatures stay as they are.
+    locked_names: Option<(LockStamp, std::sync::Arc<std::collections::BTreeSet<String>>)>,
     /// Where Auto-Complete's list was dismissed (Escape, or an entry taken): it stays shut in that field until its text
     /// changes, and is forgotten when the focus moves to another field.
     pub(crate) suggest_hidden: Option<SuggestHidden>,
@@ -114,6 +120,21 @@ pub struct FormView {
     /// trigger): `PdfCraftApp::run_field_triggers` runs them after the frame's edit, so a check
     /// box's Mouse Up sees the value its click just stored (#247).
     pub(crate) triggers: Vec<(WidgetRef, pdfcraft_engine::FieldTrigger)>,
+}
+
+impl FormView {
+    /// The names of the fields a signature locks, read again only after the document or its signatures changed.
+    pub(crate) fn locked_names(&mut self, doc: &pdfcraft_engine::Document) -> std::sync::Arc<std::collections::BTreeSet<String>> {
+        let signed = doc.signatures.iter().filter(|s| s.signed).count();
+        let invalid = doc.signatures.iter().filter(|s| s.status == pdfcraft_engine::SignatureStatus::Invalid).count();
+        let key = (doc.edit_generation(), signed, invalid);
+        if let Some((_, names)) = self.locked_names.as_ref().filter(|(at, _)| *at == key) {
+            return names.clone();
+        }
+        let names = std::sync::Arc::new(doc.locked_fields());
+        self.locked_names = Some((key, names.clone()));
+        names
+    }
 }
 
 /// A form message for the app to show, with document data kept separate so the visible

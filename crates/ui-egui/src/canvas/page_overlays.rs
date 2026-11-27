@@ -491,6 +491,8 @@ pub(crate) struct PageOverlays<'a> {
     /// Acrobat's "Highlight existing fields".
     #[prop]
     highlight_fields: bool,
+    /// The fields a signature locks: left unhighlighted.
+    locked: Option<&'a std::collections::BTreeSet<String>>,
     /// Preferences > Forms > Highlight colour, a data colour the user chose; `None` follows the theme.
     #[prop]
     field_color: Option<[u8; 3]>,
@@ -528,11 +530,18 @@ impl<'a> PageOverlays<'a> {
             guides: &[],
             grid: None,
             highlight_fields: false,
+            locked: None,
             field_color: None,
             required_color: None,
             kept_area: None,
             picked: None,
         }
+    }
+
+    /// The names of the fields a signature locks, which get no highlight.
+    pub(crate) fn locked_fields(mut self, locked: &'a std::collections::BTreeSet<String>) -> Self {
+        self.locked = Some(locked);
+        self
     }
 
     /// The ruler guides to draw over the page: a guide that is not on this page, or lies past its edge, is skipped.
@@ -631,7 +640,7 @@ impl PageOverlays<'_> {
     /// Form-field highlight (Acrobat's "Highlight existing fields"); a required field gets the stronger red
     /// outline. Radio buttons and round XFA check boxes are round, and so is theirs. Only what can be filled
     /// is marked: a push button holds no value (the frames and controls of a LaTeX `animate` animation are
-    /// push buttons), and a read-only widget is left as it is drawn.
+    /// push buttons), and a read-only widget, or a field a signature locks, is left as it is drawn.
     fn paint_field_highlights(&self, draw: &Draw<'_>, style: &PageOverlaysStyle) {
         // The colours the user chose are data, not theme roles: the first marks a field that isn't required, and tints
         // every field; the second is a required field's border.
@@ -639,7 +648,8 @@ impl PageOverlays<'_> {
         let required_edge = self
             .required_color
             .map_or(StrokeColor::Theme(style.required_edge), |[r, g, b]| StrokeColor::Data(DataColor::new(Color32::from_rgb(r, g, b))));
-        for field in self.doc.form.iter().filter(|f| f.kind != FormFieldKind::PushButton) {
+        let open = |f: &&pdfcraft_engine::FormField| f.kind != FormFieldKind::PushButton && !self.locked.is_some_and(|names| names.contains(&f.name));
+        for field in self.doc.form.iter().filter(open) {
             let required = field.has(pdfcraft_engine::field_flags::REQUIRED);
             let (width, line, edge) = if required {
                 (StrokeWidth::Thick, style.outline, required_edge)
