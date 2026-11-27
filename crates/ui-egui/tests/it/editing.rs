@@ -813,6 +813,8 @@ fn the_last_session_reopens_its_files_pages_and_active_tab() {
             app.open_path(f);
         })
     });
+    // Threads read the files: a loaded machine may take more than a few frames over them.
+    support::wait_until(&mut h, "the three files", |app| app.views.len() == files.len());
     h.state_mut().views[1].go_to_page(3);
     h.state_mut().active = Some(1);
     h.run_steps(4);
@@ -822,6 +824,7 @@ fn the_last_session_reopens_its_files_pages_and_active_tab() {
         app.apply_settings(&settings);
         app.reopen_last_files(&[]);
     });
+    support::wait_until(&mut h, "the reopened files", |app| app.views.len() == 3);
     h.run_steps(4);
     let app = h.state();
     assert_eq!(open_paths(app), files, "the same files, in the same order");
@@ -912,9 +915,9 @@ fn opening_a_missing_file_fails_and_tells_the_user() {
     let missing = std::env::temp_dir().join(format!("pdfcraft-no-such-file-{}.pdf", std::process::id()));
     // The open is queued; its failure is reported once the read fails.
     assert_eq!(h.state_mut().open_path(&missing.to_string_lossy()), OpenOutcome::Pending);
-    h.run_steps(4);
+    // The read fails on a thread: wait for what it says rather than for a number of frames.
+    assert!(support::step_until(&mut h, |h| support::shown_notice(h).is_some()), "the failure is still reported to the user");
     assert!(h.state().views.is_empty());
-    assert!(support::shown_notice(&h).is_some(), "the failure is still reported to the user");
 }
 
 #[test]
