@@ -4785,8 +4785,8 @@ milestone = "M6"
 status = "shipped"
 commands = ["form.fields"]
 tools = []
-evidence = ["crates/ui-egui/tests/it/forms.rs::tabbing_into_a_filled_field_selects_it_so_typing_replaces"]
-notes = "Tab / Shift+Tab move between text and choice fields in field order; entering with Tab selects the value"
+evidence = ["crates/ui-egui/tests/it/forms.rs::tabbing_into_a_filled_field_selects_it_so_typing_replaces", "crates/ui-egui/tests/it/forms.rs::tab_leaves_the_page_view_at_both_ends_of_the_form"]
+notes = "Tab / Shift+Tab move between text and choice fields in field order; entering with Tab selects the value. Tab on the last field and Shift+Tab on the first leave the fields rather than wrapping round (forwards by way of an End of page content stop), so the keyboard is never held on the page"
 
 [[feature]]
 id = "form.appearance-regeneration"
