@@ -24,6 +24,7 @@ mod as_word;
 mod clip;
 mod flow;
 mod layout;
+mod word_lists;
 
 #[cfg(test)]
 use as_docx::MAX_MEDIA;

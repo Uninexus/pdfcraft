@@ -873,13 +873,13 @@ fn word_paragraphs(xml: &str) -> Vec<Vec<(String, bool)>> {
         .skip(1)
         .map(|p| {
             let p = p.split_once("</w:p>").map_or(p, |(inside, _)| inside);
-            p.split("<w:r>")
-                .skip(1)
-                .filter_map(|r| {
-                    let text = r.split_once("<w:t xml:space=\"preserve\">")?.1.split_once("</w:t>")?.0;
-                    Some((text.to_string(), r.contains("<w:i/>")))
-                })
-                .collect::<Vec<_>>()
+            // A list item's marker is the list's to draw: shown here as a reader sees a bulleted one.
+            let marker = p.contains("<w:numPr>").then(|| ("\u{2022} ".to_string(), false));
+            let runs = p.split("<w:r>").skip(1).filter_map(|r| {
+                let text = r.split_once("<w:t xml:space=\"preserve\">")?.1.split_once("</w:t>")?.0;
+                Some((text.to_string(), r.contains("<w:i/>")))
+            });
+            marker.into_iter().chain(runs).collect::<Vec<_>>()
         })
         .filter(|runs| !runs.is_empty())
         .collect()
@@ -1481,7 +1481,15 @@ fn a_bulleted_list_is_paragraphs_not_a_table() {
         let mut expected = vec!["The tenant looks after:".to_string()];
         expected.extend(items.iter().cloned());
         expected.push("Rent is paid monthly in advance.".into());
-        assert_eq!(word_texts(p.blocks.clone()), expected, "{bullet}");
+        // In Word a bullet is the list's to draw, as its own bullet; a dash stays text.
+        let dash = bullet == "\u{2013}";
+        let mut in_word = expected.clone();
+        if !dash {
+            in_word.iter_mut().skip(1).take(items.len()).for_each(|t| *t = t.replacen(bullet, "\u{2022}", 1));
+        }
+        assert_eq!(word_texts(p.blocks.clone()), in_word, "{bullet}");
+        let listed = part(&docx(std::slice::from_ref(&p), "List"), "word/document.xml").matches("<w:numPr>").count();
+        assert_eq!(listed, if dash { 0 } else { items.len() }, "{bullet}");
         let h = html(std::slice::from_ref(&p), "List");
         assert!(!h.contains("<table>") && items.iter().all(|i| h.contains(&format!("<p>{i}</p>"))), "{bullet}: {h}");
         assert!(!rtf(std::slice::from_ref(&p)).contains("\\trowd"), "{bullet}");
@@ -1539,7 +1547,8 @@ fn a_long_bulleted_list_keeps_every_bullet_with_its_item() {
     assert!(found.is_empty(), "{found:?}");
     let paragraphs = word_texts(blocks);
     assert_eq!(paragraphs.len(), 150, "{paragraphs:?}");
-    assert!(paragraphs.iter().enumerate().all(|(n, p)| *p == format!("\u{F0B7} item {n};")), "{paragraphs:?}");
+    // Word draws the list's own bullet in place of the symbol font's.
+    assert!(paragraphs.iter().enumerate().all(|(n, p)| *p == format!("\u{2022} item {n};")), "{paragraphs:?}");
 }
 
 #[test]
@@ -1740,4 +1749,57 @@ fn checked_rtf_reports_omitted_pictures_once_per_page_without_dropping_text() {
     assert_eq!(omitted, [0, 2]);
     assert!(output.contains("Surviving last-page text"));
     assert_eq!(output, crate::rtf_with_title(&pages, "Partial"));
+}
+
+/// Numbers and letters become Word's lists, drawn by Word from where they start; a list goes on across a paragraph
+/// between its items, and anything else that opens with a number stays text.
+#[test]
+fn numbered_paragraphs_are_word_lists() {
+    let texts = [
+        "3. Pay the rent.",
+        "4. Keep the garden.",
+        "A note between them.",
+        "5. Return the keys.",
+        "a) by post;",
+        "b) by hand.",
+        "2026. The year ends.",
+        "1.5 kg of salt.",
+        "- a dash",
+    ];
+    let blocks: Vec<Block> = texts.iter().enumerate().map(|(n, t)| line(t, 72.0, 300.0, 700.0 - 40.0 * n as f64)).collect();
+    let p = Page { width: 612.0, height: 792.0, blocks, ..Page::default() };
+    let bytes = docx(std::slice::from_ref(&p), "Terms");
+    let read = craft_docx::read(&bytes).unwrap();
+    let paragraphs: Vec<(String, Option<u32>)> = read
+        .body
+        .iter()
+        .filter_map(|b| match &**b {
+            craft_wordmodel::Block::Para(p) => Some((p.text.clone(), p.props.numbering.map(|n| n.num))),
+            _ => None,
+        })
+        .filter(|(t, _)| !t.is_empty())
+        .collect();
+    let said: Vec<&str> = paragraphs.iter().map(|(t, _)| t.as_str()).collect();
+    assert_eq!(
+        said,
+        [
+            "Pay the rent.",
+            "Keep the garden.",
+            "A note between them.",
+            "Return the keys.",
+            "by post;",
+            "by hand.",
+            "2026. The year ends.",
+            "1.5 kg of salt.",
+            "- a dash"
+        ]
+    );
+    let lists: Vec<Option<u32>> = paragraphs.iter().map(|(_, n)| *n).collect();
+    assert!(lists[0].is_some() && lists[0] == lists[1] && lists[1] == lists[3], "{lists:?}");
+    assert!(lists[4].is_some() && lists[4] == lists[5] && lists[4] != lists[0], "{lists:?}");
+    assert!([2, 6, 7, 8].iter().all(|&i| lists[i].is_none()), "{lists:?}");
+    let start = lists[0].and_then(|n| read.numbering.level(n, 0)).map(|l| l.start);
+    assert_eq!(start, Some(3), "numbered from where the page numbers it");
+    // RTF keeps the numbers as text.
+    assert!(rtf(std::slice::from_ref(&p)).contains("3. Pay the rent."));
 }
