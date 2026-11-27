@@ -177,6 +177,8 @@ struct Builder<'a> {
     /// For RTF, which repeats a picture's data at every placement and doesn't turn pictures: what
     /// its pictures may still cost, and the rotations baked into them ([`pictures::Budget`]).
     rtf: Option<pictures::Budget>,
+    /// The Word lists so far (.docx only: RTF keeps its markers as text).
+    lists: crate::word_lists::Lists,
     /// The page (0-based) being built, and the pages that lost a picture to a limit or to a
     /// picture that couldn't be prepared.
     page: usize,
@@ -194,7 +196,7 @@ impl<'a> Builder<'a> {
         if let Some(c) = shared.filter(|c| *c != [255; 3] && pages.iter().all(|p| p.background.map(rgb8) == Some(*c))) {
             doc.settings.page_color = Some(Rgb(c[0], c[1], c[2]));
         }
-        Builder { doc, body: Vec::new(), media: Vec::new(), rtf, page: 0, omitted: Vec::new() }
+        Builder { doc, body: Vec::new(), media: Vec::new(), rtf, lists: Default::default(), page: 0, omitted: Vec::new() }
     }
 
     /// The media key for `im`, or `None` for an empty picture, and past the limits or for one that
@@ -232,6 +234,15 @@ impl<'a> Builder<'a> {
                 }
                 for r in &runs {
                     push_text(&mut p, &r.text, chr(r.block.size, r.block.bold, r.block.italic, r.block.color));
+                }
+                // A numbered heading keeps its number as text.
+                if self.rtf.is_none()
+                    && !matches!(lvl, 1 | 2)
+                    && let Some((marker, count)) = crate::word_lists::marker(&p.text)
+                    && let Some(item) = self.lists.item(&mut self.doc, marker)
+                    && crate::word_lists::strip(&mut p, count)
+                {
+                    p.props.numbering = Some(item);
                 }
                 self.body.push(Block::Para(p));
             }

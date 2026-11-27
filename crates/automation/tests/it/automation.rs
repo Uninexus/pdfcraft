@@ -12027,7 +12027,9 @@ fn word_paragraph_texts(path: &Path) -> Vec<String> {
         .skip(1)
         .map(|p| {
             let p = p.split_once("</w:p>").map_or(p, |(inside, _)| inside);
-            p.split("<w:t xml:space=\"preserve\">").skip(1).filter_map(|t| t.split_once("</w:t>").map(|(t, _)| t)).collect::<String>()
+            let text = p.split("<w:t xml:space=\"preserve\">").skip(1).filter_map(|t| t.split_once("</w:t>").map(|(t, _)| t)).collect::<String>();
+            // A list item's marker is the list's to draw: shown here as a reader sees a bulleted one.
+            if p.contains("<w:numPr>") { format!("\u{2022} {text}") } else { text }
         })
         .filter(|text| !text.is_empty())
         .collect()
@@ -12056,7 +12058,7 @@ schedule, Blue Finch Studio, who agree as follows to rent the upper rooms for th
 
 /// A bulleted list drawn as Word draws one, each bullet in the Symbol font (read as U+F0B7, as
 /// Word maps it) a tab stop before its item's text, reaches Word as one paragraph per item and
-/// not as a two-column table.
+/// not as a two-column table; the paragraphs are Word's own bulleted list.
 #[test]
 fn exporting_to_word_keeps_a_bulleted_list_as_paragraphs() {
     let dir = workdir("bulleted-list-word");
@@ -12074,9 +12076,9 @@ fn exporting_to_word_keeps_a_bulleted_list_as_paragraphs() {
         word_paragraph_texts(&dir.join("list.docx")),
         [
             "The tenant looks after:",
-            "\u{F0B7} the stairs and the landing;",
-            "\u{F0B7} the shared yard and its gate;",
-            "\u{F0B7} the bins, every week.",
+            "\u{2022} the stairs and the landing;",
+            "\u{2022} the shared yard and its gate;",
+            "\u{2022} the bins, every week.",
             "Rent is paid monthly in advance."
         ]
     );
