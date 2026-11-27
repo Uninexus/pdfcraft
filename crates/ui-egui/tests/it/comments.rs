@@ -922,9 +922,14 @@ fn rect_of(h: &Harness<'static, PdfCraftApp>, text: &str) -> [f32; 4] {
     c.iter().find(|a| a.contents.as_deref().is_some_and(|t| t.starts_with(text))).unwrap_or_else(|| panic!("no comment {text:?}: {c:?}")).rect
 }
 
-/// Post `text` in the open text box composer.
+/// Post `text` in the open text box: typed on the page, or in a callout's composer card.
 fn post_text(h: &mut Harness<'static, PdfCraftApp>, text: &str) {
-    field(h, "Type text").type_text(text);
+    let on_page = h.state().views[0].session.comments.rich.is_some();
+    if on_page {
+        h.event(egui::Event::Text(text.into()));
+    } else {
+        field(h, "Type text").type_text(text);
+    }
     h.run_steps(2);
     h.get_by_label("Post").click();
     h.run_steps(3);
@@ -4359,19 +4364,41 @@ fn edit_composer_preserves_only_typewriter_whitespace(kind: u8) {
         h.get_all_by_label("Edit text…").last().unwrap().click();
         h.run_steps(3);
     }
-    let c = h.state().views[0].session.comments.composer.as_ref().expect("the edit composer is open");
-    assert_eq!(c.page, 1);
-    assert_eq!(c.kind, pdfcraft_ui_egui::comments::ComposerKind::Edit(0));
-    h.input_mut().events.push(egui::Event::Text(" edited\n\n".into()));
-    h.step();
-    h.run_steps(2);
-    assert_eq!(h.state().views[0].session.comments.composer.as_ref().unwrap().text, "Original edited\n\n");
+    // A text box is edited on the page; a note and typed (Fill & Sign) text in the composer card.
+    let on_page = kind == 1;
+    let typed = |h: &Harness<'static, PdfCraftApp>| {
+        let comments = &h.state().views[0].session.comments;
+        if on_page {
+            let open = comments.rich.as_ref().expect("the box is open on the page");
+            assert_eq!(open.page(), 1);
+            open.text().to_string()
+        } else {
+            let c = comments.composer.as_ref().expect("the edit composer is open");
+            assert_eq!((c.page, &c.kind), (1, &pdfcraft_ui_egui::comments::ComposerKind::Edit(0)));
+            c.text.clone()
+        }
+    };
+    assert_eq!(typed(&h), "Original");
+    if on_page {
+        h.event(egui::Event::Text(" edited".into()));
+        h.run_steps(2);
+        for _ in 0..2 {
+            h.key_press(egui::Key::Enter);
+            h.run_steps(2);
+        }
+    } else {
+        h.input_mut().events.push(egui::Event::Text(" edited\n\n".into()));
+        h.step();
+        h.run_steps(2);
+    }
+    assert_eq!(typed(&h), "Original edited\n\n");
     if shots {
         h.render().unwrap().save(format!("/tmp/5954-composer-{kind}.png")).unwrap();
     }
     h.get_all_by_label("Save").last().unwrap().click();
     h.run_steps(3);
     assert!(h.state().views[0].session.comments.composer.is_none());
+    assert!(h.state().views[0].session.comments.rich.is_none());
     let id = h.state().views[0].id;
     let bytes = h.state().session.save_bytes(id).unwrap();
     // Check the raw saved string: ordinary-comment reader trimming must not hide a bad post.
@@ -5292,4 +5319,111 @@ fn escape_cancels_a_drawing_before_it_leaves_the_tool() {
     h.run_steps(3);
     assert_eq!(h.state().quick_tool, QuickTool::Select);
     assert!(comments(&h).is_empty());
+}
+
+/// The bold and italic runs of the text box at `index` on the first page.
+fn runs_of_box(h: &Harness<'static, PdfCraftApp>, index: usize) -> Vec<(usize, usize, bool, bool)> {
+    let s = h.state();
+    let doc = s.session.get(s.views[0].id).unwrap();
+    doc.comment_text_runs(0, index).iter().map(|r| (r.start, r.end, r.bold, r.italic)).collect()
+}
+
+/// A text box is typed on the page: Ctrl+B and Ctrl+I, or the Bold and Italic buttons, style what is selected or typed
+/// next, and editing the box later keeps each character's style as the text moves.
+#[test]
+fn a_text_box_is_typed_on_the_page_with_bold_and_italic() {
+    let mut h = harness(|app| app.set_option(&egui::Context::default(), "quick", "freetext").unwrap());
+    click_pt(&mut h, (50.0, 150.0));
+    h.run_steps(3);
+    let typing = |h: &mut Harness<'static, PdfCraftApp>, text: &str| {
+        h.event(egui::Event::Text(text.into()));
+        h.run_steps(3);
+    };
+    let key = |h: &mut Harness<'static, PdfCraftApp>, modifiers: egui::Modifiers, key: egui::Key| {
+        h.key_press_modifiers(modifiers, key);
+        h.run_steps(3);
+    };
+    assert!(h.state().views[0].session.comments.rich.is_some(), "the box is typed on the page");
+    assert!(h.state().views[0].session.comments.composer.is_none(), "not in a card");
+    typing(&mut h, "plain ");
+    key(&mut h, egui::Modifiers::COMMAND, egui::Key::B);
+    typing(&mut h, "bold");
+    key(&mut h, egui::Modifiers::COMMAND, egui::Key::B);
+    typing(&mut h, " end");
+    // Select the last word and make it italic with the button.
+    for _ in 0..3 {
+        key(&mut h, egui::Modifiers::SHIFT, egui::Key::ArrowLeft);
+    }
+    h.get_by_label("Italic").click();
+    h.run_steps(4);
+    key(&mut h, egui::Modifiers::COMMAND, egui::Key::Enter);
+    h.run_steps(4);
+    assert!(h.state().views[0].session.comments.rich.is_none());
+    let c = comments(&h);
+    assert_eq!(c.len(), 1);
+    assert_eq!((c[0].subtype.as_str(), c[0].contents.as_deref()), ("FreeText", Some("plain bold end")));
+    assert_eq!(runs_of_box(&h, 0), [(6, 10, true, false), (11, 14, false, true)]);
+    assert_eq!(h.state().quick_tool, QuickTool::Select);
+
+    // Edited again, with a word typed in front: the styles move with their words.
+    h.state_mut().views[0].session.comments.composer = Some(pdfcraft_ui_egui::comments::Composer {
+        page: 0,
+        at: [50.0, 150.0],
+        kind: pdfcraft_ui_egui::comments::ComposerKind::Edit(0),
+        text: "plain bold end".into(),
+        focus: true,
+    });
+    h.run_steps(4);
+    key(&mut h, egui::Modifiers::NONE, egui::Key::Home);
+    typing(&mut h, "very ");
+    h.get_all_by_label("Save").last().unwrap().click();
+    h.run_steps(4);
+    assert_eq!(comments(&h)[0].contents.as_deref(), Some("very plain bold end"));
+    assert_eq!(runs_of_box(&h, 0), [(11, 15, true, false), (16, 19, false, true)]);
+
+    // Cancel and Escape leave the box as it was.
+    for cancel in [true, false] {
+        h.state_mut().views[0].session.comments.composer = Some(pdfcraft_ui_egui::comments::Composer {
+            page: 0,
+            at: [50.0, 150.0],
+            kind: pdfcraft_ui_egui::comments::ComposerKind::Edit(0),
+            text: "very plain bold end".into(),
+            focus: true,
+        });
+        h.run_steps(4);
+        typing(&mut h, "dropped ");
+        if cancel {
+            h.get_by_label("Cancel").click();
+            h.run_steps(4);
+        } else {
+            key(&mut h, egui::Modifiers::NONE, egui::Key::Escape);
+        }
+        assert!(h.state().views[0].session.comments.rich.is_none(), "cancel={cancel}");
+        assert_eq!(comments(&h)[0].contents.as_deref(), Some("very plain bold end"), "cancel={cancel}");
+    }
+}
+
+/// One page with a text box drawn in Courier.
+const COURIER_BOX_FIXTURE: &[u8] = b"%PDF-1.7
+1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
+2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Annots [4 0 R] >> endobj
+4 0 obj << /Type /Annot /Subtype /FreeText /Rect [50 80 250 140] /DA (/Cour 12 Tf 0 g) /Contents (Fixed width) /F 4 >> endobj
+trailer << /Root 1 0 R >>
+%%EOF";
+
+/// The on-page editor lays text out in Helvetica, so a box in another face is edited in the composer card.
+#[test]
+fn a_text_box_in_another_face_keeps_the_composer_card() {
+    let mut h = harness_with_bytes(COURIER_BOX_FIXTURE.to_vec(), |_| {});
+    h.state_mut().views[0].session.comments.composer = Some(pdfcraft_ui_egui::comments::Composer {
+        page: 0,
+        at: [50.0, 140.0],
+        kind: pdfcraft_ui_egui::comments::ComposerKind::Edit(0),
+        text: "Fixed width".into(),
+        focus: true,
+    });
+    h.run_steps(4);
+    let session = &h.state().views[0].session.comments;
+    assert!(session.rich.is_none() && session.composer.is_some());
 }

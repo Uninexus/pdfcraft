@@ -16,6 +16,7 @@ impl PdfCraftApp {
                 _ => {}
             }
         }
+        crate::comments::take_text_box_keys(self, ctx, raw);
         self.return_focus_from_preferences(ctx);
         // A panel opened by keys takes the focus a couple of passes later, after the palette or menu has given its own back.
         if let Some((panel, passes)) = self.panel_focus {

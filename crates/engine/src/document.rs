@@ -1092,6 +1092,12 @@ impl Document {
         self.editor.as_ref().and_then(|e| pdfcraft_annot::text_runs(&e.cos, page, index).ok()).unwrap_or_default()
     }
 
+    /// Whether the text box at `(page, index)` is drawn in plain Helvetica, the face a new one gets.
+    pub fn comment_text_is_helvetica(&self, page: usize, index: usize) -> bool {
+        let face = self.editor.as_ref().and_then(|e| pdfcraft_annot::text_face(&e.cos, page, index).ok());
+        face == Some(pdfcraft_fonts::Std14::Helvetica)
+    }
+
     /// Comment properties of the comment at `(page, index)` (Comment Properties dialog).
     pub fn comment_props(&self, page: usize, index: usize) -> Option<pdfcraft_annot::Props> {
         self.editor.as_ref().and_then(|e| pdfcraft_annot::props(&e.cos, page, index))

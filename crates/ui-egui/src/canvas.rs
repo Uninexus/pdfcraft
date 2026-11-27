@@ -1572,6 +1572,10 @@ fn page_body(ui: &mut egui::Ui, body: &PageBody<'_>, callbacks: &mut PageCallbac
     if let Some(e) = crate::fill_sign::type_box::show(ui, body, session, cx.info, &cx.prefs.author) {
         session.pending_edit = Some(e);
     }
+    let box_cx = crate::comments::BoxCx { info: cx.info, doc: cx.doc, view_rotation: cx.rotation, prefs: cx.prefs };
+    if let Some(e) = crate::comments::rich_box(ui, body, session, &box_cx) {
+        session.pending_edit = Some(e);
+    }
     if cx.tool == QuickTool::Link {
         crate::link_ui::link_outlines(ui, body, &session.links, cx.doc.links(), cx.info);
     }
@@ -2089,8 +2093,13 @@ fn pages_at(app: &mut PdfCraftApp, index: usize, rect: Rect, ui: &mut egui::Ui) 
         view.view.step(forward);
     }
     text_caret::move_caret(view, info, rect, ui.ctx());
-    let marking = note_marker::Placed::by(chosen)
-        .filter(|_| allowed && unobstructed && view.session.comments.composer.is_none() && focus::has(ui.ctx(), out.canvas.response.id));
+    let marking = note_marker::Placed::by(chosen).filter(|_| {
+        allowed
+            && unobstructed
+            && view.session.comments.composer.is_none()
+            && view.session.comments.rich.is_none()
+            && focus::has(ui.ctx(), out.canvas.response.id)
+    });
     body_out.back_to_select |= note_marker::update(view, info, rect, ui.ctx(), marking);
     // The records readers between frames take; no pass reads them back.
     view.textures = out.textures;
@@ -2126,7 +2135,10 @@ fn pages_at(app: &mut PdfCraftApp, index: usize, rect: Rect, ui: &mut egui::Ui) 
     let view = &mut app.views[index];
     // The in-place editors and comment windows over the pages, in their old order, mapped through this pass's
     // placement.
-    if let Some(e) = crate::comments::composer(ui, view, info, &app.comment_prefs) {
+    // A text box typed on the page is the page body's, not the composer card's.
+    let box_cx = crate::comments::BoxCx { info, doc, view_rotation: view.view.rotation, prefs: &app.comment_prefs };
+    let on_page = view.session.comments.composer.as_ref().is_some_and(|c| crate::comments::typed_on_page(c, &box_cx));
+    if !on_page && let Some(e) = crate::comments::composer(ui, view, info, &app.comment_prefs) {
         view.session.pending_edit = Some(e);
     }
     let popups = crate::comments::note_popups(ui, view, info, &app.comment_prefs, doc.comments_hidden(), allowed, body_out.hovered_comment);

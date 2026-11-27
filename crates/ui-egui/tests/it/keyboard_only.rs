@@ -661,3 +661,50 @@ fn a_text_box_is_placed_at_the_marker_by_keys() {
     assert_eq!(h.state().quick_tool, pdfcraft_ui_egui::QuickTool::Select);
     assert_eq!(page_comments(&h).len(), 1);
 }
+
+/// The text box bar by keys: Tab leaves the text for Bold, Space toggles it and goes back to the text, Escape from the
+/// bar goes back too, and Cmd+Enter commits from the bar.
+#[test]
+fn the_text_box_bar_is_reached_and_left_by_keys() {
+    let mut h = open(lines());
+    support::settle(&mut h);
+    tab_to(&mut h, Role::Canvas, "Pages");
+    palette(&mut h, "comment.freetext");
+    press(&mut h, Key::Enter);
+    h.run_steps(4);
+    let in_text = focused(&h);
+    assert!(in_text.is_some(), "the text has the keyboard");
+    type_text(&mut h, "one ");
+
+    press(&mut h, Key::Tab);
+    h.run_steps(2);
+    assert!(focused(&h).is_some_and(|(_, name)| name == "Bold"), "{:?}", focused(&h));
+    press(&mut h, Key::Space);
+    h.run_steps(4);
+    assert_eq!(focused(&h), in_text, "back to the text");
+    type_text(&mut h, "two");
+
+    for back in [(Modifiers::NONE, Key::Escape), (Modifiers::SHIFT, Key::Tab)] {
+        press(&mut h, Key::Tab);
+        h.run_steps(2);
+        assert!(focused(&h).is_some_and(|(_, name)| name == "Bold"), "{:?}", focused(&h));
+        key(&mut h, back.0, back.1);
+        h.run_steps(4);
+        assert_eq!(focused(&h), in_text, "{back:?}");
+        assert!(h.state().views[0].session.comments.rich.is_some(), "{back:?} keeps the box");
+    }
+
+    press(&mut h, Key::Tab);
+    h.run_steps(2);
+    press(&mut h, Key::Tab);
+    h.run_steps(2);
+    assert!(focused(&h).is_some_and(|(_, name)| name == "Italic"), "{:?}", focused(&h));
+    command(&mut h, Key::Enter);
+    h.run_steps(8);
+    let comments = page_comments(&h);
+    assert_eq!(comments.len(), 1, "{comments:?}");
+    assert_eq!(comments[0].1.as_deref(), Some("one two"));
+    let id = h.state().views[0].id;
+    let runs = h.state().session.get(id).unwrap().comment_text_runs(0, 0);
+    assert_eq!(runs.iter().map(|r| (r.start, r.end, r.bold)).collect::<Vec<_>>(), [(4, 7, true)]);
+}

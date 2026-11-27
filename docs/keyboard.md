@@ -41,6 +41,18 @@ otherwise in the middle of what shows of the page.
 | Enter | Place the note or box there and write it |
 | Esc | Cancel |
 
+## Typing in a text box
+
+A text box is typed on the page. Pressing elsewhere on the page saves it.
+
+| Keys | What it does |
+| --- | --- |
+| Ctrl+B / Ctrl+I (Command on macOS) | Bold or italic for the selection, or for what is typed next |
+| Tab / Shift+Tab | Go to the Bold, Italic, Post (or Save) and Cancel buttons and back to the text |
+| Esc | In the buttons: back to the text |
+| Ctrl+Enter | Save the box |
+| Esc | In the text: cancel |
+
 ## Not yet by keyboard
 
 Only sticky notes and text boxes can be placed at a chosen point: shapes, callouts and drawing need a pointer.

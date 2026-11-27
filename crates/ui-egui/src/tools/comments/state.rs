@@ -168,6 +168,8 @@ pub struct CommentView {
     pub context_at: Option<(usize, [f64; 2])>,
     /// A one-shot tool just finished; the app returns to the Select tool unless pinned.
     pub tool_done: bool,
+    /// The text box being typed into on the page.
+    pub rich: Option<super::rich_box::RichBox>,
     /// Escape left the comment tool in this pass: back to Select at once, pinned or not.
     pub(crate) escaped_tool: bool,
     /// The annotation tool took the open press (it did not answer `Ignored`): the drag, release and cancel are its,
