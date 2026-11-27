@@ -102,3 +102,39 @@ fn close_all_runs_will_close_for_each_clean_document() {
     let ran = h.state().js_console.log.iter().filter(|l| *l == "wc").count();
     assert_eq!(ran, 2, "one Will Close per document: {:?}", h.state().js_console.log);
 }
+
+/// Two pages: page 1 says "c1" as it closes, page 2 says "o2" as it opens.
+fn two_pages_with_page_actions() -> Vec<u8> {
+    let act = |tag: &str| format!("<< /S /JavaScript /JS (console.println\\('{tag}'\\);) >>");
+    pdf_of(&[
+        "<< /Type /Catalog /Pages 2 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 /MediaBox [0 0 200 300] >>".into(),
+        format!("<< /Type /Page /Parent 2 0 R /AA << /C {} >> >>", act("c1")),
+        format!("<< /Type /Page /Parent 2 0 R /AA << /O {} >> >>", act("o2")),
+    ])
+}
+
+fn page_action_lines(app: &PdfCraftApp) -> Vec<String> {
+    app.js_console.log.iter().filter(|l| l.as_str() == "c1" || l.as_str() == "o2").cloned().collect()
+}
+
+#[test]
+fn a_page_close_then_open_action_runs_once_when_the_current_page_changes() {
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 1400.0)).build_eframe(|cc| {
+        crate::support::install_runtime(&cc.egui_ctx);
+        let mut app = crate::control::app_with_files(Arc::new(ScriptedFiles::new()));
+        app.set_option(&egui::Context::default(), "language", "en").unwrap();
+        app.open_bytes(&egui::Context::default(), "pages.pdf", None, two_pages_with_page_actions()).unwrap();
+        app
+    });
+    h.run_steps(4);
+    assert!(page_action_lines(h.state()).is_empty(), "page 1 has no open action: {:?}", h.state().js_console.log);
+
+    h.state_mut().views[0].go_to_page(1);
+    h.run_steps(4);
+    assert_eq!(page_action_lines(h.state()), ["c1", "o2"], "the old page's close, then the new page's open");
+
+    h.state_mut().views[0].go_to_page(1);
+    h.run_steps(4);
+    assert_eq!(page_action_lines(h.state()), ["c1", "o2"], "staying on the page runs nothing again");
+}
