@@ -1795,6 +1795,52 @@ fn comment_summary_adds_pages_after_the_sheets_and_says_when_there_is_nothing_to
     assert!(notice.contains("The printed pages have no comments, so no summary was added."), "{notice:?}");
 }
 
+/// The summary lists the comments in the order chosen in the dialog: by page unless asked otherwise.
+#[test]
+fn comment_summary_is_sorted_as_chosen() {
+    let mut h = harness_saving(None, 2);
+    for (author, text, y) in [("Zed", "written by zed", 700.0), ("Amy", "written by amy", 100.0)] {
+        let shape = pdfcraft_engine::Shape::Note { at: [100.0, y], icon: pdfcraft_engine::NoteIcon::Comment };
+        let ctx = h.ctx.clone();
+        assert!(h.state_mut().apply_edit(
+            &ctx,
+            pdfcraft_engine::Edit::AddAnnotation(pdfcraft_engine::NewAnnotation {
+                page: 0,
+                style: pdfcraft_engine::Style::default_for(&shape),
+                shape,
+                contents: text.into(),
+                author: author.into(),
+            })
+        ));
+    }
+    // Whether Amy's comment comes before Zed's in the saved job's summary.
+    let amy_first = |bytes: Arc<Vec<u8>>| {
+        let mut r = pdfcraft_render::PageRenderer::new(bytes, Default::default());
+        let text: String = (1..r.page_count())
+            .filter_map(|page| {
+                let request = pdfcraft_render::RenderRequest { page, kind: pdfcraft_render::RequestKind::Text, scale: 1.0, ..Default::default() };
+                r.render(request).text.map(|t| t.plain_text())
+            })
+            .collect();
+        text.find("written by amy").expect("listed") < text.find("written by zed").expect("listed")
+    };
+    h.open();
+    h.settle();
+    h.set("comment_summary", json!(true));
+    h.pick(None);
+    h.ok();
+    let by_page = amy_first(h.saved(0));
+
+    h.open();
+    h.settle();
+    h.set("comment_summary", json!(true));
+    h.set("comment_summary_sort", json!("author"));
+    h.pick(None);
+    h.ok();
+    assert!(amy_first(h.saved(1)), "by author, Amy comes first");
+    assert!(!by_page, "by page, they stay as they lie on it");
+}
+
 /// The choice greys out, unticked and with its reason, where the summary can't join the job
 /// (Booklet here); it is per job, so the next time the dialog opens it is off again.
 #[test]

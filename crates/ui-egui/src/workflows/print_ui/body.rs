@@ -11,6 +11,7 @@ use craft_ui::contract::{Bind, Entry, Props as _, Show as _, ShowContainer as _,
 use craft_ui::layout_components::Row;
 use craft_ui::patterns::form_dialogs::{DialogFields, Param, ParamKind};
 use craft_ui::runtime::env::{Label, UnitKind};
+use pdfcraft_engine::SummarySort;
 use pdfcraft_engine::print::{self, Binding, BookletSubset, Content, Orientation, PageOrder, Subset, spool};
 
 use super::draft::{CUSTOM_SCALE, Handling, IMAGE_DPI, PrintDraft, Which};
@@ -45,6 +46,9 @@ const CONTENT: [(Content, &str); 4] = [
     (Content::DocumentAndStamps, "document_and_stamps"),
     (Content::FormFieldsOnly, "form_fields_only"),
 ];
+/// The orders a comment summary can list the comments in.
+const SUMMARY_SORT: [(SummarySort, &str); 4] =
+    [(SummarySort::Page, "page"), (SummarySort::Author, "author"), (SummarySort::Date, "date"), (SummarySort::Type, "type")];
 /// The pages-per-sheet counts the dialog offers.
 const PER_SHEET: [usize; 5] = [2, 4, 6, 9, 16];
 /// The id of the typed columns by rows grid among the pages-per-sheet choices.
@@ -186,6 +190,11 @@ fn comments_rows(d: &PrintDraft) -> Vec<Param> {
         None => {
             summary = summary.tooltip(lbl(tl!("Adds pages listing the comments on the printed pages after the document's pages.")));
             rows.push(summary);
+            // The order is asked only for a summary that was asked for.
+            if d.comment_summary {
+                let sorts = options(&SUMMARY_SORT, SummarySort::ALL.into_iter().map(|s| (s, lbl(tl!(s.name())))).collect());
+                rows.push(choice("comment_summary_sort", row_label(tl!("Sort comments by:")), sorts, id_of(&SUMMARY_SORT, d.comment_summary_sort)));
+            }
         }
     }
     rows
@@ -484,6 +493,7 @@ pub(super) fn fields_from_draft(d: &PrintDraft) -> DialogFields {
     f.set("orientation", id_of(&ORIENTATION, d.orientation));
     f.set("content", id_of(&CONTENT, d.content));
     f.set("comment_summary", d.comment_summary);
+    f.set("comment_summary_sort", id_of(&SUMMARY_SORT, d.comment_summary_sort));
     f.set("as_image", d.as_image);
     f.set("dpi", (d.dpi.round() as u32).to_string());
     f.set("paper", d.paper_name());
@@ -651,6 +661,11 @@ pub(super) fn draft_from_fields(d: &mut PrintDraft, f: &DialogFields, edited: &[
         && let Some(v) = f.bool("comment_summary")
     {
         d.comment_summary = v;
+    }
+    if on("comment_summary_sort")
+        && let Some(v) = text("comment_summary_sort").and_then(|t| value_of(&SUMMARY_SORT, t))
+    {
+        d.comment_summary_sort = v;
     }
     if on("as_image")
         && let Some(v) = f.bool("as_image")
