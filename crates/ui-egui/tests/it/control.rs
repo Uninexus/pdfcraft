@@ -2197,3 +2197,20 @@ fn a_text_boxs_keys_are_driven_through_the_control_channel() {
     assert!(doc.info.outline.is_empty(), "no bookmark was added");
     assert_eq!(doc.comment_text_runs(0, 0).iter().map(|r| (r.start, r.end, r.bold)).collect::<Vec<_>>(), [(4, 7, true)]);
 }
+
+/// The recovery interval is set through the control channel and kept with the settings; nothing outside 1 to 60.
+#[test]
+fn the_recovery_interval_is_set_and_remembered() {
+    let (mut h, c) = harness();
+    ok(&mut h, &c, "ui.set", json!({ "key": "autosave-minutes", "value": "10" }));
+    assert_eq!(h.state().autosave_minutes, 10);
+    for bad in ["0", "61", "soon"] {
+        let rx = send(&c, "ui.set", json!({ "key": "autosave-minutes", "value": bad }));
+        h.run_steps(2);
+        assert!(answer(&rx).is_err(), "{bad}");
+    }
+    let saved = h.state().settings_snapshot();
+    let mut fresh = new_app();
+    fresh.apply_settings(&saved);
+    assert_eq!(fresh.autosave_minutes, 10);
+}
