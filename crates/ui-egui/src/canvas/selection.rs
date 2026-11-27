@@ -10,7 +10,7 @@ use std::collections::{HashMap, HashSet};
 
 /// The text layer of a page that could not be read: a page with nothing to select, which a selection across
 /// pages passes over.
-static NO_TEXT: PageText = PageText { glyphs: Vec::new(), line_of: Vec::new(), space_before: Vec::new(), truncated: false };
+pub(super) static NO_TEXT: PageText = PageText { glyphs: Vec::new(), line_of: Vec::new(), space_before: Vec::new(), truncated: false };
 
 /// One page's extracted text as the framework's selection tool reads it. The tool works in the page as shown (the view
 /// rotation applied, `PlacedPage::to_page`); the text layer is in view space, which the rotation leaves unturned, so

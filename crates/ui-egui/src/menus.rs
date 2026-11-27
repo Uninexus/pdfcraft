@@ -177,7 +177,7 @@ const GRID: &[&str] = &["view.show_rulers", "view.show_grid"];
 const THEMES: &[&str] = &["view.theme.system", "view.theme.light", "view.theme.dark"];
 const PANES: &[&str] = &["view.side_panel", "view.tools_pane", "view.split"];
 const PANE_COMMANDS: &[&str] = &["comment.list", "form.fields", "ui.dock.reset"];
-const MODES: &[&str] = &["view.full_screen", "view.read_mode", crate::viewer_prefs::TOGGLE, SEP, "view.model3d"];
+const MODES: &[&str] = &["view.full_screen", "view.read_mode", "view.caret_browsing", crate::viewer_prefs::TOGGLE, SEP, "view.model3d"];
 const PAGES: &[&str] = &[
     "page.organize",
     SEP,

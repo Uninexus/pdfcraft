@@ -358,3 +358,156 @@ fn the_side_rail_opens_panels_by_enter_and_space_and_shows_focus() {
     press(&mut h, Key::Enter);
     assert_eq!(panel(&h), Some(RightPanel::Layers), "Enter did not open the panel");
 }
+
+/// One page with two lines of text.
+fn lines() -> Vec<u8> {
+    let content = "BT /F1 14 Tf 20 150 Td (The quick brown fox) Tj 0 -24 Td (jumps over the dog) Tj ET";
+    format!(
+        "%PDF-1.7
+1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
+2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >> endobj
+4 0 obj << /Length {} >> stream
+{content}
+endstream endobj
+5 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >> endobj
+trailer << /Root 1 0 R >>
+%%EOF",
+        content.len()
+    )
+    .into_bytes()
+}
+
+fn selected(h: &H) -> String {
+    h.state().views[0].selected_text().unwrap_or_default().trim_end().to_owned()
+}
+
+/// Whether pressing the key puts `said` in the live region. The region holds an announcement for the frame that made
+/// it, so the press is stepped one frame at a time.
+fn announces(h: &mut H, modifiers: Modifiers, pressed: Key, said: &str) -> bool {
+    h.input_mut().events.push(egui::Event::Key { key: pressed, physical_key: None, pressed: true, repeat: false, modifiers });
+    let mut heard = false;
+    for _ in 0..4 {
+        h.step();
+        heard |= h.query_all_by(|node| node.label().is_some_and(|label| label.contains(said))).next().is_some();
+    }
+    h.input_mut().events.push(egui::Event::Key { key: pressed, physical_key: None, pressed: false, repeat: false, modifiers });
+    h.run_steps(4);
+    heard
+}
+
+fn shift(h: &mut H, pressed: Key) {
+    key(h, Modifiers::SHIFT, pressed);
+}
+
+/// Caret browsing: F7 puts a caret on the page's text; arrows move it, Shift selects, and Copy and the markup tools act
+/// on the selection.
+#[test]
+fn caret_browsing_selects_part_of_a_page_by_keys() {
+    let clipboard = support::RecordingClipboard::default();
+    let writes = clipboard.clone();
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |cc| {
+        support::install_runtime(&cc.egui_ctx);
+        let mut app = support::app_with_clipboard(clipboard);
+        app.set_option(&egui::Context::default(), "language", "en").unwrap();
+        app.open_bytes(&egui::Context::default(), "lines.pdf", None, lines()).unwrap();
+        app
+    });
+    h.run_steps(4);
+    support::settle(&mut h);
+    let caret = |h: &H| h.state().views[0].caret_screen_rect();
+    assert!(caret(&h).is_none());
+
+    // Without the caret, Shift and an arrow selects nothing.
+    tab_to(&mut h, Role::Canvas, "Pages");
+    shift(&mut h, Key::ArrowRight);
+    assert_eq!(selected(&h), "");
+
+    press(&mut h, Key::F7);
+    let start = caret(&h).expect("a caret at the start of the page's text");
+    assert_eq!(focused(&h), Some((Role::Canvas, "Pages".into())));
+
+    press(&mut h, Key::ArrowRight);
+    assert!(caret(&h).unwrap().center().x > start.center().x);
+    press(&mut h, Key::ArrowDown);
+    assert!(caret(&h).unwrap().center().y > start.center().y);
+    press(&mut h, Key::ArrowUp);
+    press(&mut h, Key::Home);
+    assert_eq!(caret(&h), Some(start));
+
+    // By character, by word, to the line's end, and onto the next line.
+    for _ in 0..2 {
+        shift(&mut h, Key::ArrowRight);
+    }
+    assert!(announces(&mut h, Modifiers::SHIFT, Key::ArrowRight, "Selected: The"), "the selection is announced");
+    assert_eq!(selected(&h), "The");
+    key(&mut h, Modifiers::COMMAND | Modifiers::SHIFT, Key::ArrowRight);
+    key(&mut h, Modifiers::COMMAND | Modifiers::SHIFT, Key::ArrowRight);
+    assert_eq!(selected(&h), "The quick");
+    shift(&mut h, Key::End);
+    assert_eq!(selected(&h), "The quick brown fox");
+    shift(&mut h, Key::ArrowDown);
+    assert!(selected(&h).starts_with("The quick brown fox\njumps"), "{:?}", selected(&h));
+
+    // A plain arrow goes to that end of the selection and drops it.
+    press(&mut h, Key::ArrowLeft);
+    assert_eq!(selected(&h), "");
+    assert_eq!(caret(&h), Some(start));
+    press(&mut h, Key::ArrowDown);
+    press(&mut h, Key::End);
+    key(&mut h, Modifiers::COMMAND | Modifiers::SHIFT, Key::ArrowLeft);
+    assert!(!selected(&h).is_empty() && !selected(&h).contains(' '), "{:?}", selected(&h));
+    press(&mut h, Key::Home);
+    shift(&mut h, Key::End);
+    let line = selected(&h);
+    assert_eq!(line, "jumps over the dog");
+
+    h.event(egui::Event::Copy);
+    h.run_steps(6);
+    assert_eq!(writes.copied().as_deref(), Some(line.as_str()));
+    assert!(!dirty(&h));
+    palette(&mut h, "comment.underline");
+    assert!(dirty(&h), "the selection was underlined");
+
+    // F7 again takes the caret away.
+    tab_to(&mut h, Role::Canvas, "Pages");
+    press(&mut h, Key::F7);
+    assert!(caret(&h).is_none());
+    shift(&mut h, Key::ArrowRight);
+    assert_eq!(selected(&h), "");
+}
+
+/// The caret runs on into the next page, and so does its selection; the view follows it.
+#[test]
+fn caret_browsing_selects_across_pages() {
+    let mut objects = vec![
+        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 /MediaBox [0 0 300 800] /Resources << /Font << /F1 7 0 R >> >> >>".to_string(),
+        "<< /Type /Page /Parent 2 0 R /Contents 5 0 R >>".to_string(),
+        "<< /Type /Page /Parent 2 0 R /Contents 6 0 R >>".to_string(),
+    ];
+    for words in ["one", "two"] {
+        let content = format!("BT /F1 14 Tf 20 750 Td ({words}) Tj ET");
+        objects.push(format!("<< /Length {} >> stream\n{content}\nendstream", content.len()));
+    }
+    objects.push("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_string());
+    let mut pdf = "%PDF-1.7\n".to_string();
+    for (i, object) in objects.iter().enumerate() {
+        pdf.push_str(&format!("{} 0 obj {object} endobj\n", i + 1));
+    }
+    pdf.push_str("trailer << /Root 1 0 R >>\n%%EOF");
+    let mut h = open(pdf.into_bytes());
+    support::settle(&mut h);
+    tab_to(&mut h, Role::Canvas, "Pages");
+    press(&mut h, Key::F7);
+    support::settle(&mut h);
+    shift(&mut h, Key::End);
+    assert_eq!(selected(&h), "one");
+    shift(&mut h, Key::ArrowRight);
+    shift(&mut h, Key::ArrowRight);
+    assert_eq!(selected(&h), "one\nt");
+    assert_eq!(h.state().views[0].current(), 1, "the view followed the caret");
+    shift(&mut h, Key::ArrowLeft);
+    shift(&mut h, Key::ArrowLeft);
+    assert_eq!(selected(&h), "one");
+}

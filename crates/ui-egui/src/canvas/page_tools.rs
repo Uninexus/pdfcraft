@@ -305,6 +305,7 @@ pub(crate) fn page_tool<'a>(
             let texts: &'a DocTexts<'a> = texts_slot.insert(DocTexts::new(&session.texts, &session.text_failed, cx.rotation, cx.sizes));
             let picks = PickSlots::new(&mut session.pending_pick, &mut session.picked_image, &mut session.actions_dismissed);
             let select = select_tool(&cx, &mut session.text, texts, picks, xforms, &mut session.select_dragged).cap_clicks(tool != QuickTool::Select);
+            let select = select.caret(session.caret.as_mut().map(|caret| &mut caret.moves));
             let over_text = {
                 let pages = cx.pages;
                 move |at: Pos2| {

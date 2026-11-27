@@ -52,6 +52,7 @@ mod presenter;
 pub mod scroll_speed;
 mod selection;
 pub(super) mod signature_drag;
+mod text_caret;
 mod xform;
 mod zoom;
 pub(super) mod zoom_snap;
@@ -310,6 +311,8 @@ pub struct PageSession {
     pub text: TextSelectState,
     /// Whether the current Select-tool primary press has dragged past the click threshold.
     pub(crate) select_dragged: bool,
+    /// The text caret while caret browsing is on (View > Caret browsing).
+    pub(crate) caret: Option<text_caret::TextCaret>,
     /// Select All while scrolling continuously (#2639): the text of every page of the document,
     /// highlighted on each page as its text arrives and copied whole ([`DocView::whole_text`]).
     pub(crate) all_text: bool,
@@ -442,6 +445,7 @@ impl PageSession {
             text: TextSelectState::default(),
             select_dragged: false,
             all_text: false,
+            caret: None,
             actions_dismissed: None,
             marks_waiting: None,
             texts: HashMap::new(),
@@ -1700,6 +1704,11 @@ fn text_demand(view: &DocView, visible: std::ops::Range<usize>, hand: bool) -> (
     let count = view.page_count;
     let visible: Vec<usize> = if hand { Vec::new() } else { visible.collect() };
     let mut rest: Vec<usize> = view.session.text.selection.iter().flat_map(|s| s.pages()).collect();
+    // The caret's page and its neighbours, which a key can take it to.
+    if let Some(caret) = &view.session.caret {
+        let page = caret.head.page;
+        rest.extend([Some(page), page.checked_sub(1), Some(page + 1).filter(|p| *p < count)].into_iter().flatten());
+    }
     if count > 0 && view.find.as_ref().is_some_and(|f| !f.case_query.trim().is_empty()) {
         let current = view.view.current;
         rest.extend((0..count).map(|k| (current + k) % count));
@@ -1730,6 +1739,21 @@ pub fn document_area_at(app: &mut PdfCraftApp, index: usize, rect: Rect, ui: &mu
         rulers::show(app, index, ui, &strips, ruler_input);
     }
     if let Some(out) = &out {
+        if let Some(caret) = app.views.get_mut(index).and_then(|view| view.session.caret.as_mut())
+            && caret.take_focus > 0
+        {
+            caret.take_focus -= 1;
+            focus::request(ui.ctx(), FocusTarget::Id(out.canvas.response.id));
+            ui.ctx().request_repaint();
+        }
+        if let Some(line) = app.views.get(index).and_then(DocView::caret_screen_rect) {
+            let color = craft::ui::runtime::env::Env::of(ui).tokens.color.text.normal.0;
+            let [r, g, b, a] = color;
+            // Pages are white whatever the theme: a dark edge under the theme's text colour shows on either.
+            let painter = ui.painter().with_clip_rect(rect);
+            painter.rect_filled(line.expand(1.0), 0.0, Color32::from_black_alpha(200));
+            painter.rect_filled(line, 0.0, Color32::from_rgba_unmultiplied(r, g, b, a));
+        }
         page_end::show(app, index, ui, rect, out.canvas.response.id);
         // The page view draws no ring of its own: show where the keyboard is when it was brought here by keys.
         if app.keyboard_last && focus::has(ui.ctx(), out.canvas.response.id) {
@@ -2046,6 +2070,7 @@ fn pages_at(app: &mut PdfCraftApp, index: usize, rect: Rect, ui: &mut egui::Ui) 
     if let Some(forward) = body_out.turn.or(click_turn) {
         view.view.step(forward);
     }
+    text_caret::move_caret(view, info, rect, ui.ctx());
     // The records readers between frames take; no pass reads them back.
     view.textures = out.textures;
     view.spacing = Some(out.spacing);
