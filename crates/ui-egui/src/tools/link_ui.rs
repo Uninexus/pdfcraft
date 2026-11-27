@@ -19,6 +19,7 @@ use craft::ui::patterns::form_dialogs::FormDialog;
 use craft::ui::pickers::Select;
 use craft::ui::primitives::Draw;
 use craft::ui::runtime::access::announce;
+use craft::ui::runtime::focus::FocusRequest;
 use craft::ui::runtime::requests::ColorRequest;
 use craft::ui::text::{NumberField, TextField};
 use egui::{Pos2, Rect};
@@ -56,22 +57,38 @@ pub struct LinkView {
     pub picking: Option<Box<LinkDraft>>,
     /// The view bar's answer: take the view (`true`) or leave the link as it was.
     pub picked: Option<bool>,
+    /// The view bar button with the keyboard: 0 Set link view, 1 Cancel.
+    pub bar_focus: Option<usize>,
+    /// The view bar button to give the keyboard to in the next pass.
+    pub bar_wanted: Option<usize>,
 }
 
 /// The bar shown while the user chooses a link's view: Set link view takes what is on screen, Cancel or Escape goes
 /// back to Link Properties as it was.
 pub(crate) fn view_bar(ui: &mut egui::Ui, body: &PageBody<'_>, links: &mut LinkView) {
+    links.bar_focus = None;
     if links.picking.is_none() {
         return;
     }
     let top = body.rect.center_top() + egui::vec2(0.0, 8.0);
     let anchor = [body.view.to_doc(top)];
+    let wanted = links.bar_wanted.take();
     TaskBar::fixed(tl!("Link view"), &anchor).show(ui, body.rect, |ui, _| {
-        if Button::new(tl!("Set link view")).show(ui).clicked() {
-            links.picked = Some(true);
+        let mut set = Button::new(tl!("Set link view"));
+        let mut cancel = Button::new(tl!("Cancel"));
+        match wanted {
+            Some(0) => set = set.request_focus(FocusRequest::Take),
+            Some(_) => cancel = cancel.request_focus(FocusRequest::Take),
+            None => {}
         }
-        if Button::new(tl!("Cancel")).show(ui).clicked() {
-            links.picked = Some(false);
+        for (place, button) in [set, cancel].into_iter().enumerate() {
+            let answer = button.show(ui);
+            if answer.clicked() {
+                links.picked = Some(place == 0);
+            }
+            if answer.response.has_focus() {
+                links.bar_focus = Some(place);
+            }
         }
     });
     if links.picked.is_some() {
@@ -79,14 +96,21 @@ pub(crate) fn view_bar(ui: &mut egui::Ui, body: &PageBody<'_>, links: &mut LinkV
     }
 }
 
-/// Escape while a view is being chosen goes back to Link Properties, from the keyboard (taken before the app's own
-/// Escape) or the control channel. True when it was taken.
+/// The keys the view bar takes before the app reads them, from the keyboard or the control channel: Escape goes back
+/// to Link Properties, and Tab and Shift+Tab move between its two buttons (past either end they go on as usual). True
+/// when the key was taken.
 pub(crate) fn view_key(app: &mut PdfCraftApp, key: egui::Key, modifiers: egui::Modifiers) -> bool {
-    if key != egui::Key::Escape || !modifiers.is_none() || app.modal_open() || app.palette_open {
+    if app.modal_open() || app.palette_open {
         return false;
     }
     let Some(view) = app.active.and_then(|i| app.views.get_mut(i)).filter(|v| v.session.links.picking.is_some()) else { return false };
-    view.session.links.picked = Some(false);
+    let links = &mut view.session.links;
+    match (key, links.bar_focus) {
+        (egui::Key::Escape, _) if modifiers.is_none() => links.picked = Some(false),
+        (egui::Key::Tab, Some(0)) if modifiers.is_none() => links.bar_wanted = Some(1),
+        (egui::Key::Tab, Some(1)) if modifiers.shift_only() => links.bar_wanted = Some(0),
+        _ => return false,
+    }
     true
 }
 
