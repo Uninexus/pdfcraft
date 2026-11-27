@@ -147,8 +147,8 @@ pub(super) fn show(app: &mut PdfCraftApp, index: usize, ui: &mut Ui, strips: &St
     for from_top in [true, false] {
         let strip = if from_top { strips.top } else { strips.left };
         let name = if from_top { tl!("Horizontal ruler") } else { tl!("Vertical ruler") };
-        let resp = ui.interact(strip, egui::Id::new(("pdfcraft-ruler", key, from_top)), Sense::drag());
-        resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Other, true, name));
+        let resp = ui.interact(strip, egui::Id::unique(("pdfcraft-ruler", key, from_top)), Sense::drag());
+        resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Unknown, true, name));
         let hint = tl!("Drag onto a page to add a guide");
         let cursor = if from_top { egui::CursorIcon::ResizeVertical } else { egui::CursorIcon::ResizeHorizontal };
         let resp = resp.on_hover_text(hint).on_hover_cursor(cursor);
@@ -284,10 +284,14 @@ mod tests {
     }
 
     #[test]
-    fn zooming_out_numbers_fewer_ticks() {
-        let near = ticks(0.0, 72.0, 0.0, 600.0).iter().filter(|t| t.major).count();
-        let far = ticks(0.0, 7.2, 0.0, 600.0).iter().filter(|t| t.major).count();
-        assert!(far < near, "{near} then {far}");
+    fn zooming_out_numbers_larger_steps_and_keeps_them_apart() {
+        let majors = |per_unit: f32| ticks(0.0, per_unit, 0.0, 600.0).into_iter().filter(|t| t.major).collect::<Vec<_>>();
+        let (near, far) = (majors(72.0), majors(7.2));
+        let step = |m: &[Tick]| m[1].value - m[0].value;
+        assert!(step(&far) > step(&near), "{} then {}", step(&near), step(&far));
+        for m in [near, far] {
+            assert!(m[1].at - m[0].at >= MIN_MAJOR, "{m:?}");
+        }
     }
 
     #[test]

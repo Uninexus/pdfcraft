@@ -75,7 +75,8 @@ fn a_guide_is_dragged_out_of_the_top_ruler_moved_by_its_line_and_dropped_on_the_
 
     // Out of the top ruler onto the page: a horizontal guide where the pointer let go.
     let drop = pos2(shown.center().x, shown.top() + shown.height() * 0.4);
-    drag(&mut h, on_top_ruler(&h, drop.x), drop);
+    let from = on_top_ruler(&h, drop.x);
+    drag(&mut h, from, drop);
     let made = guides(&h);
     assert_eq!(made.len(), 1, "{made:?}");
     assert_eq!(made[0].axis, GuideAxis::Horizontal);
@@ -94,7 +95,8 @@ fn a_guide_is_dragged_out_of_the_top_ruler_moved_by_its_line_and_dropped_on_the_
 
     // Onto the ruler: gone.
     let line = pos2(shown.center().x, shown.top() + moved[0].position as f32 / PAGE_HEIGHT * shown.height());
-    drag(&mut h, line, on_top_ruler(&h, line.x));
+    let ruler = on_top_ruler(&h, line.x);
+    drag(&mut h, line, ruler);
     assert!(guides(&h).is_empty());
 }
 
@@ -103,7 +105,8 @@ fn the_left_ruler_makes_a_vertical_guide() {
     let mut h = harness();
     let shown = page(&h);
     let drop = pos2(shown.left() + shown.width() * 0.25, shown.center().y);
-    drag(&mut h, on_left_ruler(&h, drop.y), drop);
+    let from = on_left_ruler(&h, drop.y);
+    drag(&mut h, from, drop);
     let made = guides(&h);
     assert_eq!(made.len(), 1, "{made:?}");
     assert_eq!(made[0].axis, GuideAxis::Vertical);
@@ -118,7 +121,8 @@ fn a_drag_from_a_ruler_that_ends_off_the_page_makes_no_guide_and_hidden_rulers_t
     // Ends on the pasteboard beside the page.
     let aside = pos2(viewport.right() - 10.0, shown.center().y);
     assert!(!shown.contains(aside));
-    drag(&mut h, on_top_ruler(&h, aside.x), aside);
+    let from = on_top_ruler(&h, aside.x);
+    drag(&mut h, from, aside);
     assert!(guides(&h).is_empty());
 
     // Where the ruler was, nothing takes a drag once the rulers are off.
