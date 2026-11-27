@@ -16593,8 +16593,8 @@ fn link_position_through_tools() {
     }
 }
 
-/// An approval signature that locks the fields is broken by a later change to any of them; without the lock, filling
-/// in after signing is allowed.
+/// An approval signature that locks the fields keeps them as signed: a later fill is refused, saying why, and nothing
+/// changes. Without the lock, filling in after signing is allowed.
 #[test]
 fn signing_can_lock_the_form_fields() {
     let dir = workdir("sign-lock");
@@ -16610,15 +16610,18 @@ fn signing_can_lock_the_form_fields() {
         let args =
             json!({ "doc": doc, "id": "ada.p12", "password": "secret12", "page": 1, "rect": [20, 200, 180, 250], "lock_fields": lock, "out": out });
         ok(&mut a, "sign_document", args);
-        let before = ok(&mut a, "sign_list", json!({ "doc": doc }));
         let mut values = serde_json::Map::new();
         values.insert(text, json!("changed after signing"));
-        ok(&mut a, "form_fill", json!({ "doc": doc, "values": values }));
-        ok(&mut a, "doc_save", json!({ "doc": doc, "path": out }));
-        let after = ok(&mut a, "sign_list", json!({ "doc": doc }));
-        let status = |list: &Value| list["signatures"][0]["status"].as_str().unwrap().to_owned();
-        assert_ne!(status(&before), "invalid", "{before}");
-        assert_eq!(status(&after) == "invalid", lock, "lock {lock}: {after}");
+        let filled = a.call("form_fill", &json!({ "doc": doc, "values": values }));
+        match (lock, filled) {
+            (true, Err(ToolError::Failed(why))) => assert!(why.contains("locks that form field"), "{why}"),
+            (false, Ok(_)) => {}
+            (_, other) => panic!("lock {lock}: {other:?}"),
+        }
+        let listed = ok(&mut a, "sign_list", json!({ "doc": doc }));
+        assert_ne!(listed["signatures"][0]["status"], "invalid", "{listed}");
+        // A comment is not a field: the lock leaves it alone.
+        ok(&mut a, "comment_add", json!({ "doc": doc, "page": 1, "type": "note", "at": [40, 40], "contents": "seen" }));
     }
     let doc = ok(&mut a, "doc_open", json!({ "path": "a.pdf" }))["doc"].as_u64().unwrap();
     let both = json!({ "doc": doc, "id": "ada.p12", "password": "secret12", "certify": "form_fill", "lock_fields": true, "out": "no.pdf" });

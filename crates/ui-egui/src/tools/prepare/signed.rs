@@ -8,9 +8,9 @@
 //! the reasons keeps the other seed entries the field holds (formats, digest methods, revocation); when the field's seed
 //! values hold something this window cannot show whole, they are left alone.
 //!
-//! Both are entries in the file for the one who signs and for other programs. PdfCraft does not apply them: it does not
-//! make the locked fields read-only after a signature and it does not read the seed values when it signs. The window says
-//! so. Nothing is signed or sent.
+//! Both are entries in the file for the one who signs and for other programs. A lock takes effect once the field is
+//! signed, when PdfCraft refuses to change the locked fields' values; setting it applies nothing, and PdfCraft does not
+//! read the seed values when it signs. The window says so. Nothing is signed or sent.
 
 use pdfcraft_engine::{DocId, Edit, LockAction, LockChange, LockSpec, SeedChange, SeedEntry, SeedSpec};
 
@@ -245,7 +245,7 @@ impl PdfCraftApp {
         self.notify(if removal {
             tl!("The lock was taken out").to_string()
         } else {
-            tl!("The lock was set. It is a note in the file: PdfCraft does not make the fields read-only after a signature, and nothing was signed or sent")
+            tl!("The lock was set. It takes effect once the field is signed: PdfCraft then refuses to change what the locked fields hold. Nothing was signed or sent")
                 .to_string()
         });
     }

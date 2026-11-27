@@ -33,6 +33,8 @@ pub enum EditError {
     Measure(#[from] measure::MeasureError),
     #[error("{0}")]
     Protection(String),
+    #[error("the signature in {0:?} locks that form field: changing it would make the signature invalid, so the document was not changed")]
+    Locked(String),
     #[error("the password is incorrect")]
     WrongPassword,
     #[error("{0}")]

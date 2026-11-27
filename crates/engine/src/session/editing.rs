@@ -368,6 +368,17 @@ impl Session {
         cx.redaction_marks.clear();
         // `next` is a copy: if the edit fails or crashes, the document is unchanged.
         run_checked_edit(&mut next, &edit, &mut cx)?;
+        // The values of fields a signature locks stay as signed, however the edit would change them (typing, reset,
+        // import, scripts), and the fields are not removed. A signature already invalid no longer holds anything back.
+        if signed {
+            let broken = pdfcraft_sign::pdf::signatures_locking_changed_values(&editor.cos, &next);
+            if let Some(field) =
+                broken.iter().find(|name| signatures_before.iter().any(|s| &s.field == *name && s.status != pdfcraft_sign::pdf::Status::Invalid))
+            {
+                discard_edit_callbacks(&cx);
+                return Err(EditError::Locked(field.clone()));
+            }
+        }
         // A field's enter or exit scripts that changed nothing leave no edit behind (no undo step,
         // nothing unsaved); what they showed or asked for still goes out. Only an event on its own:
         // a batch keeps the other edits it holds.
