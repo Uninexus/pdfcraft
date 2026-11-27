@@ -5247,3 +5247,49 @@ fn comment_menu_rows_follow_permissions_and_run_their_action() {
     }
     attachment_page_menu_row();
 }
+
+/// Escape with a comment tool and nothing drawn or selected goes back to Select at once; it used to wait for the next
+/// edit. A selected comment is deselected first.
+#[test]
+fn escape_leaves_a_comment_tool_at_once() {
+    for tool in ["highlight", "underline", "square", "freetext", "ink"] {
+        let mut h = harness(move |app| app.set_option(&egui::Context::default(), "quick", tool).unwrap());
+        assert_ne!(h.state().quick_tool, QuickTool::Select, "{tool}");
+        h.key_press(egui::Key::Escape);
+        h.run_steps(3);
+        assert_eq!(h.state().quick_tool, QuickTool::Select, "{tool}: one Escape leaves the tool");
+        assert!(comments(&h).is_empty(), "{tool}");
+        // The tool picked again stays: nothing is left over from leaving it.
+        h.set_option("quick", tool).unwrap();
+        h.run_steps(3);
+        assert_ne!(h.state().quick_tool, QuickTool::Select, "{tool}: picked again");
+    }
+    let mut h = harness(|app| app.set_option(&egui::Context::default(), "quick", "square").unwrap());
+    add_two_boxes_and_a_reply(&mut h);
+    h.state_mut().views[0].session.comments.select_only((0, 0));
+    h.run_steps(2);
+    h.key_press(egui::Key::Escape);
+    h.run_steps(3);
+    assert!(h.state().views[0].session.comments.selection().is_empty(), "the first Escape deselects");
+    assert_ne!(h.state().quick_tool, QuickTool::Select, "and keeps the tool");
+    h.key_press(egui::Key::Escape);
+    h.run_steps(3);
+    assert_eq!(h.state().quick_tool, QuickTool::Select);
+}
+
+/// A shape being clicked out takes the first Escape; the next leaves the tool.
+#[test]
+fn escape_cancels_a_drawing_before_it_leaves_the_tool() {
+    let mut h = harness(|app| app.set_option(&egui::Context::default(), "quick", "polygon").unwrap());
+    click_pt(&mut h, (60.0, 60.0));
+    h.run_steps(30);
+    click_pt(&mut h, (120.0, 60.0));
+    h.run_steps(2);
+    h.key_press(egui::Key::Escape);
+    h.run_steps(3);
+    assert_ne!(h.state().quick_tool, QuickTool::Select, "the first Escape drops the drawing");
+    h.key_press(egui::Key::Escape);
+    h.run_steps(3);
+    assert_eq!(h.state().quick_tool, QuickTool::Select);
+    assert!(comments(&h).is_empty());
+}
