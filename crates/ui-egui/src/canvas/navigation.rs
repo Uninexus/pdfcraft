@@ -200,6 +200,12 @@ impl DocView {
         }
     }
 
+    /// What the window shows: the current page, the user-space point of it at the top-left, and the zoom in percent.
+    pub(crate) fn shown_view(&self, info: &DocInfo) -> Option<(usize, [f64; 2], f64)> {
+        let corner = self.place_at_corner(info)?;
+        Some((self.view.current, corner.map(f64::from), self.view.zoom * 100.0))
+    }
+
     /// The user-space point of the current page at the window's top-left as far as pages go (past
     /// the side gutter) in the last pass, if that page was drawn.
     fn place_at_corner(&self, info: &DocInfo) -> Option<[f32; 2]> {

@@ -48,11 +48,23 @@ impl Automation {
     /// The action `url`, `to_page` and `zoom` ask for, if any. `current` is the link's action now
     /// (link_edit): a new page keeps the link's zoom, and a zoom alone keeps its page.
     fn link_action(&self, a: &Args, current: Option<&LinkAction>) -> Result<Option<LinkAction>> {
-        let zoom = link_zoom(a)?;
+        let mut zoom = link_zoom(a)?;
         let (current_page, current_zoom) = match current {
             Some(LinkAction::Page { page, zoom }) => (Some(*page), Some(*zoom)),
             _ => (None, None),
         };
+        // A position makes the zoom a view: that point of the page at the window's top-left.
+        if let Some([x, y]) = a.nums::<2>("position")? {
+            let page = match a.opt_int("to_page")? {
+                Some(p) => usize::try_from(p).ok().and_then(|p| p.checked_sub(1)),
+                None => current_page,
+            };
+            let pages = &self.doc(a)?.info.pages;
+            let Some(target) = page.and_then(|p| pages.get(p)) else { return Err(bad("position needs to_page, a page of the document")) };
+            let Some(LinkZoom::Percent(percent)) = zoom else { return Err(bad("position needs zoom as a percentage or actual")) };
+            let [left, top] = target.view_to_user(x as f32, y as f32).map(f64::from);
+            zoom = Some(LinkZoom::View { left, top, percent });
+        }
         match (a.opt_str("url")?, a.opt_int("to_page")?) {
             (Some(_), Some(_)) => Err(bad("pass url or to_page, not both")),
             (Some(_), None) if zoom.is_some() => Err(bad("zoom goes with to_page, not url")),
@@ -671,6 +683,7 @@ fn zoom_value(zoom: LinkZoom) -> Value {
         LinkZoom::FitVisible => json!("fit_visible"),
         LinkZoom::Inherit => json!("inherit"),
         LinkZoom::Percent(p) => json!(p),
+        LinkZoom::View { percent, .. } => json!(percent),
     }
 }
 

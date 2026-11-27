@@ -17,6 +17,10 @@ impl PdfCraftApp {
             }
         }
         crate::comments::take_text_box_keys(self, ctx, raw);
+        raw.events.retain(|event| {
+            let egui::Event::Key { key, pressed: true, modifiers, .. } = event else { return true };
+            !crate::link_ui::view_key(self, *key, *modifiers)
+        });
         self.return_focus_from_preferences(ctx);
         // A panel opened by keys takes the focus a couple of passes later, after the palette or menu has given its own back.
         if let Some((panel, passes)) = self.panel_focus {

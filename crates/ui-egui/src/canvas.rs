@@ -1572,6 +1572,7 @@ fn page_body(ui: &mut egui::Ui, body: &PageBody<'_>, callbacks: &mut PageCallbac
     if let Some(e) = crate::fill_sign::type_box::show(ui, body, session, cx.info, &cx.prefs.author) {
         session.pending_edit = Some(e);
     }
+    crate::link_ui::view_bar(ui, body, &mut session.links);
     let box_cx = crate::comments::BoxCx { info: cx.info, doc: cx.doc, view_rotation: cx.rotation, prefs: cx.prefs };
     if let Some(e) = crate::comments::rich_box(ui, body, session, &box_cx) {
         session.pending_edit = Some(e);

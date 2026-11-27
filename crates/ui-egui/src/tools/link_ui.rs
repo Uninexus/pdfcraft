@@ -6,10 +6,11 @@ use craft::behavior::kurbo::{BezPath, Point};
 use craft::behavior::{CancelReason, Cursor, CursorIcon, PointerButton, PressPhase, PressState};
 use craft::pages::ui::{PageBody, PlacedPage};
 use craft::theme::Srgba;
+use craft::ui::buttons::Button;
 use craft::ui::canvas::{CanvasTool, ToolAction, ToolClaims, ToolContext, ToolKey, ToolPath, ToolPointer};
-use craft::ui::canvas_controls::SelectionOutline;
+use craft::ui::canvas_controls::{SelectionOutline, TaskBar};
 use craft::ui::choice::{Checkbox, Radio, RadioGroup};
-use craft::ui::contract::{Bind, Entry, Props as _, Show as _, ShowContainer as _};
+use craft::ui::contract::{Bind, Entry, Politeness, Props as _, Show as _, ShowContainer as _};
 use craft::ui::dialog::{DialogId, DialogResult, DialogStack, StackDialog, dialog_id};
 use craft::ui::display::{Shade, Text};
 use craft::ui::form::{Field, FieldGroup, Help};
@@ -17,6 +18,7 @@ use craft::ui::layout_components::Row;
 use craft::ui::patterns::form_dialogs::FormDialog;
 use craft::ui::pickers::Select;
 use craft::ui::primitives::Draw;
+use craft::ui::runtime::access::announce;
 use craft::ui::runtime::requests::ColorRequest;
 use craft::ui::text::{NumberField, TextField};
 use egui::{Pos2, Rect};
@@ -50,6 +52,42 @@ pub struct LinkView {
     /// link (page, index).
     pub open_new: Option<(usize, [f64; 4])>,
     pub open_existing: Option<(usize, usize)>,
+    /// Link Properties put away while the user scrolls and zooms to the view the link should show.
+    pub picking: Option<Box<LinkDraft>>,
+    /// The view bar's answer: take the view (`true`) or leave the link as it was.
+    pub picked: Option<bool>,
+}
+
+/// The bar shown while the user chooses a link's view: Set link view takes what is on screen, Cancel or Escape goes
+/// back to Link Properties as it was.
+pub(crate) fn view_bar(ui: &mut egui::Ui, body: &PageBody<'_>, links: &mut LinkView) {
+    if links.picking.is_none() {
+        return;
+    }
+    let top = body.rect.center_top() + egui::vec2(0.0, 8.0);
+    let anchor = [body.view.to_doc(top)];
+    TaskBar::fixed(tl!("Link view"), &anchor).show(ui, body.rect, |ui, _| {
+        if Button::new(tl!("Set link view")).show(ui).clicked() {
+            links.picked = Some(true);
+        }
+        if Button::new(tl!("Cancel")).show(ui).clicked() {
+            links.picked = Some(false);
+        }
+    });
+    if links.picked.is_some() {
+        ui.ctx().request_repaint();
+    }
+}
+
+/// Escape while a view is being chosen goes back to Link Properties, from the keyboard (taken before the app's own
+/// Escape) or the control channel. True when it was taken.
+pub(crate) fn view_key(app: &mut PdfCraftApp, key: egui::Key, modifiers: egui::Modifiers) -> bool {
+    if key != egui::Key::Escape || !modifiers.is_none() || app.modal_open() || app.palette_open {
+        return false;
+    }
+    let Some(view) = app.active.and_then(|i| app.views.get_mut(i)).filter(|v| v.session.links.picking.is_some()) else { return false };
+    view.session.links.picked = Some(false);
+    true
 }
 
 /// What a link does, as Link Properties' Link Action group offers it.
@@ -200,6 +238,7 @@ fn zoom_label(zoom: LinkZoom) -> String {
         LinkZoom::FitHeight => tl!("Fit Height").to_string(),
         LinkZoom::FitVisible => tl!("Fit Visible").to_string(),
         LinkZoom::Inherit => tl!("Inherit Zoom").to_string(),
+        LinkZoom::View { percent, .. } => crate::i18n::fmt(tl!("Chosen view ({zoom}%)"), &[("zoom", &format!("{percent:.0}"))]).to_string(),
         LinkZoom::Percent(p) if (p - 100.0).abs() < 1e-9 => tl!("Actual Size").to_string(),
         // Another writer's factor can be anything up to f64::MAX, or a tiny fraction: exponent
         // form keeps it short.
@@ -386,6 +425,14 @@ pub(crate) struct LinkPropsDialog {
     recent: RecentColours,
 }
 
+/// What Link Properties answers.
+pub(crate) enum LinkAnswer {
+    /// OK: the edit it makes.
+    Edit(Box<Edit>),
+    /// Choose the view in the document, then come back with this draft.
+    ChooseView(Box<LinkDraft>),
+}
+
 impl LinkPropsDialog {
     /// The dialog editing `draft` in a document of `pages` pages and these article threads.
     pub(crate) fn new(draft: LinkDraft, pages: usize, threads: Vec<ThreadChoice>, recent: RecentColours) -> Self {
@@ -535,8 +582,9 @@ struct ActionCx<'a> {
     threads: &'a [ThreadChoice],
 }
 
-/// The Link Action group.
-fn action(ui: &mut egui::Ui, d: &mut LinkDraft, cx: &ActionCx<'_>) {
+/// The Link Action group. True when the user asked to choose the view in the document.
+fn action(ui: &mut egui::Ui, d: &mut LinkDraft, cx: &ActionCx<'_>) -> bool {
+    let mut choose = false;
     FieldGroup::new(tl!("Link Action").to_string()).show(ui, |ui, _| {
         Text::new(tl!("Link Action").to_uppercase()).shade(Shade::Muted).show(ui);
         if d.preserve_action {
@@ -557,7 +605,7 @@ fn action(ui: &mut egui::Ui, d: &mut LinkDraft, cx: &ActionCx<'_>) {
             Radio::new(LinkKind::Web).label(tl!("Open a web page").to_string()).show(ui);
             web_rows(ui, &mut d.url, kind == LinkKind::Web);
             Radio::new(LinkKind::Page).label(tl!("Go to a page view").to_string()).show(ui);
-            page_rows(ui, &mut d.target, &mut d.zoom, cx.pages, kind == LinkKind::Page);
+            choose = page_rows(ui, &mut d.target, &mut d.zoom, cx.pages, kind == LinkKind::Page);
             Radio::new(LinkKind::Thread).label(tl!("Go to an article thread").to_string()).enabled(existing).show(ui);
             thread_rows(ui, &mut d.thread, &mut d.bead, cx.threads, kind == LinkKind::Thread && existing);
             Radio::new(LinkKind::Menu).label(tl!("Run a menu item").to_string()).enabled(existing).show(ui);
@@ -574,6 +622,7 @@ fn action(ui: &mut egui::Ui, d: &mut LinkDraft, cx: &ActionCx<'_>) {
                 .show(ui);
         }
     });
+    choose
 }
 
 /// The web address row of the Link Action group.
@@ -587,8 +636,8 @@ fn web_rows(ui: &mut egui::Ui, url: &mut String, on: bool) {
     });
 }
 
-/// The page and zoom rows of the Link Action group.
-fn page_rows(ui: &mut egui::Ui, target: &mut usize, zoom: &mut LinkZoom, pages: usize, on: bool) {
+/// The page and zoom rows of the Link Action group. True when the user asked to choose the view in the document.
+fn page_rows(ui: &mut egui::Ui, target: &mut usize, zoom: &mut LinkZoom, pages: usize, on: bool) -> bool {
     Field::new(tl!("Page").to_string()).show(ui, |ui, _| {
         Row::new().show(ui, |ui, _| {
             let page = NumberField::new(tl!("Page").to_string(), Bind::given(Some(*target as f64)))
@@ -597,7 +646,14 @@ fn page_rows(ui: &mut egui::Ui, target: &mut usize, zoom: &mut LinkZoom, pages: 
                 .enabled(on)
                 .show(ui);
             if let Some(n) = page.edit.events.landed().cloned().flatten() {
-                *target = (n.round().max(1.0) as usize).min(pages.max(1));
+                let n = (n.round().max(1.0) as usize).min(pages.max(1));
+                // A chosen view's position belongs to its page: another page keeps only its zoom.
+                if n != *target
+                    && let LinkZoom::View { percent, .. } = *zoom
+                {
+                    *zoom = LinkZoom::Percent(percent);
+                }
+                *target = n;
             }
             Text::new(crate::i18n::fmt(tl!("of {pages}"), &[("pages", &pages.max(1).to_string())]).to_string()).shade(Shade::Muted).show(ui);
         });
@@ -616,6 +672,7 @@ fn page_rows(ui: &mut egui::Ui, target: &mut usize, zoom: &mut LinkZoom, pages: 
             *zoom = *z;
         }
     });
+    Button::new(tl!("Choose the view in the document…").to_string()).enabled(on).show(ui).clicked()
 }
 
 /// The article thread and bead rows of the Link Action group.
@@ -716,26 +773,32 @@ fn draft_ok_url(url: &str) -> bool {
 }
 
 impl StackDialog for LinkPropsDialog {
-    type Result = Edit;
+    type Result = LinkAnswer;
 
     fn id(&self) -> DialogId {
         self.id
     }
 
-    fn show(&mut self, ui: &mut egui::Ui, _: &DialogStack) -> Option<DialogResult<Edit>> {
+    fn show(&mut self, ui: &mut egui::Ui, _: &DialogStack) -> Option<DialogResult<LinkAnswer>> {
         let title = if self.draft.index.is_some() { tl!("Link Properties") } else { tl!("Create Link") };
         let LinkPropsDialog { draft, pages, threads, open, colour_request, recent, .. } = self;
         let has_threads = !threads.is_empty();
         let reason = ok_reason(draft, has_threads);
         let form = FormDialog::new(title.to_string(), Bind::bound(&mut *draft)).opened(Bind::bound(open)).ok_reason(reason);
         let cx = ActionCx { pages: *pages, threads: threads.as_slice() };
+        let mut choose = None;
         let shown = form.show(ui, |ui, _, d| {
             appearance(ui, d, colour_request, recent);
-            action(ui, d, &cx);
+            if action(ui, d, &cx) {
+                choose = Some(Box::new(d.clone()));
+            }
             draft_ok(d, has_threads)
         });
+        if let Some(draft) = choose {
+            return Some(DialogResult::Ok(LinkAnswer::ChooseView(draft)));
+        }
         match (shown.accepted, shown.closed) {
-            (Some(d), _) => Some(DialogResult::Ok(edit_for(&d))),
+            (Some(d), _) => Some(DialogResult::Ok(LinkAnswer::Edit(Box::new(edit_for(&d))))),
             (None, Some(_)) => Some(DialogResult::Cancel),
             (None, None) => None,
         }
@@ -756,6 +819,10 @@ impl PdfCraftApp {
             _ => LinkDraft { page, rect: rect.unwrap_or_default(), ..LinkDraft::default() },
         };
         let (pages, threads) = self.session.get(id).map_or((1, Vec::new()), |d| (d.info.pages.len(), thread_choices(d)));
+        // Properties opened afresh replace a view still being chosen.
+        if let Some(view) = self.active.and_then(|i| self.views.get_mut(i)) {
+            view.session.links.picking = None;
+        }
         crate::dialogs::host::open(self, LinkPropsDialog::new(draft, pages, threads, self.recent_colours.clone()));
     }
 
@@ -770,9 +837,47 @@ impl PdfCraftApp {
                 }
             });
         }
-        if let Some(DialogResult::Ok(edit)) = self.dialogs.take::<LinkPropsDialog>() {
-            self.apply_edit(ctx, edit);
+        match self.dialogs.take::<LinkPropsDialog>() {
+            Some(DialogResult::Ok(LinkAnswer::Edit(edit))) => {
+                self.apply_edit(ctx, *edit);
+            }
+            Some(DialogResult::Ok(LinkAnswer::ChooseView(draft))) => {
+                if let Some(view) = self.active.and_then(|i| self.views.get_mut(i)) {
+                    view.session.links.picking = Some(draft);
+                    announce(ctx, tl!("Scroll and zoom to the view, then choose Set link view").to_string(), Politeness::Polite);
+                }
+            }
+            _ => {}
         }
+        self.finish_link_view(ctx);
+    }
+
+    /// Reopens Link Properties once the view bar is answered, with the view on screen when it was taken.
+    fn finish_link_view(&mut self, ctx: &egui::Context) {
+        let Some(view) = self.active.and_then(|i| self.views.get_mut(i)) else { return };
+        let Some(take) = view.session.links.picked.take() else { return };
+        let Some(mut draft) = view.session.links.picking.take() else { return };
+        let Some(doc) = self.session.get(view.id) else { return };
+        // An undo or delete while scrolling may have taken the link away, or moved another into its place.
+        let gone = draft.index.is_some_and(|index| !doc.links().iter().any(|l| l.page == draft.page && l.index == index && l.obj == draft.obj));
+        if gone {
+            self.notify_tr("The link changed while the view was being chosen: open its properties again");
+            return;
+        }
+        if take {
+            if let Some((page, [left, top], percent)) = view.shown_view(&doc.info) {
+                draft.kind = LinkKind::Page;
+                draft.preserve_action = false;
+                draft.target = page + 1;
+                draft.zoom = LinkZoom::View { left, top, percent };
+            } else {
+                self.notify_tr("That view could not be read: scroll to a page and try again");
+                return;
+            }
+        }
+        let (pages, threads) = (doc.info.pages.len(), thread_choices(doc));
+        crate::dialogs::host::open(self, LinkPropsDialog::new(*draft, pages, threads, self.recent_colours.clone()));
+        ctx.request_repaint();
     }
 
     /// Create links from URLs in the text of every page.
