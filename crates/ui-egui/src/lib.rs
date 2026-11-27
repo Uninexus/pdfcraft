@@ -352,6 +352,10 @@ pub struct PdfCraftApp {
     /// Whether the Tools pane was in the dock when the floating toolbar was last placed: the toolbar follows the page area's
     /// left edge as the pane closes and opens.
     pub(crate) toolbar_tools_open: bool,
+    /// The rail's zoom field, once it has been shown.
+    pub(crate) zoom_field: Option<egui::Id>,
+    /// The zoom field had the focus as this frame's input arrived, and the rail has not moved it on yet.
+    pub(crate) zoom_held: bool,
     /// The left rulers the last pass drew: the floating toolbar is kept off them.
     pub(crate) left_rulers: Vec<egui::Rect>,
     /// Where the floating toolbar stood before a ruler moved it, and where it was moved to.

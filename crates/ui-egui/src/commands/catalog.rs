@@ -2,9 +2,9 @@
 //! menu-only id, and one [`CommandState`] row per command, so the menus, the palette and the shortcuts read one
 //! enabled, checked and hint rule.
 
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
-use craft::keymap::{Key, Mods};
+use craft::keymap::{Key, Mods, Overrides};
 use craft::menu::Chord;
 use craft::ui::runtime::commands::{
     AppCatalog, Binding, CommandDef, CommandDefError, CommandGate, CommandInput, CommandKind, CommandRef, CommandState, CommandStates, ModalRule,
@@ -45,6 +45,22 @@ const FRAMEWORK_EDIT: &[&str] = &["edit.copy", "edit.paste"];
 
 /// The built catalogs, one per platform and single-key setting (see [`shared_catalog`]).
 static CATALOGS: [OnceLock<Option<AppCatalog>>; 4] = [OnceLock::new(), OnceLock::new(), OnceLock::new(), OnceLock::new()];
+
+/// The framework's bindings PdfCraft takes away. Its window commands "Show or Hide Panels" (with and without the
+/// tools) sit on a bare Tab and Shift+Tab and fire when nothing has the focus, which is where Tab lands after the
+/// window's last control: the next press hid the interface in place of going round to the first. Showing and hiding
+/// the interface stays on F8 (`view.toggle_interface`), the side panel on F4 and the Tools panel on Shift+F4.
+fn unbound() -> Arc<Overrides> {
+    static UNBOUND: OnceLock<Arc<Overrides>> = OnceLock::new();
+    let overrides = UNBOUND.get_or_init(|| {
+        let mut overrides = Overrides::default();
+        for command in ["window.toggle_panels", "window.toggle_panels_keep_tools"] {
+            overrides.insert(command, Vec::new());
+        }
+        Arc::new(overrides)
+    });
+    Arc::clone(overrides)
+}
 
 /// What a command is to the keymap: a toggle or a radio choice for the ones that carry a checked state.
 fn kind_of(id: &str) -> CommandKind {
@@ -142,7 +158,7 @@ pub(crate) fn command_input(app: &mut PdfCraftApp, ctx: &egui::Context) -> Comma
     // fields, at once, as `run_fired` sends them.
     let organize = app.active.and_then(|i| app.views.get(i)).is_some_and(|v| v.organize);
     let reads_clipboard = !organize && !app.is_preparing();
-    let mut input = CommandInput::new().gate(CommandGate::new(gated, |gated, _| !*gated)).paste_reads_clipboard(reads_clipboard);
+    let mut input = CommandInput::new().gate(CommandGate::new(gated, |gated, _| !*gated)).paste_reads_clipboard(reads_clipboard).overrides(unbound());
     if let Some(catalog) = shared_catalog(super::mac_shortcuts(ctx), app.single_key_accelerators) {
         input = input.catalog(catalog);
     }
