@@ -55,6 +55,7 @@ mod fast_web_view;
 mod field_signer;
 mod field_triggers;
 mod fill_sign;
+mod find_bookmarks;
 mod find_comments;
 mod find_replace;
 mod folder_search;

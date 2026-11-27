@@ -68,7 +68,7 @@ impl DocView {
         let current = self.current();
         if let Some(f) = self.find.as_mut() {
             f.matches = FindMatches::new(current);
-            f.forget_comment_hits();
+            f.forget_listed_hits();
         }
     }
 
