@@ -76,6 +76,8 @@ pub struct PrintDraft {
     pub comment_summary: bool,
     /// The order the summary lists the comments in (per job; Page unless chosen).
     pub comment_summary_sort: pdfcraft_engine::SummarySort,
+    /// How many more passes to ask the dialog to show the sort row, after the summary was ticked.
+    pub reveal_summary_sort: u8,
     /// The open document withholds copying, which the summary needs; read when the dialog opens.
     pub comment_summary_no_copying: bool,
     /// The open document allows only low-resolution printing, whose pages are pictures; read when
@@ -162,6 +164,7 @@ impl Default for PrintDraft {
             content: Content::DocumentAndMarkups,
             comment_summary: false,
             comment_summary_sort: pdfcraft_engine::SummarySort::Page,
+            reveal_summary_sort: 0,
             comment_summary_no_copying: false,
             comment_summary_low_resolution: false,
             as_image: false,
