@@ -9,7 +9,7 @@ license.workspace = true
 workspace = true
 
 [dependencies]
-craft-xfdf = { git = "https://github.com/Uninexus/craft-libs", rev = "d771cdb234fcc7ae365d4018dbbf68d0bfc88aab", version = "0.1.0" }
+craft-xfdf = { git = "https://github.com/Uninexus/craft-libs", rev = "414048894d6d70af119ea2c4588e85053b519989", version = "0.1.0" }
 pdfcraft-cos = { workspace = true }
 pdfcraft-annot = { workspace = true }
 pdfcraft-forms = { workspace = true }

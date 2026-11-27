@@ -167,6 +167,7 @@ struct PrefsDraft {
     field_highlight_color: Option<[u8; 3]>,
     required_field_color: Option<[u8; 3]>,
     hide_empty_highlight_hover: bool,
+    connector_lines: bool,
     comment_tool_pinned: bool,
     flatten_fill_sign_on_save: bool,
     ask_to_lock_signatures: bool,
@@ -216,6 +217,7 @@ impl PrefsDraft {
             field_highlight_color: app.field_highlight_color,
             required_field_color: app.required_field_color,
             hide_empty_highlight_hover: app.comment_prefs.hide_empty_highlight_hover,
+            connector_lines: app.comment_prefs.connector_lines,
             comment_tool_pinned: app.comment_prefs.pinned,
             flatten_fill_sign_on_save: app.flatten_fill_sign_on_save,
             ask_to_lock_signatures: app.ask_to_lock_signatures,
@@ -270,6 +272,7 @@ impl PrefsDraft {
             field_highlight_color: None,
             required_field_color: None,
             hide_empty_highlight_hover: prefs.hide_empty_highlight_hover,
+            connector_lines: prefs.connector_lines,
             comment_tool_pinned: prefs.pinned,
             flatten_fill_sign_on_save: false,
             ask_to_lock_signatures: true,
@@ -681,6 +684,7 @@ impl PreferencesModel for Prefs<'_> {
             ("forms.tooltips", PrefValue::Bool(v)) => d.form_tooltips = v,
             ("forms.autocomplete", PrefValue::Choice(id)) => d.form_autocomplete = lookup(&autocomplete_table(), &id).unwrap_or(d.form_autocomplete),
             ("comment.hide_hover", PrefValue::Bool(v)) => d.hide_empty_highlight_hover = v,
+            ("comment.connector", PrefValue::Bool(v)) => d.connector_lines = v,
             ("comment.pinned", PrefValue::Bool(v)) => d.comment_tool_pinned = v,
             ("fill.flatten", PrefValue::Bool(v)) => d.flatten_fill_sign_on_save = v,
             ("fill.ask_lock", PrefValue::Bool(v)) => d.ask_to_lock_signatures = v,
@@ -877,6 +881,7 @@ impl PreferencesModel for Prefs<'_> {
             }
             "comment" => {
                 d.hide_empty_highlight_hover = fresh.hide_empty_highlight_hover;
+                d.connector_lines = fresh.connector_lines;
                 d.comment_tool_pinned = fresh.comment_tool_pinned;
             }
             "fill" => {
@@ -971,6 +976,7 @@ impl PreferencesDraft for Prefs<'_> {
         self.app.field_highlight_color = d.field_highlight_color;
         self.app.required_field_color = d.required_field_color;
         self.app.comment_prefs.hide_empty_highlight_hover = d.hide_empty_highlight_hover;
+        self.app.comment_prefs.connector_lines = d.connector_lines;
         self.app.comment_prefs.pinned = d.comment_tool_pinned;
         self.app.blank_paper = d.blank_paper;
         self.app.flatten_fill_sign_on_save = d.flatten_fill_sign_on_save;
@@ -1213,6 +1219,7 @@ impl Prefs<'_> {
                 tl!("Hide hover previews for highlights without comment text"),
                 RowKind::Bool(d.hide_empty_highlight_hover),
             ),
+            RowSpec::new("comment.connector", tl!("Show lines joining comments to their pop-ups"), RowKind::Bool(d.connector_lines)),
             RowSpec::new("comment.pinned", tl!("Keep the selected comment tool selected after use"), RowKind::Bool(d.comment_tool_pinned))
                 .help(tl!("The same as the pin on the comment toolbar.")),
             RowSpec::new("comment.reset", tl!("Comment tool defaults"), RowKind::Custom).help(tl!(

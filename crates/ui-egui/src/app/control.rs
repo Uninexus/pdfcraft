@@ -487,6 +487,13 @@ impl PdfCraftApp {
                     _ => return Err("hide-empty-highlight-hover must be true or false".into()),
                 };
             }
+            ("connector-lines", _) => {
+                self.comment_prefs.connector_lines = match value {
+                    "true" => true,
+                    "false" => false,
+                    _ => return Err("connector-lines must be true or false".into()),
+                };
+            }
             ("text-links", _) => {
                 self.text_links = match value {
                     "true" => true,

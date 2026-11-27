@@ -29,6 +29,9 @@ fn duplex_from_ui(duplex: Option<UiDuplex>) -> Option<spool::Duplex> {
     })
 }
 
+/// The passes the dialog is asked to show a row that was just added: one to lay it out, and the next to scroll to it.
+const REVEAL_PASSES: u8 = 3;
+
 /// The job settings the draft holds, as the dialog's `State` keeps them. A draft without a printer is Save as PDF, or
 /// (`looking`) a printer not yet known.
 fn settings_of(d: &PrintDraft, looking: bool) -> Settings {
@@ -117,6 +120,7 @@ impl PdfCraftApp {
             // job or another document, and the document decides whether it can take one.
             comment_summary: false,
             comment_summary_sort: pdfcraft_engine::SummarySort::Page,
+            reveal_summary_sort: 0,
             comment_summary_no_copying: no_copying,
             comment_summary_low_resolution: low_resolution,
             ..keep
@@ -242,8 +246,14 @@ impl PdfCraftApp {
         if chosen.is_some() {
             d.printer_picked = true;
         }
+        let summed = d.comment_summary;
         body::draft_from_fields(d, &fields, &edited);
         d.drop_blocked_comment_summary();
+        // Ticking the summary adds its sort row, which lies below what the dialog shows at its usual size. The row has
+        // no height yet in the pass that adds it, so it is asked for in a few passes.
+        if !summed && d.comment_summary {
+            d.reveal_summary_sort = REVEAL_PASSES;
+        }
         let printer_changed = chosen.is_some() && d.printer != before;
         if printer_changed {
             d.show_driver_options = false;
@@ -313,6 +323,11 @@ impl PdfCraftApp {
         // `apply_setup` can change two-sided; the dialog's other settings were just read from it.
         dialog.state_mut().settings.duplex = duplex;
         dialog.set_sections(sections);
+        if self.print_draft.reveal_summary_sort > 0 {
+            self.print_draft.reveal_summary_sort -= 1;
+            dialog.reveal_row("comment_summary_sort");
+            ctx.request_repaint();
+        }
         dialog.set_sheet(sheet);
         dialog.set_preview_pager(pager);
         dialog.set_duplex_by_layout(booklet);

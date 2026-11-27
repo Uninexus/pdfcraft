@@ -5473,3 +5473,51 @@ fn export_the_second_note(to: &str) -> String {
     let bytes = written.file(&out).expect("the picked file is written");
     String::from_utf8_lossy(&bytes).into_owned()
 }
+
+/// A wedge joins a comment to its open pop-up while the pointer is on the comment, and shows where the comment is,
+/// unless Preferences turn it off.
+#[test]
+fn a_connector_line_joins_a_comment_to_its_open_pop_up_unless_turned_off() {
+    /// Whether a small filled shape reaches from the note (its right edge at `from`) to the window (its left at `to`)
+    /// and is painted under a clip that takes in its end at the note: one clipped to the window never shows.
+    fn joined(h: &Harness<'static, PdfCraftApp>, from: f32, to: f32) -> bool {
+        fn spans(shape: &egui::Shape, clip: egui::Rect, from: f32, to: f32) -> bool {
+            let (bounds, corners): (egui::Rect, Vec<Pos2>) = match shape {
+                egui::Shape::Mesh(mesh) if mesh.vertices.len() <= 8 => (mesh.calc_bounds(), mesh.vertices.iter().map(|v| v.pos).collect()),
+                egui::Shape::Path(path) if path.points.len() == 3 => (egui::Rect::from_points(&path.points), path.points.clone()),
+                egui::Shape::Vec(shapes) => return shapes.iter().any(|s| spans(s, clip, from, to)),
+                _ => return false,
+            };
+            bounds.left() <= from + 2.0 && (bounds.right() - to).abs() <= 2.0 && corners.iter().any(|p| p.x <= from + 2.0 && clip.contains(*p))
+        }
+        h.output().shapes.iter().any(|c| spans(&c.shape, c.clip_rect, from, to))
+    }
+    let mut h = harness(|_| {});
+    let ctx = egui::Context::default();
+    let note = pdfcraft_engine::Edit::AddAnnotation(pdfcraft_engine::NewAnnotation {
+        page: 0,
+        shape: pdfcraft_engine::Shape::Note { at: [20.0, 180.0], icon: pdfcraft_engine::NoteIcon::Comment },
+        style: pdfcraft_engine::Style { color: [1.0, 0.8, 0.0], opacity: 1.0, width: 1.0, ..Default::default() },
+        contents: "look here".into(),
+        author: "Tester".into(),
+    });
+    assert!(h.state_mut().apply_edit(&ctx, note));
+    let open = pdfcraft_engine::Edit::SetAnnotationPopup { page: 0, index: 0, rect: Some([180.0, 20.0, 290.0, 90.0]), open: Some(true) };
+    assert!(h.state_mut().apply_edit(&ctx, open));
+    h.run_steps(6);
+    h.state_mut().views[0].session.comments.clear_selection();
+    let away = at(&h, 100.0, 20.0);
+    let on_note = at(&h, 28.0, 172.0);
+    let note_right = at(&h, 40.0, 170.0).x;
+    let window_left = popup_rect(&h, "Tester").left();
+    h.hover_at(away);
+    h.run_steps(3);
+    assert!(!joined(&h, note_right, window_left), "nothing joins them while neither is pointed at");
+    h.hover_at(on_note);
+    h.run_steps(3);
+    assert!(joined(&h, note_right, window_left), "the wedge shows while the comment is pointed at");
+
+    h.state_mut().comment_prefs.connector_lines = false;
+    h.run_steps(3);
+    assert!(!joined(&h, note_right, window_left), "turned off, there is none");
+}

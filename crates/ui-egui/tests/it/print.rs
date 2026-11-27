@@ -1841,6 +1841,19 @@ fn comment_summary_is_sorted_as_chosen() {
     assert!(!by_page, "by page, they stay as they lie on it");
 }
 
+/// Ticking the summary adds its sort row below what the dialog shows: the dialog scrolls it into view.
+#[test]
+fn ticking_the_summary_brings_its_sort_row_into_view() {
+    let mut h = harness();
+    h.open();
+    h.settle();
+    h.set("comment_summary", json!(true));
+    h.run_steps(20);
+    let row = h.query_all_by_label("Sort comments by").map(|n| n.rect()).next().expect("the sort row");
+    let buttons = h.query_all_by_label("Cancel").map(|n| n.rect()).next().expect("the dialog's buttons");
+    assert!(row.max.y <= buttons.min.y, "the row is above the buttons: {row:?} {buttons:?}");
+}
+
 /// The choice greys out, unticked and with its reason, where the summary can't join the job
 /// (Booklet here); it is per job, so the next time the dialog opens it is off again.
 #[test]

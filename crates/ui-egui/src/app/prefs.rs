@@ -250,6 +250,7 @@ impl PdfCraftApp {
             date_language: self.session.date_language().map(str::to_string),
             author: Some(self.comment_prefs.author.clone()),
             hide_empty_highlight_hover: Some(self.comment_prefs.hide_empty_highlight_hover),
+            connector_lines: Some(self.comment_prefs.connector_lines),
             comment_tool_pinned: Some(self.comment_prefs.pinned),
         };
         let styles: Vec<serde_json::Value> = self
@@ -683,6 +684,9 @@ impl PdfCraftApp {
         }
         if let Some(hide) = v.hide_empty_highlight_hover {
             self.comment_prefs.hide_empty_highlight_hover = hide;
+        }
+        if let Some(on) = v.connector_lines {
+            self.comment_prefs.connector_lines = on;
         }
         if let Some(pinned) = v.comment_tool_pinned {
             self.comment_prefs.pinned = pinned;
