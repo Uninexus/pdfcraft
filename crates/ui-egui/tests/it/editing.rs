@@ -4657,6 +4657,7 @@ fn a_page_image_turns_by_the_degrees_typed() {
         }
     });
     h.run_steps(4);
+    shrink_the_picture(&mut h);
     let id = h.state().views[0].id;
     let before = h.state().session.get(id).unwrap().page_images(0)[0].rect;
     assert!(h.execute("edit.edit_text"));
@@ -4833,6 +4834,18 @@ fn check_existing_artwork(name: &'static str, bytes: Vec<u8>) {
     assert!(h.state().session.get(id).unwrap().page_images(0).is_empty());
 }
 
+/// Makes the picture a PNG opens as cover less than half its page. Edit reads a page that a picture covers by itself
+/// ("Recognize text", on a worker thread), which would add an undo step at a time the test can't know.
+fn shrink_the_picture(h: &mut Harness<'static, PdfCraftApp>) {
+    let id = h.state().views[0].id;
+    let [x0, y0, x1, y1] = h.state().session.get(id).unwrap().page_images(0)[0].rect;
+    let (qw, qh, mx, my) = ((x1 - x0) / 4.0, (y1 - y0) / 4.0, (x0 + x1) / 2.0, (y0 + y1) / 2.0);
+    let ctx = h.ctx.clone();
+    let change = pdfcraft_engine::ImageEdit::Move([mx - qw, my - qh, mx + qw, my + qh]);
+    assert!(h.state_mut().apply_edit(&ctx, pdfcraft_engine::Edit::EditPageImage { page: 0, index: 0, change }));
+    h.run_steps(4);
+}
+
 #[test]
 fn image_right_click_context_menu_items_and_actions() {
     let mut png = Vec::new();
@@ -4847,6 +4860,8 @@ fn image_right_click_context_menu_items_and_actions() {
         }
     });
     h.run_steps(4);
+    shrink_the_picture(&mut h);
+    let before = h.state().session.get(h.state().views[0].id).unwrap().can_undo().map(str::to_owned);
     assert!(h.execute("edit.edit_text"));
     h.run_steps(2);
     let r = h.state().views[0].page_screen_rect(0).expect("on screen");
@@ -4904,7 +4919,7 @@ fn image_right_click_context_menu_items_and_actions() {
     h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Z);
     h.run_steps(3);
     let doc = h.state().session.get(id).unwrap();
-    assert_eq!(doc.can_undo(), None);
+    assert_eq!(doc.can_undo(), before.as_deref(), "only the flip is undone");
 }
 
 #[test]
