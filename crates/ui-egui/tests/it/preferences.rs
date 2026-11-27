@@ -253,3 +253,33 @@ fn follow_theme_takes_one_colour_back_to_the_theme_and_leaves_the_other() {
     assert!(h.state().field_highlight_color.is_none(), "the highlight follows the theme again");
     assert!(h.state().required_field_color.is_some(), "the other colour was not reset");
 }
+
+/// A check box row is one line high, so a label that wraps is cut off. Every English check box label fits on one.
+#[test]
+fn no_check_box_label_is_cut_off() {
+    use egui_kittest::kittest::NodeT as _;
+    fn lines(shape: &egui::Shape, out: &mut Vec<(String, usize)>) {
+        match shape {
+            egui::Shape::Text(t) => out.push((t.galley.text().to_owned(), t.galley.rows.len())),
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|s| lines(s, out)),
+            _ => {}
+        }
+    }
+    // Tall enough that the whole page is painted.
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 6000.0)).build_eframe(|cc| {
+        crate::support::install_runtime(&cc.egui_ctx);
+        let mut app = crate::control::new_app();
+        app.set_option(&egui::Context::default(), "language", "en").unwrap();
+        app
+    });
+    h.run_steps(3);
+    h.state_mut().open_preferences();
+    h.run_steps(8);
+    let boxes: Vec<String> = h.query_all_by_role(egui::accesskit::Role::CheckBox).filter_map(|n| n.accesskit_node().label()).collect();
+    let mut painted = Vec::new();
+    h.output().shapes.iter().for_each(|c| lines(&c.shape, &mut painted));
+    let seen: Vec<&(String, usize)> = painted.iter().filter(|(text, _)| boxes.contains(text)).collect();
+    assert!(seen.len() > 10, "the labels were painted: {seen:?}");
+    let wrapped: Vec<_> = seen.iter().filter(|(_, rows)| *rows > 1).collect();
+    assert!(wrapped.is_empty(), "{wrapped:?}");
+}

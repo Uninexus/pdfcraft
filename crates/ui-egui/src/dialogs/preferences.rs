@@ -1032,11 +1032,14 @@ impl Prefs<'_> {
                 tl!("Reopen the files that were open when PdfCraft last closed"),
                 RowKind::Bool(d.reopen_last_session),
             ));
-            rows.push(RowSpec::new(
-                "general.restore_view",
-                tl!("Restore the last view (page, zoom and page display) when a document is opened again"),
-                RowKind::Bool(d.restore_last_view),
-            ));
+            rows.push(
+                RowSpec::new(
+                    "general.restore_view",
+                    tl!("Restore the last view when a document is opened again"),
+                    RowKind::Bool(d.restore_last_view),
+                )
+                .help(tl!("Brings back the page, zoom and page display.")),
+            );
             rows.push(RowSpec::new("general.reload", tl!("Reload documents when their files change on disk"), RowKind::Bool(d.reload_changed_files)));
             rows.push(
                 RowSpec::new(
