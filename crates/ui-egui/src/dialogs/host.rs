@@ -71,6 +71,7 @@ fn results(app: &mut PdfCraftApp, ctx: &egui::Context) {
     app.convert_colours_pass(ctx);
     app.fix_hairlines_pass(ctx);
     app.page_boxes_pass(ctx);
+    app.page_transitions_pass(ctx);
     app.protect_pass(ctx);
     app.pdfa_pass(ctx);
     app.pdfx_verify_pass();

@@ -139,7 +139,7 @@ pub(crate) fn panel(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
         row("square-dashed-mouse-pointer", "Set page boxes", Some(Act::Command("page.boxes")), true, false, true),
         row("crop", "Crop pages", Some(Act::Command("page.crop")), true, false, false),
         row("scan", "Remove white margins", Some(Act::Command("page.remove_white_margins")), true, false, false),
-        row("presentation", "Page transitions", Some(Act::Command("page.transitions")), true, true, false),
+        row("presentation", "Page transitions", Some(Act::Command("page.transitions")), true, false, false),
         row("file-text", "Page templates", None, true, true, false),
         row("printer", "Print pages", Some(Act::Command("print.dialog")), true, false, false),
         row("tag", "Page labels", Some(Act::Command("page.number")), true, false, true),

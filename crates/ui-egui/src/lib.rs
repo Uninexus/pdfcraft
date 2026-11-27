@@ -841,6 +841,8 @@ pub struct PdfCraftApp {
     pub text_style_draft: bookmark_styles_ui::TextStyleDraft,
     /// Set Page Boxes dialog state.
     pub boxes_draft: pageboxes::BoxesDraft,
+    /// What the first target page had when Page Transitions opened, for what the dialog has no row for.
+    pub(crate) transition_seed: Option<pdfcraft_engine::Transition>,
     /// Header & footer / watermark / background dialog state.
     pub marks_draft: marks_ui::MarksDraft,
     /// The Update dialogs' preview page without the marks they replace.

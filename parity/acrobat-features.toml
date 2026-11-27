@@ -3371,11 +3371,11 @@ title = "Page transitions"
 area = "D"
 tier = "P2"
 milestone = "M4"
-status = "partial"
-commands = []
+status = "shipped"
+commands = ["page.transitions"]
 tools = ["doc_info", "page_transition_set"]
-evidence = ["crates/render/src/inspect/tests.rs::page_transitions_and_display_times_are_read", "crates/automation/tests/it/automation.rs::doc_info_lists_page_transitions_and_display_times", "crates/organize/src/tests.rs::page_transitions_are_set_removed_and_checked", "crates/automation/tests/it/automation.rs::page_transitions_are_set_and_removed_through_the_tools"]
-notes = "Read, set and played: each page's /Trans (style, duration, dimension, motion, direction, Fly scale and backdrop) and /Dur display time are read with the spec's defaults and listed by doc_info (DocInfo::transitions); page_transition_set (Edit::SetTransition, one undo step) writes or removes them on chosen pages with the values checked first. Full screen plays them and advances on /Dur (view.full-screen-presentation). Not yet: the Page Transitions dialog"
+evidence = ["crates/ui-egui/tests/it/pageboxes.rs::the_page_transitions_dialog_sets_and_removes_a_transition_on_every_page", "crates/render/src/inspect/tests.rs::page_transitions_and_display_times_are_read", "crates/automation/tests/it/automation.rs::doc_info_lists_page_transitions_and_display_times", "crates/organize/src/tests.rs::page_transitions_are_set_removed_and_checked", "crates/automation/tests/it/automation.rs::page_transitions_are_set_and_removed_through_the_tools"]
+notes = "Read, set and played: each page's /Trans (style, duration, dimension, motion, direction, Fly scale and backdrop) and /Dur display time are read with the spec's defaults and listed by doc_info (DocInfo::transitions); page_transition_set (Edit::SetTransition, one undo step) writes or removes them on chosen pages with the values checked first. Full screen plays them and advances on /Dur (view.full-screen-presentation). Organize pages > Page transitions (also Edit > Pages and the palette, as page.transitions) sets the style, the directions that style allows, orientation, motion, transition time, automatic page turn with seconds, and the pages (all, current or selected, from-to) as one undo step, showing what the first target page has; the Fly scale and backdrop of a page are kept but have no row."
 
 [[feature]]
 id = "organize.page-tab-order"
