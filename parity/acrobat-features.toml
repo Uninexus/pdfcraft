@@ -1471,8 +1471,8 @@ milestone = "M12"
 status = "partial"
 commands = []
 tools = []
-evidence = ["crates/ui-egui/tests/it/find_bookmarks.rs::the_find_bar_finds_a_bookmark_only_when_asked_to_and_goes_where_it_goes", "crates/ui-egui/tests/it/find_comments.rs::the_find_bar_finds_a_comment_only_when_asked_to"]
-notes = "In the find bar: Include comments finds the text of comments and replies, and moving to one selects it; Include bookmarks finds bookmark titles, goes where the bookmark goes and names it under the checkboxes. Bookmarks that go to no page of the document, and bookmarks past what the Bookmarks panel lists, are not searched. Not yet: either option in the Advanced search panel, in folder search or as an automation tool, and the choices are not remembered."
+evidence = ["crates/ui-egui/tests/it/find_bookmarks.rs::the_search_panel_lists_comment_and_bookmark_hits_when_asked_to", "crates/ui-egui/tests/it/find_bookmarks.rs::the_find_bar_finds_a_bookmark_only_when_asked_to_and_goes_where_it_goes", "crates/ui-egui/tests/it/find_comments.rs::the_find_bar_finds_a_comment_only_when_asked_to"]
+notes = "In the find bar: Include comments finds the text of comments and replies, and moving to one selects it; Include bookmarks finds bookmark titles, goes where the bookmark goes and names it under the checkboxes. Bookmarks that go to no page of the document, and bookmarks past what the Bookmarks panel lists, are not searched. The Advanced search panel has both options for the current document. Not yet: either option for all open documents, in folder search or as an automation tool, and the choices are not remembered."
 
 [[feature]]
 id = "view.find-results-panel"
@@ -1496,10 +1496,11 @@ status = "partial"
 commands = ["edit.advanced_search"]
 tools = ["text_find"]
 evidence = [
+    "crates/ui-egui/tests/it/find_bookmarks.rs::the_search_panel_lists_comment_and_bookmark_hits_when_asked_to",
     "crates/ui-egui/tests/it/viewer.rs::advanced_search_lists_results_with_context",
     "crates/ui-egui/tests/it/search_open_docs.rs::matches_from_every_open_document_are_listed_and_a_click_switches_tab",
 ]
-notes = "as a side panel, in the current document or in all open documents (results grouped by document, capped per document and in all, a click switches to that tab); searching folders is the separate Folder scope (view.search-folder); searching indexes is still to come"
+notes = "as a side panel, in the current document or in all open documents (results grouped by document, capped per document and in all, a click switches to that tab); searching folders is the separate Folder scope (view.search-folder); searching indexes is still to come. In the current document, Include comments and Include bookmarks list those hits under their own headings"
 
 [[feature]]
 id = "view.search-folder"

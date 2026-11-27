@@ -26,14 +26,28 @@ const BOOKMARK_PAGE_BASE: usize = COMMENT_PAGE_BASE + usize::MAX / 4;
 /// The most bookmarks one search lists, and the deepest it reads.
 const MAX_BOOKMARK_HITS: usize = 2000;
 const MAX_BOOKMARK_DEPTH: usize = 256;
-/// The most characters of a found bookmark's title the bar shows.
-const SHOWN_TITLE_CHARS: usize = 80;
+/// The most characters of a found bookmark's title or comment's line shown.
+const SHOWN_CHARS: usize = 80;
 
 /// A comment the search found: its `(page, index)` and where it sits on its page (for scrolling to it).
 #[derive(Clone, Debug, PartialEq)]
 struct CommentHit {
     key: (usize, usize),
     rect: [f32; 4],
+    /// The line of the thread that holds the query, shortened: the Search panel lists it.
+    excerpt: String,
+}
+
+/// What a match that is not page text stands for, as the Search panel lists it.
+pub(crate) enum Listed<'a> {
+    /// A comment on page `page` (from 0).
+    Comment {
+        page: usize,
+        excerpt: &'a str,
+    },
+    Bookmark {
+        title: String,
+    },
 }
 
 /// A bookmark the search found: its title and where it goes.
@@ -99,12 +113,15 @@ impl Find {
 
     /// The title of the bookmark that is the current match, shortened to fit the bar.
     fn current_bookmark(&self) -> Option<String> {
-        let title = &self.bookmark_at(self.matches.current_match()?.page)?.title;
-        let mut shown: String = title.chars().take(SHOWN_TITLE_CHARS).collect();
-        if shown.len() < title.len() {
-            shown.push('…');
+        Some(shortened(&self.bookmark_at(self.matches.current_match()?.page)?.title))
+    }
+
+    /// The comment or bookmark a match's `page` stands for; `None` for a real page.
+    pub(crate) fn listed(&self, page: usize) -> Option<Listed<'_>> {
+        if let Some(hit) = self.comment_at(page) {
+            return Some(Listed::Comment { page: hit.key.0, excerpt: &hit.excerpt });
         }
-        Some(shown)
+        self.bookmark_at(page).map(|hit| Listed::Bookmark { title: shortened(&hit.title) })
     }
 
     /// The comment a match stands for, when it is a comment's.
@@ -173,7 +190,8 @@ impl DocView {
     /// the comments whose text (or a reply's) holds the query, none when comments are hidden or of a hidden type.
     pub(super) fn sync_find_comments(&mut self, doc: &pdfcraft_engine::Document, editing: bool) {
         let Some(f) = self.find.as_mut() else { return };
-        let on = f.include_comments && !f.in_panel && !editing && !f.case_query.trim().is_empty();
+        // The Search panel lists them also in Edit text mode, where only the find bar (with Replace) leaves them out.
+        let on = f.include_comments && (f.in_panel || !editing) && !f.case_query.trim().is_empty();
         let hits = if on { find_comment_hits(doc, &f.case_query, &f.options) } else { Vec::new() };
         if hits == f.comment_hits {
             return;
@@ -190,7 +208,7 @@ impl DocView {
     /// The same for bookmarks: with "Include bookmarks" on, those whose title holds the query.
     pub(super) fn sync_find_bookmarks(&mut self, doc: &pdfcraft_engine::Document, editing: bool) {
         let Some(f) = self.find.as_mut() else { return };
-        let on = f.include_bookmarks && !f.in_panel && !editing && !f.case_query.trim().is_empty();
+        let on = f.include_bookmarks && (f.in_panel || !editing) && !f.case_query.trim().is_empty();
         let hits = if on { find_bookmark_hits(&doc.info.outline, &f.case_query, &f.options) } else { Vec::new() };
         if hits == f.bookmark_hits {
             return;
@@ -344,12 +362,29 @@ fn find_comment_hits(doc: &pdfcraft_engine::Document, query: &str, options: &Fin
         .annotations
         .iter()
         .filter(|a| a.is_comment() && !a.is_group_member() && !hidden.contains(&a.subtype))
-        .filter(|a| texts.get(&(a.page, a.index)).is_some_and(|text| !pattern.find_all(text, 1).is_empty()))
-        .map(|a| CommentHit { key: (a.page, a.index), rect: a.shown_rect(info.pages.get(a.page).map_or(0, |p| p.rotation)) })
+        .filter_map(|a| {
+            let text = texts.get(&(a.page, a.index))?;
+            if pattern.find_all(text, 1).is_empty() {
+                return None;
+            }
+            // A match across two lines has no single line to show: the thread's first stands for it.
+            let line = text.lines().find(|line| !pattern.find_all(line, 1).is_empty()).or_else(|| text.lines().next());
+            let rect = a.shown_rect(info.pages.get(a.page).map_or(0, |p| p.rotation));
+            Some(CommentHit { key: (a.page, a.index), rect, excerpt: shortened(line.unwrap_or_default()) })
+        })
         .collect();
     hits.sort_by_key(|h| h.key);
     hits.truncate(MAX_COMMENT_HITS);
     hits
+}
+
+/// `text` as one line the bar or the panel can show.
+fn shortened(text: &str) -> String {
+    let mut shown: String = text.chars().take(SHOWN_CHARS).collect();
+    if shown.len() < text.len() {
+        shown.push('…');
+    }
+    shown
 }
 
 /// The bookmarks whose title holds `query` under the find `options`, in outline order. A bookmark that goes to no

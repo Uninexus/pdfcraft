@@ -65,6 +65,7 @@ use bars::{Notice, notices, page_size_hint};
 pub(crate) use cache::{BASE_SIDE, TILE_THRESHOLD, texture_image};
 pub use craft::pages::{Fit, PageDisplay, PageSpacing, ViewDefaults, display_token, parse_display_token};
 pub use find::Find;
+pub(crate) use find::Listed;
 use find::find_bar;
 use organize::organize_grid;
 use page_menu::{FieldMenu, PageMenuAction};

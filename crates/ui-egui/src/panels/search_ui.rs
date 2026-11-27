@@ -18,6 +18,7 @@ use craft::ui::text::TextField;
 
 use super::right::PanelResult;
 use crate::PdfCraftApp;
+use crate::canvas::Listed;
 use crate::folder_search_ui::Action;
 use crate::open_docs_search_ui::Action as OpenDocsAction;
 
@@ -26,10 +27,13 @@ const CONTEXT: usize = 36;
 /// The most results listed.
 const MAX_RESULTS: usize = 2000;
 
-/// A row of the results: a page's heading or a match by its index in the search's matches.
+/// A row of the results: a page's heading, the comments' or bookmarks' heading, or a match by its index in the search's
+/// matches.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 enum Hit {
     Page(usize),
+    Comments,
+    Bookmarks,
     Match(usize),
 }
 
@@ -86,6 +90,18 @@ pub(crate) fn show(app: &mut PdfCraftApp, ui: &mut egui::Ui) -> PanelResult {
     if before != (find.options.whole_word, find.options.match_case) {
         find.case_query.clear();
     }
+    // Comments and bookmarks are searched in this document only.
+    if !open_docs.on && !folder.on {
+        let before = (find.include_comments, find.include_bookmarks);
+        Row::new().show(ui, |ui, _| {
+            Checkbox::new(Bind::bound(&mut find.include_comments)).label(tl!("Include comments").to_string()).show(ui);
+            Checkbox::new(Bind::bound(&mut find.include_bookmarks)).label(tl!("Include bookmarks").to_string()).show(ui);
+        });
+        // The page view lists them on its next pass.
+        if before != (find.include_comments, find.include_bookmarks) {
+            ui.ctx().request_repaint();
+        }
+    }
     if open_docs.on {
         let (query, case, whole) = (find.query.clone(), find.options.match_case, find.options.whole_word);
         let can_search = !query.trim().is_empty();
@@ -132,14 +148,17 @@ pub(crate) fn show(app: &mut PdfCraftApp, ui: &mut egui::Ui) -> PanelResult {
         Text::new(status).show(ui);
     }
     let mut rows = Vec::new();
-    let mut last_page = None;
+    let mut last_heading = None;
     for (i, m) in matches.iter().enumerate().take(MAX_RESULTS) {
-        if !view.session.texts.contains_key(&m.page) {
-            continue;
-        }
-        if last_page != Some(m.page) {
-            rows.push(Hit::Page(m.page));
-            last_page = Some(m.page);
+        let heading = match find.listed(m.page) {
+            Some(Listed::Comment { .. }) => Hit::Comments,
+            Some(Listed::Bookmark { .. }) => Hit::Bookmarks,
+            None if view.session.texts.contains_key(&m.page) => Hit::Page(m.page),
+            None => continue,
+        };
+        if last_heading.as_ref() != Some(&heading) {
+            rows.push(heading.clone());
+            last_heading = Some(heading);
         }
         rows.push(Hit::Match(i));
     }
@@ -153,8 +172,19 @@ pub(crate) fn show(app: &mut PdfCraftApp, ui: &mut egui::Ui) -> PanelResult {
         .natural_height(true)
         .show_items(ui, &results, &mut |key, _| match key {
             Hit::Page(p) => ListRow::new(crate::i18n::fmt(tl!("Page {label}"), &[("label", &(p + 1).to_string())])).section_heading(),
+            Hit::Comments => ListRow::new(tl!("Comments").to_string()).section_heading(),
+            Hit::Bookmarks => ListRow::new(tl!("Bookmarks").to_string()).section_heading(),
             Hit::Match(i) => {
                 let Some(m) = matches.get(*i) else { return ListRow::new(Label::Empty) };
+                let tip = tl!("Go to this result").to_string();
+                match find.listed(m.page) {
+                    Some(Listed::Comment { page, excerpt }) => {
+                        let on = crate::i18n::fmt(tl!("Page {label}"), &[("label", &(page + 1).to_string())]);
+                        return ListRow::new(format!("{on}: {excerpt}")).tooltip(tip);
+                    }
+                    Some(Listed::Bookmark { title }) => return ListRow::new(title).tooltip(tip),
+                    None => {}
+                }
                 let Some(text) = view.session.texts.get(&m.page) else { return ListRow::new(Label::Empty) };
                 let n = text.glyphs.len();
                 let range = &m.range;
