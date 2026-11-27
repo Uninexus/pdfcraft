@@ -5,6 +5,7 @@ use super::create::{
 use super::draw::{draw_appearance, redraw_or_restore, set_appearance};
 use super::info::{is_comment_subtype, is_group_subordinate, line_endings_of, own_popup, popup_info, text_value};
 use super::lookup::{annot_dict, annot_ref, annotation_flags, annots, change_annots, is_fill_sign, page_ref, set_annots};
+use super::rich::{self, TextRun};
 use super::text_style::{self, TextStyle};
 use super::types::{
     BorderShape, FLAG_HIDDEN, FLAG_LOCKED, FLAG_NO_ROTATE, FLAG_NO_ZOOM, FLAG_PRINT, LineEnding, Markup, Meta, NewAnnotation, ReviewState, Rgb,
@@ -74,6 +75,8 @@ fn restyle_text_bordered(d: &mut Dict, style: TextStyle, border: Option<crate::R
 /// plain `/Contents`, its text `style` and `/Q`, so viewers that edit rich text show the same thing.
 fn rich_text_in(d: &mut Dict, style: TextStyle) {
     let text = d.get(b"Contents").and_then(|c| c.as_string()).map(PdfString::to_text).unwrap_or_default();
+    // Bold and italic runs stay while the rich text still says what the box says.
+    let runs = runs_in(d);
     let TextStyle { face, size, color: col } = style;
     let (family, weight, slant) = text_style::css(face);
     let hex = format!(
@@ -87,8 +90,7 @@ fn rich_text_in(d: &mut Dict, style: TextStyle) {
         Some(2) => "right",
         _ => "left",
     };
-    let esc = |s: &str| s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;");
-    let body: String = text.split('\n').map(|line| format!("<p dir=\"ltr\">{}</p>", esc(line.trim_end_matches('\r')))).collect();
+    let body = rich::body(&text, &runs);
     let style = format!(
         "font-size:{}pt;text-align:{align};color:{hex};font-weight:{weight};font-style:{slant};font-family:{family};font-stretch:normal",
         n(size)
@@ -100,6 +102,49 @@ fn rich_text_in(d: &mut Dict, style: TextStyle) {
     let keywords = format!("{}{}", if slant == "normal" { "" } else { "italic " }, if weight == "normal" { "" } else { "bold " });
     d.set(b"DS".to_vec(), PdfString::text(&format!("font: {keywords}{family} {}pt; text-align:{align}; color:{hex}", n(size))));
     d.set(b"RC".to_vec(), PdfString::text(&rc));
+}
+
+/// The bold and italic runs of `d`'s text, as its rich text gives them ([`rich::runs`]).
+pub(crate) fn runs_in(d: &Dict) -> Vec<TextRun> {
+    let string = |key: &[u8]| d.get(key).and_then(Object::as_string).map(PdfString::to_text).unwrap_or_default();
+    rich::runs(&string(b"RC"), &string(b"Contents"))
+}
+
+/// The bold and italic runs of the text box at `(page, index)`; none for another kind of comment.
+pub fn text_runs(doc: &Document, page: usize, index: usize) -> Result<Vec<TextRun>, AnnotError> {
+    let p = page_ref(doc, page)?;
+    let entry = annots(doc, p).get(index).map(|o| doc.resolve(o)).ok_or(AnnotError::NoSuchAnnotation { page, index })?;
+    let Some(d) = entry.as_dict() else { return Err(AnnotError::NoSuchAnnotation { page, index }) };
+    Ok(if d.name(b"Subtype") == Some(b"FreeText") { runs_in(d) } else { Vec::new() })
+}
+
+/// Make the characters `runs` name bold or italic and the rest of the text box's text plain: written to its rich text
+/// and drawn, the box growing to fit. An empty `runs` makes it all plain. Positions count characters of `/Contents`,
+/// a line break as one.
+pub fn set_text_runs(doc: &mut Document, page: usize, index: usize, runs: &[TextRun], meta: &Meta) -> Result<(), AnnotError> {
+    let (_, r) = annot_ref(doc, page, index)?;
+    unlocked(doc, r)?;
+    let before = annot_dict(doc, r);
+    if before.name(b"Subtype") != Some(b"FreeText") {
+        return Err(AnnotError::Invalid("only a text box's text can be bold or italic".into()));
+    }
+    let text = before.get(b"Contents").and_then(Object::as_string).map(PdfString::to_text).unwrap_or_default();
+    // Thai is shaped in one face: runs would be written and not drawn.
+    if !runs.is_empty() && rich::shaped_only(&text) {
+        return Err(AnnotError::Invalid("bold and italic parts of Thai text can't be drawn yet".into()));
+    }
+    let runs = rich::checked(runs, &text).map_err(AnnotError::Invalid)?;
+    let style = text_style::text_style(&before, text_style::dr_face(doc, &before));
+    doc.update_dict(r, |d| {
+        // Write the new runs, which `rich_text_in` then keeps.
+        d.set(b"RC".to_vec(), PdfString::text(&format!("<body>{}</body>", rich::body(&text, &runs))));
+        rich_text_in(d, style);
+        touch(d, meta);
+    })?;
+    match fitted_box(doc, r, &text) {
+        Some(rect) => apply_text_box(doc, r, rect, meta, true),
+        None => draw_appearance(doc, r),
+    }
 }
 
 pub(crate) fn touch(d: &mut Dict, meta: &Meta) {
@@ -365,7 +410,14 @@ fn fitted_box(doc: &Document, r: ObjRef, text: &str) -> Option<[f64; 4]> {
         let longest = text.lines().map(|l| measure(l, size)).fold(0.0, f64::max);
         (longest + 2.0 * pad + 4.0).clamp(40.0, 300.0)
     };
-    let height = appearance::text_lines_height(&pdfcraft_fonts::wrap_with(text, size, (w - 2.0 * pad).max(1.0), measure), size);
+    let width = (w - 2.0 * pad).max(1.0);
+    let runs = runs_in(&d);
+    let lines = if runs.is_empty() || rich::shaped_only(text) {
+        pdfcraft_fonts::wrap_with(text, size, width, measure)
+    } else {
+        rich::wrap(text, &runs, face, size, width).iter().map(|line| line.iter().map(|(_, t)| t.as_str()).collect()).collect()
+    };
+    let height = appearance::text_lines_height(&lines, size);
     Some([x0, top - height - 2.0 * pad - 2.0, x0 + w, top])
 }
 

@@ -122,7 +122,7 @@ fn family_face(name: &str) -> Option<Std14> {
     }
 }
 
-fn is_bold(f: Std14) -> bool {
+pub(crate) fn is_bold(f: Std14) -> bool {
     matches!(
         f,
         Std14::HelveticaBold
@@ -134,7 +134,7 @@ fn is_bold(f: Std14) -> bool {
     )
 }
 
-fn is_italic(f: Std14) -> bool {
+pub(crate) fn is_italic(f: Std14) -> bool {
     matches!(
         f,
         Std14::HelveticaOblique
@@ -147,7 +147,7 @@ fn is_italic(f: Std14) -> bool {
 }
 
 /// `base`'s family in the given weight and slant.
-fn styled(base: Std14, bold: bool, italic: bool) -> Std14 {
+pub(crate) fn styled(base: Std14, bold: bool, italic: bool) -> Std14 {
     use Std14::*;
     match (base, bold, italic) {
         (TimesRoman | TimesBold | TimesItalic | TimesBoldItalic, false, false) => TimesRoman,

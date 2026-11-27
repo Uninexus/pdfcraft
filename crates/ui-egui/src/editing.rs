@@ -1218,6 +1218,7 @@ fn comment_page(edit: &Edit) -> Option<usize> {
         | Edit::StyleAnnotation { page, .. }
         | Edit::FillAnnotation { page, .. }
         | Edit::PartOpacity { page, .. }
+        | Edit::TextRunsAnnotation { page, .. }
         | Edit::FontSizeAnnotation { page, .. }
         | Edit::BorderColorAnnotation { page, .. }
         | Edit::BorderShapeAnnotation { page, .. }

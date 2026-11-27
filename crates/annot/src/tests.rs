@@ -5695,3 +5695,74 @@ endstream",
     assert!(list(&doc, 0)[0].contains(b"AAPL:AKExtras"));
     assert!(doc.repair_log().is_empty(), "{:?}", doc.repair_log());
 }
+
+fn run(start: usize, end: usize, bold: bool, italic: bool) -> TextRun {
+    TextRun { start, end, bold, italic }
+}
+
+/// A text box with a bold word and an italic word, as `(document, index)`.
+fn rich_box(width: f64, text: &str, runs: &[TextRun]) -> (Document, usize) {
+    let mut doc = fixture();
+    let t = add_annotation(&mut doc, &new(0, Shape::TextBox { rect: [20.0, 600.0, 20.0 + width, 700.0], font_size: 12.0 }), &meta("t")).unwrap();
+    set_contents(&mut doc, 0, t, text, &meta("")).unwrap();
+    set_text_runs(&mut doc, 0, t, runs, &meta("")).unwrap();
+    (doc, t)
+}
+
+#[test]
+fn bold_and_italic_runs_are_stored_and_drawn() {
+    let (doc, t) = rich_box(300.0, "plain bold & <slanted>", &[run(6, 10, true, false), run(13, 22, false, true)]);
+    let doc = reopen(&doc);
+    assert_eq!(text_runs(&doc, 0, t).unwrap(), [run(6, 10, true, false), run(13, 22, false, true)]);
+    let d = &list(&doc, 0)[t];
+    assert_eq!(text(d, b"Contents"), "plain bold & <slanted>", "the plain text is untouched");
+    let rc = text(d, b"RC");
+    assert!(rc.contains("<span style=\"font-weight:bold\">bold</span> &amp; <span style=\"font-style:italic\">&lt;slanted&gt;</span>"), "{rc}");
+    let ap = ap_content(&doc, d);
+    assert!(ap.contains("/Helv 12 Tf") && ap.contains("/HeBo 12 Tf") && ap.contains("/HeOb 12 Tf"), "{ap}");
+    for words in ["(plain ) Tj", "(bold) Tj", "( & ) Tj", "(<slanted>) Tj"] {
+        assert!(ap.contains(words), "{words}: {ap}");
+    }
+}
+
+#[test]
+fn runs_stay_through_restyling_and_moving_and_go_with_new_text() {
+    let runs = [run(0, 3, true, true)];
+    let (mut doc, t) = rich_box(200.0, "one two", &runs);
+    set_style(&mut doc, 0, t, StyleChange::new(Some([1.0, 0.0, 0.0]), None, None, None), &meta("")).unwrap();
+    set_rect(&mut doc, 0, t, [40.0, 500.0, 340.0, 560.0], &meta("")).unwrap();
+    set_contents(&mut doc, 0, t, "one two", &meta("")).unwrap();
+    assert_eq!(text_runs(&doc, 0, t).unwrap(), runs, "the same text keeps them");
+    assert!(ap_content(&doc, &list(&doc, 0)[t]).contains("/HeBO 12 Tf"));
+    set_contents(&mut doc, 0, t, "other words", &meta("")).unwrap();
+    assert_eq!(text_runs(&doc, 0, t).unwrap(), [], "new text drops them");
+    assert!(!ap_content(&doc, &list(&doc, 0)[t]).contains("/HeBO"));
+    set_contents(&mut doc, 0, t, "one two", &meta("")).unwrap();
+    set_text_runs(&mut doc, 0, t, &runs, &meta("")).unwrap();
+    set_text_runs(&mut doc, 0, t, &[], &meta("")).unwrap();
+    assert_eq!(text_runs(&doc, 0, t).unwrap(), [], "an empty list makes it plain");
+}
+
+#[test]
+fn wider_bold_text_wraps_onto_more_lines_and_the_box_grows() {
+    let words = "mmmm mmmm mmmm mmmm mmmm mmmm";
+    // Just wide enough for two plain words a line.
+    let width = appearance::text_width("mmmm mmmm", 12.0) + 9.0;
+    let (doc, t) = rich_box(width, words, &[]);
+    let plain = rect(&list(&doc, 0)[t]);
+    let (doc, t) = rich_box(width, words, &[run(0, words.len(), true, false)]);
+    let bold = rect(&list(&doc, 0)[t]);
+    assert!(bold[3] - bold[1] > plain[3] - plain[1], "plain {plain:?}, bold {bold:?}");
+}
+
+#[test]
+fn runs_are_refused_where_they_do_not_fit() {
+    let (mut doc, t) = rich_box(200.0, "ab\ncd", &[run(3, 5, true, false)]);
+    assert_eq!(text_runs(&doc, 0, t).unwrap(), [run(3, 5, true, false)], "a line break counts as one");
+    for bad in [run(0, 6, true, false), run(2, 2, true, false)] {
+        assert!(matches!(set_text_runs(&mut doc, 0, t, &[bad], &meta("")), Err(AnnotError::Invalid(_))), "{bad:?}");
+    }
+    assert_eq!(text_runs(&doc, 0, t).unwrap(), [run(3, 5, true, false)], "a refused call changes nothing");
+    let note = add_annotation(&mut doc, &new(0, Shape::Note { at: [20.0, 20.0], icon: NoteIcon::Comment }), &meta("n")).unwrap();
+    assert!(set_text_runs(&mut doc, 0, note, &[run(0, 1, true, false)], &meta("")).is_err());
+}

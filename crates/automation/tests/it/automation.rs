@@ -16541,3 +16541,30 @@ fn grouped_existing_thai_body_edits_saves_reopens_and_undo_restores_original_gly
     assert_eq!(page_text(&mut a, reopened), [new, old]);
     assert_eq!(ok(&mut a, "content_list", json!({"doc":reopened}))["count"], 0, "editing existing text must not create Add Text objects");
 }
+
+/// Bold and italic parts of a text box through the tools: set, listed, saved and reopened, undone, and refused where
+/// they don't fit.
+#[test]
+fn text_box_runs_through_tools() {
+    let dir = workdir("text-runs");
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "a.pdf" }))["doc"].as_u64().unwrap();
+    let c = ok(
+        &mut a,
+        "comment_add",
+        json!({ "doc": doc, "page": 1, "type": "textbox", "rect": [20, 20, 220, 80], "contents": "plain bold", "author": "Ada" }),
+    );
+    let (page, index) = (c["comment"]["page"].clone(), c["comment"]["index"].clone());
+    let runs = json!([{ "start": 6, "end": 10, "bold": true, "italic": false }]);
+    ok(&mut a, "comment_edit", json!({ "doc": doc, "page": page, "index": index, "text_runs": runs }));
+    let listed = |a: &mut Automation, doc: u64| ok(a, "comment_list", json!({ "doc": doc }))["comments"][0]["text_runs"].clone();
+    assert_eq!(listed(&mut a, doc), runs);
+    ok(&mut a, "doc_save", json!({ "doc": doc, "path": "runs.pdf" }));
+    let again = ok(&mut a, "doc_open", json!({ "path": "runs.pdf" }))["doc"].as_u64().unwrap();
+    assert_eq!(listed(&mut a, again), runs);
+    ok(&mut a, "edit_undo", json!({ "doc": doc }));
+    assert!(listed(&mut a, doc).is_null(), "undone");
+    for bad in [json!([{ "start": 0, "end": 99, "bold": true }]), json!("bold"), json!([{ "start": 1 }])] {
+        assert!(a.call("comment_edit", &json!({ "doc": doc, "page": page, "index": index, "text_runs": bad })).is_err(), "{bad}");
+    }
+}
