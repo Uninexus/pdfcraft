@@ -16627,3 +16627,25 @@ fn signing_can_lock_the_form_fields() {
     let both = json!({ "doc": doc, "id": "ada.p12", "password": "secret12", "certify": "form_fill", "lock_fields": true, "out": "no.pdf" });
     assert!(matches!(a.call("sign_document", &both), Err(ToolError::InvalidArgs(_))));
 }
+
+/// Contracts with two signers: when the first signature locks nothing, the second person signs the other empty field,
+/// and both signatures stand.
+#[test]
+fn a_second_signer_follows_a_signature_that_locks_nothing() {
+    let dir = workdir("sign-second");
+    let mut a = auto(&dir);
+    ok(&mut a, "sign_id_create", json!({ "name": "Ada Lovelace", "key": "p256", "password": "secret12", "path": "ada.p12" }));
+    ok(&mut a, "sign_id_create", json!({ "name": "Grace Hopper", "key": "p256", "password": "secret12", "path": "grace.p12" }));
+    let doc = ok(&mut a, "doc_open", json!({ "path": "a.pdf" }))["doc"].as_u64().unwrap();
+    let field = |a: &mut Automation, rect: Value| {
+        ok(a, "form_add_field", json!({ "doc": doc, "page": 1, "type": "signature", "rect": rect }))["field"].as_str().unwrap().to_owned()
+    };
+    let first = field(&mut a, json!([20, 200, 180, 250]));
+    let second = field(&mut a, json!([200, 200, 380, 250]));
+    ok(&mut a, "sign_document", json!({ "doc": doc, "id": "ada.p12", "password": "secret12", "field": first, "out": "one.pdf" }));
+    ok(&mut a, "sign_document", json!({ "doc": doc, "id": "grace.p12", "password": "secret12", "field": second, "out": "two.pdf" }));
+    let list = ok(&mut a, "sign_list", json!({ "doc": doc }));
+    let signatures = list["signatures"].as_array().unwrap();
+    assert_eq!(signatures.len(), 2, "{list}");
+    assert!(signatures.iter().all(|s| s["signed"] == true && s["status"] != "invalid"), "{list}");
+}
