@@ -4,12 +4,14 @@ use craft::ui::contract::{
     Bind, Entry, Outcome as _, Props as _, Scroll, SelectMode, Show as _, ShowCollection as _, ShowContainer as _, Trigger, clicked,
 };
 use craft::ui::display::{Shade, Text};
+use craft::ui::form::Field;
 use craft::ui::layout_components::{Row, Stack};
 use craft::ui::list::{ListRow, RowInk, ThumbAspect};
 use craft::ui::menu::Menu;
 use craft::ui::primitives::IconSpec;
 use craft::ui::runtime::env::Label;
 use craft::ui::sections::{HeaderAction, HeaderCommand, Panel, Section};
+use craft::ui::text::NumberField;
 use craft::ui::tile_grid::{CaptionPlace, Tile, TileGrid, TileGroup};
 
 use super::{Availability, PdfCraftApp, ToolGroup, ToolItem, catalog};
@@ -22,6 +24,22 @@ const EDIT_CONTENT_SHOWN: usize = 5;
 
 /// Other options: the tools Acrobat's Edit panel links to.
 const EDIT_OTHER_TOOLS: [&str; 3] = ["combine", "redact", "form"];
+
+/// The "Selected picture" section: a field that turns the picture by the degrees typed, clockwise, each time one is
+/// entered. It reads 0 again afterwards, since it asks for a turn and does not show the picture's angle. Returns the
+/// degrees entered in this pass.
+fn rotate_by_field(ui: &mut egui::Ui) -> Option<f64> {
+    let mut entered = None;
+    let _ = Section::fixed(tl!("Selected picture").to_string()).show(ui, |ui, _| {
+        let shown = Field::new(tl!("Rotate by").to_string()).show(ui, |ui, _| {
+            NumberField::new(tl!("Rotate by").to_string(), Bind::given(Some(0.0))).unit("°").range(-360.0..=360.0).step(1.0).show(ui).edit
+        });
+        // A typing run or a scrub is one gesture: applied when it commits, one undo step.
+        entered = shown.inner.as_ref().and_then(|edit| edit.events.committed()).copied().flatten().filter(|d: &f64| d.is_finite() && d.abs() >= 0.05);
+        let _ = Text::new(tl!("Degrees clockwise; a negative number turns the other way.").to_string()).shade(Shade::Muted).show(ui);
+    });
+    entered
+}
 
 /// Edit a PDF, laid out as Acrobat's Edit panel: the title with Preferences and Close; Format text
 /// while text is being edited or added; Modify page as a row of icon buttons and Organize pages;
@@ -333,6 +351,22 @@ fn format_section(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
             None => {}
         }
         return;
+    }
+    // A picture that was in the page already: dragging its knob turns it by eye, this by a number.
+    let picture = app.active_ids().filter(|_| app.quick_tool == crate::QuickTool::EditText).and_then(|(i, id)| {
+        // A picture added with this app has its own section below.
+        if app.views[i].session.content.selected.is_some() {
+            return None;
+        }
+        let chosen = app.views[i].session.image_selection.as_ref()?;
+        let (page, index) = (chosen.page, chosen.index);
+        (index < app.session.get(id)?.page_images(page).len()).then_some((page, index))
+    });
+    if let Some((page, index)) = picture
+        && let Some(degrees) = rotate_by_field(ui)
+    {
+        let change = pdfcraft_engine::ImageEdit::RotateBy(degrees);
+        app.apply_edit(ui.ctx(), pdfcraft_engine::Edit::EditPageImage { page, index, change });
     }
     let selected = app.active_ids().and_then(|(i, id)| {
         let (page, index) = app.views[i].session.content.selected?;
