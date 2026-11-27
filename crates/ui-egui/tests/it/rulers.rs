@@ -133,3 +133,34 @@ fn a_drag_from_a_ruler_that_ends_off_the_page_makes_no_guide_and_hidden_rulers_t
     drag(&mut h, from, drop);
     assert!(guides(&h).is_empty(), "with the rulers off nothing makes a guide");
 }
+
+#[test]
+fn a_ruler_reached_by_tab_adds_a_guide_in_the_middle_of_the_view_and_says_where() {
+    use egui::accesskit::Role;
+    use egui_kittest::kittest::Queryable as _;
+    for (ruler, axis) in [("Horizontal ruler", GuideAxis::Horizontal), ("Vertical ruler", GuideAxis::Vertical)] {
+        for key in [egui::Key::Enter, egui::Key::Space] {
+            let mut h = harness();
+            let mut reached = false;
+            for _ in 0..300 {
+                h.key_press(egui::Key::Tab);
+                h.run_steps(2);
+                if h.query_by(|node| node.is_focused() && node.label().as_deref() == Some(ruler)).is_some() {
+                    reached = true;
+                    break;
+                }
+            }
+            assert!(reached, "Tab never reached the {ruler}");
+            assert!(guides(&h).is_empty());
+            h.key_press(key);
+            h.run_steps(3);
+            let made = guides(&h);
+            assert_eq!(made.len(), 1, "{ruler} {key:?}: {made:?}");
+            assert_eq!(made[0].axis, axis);
+            let page_size = if axis == GuideAxis::Horizontal { PAGE_HEIGHT } else { PAGE_WIDTH };
+            assert!((made[0].position - f64::from(page_size) / 2.0).abs() < 3.0, "the whole page shows: {}", made[0].position);
+            assert!(h.query_all_by_role(Role::Status).chain(h.query_all_by_role(Role::Alert)).count() > 0, "a live region");
+            h.get_by_label_contains("Guide added at");
+        }
+    }
+}

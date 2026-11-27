@@ -245,6 +245,37 @@ fn keep_toolbar_in_the_margin(app: &mut PdfCraftApp) {
     }
 }
 
+/// The width of the floating rail's window.
+const RAIL_WIDTH: f32 = 52.0;
+
+/// Keeps the floating toolbar off the left rulers (the top ruler is kept clear by the dock's top inset), and puts it
+/// back once the rulers are gone, unless it was dragged elsewhere in the meantime.
+fn keep_toolbar_off_rulers(app: &mut PdfCraftApp, ctx: &egui::Context) {
+    let rulers = std::mem::take(&mut app.left_rulers);
+    let Some(rect) = toolbar_rect(&app.dock) else { return };
+    let x = rect.min.x;
+    let width = rect.width().max(RAIL_WIDTH);
+    let target = if rulers.is_empty() {
+        app.toolbar_before_rulers.take().filter(|(_, moved)| (x - moved).abs() < 0.5).map(|(before, _)| before)
+    } else {
+        // Left to right, so that leaving one ruler of a split view cannot end on the next.
+        let mut rulers = rulers;
+        rulers.sort_by(|a, b| a.left().total_cmp(&b.left()));
+        let clear = rulers.iter().fold(x, |x, ruler| if x < ruler.right() && x + width > ruler.left() { ruler.right() } else { x });
+        if clear == x {
+            None
+        } else {
+            let before = app.toolbar_before_rulers.map_or(x, |(before, _)| before);
+            app.toolbar_before_rulers = Some((before, clear));
+            Some(clear)
+        }
+    };
+    if let Some(target) = target.filter(|target| target.is_finite()) {
+        move_toolbar(app, rect.translate(egui::vec2(target - x, 0.0)));
+        ctx.request_repaint();
+    }
+}
+
 /// The floating toolbar's window rect, `None` when the toolbar is docked or closed.
 fn toolbar_rect(workspace: &Workspace<PanelId>) -> Option<egui::Rect> {
     workspace.layout().floating.iter().find(|window| window.contains(&PanelId::Toolbar)).map(|window| window.rect)
@@ -623,6 +654,7 @@ pub fn dock(app: &mut PdfCraftApp, ui: &mut Ui) {
     let anchor = rail_anchor(app);
     keep_toolbar_in_the_margin(app);
     fit_tools_to_window(app, ui.ctx().content_rect().width());
+    keep_toolbar_off_rulers(app, ui.ctx());
     refresh_specs(app);
     let workspace = Arc::clone(&app.dock);
     // The rail lists the Accessibility Checker once the document has a report, and Search and Compare only while
@@ -634,7 +666,7 @@ pub fn dock(app: &mut PdfCraftApp, ui: &mut Ui) {
         PanelId::Search | PanelId::Compare | PanelId::Destinations | PanelId::Articles => open == Some(*panel),
         _ => true,
     };
-    let inset = app.notice_inset;
+    let inset = app.notice_inset + crate::canvas::rulers::top_room(app, ui);
     // The specs leave the app while its panels borrow it, and come back with their revision.
     // Home and Combine have no side panel and no toolbar, and Read mode hides the tools and the quick toolbar, not the
     // navigation panels. A document that hides the window controls keeps the quick toolbar on its pages; full screen
@@ -1251,6 +1283,49 @@ mod tests {
 
     fn tools_x(h: &Harness<'static, PdfCraftApp>) -> f32 {
         h.get_by_label("Expand all tools").rect().center().x
+    }
+
+    /// The quick-tools bar covers neither ruler, wherever the layout puts it, and goes back when the rulers are hidden.
+    #[test]
+    fn the_toolbar_stays_off_the_rulers_in_every_layout() {
+        use egui::accesskit::Role;
+        type Setup = fn(&mut PdfCraftApp);
+        fn float_at(app: &mut PdfCraftApp, x: f32) {
+            let rect = toolbar_rect(&app.dock).unwrap();
+            move_toolbar(app, rect.translate(egui::vec2(x - rect.min.x, -rect.min.y)));
+        }
+        let layouts: [(&str, Setup); 7] = [
+            ("default", |_| {}),
+            ("tools closed", |app| app.set_left_open(false)),
+            ("tools on the right", |app| set_tools_on_right(app, true).unwrap()),
+            ("rail on the left", |app| set_rail_side(app, DockSide::Start).unwrap()),
+            ("dragged to the window's corner", |app| {
+                app.set_left_open(false);
+                float_at(app, 0.0);
+            }),
+            ("docked left", |app| move_to_edge(app, PanelId::Toolbar, DockEdge::Start).unwrap()),
+            ("docked right", |app| move_to_edge(app, PanelId::Toolbar, DockEdge::End).unwrap()),
+        ];
+        for (name, setup) in layouts {
+            let mut h = harness(|app| {
+                app.open_bytes(&egui::Context::default(), "form.pdf", None, include_bytes!("../../tests/data/form.pdf").to_vec()).unwrap();
+            });
+            setup(h.state_mut());
+            h.run_steps(6);
+            let before = toolbar_rect(&h.state().dock);
+            assert!(h.state_mut().execute(&egui::Context::default(), "view.show_rulers"), "{name}");
+            h.run_steps(6);
+            // A floating bar is a window with its grip; a docked one is the rail itself.
+            let window = h.query_by_role_and_label(Role::Group, "Toolbar");
+            let bar = window.unwrap_or_else(|| h.get_by_role_and_label(Role::Toolbar, "Toolbar")).rect();
+            for ruler in ["Horizontal ruler", "Vertical ruler"] {
+                let ruler_rect = h.get_by_label(ruler).rect();
+                assert!(!bar.intersect(ruler_rect).is_positive(), "{name}: the toolbar {bar:?} covers the {ruler} {ruler_rect:?}");
+            }
+            assert!(h.state_mut().execute(&egui::Context::default(), "view.show_rulers"), "{name}");
+            h.run_steps(6);
+            assert_eq!(toolbar_rect(&h.state().dock), before, "{name}: hidden rulers leave the toolbar where it was");
+        }
     }
 
     /// A panel moved to the other edge is there again in a new app restored from the saved settings.

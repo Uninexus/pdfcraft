@@ -6,9 +6,12 @@
 //! makes a guide there through the session's `add_guide`, the function `doc_guide_add` calls; a guide dragged by its line
 //! (`guides`) and dropped on a ruler is removed. Guides are view state: no undo step, and the document is not dirty.
 
-use egui::{Align2, Color32, FontId, Pos2, Rect, Sense, Stroke, Ui, pos2};
+use egui::{Align2, Color32, FontId, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, pos2};
 
-use craft::ui::runtime::env::Env;
+use craft::behavior::{Metrics, Sense as Behaviour};
+use craft::ui::contract::{Common, Component, Cx, Focus as _, MeasureCx, NoValue, Outcome, Pointer as _, Props as _, Role, Show as _};
+use craft::ui::runtime::env::{Env, Label};
+use craft::ui::style::{ComponentStyle, StyleCx};
 
 use crate::PdfCraftApp;
 use crate::units::Unit;
@@ -71,11 +74,20 @@ fn thickness(ui: &Ui) -> f32 {
     env.tokens.typography.caption.line_height + 2.0 * env.tokens.space.gap.tight
 }
 
+/// Whether the tab at `index` shows rulers: they are on and it shows a page body.
+fn shows(app: &PdfCraftApp, index: usize) -> bool {
+    app.views.get(index).is_some_and(|view| view.show_rulers && !view.organize && !view.presenting())
+}
+
+/// The room the active tab's top ruler takes, none when it shows no rulers: floating panels stay below it.
+pub(crate) fn top_room(app: &PdfCraftApp, ui: &Ui) -> f32 {
+    if app.active.is_some_and(|index| shows(app, index)) { thickness(ui) } else { 0.0 }
+}
+
 /// The strips of the tab at `index` in `rect`, or `None` when its rulers are off or it shows no page body (the
 /// Organize grid, full screen). The top strip lies under the notice bars (`notice_inset`, as the last pass measured).
 pub(super) fn layout(app: &PdfCraftApp, index: usize, ui: &Ui, rect: Rect) -> Option<Strips> {
-    let view = app.views.get(index)?;
-    if !view.show_rulers || view.organize || view.presenting() {
+    if !shows(app, index) {
         return None;
     }
     let t = thickness(ui);
@@ -136,31 +148,79 @@ pub(super) fn label(value: f64, per_unit: f32) -> String {
     format!("{value:.decimals$}")
 }
 
-/// Paints the rulers of the tab at `index`, takes drags from them, and applies what a guide's drag asked for.
-pub(super) fn show(app: &mut PdfCraftApp, index: usize, ui: &mut Ui, strips: &Strips) {
-    settle_guide_drag(app, index, ui, strips);
-    let Some(view) = app.views.get(index) else { return };
-    let pages = view.page_xforms();
-    let (key, current) = (view.view_key(), view.view.current);
-    let look = look(ui);
-    paint(ui, strips, &pages, current, app.units, &look);
+/// What the rulers' input left for the painting after the page view.
+#[derive(Clone, Copy, Default)]
+pub(super) struct RulerInput {
+    /// The ruler that holds the keyboard focus.
+    focused: Option<Rect>,
+    /// A drag from a ruler under way: whether it is the top one, and where the pointer is.
+    dragging: Option<(bool, Pos2)>,
+}
+
+/// The rulers as controls: a drag from one makes a guide, and so does Enter or Space on the one with the focus.
+pub(super) fn input(app: &mut PdfCraftApp, index: usize, ui: &mut Ui, strips: &Strips) -> Option<RulerInput> {
+    let key = app.views.get(index)?.view_key();
+    let mut out = RulerInput::default();
     for from_top in [true, false] {
         let strip = if from_top { strips.top } else { strips.left };
         let name = if from_top { tl!("Horizontal ruler") } else { tl!("Vertical ruler") };
-        let resp = ui.interact(strip, egui::Id::unique(("pdfcraft-ruler", key, from_top)), Sense::drag());
-        resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Unknown, true, name));
-        let hint = tl!("Drag onto a page to add a guide");
+        let stop = RulerStop::new(name.to_string()).id(egui::Id::unique(("pdfcraft-ruler", key, from_top))).show_at(ui, strip);
+        if stop.focused {
+            out.focused = Some(strip);
+        }
+        if stop.activated {
+            add_in_view(app, index, strips, from_top);
+        }
+        let resp = ui.interact(strip, egui::Id::unique(("pdfcraft-ruler-drag", key, from_top)), Sense::DRAG);
+        let hint = tl!("Drag onto a page to add a guide, or press Enter to add one in the middle of the view");
         let cursor = if from_top { egui::CursorIcon::ResizeVertical } else { egui::CursorIcon::ResizeHorizontal };
         let resp = resp.on_hover_text(hint).on_hover_cursor(cursor);
         let pointer = ui.input(|i| i.pointer.latest_pos());
         if let Some(at) = pointer.filter(|_| resp.dragged()) {
-            preview(ui, strips, &pages, from_top, at, &look);
+            out.dragging = Some((from_top, at));
         }
         if resp.drag_stopped()
             && let Some(at) = pointer
         {
             drop_guide(app, index, strips, from_top, at);
         }
+    }
+    Some(out)
+}
+
+/// Paints the rulers of the tab at `index` after its pages, and applies what a guide's drag asked for.
+pub(super) fn show(app: &mut PdfCraftApp, index: usize, ui: &mut Ui, strips: &Strips, input: Option<RulerInput>) {
+    settle_guide_drag(app, index, ui, strips);
+    let Some(view) = app.views.get(index) else { return };
+    let pages = view.page_xforms();
+    let current = view.view.current;
+    let look = look(ui);
+    paint(ui, strips, &pages, current, app.units, &look);
+    app.left_rulers.push(strips.left);
+    let input = input.unwrap_or_default();
+    if let Some(strip) = input.focused {
+        ui.painter().rect_stroke(strip, 0.0, Stroke::new(2.0 * look.line, look.guide), StrokeKind::Inside);
+    }
+    if let Some((from_top, at)) = input.dragging {
+        preview(ui, strips, &pages, from_top, at, &look);
+    }
+}
+
+/// Adds a guide through the middle of the part of the current page that is on screen (the first page on screen when the
+/// current one is not), and says where it is.
+fn add_in_view(app: &mut PdfCraftApp, index: usize, strips: &Strips, from_top: bool) {
+    let Some(view) = app.views.get(index) else { return };
+    let current = view.view.current;
+    let pages = view.page_xforms();
+    let on_screen = |xf: &super::xform::PageXform| xf.rect.intersect(strips.pages);
+    let shown = pages.iter().filter(|(_, xf)| on_screen(xf).is_positive());
+    let Some(at) = shown.clone().find(|(page, _)| *page == current).or(shown.clone().next()).map(|(_, xf)| on_screen(xf).center()) else {
+        return;
+    };
+    if let Some(position) = drop_guide(app, index, strips, from_top, at) {
+        let unit = app.units;
+        let text = format!("{:.*} {}", unit.decimals(), position * unit.per_point(), unit.label());
+        app.notify_fmt("Guide added at {position}", &[("position", &text)]);
     }
 }
 
@@ -189,19 +249,23 @@ fn settle_guide_drag(app: &mut PdfCraftApp, index: usize, ui: &Ui, strips: &Stri
     }
 }
 
-/// Makes the guide a drag from a ruler dropped at `at` stands for, when that is on a page.
-fn drop_guide(app: &mut PdfCraftApp, index: usize, strips: &Strips, from_top: bool, at: Pos2) {
-    let Some(view) = app.views.get_mut(index) else { return };
+/// Makes the guide a drag from a ruler dropped at `at` stands for, when that is on a page; its position in points.
+fn drop_guide(app: &mut PdfCraftApp, index: usize, strips: &Strips, from_top: bool, at: Pos2) -> Option<f64> {
+    let view = app.views.get_mut(index)?;
     let doc = view.id;
-    let Some((page, xf)) = view.page_xforms().into_iter().find(|(_, xf)| xf.rect.contains(at)) else { return };
+    let (page, xf) = view.page_xforms().into_iter().find(|(_, xf)| xf.rect.contains(at))?;
     if !strips.pages.contains(at) {
-        return;
+        return None;
     }
     // A guide made while guides are hidden would be lost to sight at once.
     view.show_guides = true;
     let (axis, position) = guides::dropped(&xf, from_top, at);
-    if let Err(error) = app.session.add_guide(doc, page, axis, position) {
-        app.notify_error(error);
+    match app.session.add_guide(doc, page, axis, position) {
+        Ok(_) => Some(position),
+        Err(error) => {
+            app.notify_error(error);
+            None
+        }
     }
 }
 
@@ -305,5 +369,78 @@ mod tests {
     fn a_number_has_the_decimals_its_step_needs() {
         assert_eq!(label(2.0, 72.0), "2");
         assert_eq!(label(0.5, 200.0), "0.5");
+    }
+}
+
+/// The style of a ruler's control: the strip paints itself.
+#[derive(Clone, Debug, PartialEq, ComponentStyle)]
+pub(crate) struct RulerStopStyle {
+    #[style(metrics)]
+    metrics: Metrics,
+}
+
+/// What a ruler's control reports.
+pub(crate) struct RulerStopOutput {
+    response: egui::Response,
+    activated: bool,
+    focused: bool,
+}
+
+impl Outcome for RulerStopOutput {
+    type Value = NoValue;
+
+    fn response(&self) -> &egui::Response {
+        &self.response
+    }
+}
+
+/// A ruler as the framework's keyboard and assistive technology see it: a Tab stop with a button's role and keys. It
+/// paints nothing, and the pointer's drag is read from the strip itself.
+#[derive(Component)]
+#[component(canvas_control, sample = RulerStop::sample)]
+pub(crate) struct RulerStop {
+    #[common]
+    common: Common,
+    activated: bool,
+    focused: bool,
+}
+
+impl RulerStop {
+    fn new(name: String) -> Self {
+        RulerStop { common: Common::new(), activated: false, focused: false }.label(Label::from(name))
+    }
+
+    /// For the component suite.
+    fn sample() -> Self {
+        RulerStop::new(tl!("Horizontal ruler").to_string())
+    }
+}
+
+impl Component for RulerStop {
+    const ROLE: Role = Role::BUTTON;
+    const PARTS: bool = false;
+    const OVERLAYS: bool = false;
+    type Style = RulerStopStyle;
+    type Output = RulerStopOutput;
+
+    fn style(_: &StyleCx<'_>, _: RulerStopStyleKey) -> RulerStopStyle {
+        RulerStopStyle { metrics: Metrics::new() }
+    }
+
+    fn sense(&self) -> Behaviour {
+        Behaviour::FOCUS
+    }
+
+    fn measure(&mut self, _: &MeasureCx<'_, Self>) -> egui::Vec2 {
+        egui::Vec2::ZERO
+    }
+
+    fn update(&mut self, cx: &mut Cx<'_, Self>) {
+        self.activated = cx.activation().is_some();
+        self.focused = cx.is_focused();
+    }
+
+    fn finish(self, cx: Cx<'_, Self>) -> RulerStopOutput {
+        RulerStopOutput { response: cx.response.clone(), activated: self.activated, focused: self.focused }
     }
 }

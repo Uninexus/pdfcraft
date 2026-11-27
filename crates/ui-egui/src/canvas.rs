@@ -40,7 +40,7 @@ mod guides;
 pub(super) mod image_pick;
 mod navigation;
 pub(crate) mod organize;
-mod rulers;
+pub(crate) mod rulers;
 // PLAN: no sheet assigns the `mod` lines of the four new page-body files (pdf-canvas-w9 `page_parts.rs`,
 // `page_tools.rs`; pdf-canvas-w10 `pictures.rs`; pdf-canvas-w15 `page_overlays.rs`); the host writes them here.
 pub(crate) mod page_overlays;
@@ -1722,9 +1722,11 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
 pub fn document_area_at(app: &mut PdfCraftApp, index: usize, rect: Rect, ui: &mut egui::Ui) -> Option<PageViewOutput> {
     // With the rulers shown, the pages take the room inside them: a press on a ruler never reaches the page view.
     let strips = rulers::layout(app, index, ui, rect);
+    // The rulers take their input before the page view, which keeps Tab for itself once it has the focus.
+    let ruler_input = strips.and_then(|strips| rulers::input(app, index, ui, &strips));
     let out = pages_at(app, index, strips.map_or(rect, |s| s.pages), ui);
     if let Some(strips) = strips.filter(|_| out.is_some()) {
-        rulers::show(app, index, ui, &strips);
+        rulers::show(app, index, ui, &strips, ruler_input);
     }
     out
 }

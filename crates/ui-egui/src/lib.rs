@@ -352,6 +352,10 @@ pub struct PdfCraftApp {
     /// Whether the Tools pane was in the dock when the floating toolbar was last placed: the toolbar follows the page area's
     /// left edge as the pane closes and opens.
     pub(crate) toolbar_tools_open: bool,
+    /// The left rulers the last pass drew: the floating toolbar is kept off them.
+    pub(crate) left_rulers: Vec<egui::Rect>,
+    /// Where the floating toolbar stood before a ruler moved it, and where it was moved to.
+    pub(crate) toolbar_before_rulers: Option<(f32, f32)>,
     /// Whether the window was narrow (under [`panels::side_panels::NARROW_WINDOW`]) when the Tools pane's width was last set: a
     /// narrow window keeps the pane at production's width, a wide one gives it the width Format text needs.
     pub(crate) window_narrow: bool,
