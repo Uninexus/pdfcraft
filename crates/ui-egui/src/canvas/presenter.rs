@@ -70,6 +70,8 @@ pub(crate) struct PresentAt {
     /// Whether the pages scroll continuously (full screen that keeps the window's display).
     pub(crate) continuous: bool,
     pub(crate) rotation: u16,
+    /// Preferences: the seconds after which a page without a display time of its own is turned; `None` never.
+    pub(crate) every: Option<f64>,
 }
 
 /// What a frame of full screen asks of the caller.
@@ -292,12 +294,12 @@ pub(super) fn frame(
 
     presenter.picture = presenter.shown.filter(|(shown, _)| *shown == page).and_then(|_| placed(page)).and_then(|p| p.picture.shown());
 
-    // A page with a display time advances once it is up (not past the last page).
+    // A page with a display time advances once it is up, else after the time Preferences set (not past the last page).
     let mut step = None;
     if let Some((shown, since)) = presenter.shown
         && shown == page
         && page + 1 < info.pages.len()
-        && let Some(seconds) = entry(info, page).and_then(|t| t.display).map(f64::from).filter(|d| d.is_finite() && *d >= 0.0)
+        && let Some(seconds) = entry(info, page).and_then(|t| t.display).map(f64::from).filter(|d| d.is_finite() && *d >= 0.0).or(at.every)
     {
         let left = since + seconds.min(MAX_DISPLAY) - now;
         if left <= 0.0 {

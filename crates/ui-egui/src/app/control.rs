@@ -247,6 +247,11 @@ impl PdfCraftApp {
                     _ => return Err("full-screen-escape must be on or off".into()),
                 };
             }
+            ("full-screen-advance", _) => {
+                let max = crate::FULL_SCREEN_ADVANCE_MAX;
+                let seconds = value.parse().ok().filter(|n| *n <= max).ok_or_else(|| format!("full-screen-advance must be between 0 and {max}"))?;
+                self.full_screen_advance = seconds;
+            }
             ("full-screen-fill", _) => {
                 self.full_screen_fill = match value {
                     "on" => true,

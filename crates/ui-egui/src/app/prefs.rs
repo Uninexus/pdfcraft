@@ -203,6 +203,7 @@ impl PdfCraftApp {
         let behavior = settings::Behavior {
             default_page_gaps: Some(self.view_defaults.page_gaps),
             full_screen_fill: Some(self.full_screen_fill),
+            full_screen_advance: Some(self.full_screen_advance),
             full_screen_escape_exits: Some(self.full_screen_escape_exits),
             units: Some(self.units),
             grid_spacing: grid.map(|g| g.spacing),
@@ -552,6 +553,7 @@ impl PdfCraftApp {
         if let Some(fill) = b.full_screen_fill {
             self.full_screen_fill = fill;
         }
+        self.full_screen_advance = b.full_screen_advance.map_or(self.full_screen_advance, |s| s.min(crate::FULL_SCREEN_ADVANCE_MAX));
         if let Some(exits) = b.full_screen_escape_exits {
             self.full_screen_escape_exits = exits;
         }

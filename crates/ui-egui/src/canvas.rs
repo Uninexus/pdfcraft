@@ -1913,6 +1913,7 @@ fn pages_at(app: &mut PdfCraftApp, index: usize, rect: Rect, ui: &mut egui::Ui) 
         display: view.view.display,
         continuous: view.view.continuous,
         rotation: view.view.rotation,
+        every: (app.full_screen_advance > 0).then(|| f64::from(app.full_screen_advance)),
     });
     let veiled = page_overlays::veiled(view);
     // Shadows only with the preference on, and only between gaps: they would darken the page before when pages touch.
