@@ -5365,7 +5365,11 @@ fn a_text_box_is_typed_on_the_page_with_bold_and_italic() {
     assert_eq!(runs_of_box(&h, 0), [(6, 10, true, false), (11, 14, false, true)]);
     assert_eq!(h.state().quick_tool, QuickTool::Select);
 
-    // Edited again, with a word typed in front: the styles move with their words.
+    // Edited again, with a word typed in front: the styles move with their words. A selected box is let go, so that no
+    // resize handle lies over the text.
+    click_pt(&mut h, (60.0, 145.0));
+    h.run_steps(3);
+    assert!(h.state().views[0].session.comments.primary().is_some(), "the box is selected");
     h.state_mut().views[0].session.comments.composer = Some(pdfcraft_ui_egui::comments::Composer {
         page: 0,
         at: [50.0, 150.0],
@@ -5374,6 +5378,7 @@ fn a_text_box_is_typed_on_the_page_with_bold_and_italic() {
         focus: true,
     });
     h.run_steps(4);
+    assert!(h.state().views[0].session.comments.primary().is_none(), "no frame over the editor");
     key(&mut h, egui::Modifiers::NONE, egui::Key::Home);
     typing(&mut h, "very ");
     h.get_all_by_label("Save").last().unwrap().click();

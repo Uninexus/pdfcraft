@@ -329,6 +329,8 @@ fn adopt(session: &mut PageSession, cx: &BoxCx<'_>) {
     };
     open.follow_caret();
     session.comments.rich = Some(open);
+    // A selected box would keep its frame and resize handles over the text being typed.
+    session.comments.clear_selection();
 }
 
 /// The box's text laid out in the screen points of the pass, the first line's top-left at `origin`.
@@ -605,6 +607,8 @@ pub(crate) fn show(ui: &mut egui::Ui, body: &PageBody<'_>, session: &mut PageSes
         painter.rect_stroke(rect, 0.0, Stroke::new((border * zoom) as f32, ink), egui::StrokeKind::Inside);
     }
     host.paint(painter);
+    // Where the typing happens, for a box with no border of its own.
+    painter.rect_stroke(rect.expand(2.0), 0.0, Stroke::new(1.0, ui.visuals().selection.bg_fill), egui::StrokeKind::Outside);
     if host.open.text.is_empty() {
         painter.text(origin, egui::Align2::LEFT_TOP, tl!("Type text"), FontId::proportional((host.open.size * zoom) as f32), Color32::from_gray(150));
     }
