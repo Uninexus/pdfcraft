@@ -79,6 +79,7 @@ fn results(app: &mut PdfCraftApp, ctx: &egui::Context) {
     app.ink_manager_pass(ctx);
     app.media_actions_pass(ctx);
     app.word_count_pass(ctx);
+    app.signature_properties_pass(ctx);
     app.prompts_pass(ctx);
     app.attachment_description_pass(ctx);
     // Comments.

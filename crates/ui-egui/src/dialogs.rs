@@ -37,6 +37,7 @@ pub(crate) mod rename_ui;
 pub(crate) mod role_class_map;
 pub(crate) mod shortcuts;
 pub(crate) mod signature;
+pub(super) mod signature_props;
 pub(super) mod signature_report_ui;
 pub(super) mod signing_handoff_ui;
 pub(super) mod signing_plan_ui;

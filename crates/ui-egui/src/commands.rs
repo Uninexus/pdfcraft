@@ -1031,6 +1031,7 @@ impl PdfCraftApp {
                 self.choose_right_panel(Some(RightPanel::Signatures));
             }
             "sign.panel" => self.choose_right_panel(Some(RightPanel::Signatures)),
+            "sign.properties" => self.open_signature_properties(None),
             "form.export_data" => self.export_data_dialog(ctx, false, true),
             "form.merge_data" => self.merge_data_dialog(),
             "form.prepare" => {
