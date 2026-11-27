@@ -74,6 +74,22 @@ fn page_check_boxes_pick_several_pages() {
     }
 }
 
+/// The page grid takes over the left panel, so its heading names Organize pages, not the panel it replaced.
+#[test]
+fn the_panel_beside_the_grid_is_headed_organize_pages() {
+    let mut h = organize();
+    h.state_mut().set_option(&egui::Context::default(), "organize", "off").unwrap();
+    h.state_mut().set_option(&egui::Context::default(), "left", "edit").unwrap();
+    h.run_steps(4);
+    let painted = |h: &Harness<'static, PdfCraftApp>, words: &str| {
+        h.output().shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text() == words))
+    };
+    assert!(painted(&h, "Edit a PDF"), "the Edit panel is up");
+    assert!(h.execute("page.organize"));
+    h.run_steps(6);
+    assert!(painted(&h, "Organize pages") && !painted(&h, "Edit a PDF"), "headed by what it shows");
+}
+
 #[test]
 fn organize_header_paints_a_close_label() {
     let h = organize();

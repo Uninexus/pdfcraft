@@ -445,8 +445,10 @@ impl DockSpecs {
         let tools_title = if calc_order {
             crate::i18n::t("Calculation order")
         } else {
-            // The panel is headed by what it shows: the tool's name, or All tools (production's heading).
-            match app.left {
+            // The panel is headed by what it shows: the tool's name, or All tools (production's heading). The page grid
+            // takes the panel over from whichever was open.
+            let shown = if crate::organize_panel::showing(app) { LeftPanel::Tool("organize") } else { app.left };
+            match shown {
                 LeftPanel::Tool(id) => super::catalog::group(id).map_or_else(|| crate::i18n::t("All tools"), |g| crate::i18n::t(g.label)),
                 _ => crate::i18n::t("All tools"),
             }
