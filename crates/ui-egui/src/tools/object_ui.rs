@@ -36,6 +36,22 @@ pub(crate) struct ObjectSelection {
     marquee_mods: Mods,
 }
 
+impl crate::PdfCraftApp {
+    /// Selects every object of `page` of the active tab together, as a marquee over the whole page does, and returns
+    /// how many: for tests of the commands that act on a selection.
+    #[doc(hidden)]
+    pub fn select_page_objects_for_test(&mut self, page: usize) -> usize {
+        let Some((i, id)) = self.active_ids() else { return 0 };
+        let Some(doc) = self.session.get(id) else { return 0 };
+        let objects = &mut self.views[i].session.objects;
+        let Ok(found) = objects.inventory(doc, page) else { return 0 };
+        objects.clear();
+        objects.page = Some(page);
+        objects.selected = found;
+        objects.selected.len()
+    }
+}
+
 impl ObjectSelection {
     pub fn count(&self) -> usize {
         self.selected.len()
