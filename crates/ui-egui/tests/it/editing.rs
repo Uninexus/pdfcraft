@@ -4639,6 +4639,51 @@ fn dragging_the_rotate_knob_turns_a_page_image() {
     assert!((turned[2] - turned[0] - hh).abs() < 1.5 && (turned[3] - turned[1] - w).abs() < 1.5, "{before:?} -> {turned:?}");
 }
 
+/// A picture selected in Edit a PDF can be turned by a typed number of degrees, as one undo step.
+#[test]
+fn a_page_image_turns_by_the_degrees_typed() {
+    let mut png = Vec::new();
+    image::RgbImage::from_pixel(80, 40, image::Rgb([200, 40, 40])).write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).unwrap();
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |cc| {
+        crate::support::install_runtime(&cc.egui_ctx);
+        {
+            let mut app = crate::control::new_app();
+            app.set_option(&egui::Context::default(), "language", "en").unwrap();
+            app.open_bytes(&egui::Context::default(), "picture.png", None, png.clone()).expect("opens");
+            app
+        }
+    });
+    h.run_steps(4);
+    let id = h.state().views[0].id;
+    let before = h.state().session.get(id).unwrap().page_images(0)[0].rect;
+    assert!(h.execute("edit.edit_text"));
+    h.run_steps(2);
+    let c = h.state().views[0].page_screen_rect(0).expect("on screen").center();
+    h.hover_at(c);
+    h.run_steps(1);
+    h.drag_at(c);
+    h.run_steps(1);
+    h.drop_at(c);
+    h.run_steps(3);
+    let field = h.get_by_role_and_label(egui::accesskit::Role::SpinButton, "Rotate by").rect().center();
+    h.hover_at(field);
+    h.run_steps(1);
+    h.drag_at(field);
+    h.run_steps(1);
+    h.drop_at(field);
+    h.run_steps(2);
+    h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    h.event(egui::Event::Text("90".into()));
+    h.run_steps(2);
+    h.key_press(egui::Key::Enter);
+    h.run_steps(4);
+    let doc = h.state().session.get(id).unwrap();
+    assert_eq!(doc.can_undo(), Some("Rotate image"));
+    let turned = doc.page_images(0)[0].rect;
+    let (w, hh) = (before[2] - before[0], before[3] - before[1]);
+    assert!((turned[2] - turned[0] - hh).abs() < 1.5 && (turned[3] - turned[1] - w).abs() < 1.5, "{before:?} -> {turned:?}");
+}
+
 #[test]
 fn dragging_rotate_knob_on_already_rotated_image_applies_delta_only() {
     let mut png = Vec::new();
