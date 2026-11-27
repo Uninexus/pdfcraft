@@ -589,3 +589,43 @@ fn a_sticky_note_is_placed_at_the_caret_by_keys() {
     // The second line stands about 126 points up the 200 point page, and its end is right of the middle.
     assert!(rect[0] > 100.0 && rect[3] > 110.0 && rect[3] < 160.0, "{rect:?}");
 }
+
+/// Help ▸ Keyboard shortcuts lists the keys no command binds: moving around the window, the text caret and placing a
+/// sticky note.
+#[test]
+fn the_shortcuts_window_lists_the_keys_no_command_binds() {
+    let mut h = open(lines());
+    h.ctx.set_os(egui::os::OperatingSystem::Windows);
+    for (query, rows) in [
+        ("control", &["Next / previous control: Tab / Shift+Tab"][..]),
+        ("focused", &["Press the focused button: Enter / "][..]),
+        (
+            "caret",
+            &["Move the caret by character and line: ← → ↑ ↓", "Move the caret by word: Ctrl+← →", "Extend the selection with the caret: Shift+"][..],
+        ),
+        ("note", &["Move the sticky note marker (Shift: further): ← → ↑ ↓", "Place the sticky note at the marker: Enter"][..]),
+        ("tool", &["Leave a comment tool: Esc"][..]),
+    ] {
+        assert!(h.state_mut().execute(&egui::Context::default(), "help.shortcuts"));
+        h.run_steps(3);
+        // Keys outside the commands are listed under Fixed Keys.
+        h.get_all_by_label("Show:").last().expect("the Show list").click();
+        h.run_steps(3);
+        h.get_by_label("Fixed Keys").click();
+        h.run_steps(3);
+        h.get_by_role_and_label(Role::TextInput, "Search:").focus();
+        h.run_steps(2);
+        h.get_by_role_and_label(Role::TextInput, "Search:").type_text(query);
+        h.run_steps(4);
+        for row in rows {
+            assert!(h.query_all_by_label_contains(row).next().is_some(), "{query:?} does not list {row:?}");
+        }
+        press(&mut h, Key::Escape);
+        h.run_steps(3);
+        if h.query_by_label("Search:").is_some() {
+            press(&mut h, Key::Escape);
+            h.run_steps(3);
+        }
+        assert!(h.query_by_label("Search:").is_none(), "the window closed");
+    }
+}
