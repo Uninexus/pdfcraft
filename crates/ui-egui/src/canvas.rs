@@ -231,6 +231,8 @@ pub struct DocView {
     /// Full screen (Acrobat's Full Screen Mode): the display saved on entering it, while the view
     /// shows one page or spread at a time, fitted to the screen. `None` outside full screen.
     presentation: Option<SavedDisplay>,
+    /// Full screen was entered from the page grid, which comes back on leaving.
+    grid_behind_presentation: bool,
     /// Full screen fills the screen with one page (or spread) at a time, edge to edge (the
     /// default); off, it keeps the page display it was entered from. Set from the app's
     /// preference before full screen is entered.
@@ -646,6 +648,7 @@ impl DocView {
             forward: Vec::new(),
             interface: Default::default(),
             presentation: None,
+            grid_behind_presentation: false,
             full_screen_fill: true,
             cut_notice_dismissed: Default::default(),
             find: None,

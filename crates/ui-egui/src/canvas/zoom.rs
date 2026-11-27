@@ -28,6 +28,8 @@ impl DocView {
         });
         self.session.text.selection = None;
         self.session.presenter = Default::default();
+        // Full screen presents the document: the page grid steps aside until it is left.
+        self.grid_behind_presentation = std::mem::take(&mut self.organize);
         if self.full_screen_fill {
             self.view.continuous = false;
             self.view.fit = Fit::Page;
@@ -54,6 +56,7 @@ impl DocView {
         let filled = self.fills_screen();
         let Some(saved) = self.presentation.take() else { return };
         self.session.presenter = Default::default();
+        self.organize |= std::mem::take(&mut self.grid_behind_presentation);
         self.view.display = saved.display;
         self.view.continuous = saved.continuous;
         self.view.cover = saved.cover;
