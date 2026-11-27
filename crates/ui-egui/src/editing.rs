@@ -31,6 +31,9 @@ fn clear_shifted_page_comment_state(view: &mut crate::DocView, shifted_from: usi
     if view.session.comments.composer.as_ref().is_some_and(|c| !matches!(c.kind, crate::comments::ComposerKind::Edit(_)) && c.page >= shifted_from) {
         view.session.comments.composer = None;
     }
+    if view.session.comments.rich.as_ref().is_some_and(|open| open.is_new() && open.page >= shifted_from) {
+        view.session.comments.rich = None;
+    }
 }
 
 /// Keeps the pages (or comment) the user acted on selected, where they now are. `annots_before`
@@ -67,6 +70,8 @@ fn select_after_edit(
             }
             view.select_pages(&[]);
         }
+        // A new text box with runs is followed up as any new comment is.
+        Edit::AddTextBox { new, .. } => select_after_edit(view, &Edit::AddAnnotation(new.clone()), info, annots_before, quick_tool, across_pages),
         // A stroke drawn with the pen stays unselected, so the selection box and
         // author popup don't sit over the next stroke (#429).
         Edit::AddAnnotation(a)
@@ -222,7 +227,7 @@ impl PdfCraftApp {
                 // drop its highlight now, not on the next frame (which only comes with the next input).
                 view.session.picked_image = None;
                 self.wake.wake();
-                if matches!(edit, Edit::AddAnnotation(_)) {
+                if edit.added_annotation().is_some() {
                     // A released drawing's raster can come now: it will have the annotation.
                     view.session.comments.drawings_committed();
                 } else {
@@ -263,7 +268,7 @@ impl PdfCraftApp {
                     let (document, page) = view.revisions.of(selection.page);
                     selection.settled_revision = Some(craft::pages::ui::PageRevision { document, page });
                 }
-                if matches!(edit, Edit::AddAnnotation(_)) || across_pages.is_some() {
+                if edit.added_annotation().is_some() || across_pages.is_some() {
                     view.session.comments.comment_added();
                 }
                 // A deletion moves the pop-ups' state with its comments (`annotation_deleted`).
@@ -1207,6 +1212,7 @@ fn one_page_changed(
 fn comment_page(edit: &Edit) -> Option<usize> {
     match edit {
         Edit::AddAnnotation(a) => Some(a.page),
+        Edit::AddTextBox { new, .. } => Some(new.page),
         Edit::DeleteAnnotation { page, .. }
         | Edit::SetAnnotationContents { page, .. }
         | Edit::ReplyToAnnotation { page, .. }

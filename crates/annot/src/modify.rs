@@ -118,6 +118,14 @@ pub fn text_runs(doc: &Document, page: usize, index: usize) -> Result<Vec<TextRu
     Ok(if d.name(b"Subtype") == Some(b"FreeText") { runs_in(d) } else { Vec::new() })
 }
 
+/// The standard face the text box at `(page, index)` is drawn in, which its runs add to.
+pub fn text_face(doc: &Document, page: usize, index: usize) -> Result<pdfcraft_fonts::Std14, AnnotError> {
+    let p = page_ref(doc, page)?;
+    let entry = annots(doc, p).get(index).map(|o| doc.resolve(o)).ok_or(AnnotError::NoSuchAnnotation { page, index })?;
+    let Some(d) = entry.as_dict() else { return Err(AnnotError::NoSuchAnnotation { page, index }) };
+    Ok(text_style::text_style(d, text_style::dr_face(doc, d)).face)
+}
+
 /// Make the characters `runs` name bold or italic and the rest of the text box's text plain: written to its rich text
 /// and drawn, the box growing to fit. An empty `runs` makes it all plain. Positions count characters of `/Contents`,
 /// a line break as one.

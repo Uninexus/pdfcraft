@@ -297,6 +297,11 @@ pub enum Edit {
         fill: Option<f64>,
         text: Option<f64>,
     },
+    /// A new text box with bold and italic parts, in one undo step.
+    AddTextBox {
+        new: pdfcraft_annot::NewAnnotation,
+        runs: Vec<pdfcraft_annot::TextRun>,
+    },
     /// The bold and italic parts of a text box's text, replacing those it had; none makes it all plain.
     TextRunsAnnotation {
         page: usize,
@@ -834,4 +839,14 @@ pub enum Edit {
         label: String,
         edits: Vec<Edit>,
     },
+}
+
+impl Edit {
+    /// The comment this edit adds, for one that adds a single comment.
+    pub fn added_annotation(&self) -> Option<&pdfcraft_annot::NewAnnotation> {
+        match self {
+            Edit::AddAnnotation(new) | Edit::AddTextBox { new, .. } => Some(new),
+            _ => None,
+        }
+    }
 }

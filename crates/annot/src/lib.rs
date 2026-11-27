@@ -47,9 +47,9 @@ pub(crate) use modify::n;
 pub use modify::{
     add_reply, add_text_replacement, deletable, delete_annotation, erase_ink, fillable, goes_with, lift_annotation, move_annotation, release_members,
     set_border_color, set_border_shape, set_contents, set_fill, set_font_size, set_locked, set_marked, set_part_opacity, set_points, set_popup,
-    set_rect, set_review_state, set_style, set_text_runs, text_runs, with_replies_and_popups,
+    set_rect, set_review_state, set_style, set_text_runs, text_face, text_runs, with_replies_and_popups,
 };
-pub use rich::TextRun;
+pub use rich::{TextRun, line_ranges as rich_line_ranges};
 pub use threed::{Activation as Activation3d, MAX_MODEL_BYTES, ModelFormat, NewModel3d, PosterPicture, add_3d_model, check_model};
 pub use types::{
     AttachIcon, BorderShape, FillMark, LineEnding, Markup, Meta, NOTE_SIZE, NewAnnotation, NoteIcon, OverlayFont, OverlayLook, ReviewState, Rgb,

@@ -95,7 +95,7 @@ impl crate::PdfCraftApp {
                 "selected_comment": v.session.comments.primary().map(|(p, i)| json!({ "page": p + 1, "index": i + 1 })),
                 // Every selected comment (⌘-click adds), the one with the handles first.
                 "selected_comments": v.session.comments.selection().iter().map(|(p, i)| json!({ "page": p + 1, "index": i + 1 })).collect::<Vec<_>>(),
-                "comment_composer_open": v.session.comments.composer.is_some(),
+                "comment_composer_open": v.session.comments.composer.is_some() || v.session.comments.rich.is_some(),
             })),
             // The Combine files tab: how its files show, and each grid thumbnail's state.
             "combine": {

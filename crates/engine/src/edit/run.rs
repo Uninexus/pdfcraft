@@ -51,6 +51,7 @@ pub(crate) fn check_permission(edit: &Edit, p: &pdfcraft_cos::Permissions) -> Re
         }
         Edit::AddMeasurement(_)
         | Edit::AddAnnotation(_)
+        | Edit::AddTextBox { .. }
         | Edit::PasteComments { .. }
         | Edit::AddCustomStamp { .. }
         | Edit::AddModel3d { .. }
@@ -696,6 +697,10 @@ pub(crate) fn run_edit(doc: &mut pdfcraft_cos::Document, edit: &Edit, cx: &mut E
         Edit::SetMeasurementScale { page, bbox, name, scale } => measure::set_scale(doc, *page, *bbox, name, scale)?,
         Edit::AddAnnotation(a) => {
             pdfcraft_annot::add_annotation(doc, a, &cx.meta())?;
+        }
+        Edit::AddTextBox { new, runs } => {
+            let index = pdfcraft_annot::add_annotation(doc, new, &cx.meta())?;
+            pdfcraft_annot::set_text_runs(doc, new.page, index, runs, &cx.meta())?;
         }
         Edit::PasteComments { xfdf, page, offset } => {
             // Names from the edit's own id generator: unique to this paste within the document.

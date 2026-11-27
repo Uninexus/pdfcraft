@@ -4,6 +4,8 @@
 //! Positions count the characters of the text as `/Contents` holds it, with every line break (`\r\n`, `\r` or `\n`)
 //! counted as one. A run adds to the box's own face: bold text in a bold box stays bold.
 
+use std::ops::Range;
+
 use pdfcraft_fonts::Std14;
 
 use crate::text_style::{is_bold, is_italic, styled};
@@ -240,53 +242,83 @@ pub(crate) fn line_width(line: &[Segment], size: f64) -> f64 {
     line.iter().map(|(face, text)| face.text_width(text, size)).sum()
 }
 
-/// `text` wrapped `width` wide in lines of one-face segments: at spaces, and between characters for a word wider than
-/// the line, as [`pdfcraft_fonts::wrap_with`] breaks text of one face.
-pub(crate) fn wrap(text: &str, runs: &[TextRun], base: Std14, size: f64, width: f64) -> Vec<Vec<Segment>> {
+/// The lines `text` with `runs` is broken into, `width` wide in Helvetica at `size`, as ranges of characters (a line
+/// break counting as one): what a text box's appearance draws on each line, for an editor to lay out alike.
+pub fn line_ranges(text: &str, runs: &[TextRun], size: f64, width: f64) -> Vec<Range<usize>> {
+    ranges(&faces(text, runs, Std14::Helvetica), size, width)
+}
+
+/// Each character of `text` with the face it is drawn in.
+fn faces(text: &str, runs: &[TextRun], base: Std14) -> Vec<(char, Std14)> {
     let text = lines_normalized(text);
     let flags = per_char(runs, text.chars().count());
-    let styled: Vec<(char, Std14)> = text.chars().zip(&flags).map(|(c, &f)| (c, face(base, f))).collect();
-    let advance = |&(ch, face): &(char, Std14)| face.text_width(ch.encode_utf8(&mut [0; 4]), size);
+    text.chars().zip(&flags).map(|(c, &f)| (c, face(base, f))).collect()
+}
+
+fn advance(&(ch, face): &(char, Std14), size: f64) -> f64 {
+    face.text_width(ch.encode_utf8(&mut [0; 4]), size)
+}
+
+/// `styled` wrapped `width` wide: at spaces, and between characters for a word wider than the line, as
+/// [`pdfcraft_fonts::wrap_with`] breaks text of one face. A space a line breaks at is on neither line.
+fn ranges(styled: &[(char, Std14)], size: f64, width: f64) -> Vec<Range<usize>> {
     let mut lines = Vec::new();
+    let mut base = 0;
     for paragraph in styled.split(|(c, _)| *c == '\n') {
-        let mut line: Vec<Segment> = Vec::new();
+        // The line being filled, within the paragraph.
+        let (mut start, mut end) = (0, 0);
         let mut used = 0.0;
-        // The space before the word being placed, in its own face.
-        let mut gap: Option<(char, Std14)> = None;
         let mut at = 0;
         loop {
-            let end = paragraph.iter().skip(at).position(|(c, _)| *c == ' ').map_or(paragraph.len(), |n| at + n);
-            let word = paragraph.get(at..end).unwrap_or_default();
-            let word_width: f64 = word.iter().map(advance).sum();
-            let lead = gap.as_ref().map_or(0.0, advance);
+            let word_end = paragraph.iter().skip(at).position(|(c, _)| *c == ' ').map_or(paragraph.len(), |n| at + n);
+            let word = paragraph.get(at..word_end).unwrap_or_default();
+            let word_width: f64 = word.iter().map(|c| advance(c, size)).sum();
+            // The space before the word, which comes with it.
+            let lead = at.checked_sub(1).and_then(|i| paragraph.get(i)).map_or(0.0, |c| advance(c, size));
             if used + lead + word_width <= width {
-                for &(ch, face) in gap.iter().chain(word) {
-                    push(&mut line, face, ch);
-                }
+                end = word_end;
                 used += lead + word_width;
             } else {
-                if line.iter().any(|(_, t)| !t.trim().is_empty()) {
-                    lines.push(std::mem::take(&mut line));
+                // Indentation alone is not a line: it is dropped before an over-long word.
+                if paragraph.get(start..end).is_some_and(|line| line.iter().any(|(c, _)| !c.is_whitespace())) {
+                    lines.push(base + start..base + end);
                 }
-                line.clear();
-                used = 0.0;
-                for unit in word {
-                    let unit_width = advance(unit);
-                    if !line.is_empty() && used + unit_width > width {
-                        lines.push(std::mem::take(&mut line));
+                (start, end, used) = (at, at, 0.0);
+                for (offset, unit) in word.iter().enumerate() {
+                    let unit_width = advance(unit, size);
+                    if end > start && used + unit_width > width {
+                        lines.push(base + start..base + end);
+                        start = at + offset;
                         used = 0.0;
                     }
-                    push(&mut line, unit.1, unit.0);
+                    end = at + offset + 1;
                     used += unit_width;
                 }
             }
-            let Some(space) = paragraph.get(end) else { break };
-            gap = Some(*space);
-            at = end + 1;
+            if word_end >= paragraph.len() {
+                break;
+            }
+            at = word_end + 1;
         }
-        lines.push(line);
+        lines.push(base + start..base + end);
+        base += paragraph.len() + 1;
     }
     lines
+}
+
+/// `text` wrapped `width` wide in lines of one-face segments.
+pub(crate) fn wrap(text: &str, runs: &[TextRun], base: Std14, size: f64, width: f64) -> Vec<Vec<Segment>> {
+    let styled = faces(text, runs, base);
+    ranges(&styled, size, width)
+        .into_iter()
+        .map(|range| {
+            let mut line: Vec<Segment> = Vec::new();
+            for &(ch, face) in styled.get(range).unwrap_or_default() {
+                push(&mut line, face, ch);
+            }
+            line
+        })
+        .collect()
 }
 
 #[cfg(test)]
