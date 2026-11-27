@@ -8924,11 +8924,11 @@ title = "Ink manager"
 area = "L"
 tier = "P1"
 milestone = "M11"
-status = "planned"
-commands = []
-tools = []
-evidence = []
-notes = ""
+status = "partial"
+commands = ["print.ink_manager"]
+tools = ["doc_inks", "doc_ink_aliases"]
+evidence = ["crates/ui-egui/tests/it/ink_manager.rs::an_ink_given_another_inks_name_merges_with_it_as_one_edit", "crates/automation/tests/it/automation.rs::ink_aliases_through_tools"]
+notes = "The Ink Manager window (Print production, command print.ink_manager) lists the document's spot inks with how many colour spaces name each, and gives an ink the name of another (an alias) as one undoable edit; see print.ink-aliases. Missing: converting a spot ink to process in the window, ink frequency, angle and dot shape, and an ink preview (print.separations)."
 
 [[feature]]
 id = "print.ink-aliases"
@@ -8949,7 +8949,7 @@ evidence = [
     "crates/automation/tests/it/automation.rs::ink_aliases_through_tools",
     "crates/ui-egui/tests/it/ink_manager.rs::an_ink_given_another_inks_name_merges_with_it_as_one_edit",
 ]
-notes = "Print production ▸ Ink Manager… (command print.ink_manager, also in All tools under Use print production; `ui.set dialog=ink-manager`) opens a window that lists the same spot inks as doc_inks, each with how many colour spaces name it, a warning when DeviceN spaces were left unread, and a notice when the document does not allow changes. Alias on an ink picks it; the window then takes the name of another listed ink from a dropdown or a typed name, and Apply runs the same AliasInks edit as doc_ink_aliases (one undo step, the document is marked changed) and reads the list again. A refusal (a bad name, a process colorant, two colorants merged in one DeviceN space, a document that cannot be changed) and an alias that no colour space uses are shown as messages and change nothing; inks left with different definitions under one name are listed in a warning. Headless: doc_inks lists the spot colorants of the Separation and DeviceN colour spaces lists the spot colorants of the Separation and DeviceN colour spaces, and doc_ink_aliases renames them (from to) in every colour space of the document as one undoable edit; each space keeps its own alternate space and tint transform, so the page looks the same on screen; inks that end up with different definitions under one name are reported (PDF/X wants one per name). Aliases that would put one colorant twice in a DeviceN space are refused. DeviceN colorant entries are read from one allowance of 2,000,000 per reading (shared names arrays count once per space): doc_inks reports unread_spaces, doc_ink_aliases refuses with nothing written. Process colorants, All and None are never renamed. Missing: converting a spot ink to process in the Ink Manager window (Convert colours does that for the whole document), and moving a DeviceN space's tint transform to the target ink."
+notes = "Print production ▸ Ink Manager… (command print.ink_manager, also in All tools under Use print production; `ui.set dialog=ink-manager`) opens a window that lists the same spot inks as doc_inks, each with how many colour spaces name it, a warning when DeviceN spaces were left unread, and a notice when the document does not allow changes. Alias on an ink picks it; the window then takes the name of another listed ink from a dropdown or a typed name, and Apply runs the same AliasInks edit as doc_ink_aliases (one undo step, the document is marked changed) and reads the list again. A refusal (a bad name, a process colorant, two colorants merged in one DeviceN space, a document that cannot be changed) and an alias that no colour space uses are shown as messages and change nothing; inks left with different definitions under one name are listed in a warning. Headless: doc_inks lists the spot colorants of the Separation and DeviceN colour spaces, and doc_ink_aliases renames them (from to) in every colour space of the document as one undoable edit; each space keeps its own alternate space and tint transform, so the page looks the same on screen; inks that end up with different definitions under one name are reported (PDF/X wants one per name). Aliases that would put one colorant twice in a DeviceN space are refused. DeviceN colorant entries are read from one allowance of 2,000,000 per reading (shared names arrays count once per space): doc_inks reports unread_spaces, doc_ink_aliases refuses with nothing written. Process colorants, All and None are never renamed. Missing: converting a spot ink to process in the Ink Manager window (Convert colours does that for the whole document), and moving a DeviceN space's tint transform to the target ink."
 
 [[feature]]
 id = "print.printer-marks"
