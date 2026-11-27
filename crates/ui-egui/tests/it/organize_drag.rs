@@ -90,6 +90,21 @@ fn the_panel_beside_the_grid_is_headed_organize_pages() {
     assert!(painted(&h, "Organize pages") && !painted(&h, "Edit a PDF"), "headed by what it shows");
 }
 
+/// Full screen from the page grid presents the pages, and leaving it brings the grid back.
+#[test]
+fn full_screen_from_the_page_grid_presents_the_document() {
+    let mut h = organize();
+    assert!(h.execute("view.full_screen"));
+    h.run_steps(8);
+    assert!(h.state().views[0].presenting() && !h.state().views[0].organize);
+    assert!(h.state().views[0].page_screen_rect(0).is_some(), "a page is on screen");
+    assert!(h.query_by_label("Select 1").is_none(), "no thumbnails");
+    assert!(h.execute("view.full_screen"));
+    h.run_steps(8);
+    assert!(h.state().views[0].organize, "the grid is back");
+    assert!(h.query_by_label("Select 1").is_some());
+}
+
 #[test]
 fn organize_header_paints_a_close_label() {
     let h = organize();
