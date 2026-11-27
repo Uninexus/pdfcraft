@@ -166,6 +166,23 @@ impl ObjectSelection {
         Edit::MoveObjects { page, objects: self.selected.iter().map(|o| o.target).collect(), offset }
     }
 
+    /// The edit that aligns or distributes the selected objects, if any has to move. The selection
+    /// follows the objects to where the edit puts them.
+    pub(crate) fn arrange(&mut self, doc: &Document, op: pdfcraft_engine::ArrangeOp) -> Result<Option<Edit>, String> {
+        let (page, targets) = self.selection().ok_or("select objects first")?;
+        let edit = doc.arrange_objects(page, &targets, op)?;
+        if let Some(Edit::ArrangeObjects { moves, .. }) = &edit {
+            let mut expected = self.selected.clone();
+            for object in &mut expected {
+                if let Some((_, o)) = moves.iter().find(|(t, _)| *t == object.target) {
+                    object.rect = [object.rect[0] + o[0], object.rect[1] + o[1], object.rect[2] + o[0], object.rect[3] + o[1]];
+                }
+            }
+            self.pending = Some(expected);
+        }
+        Ok(edit)
+    }
+
     /// The objects of `page` that can be selected together, as `doc.editable_objects` lists them, or
     /// why they can't be.
     pub(crate) fn inventory(&mut self, doc: &Document, page: usize) -> Result<Vec<EditableObject>, String> {

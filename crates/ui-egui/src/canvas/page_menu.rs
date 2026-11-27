@@ -298,6 +298,37 @@ fn link_rows(ui: &mut egui::Ui, view: &mut DocView, can_modify: bool, page: usiz
     }
 }
 
+/// Align and Distribute for the objects selected together in Edit a PDF.
+fn object_rows(ui: &mut egui::Ui, view: &mut DocView, doc: &pdfcraft_engine::Document, can_modify: bool) {
+    use pdfcraft_engine::ArrangeOp as A;
+    let count = view.session.objects.count();
+    Menu::submenu_row_enabled(ui, tl!("Align objects").to_string(), can_modify && count >= 2, |ui, _| {
+        for (op, label) in [
+            (A::AlignLeft, "Left"),
+            (A::AlignCenter, "Horizontal centers"),
+            (A::AlignRight, "Right"),
+            (A::AlignTop, "Top"),
+            (A::AlignMiddle, "Vertical centers"),
+            (A::AlignBottom, "Bottom"),
+        ] {
+            object_row(ui, view, doc, op, label);
+        }
+    });
+    Menu::submenu_row_enabled(ui, tl!("Distribute objects").to_string(), can_modify && count >= 3, |ui, _| {
+        for (op, label) in [(A::DistributeHorizontal, "Horizontally"), (A::DistributeVertical, "Vertically")] {
+            object_row(ui, view, doc, op, label);
+        }
+    });
+    Divider::horizontal().show(ui);
+}
+
+/// One Align / Distribute item for the selected objects.
+fn object_row(ui: &mut egui::Ui, view: &mut DocView, doc: &pdfcraft_engine::Document, op: pdfcraft_engine::ArrangeOp, label: &str) {
+    if MenuItem::new(tl!(label).to_string()).show(ui).ran {
+        view.session.pending_edit = view.session.objects.arrange(doc, op).ok().flatten();
+    }
+}
+
 /// The rows of the menu, in the order of decisions: a field, a link, a picked picture, a comment, then the default rows.
 fn rows(ui: &mut egui::Ui, view: &mut DocView, cx: &PageMenuCx<'_>, menu_for: Option<Owner>, pick: &mut PageMenuPick) {
     let can_modify = cx.rights.can_modify;
@@ -351,6 +382,9 @@ fn rows(ui: &mut egui::Ui, view: &mut DocView, cx: &PageMenuCx<'_>, menu_for: Op
             },
         );
         return;
+    }
+    if cx.tool == QuickTool::EditText && view.session.objects.count() >= 2 {
+        object_rows(ui, view, cx.doc, can_modify);
     }
     let (page, at) = view.session.comments.context_at.unwrap_or((view.view.current, [0.0, 0.0]));
     // On a page still being read, the picture rows appear when the answer comes.

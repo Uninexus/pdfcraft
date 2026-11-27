@@ -2322,11 +2322,11 @@ title = "Align and distribute objects"
 area = "C"
 tier = "P1"
 milestone = "M7"
-status = "planned"
-commands = []
-tools = []
-evidence = []
-notes = ""
+status = "partial"
+commands = ["arrange.align_left", "arrange.align_center", "arrange.align_right", "arrange.align_top", "arrange.align_middle", "arrange.align_bottom", "arrange.distribute_horizontal", "arrange.distribute_vertical"]
+tools = ["objects_align"]
+evidence = ["crates/ui-egui/tests/it/align_distribute.rs::align_left_then_distribute_vertically_are_each_one_undo_step", "crates/automation/tests/it/automation.rs::objects_align_and_distribute_through_the_tool_in_one_undo_step", "crates/engine/src/arrange.rs::distributing_equalises_gaps_and_leaves_the_outer_objects"]
+notes = "Page objects selected together in Edit text & images (paragraphs, Image/Form artwork, added text and images; same page, 2+ for align, 3+ for distribute): Align left, horizontal centers, right, top, vertical centers, bottom to the selection's bounds, and Distribute horizontally or vertically with equal gaps, the outermost two staying put. Laid out on displayed page rectangles, so a rotated page aligns what the reader sees. Right-click menu and Edit a PDF tool list; each command is one undo step and the selection stays. Tool objects_align. Still missing: aligning to the page or to a key object, comments (form fields have their own entry, form.align-distribute-fields), spacing by a typed amount, and objects across pages."
 
 [[feature]]
 id = "edit.vector-edit"

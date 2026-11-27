@@ -638,6 +638,13 @@ pub enum Edit {
         objects: Vec<ObjectTarget>,
         offset: [f64; 2],
     },
+    /// Align or distribute objects of `page` together: each reference moves by its own
+    /// user-space offset (from `Document::arrange_objects`), all or none.
+    ArrangeObjects {
+        page: usize,
+        moves: Vec<(ObjectTarget, [f64; 2])>,
+        op: crate::ArrangeOp,
+    },
     /// Delete mixed existing and added objects together (references from one inventory of
     /// `page`), as one step: what Delete and Cut do to objects selected together.
     DeleteObjects {
