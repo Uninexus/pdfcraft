@@ -15,8 +15,8 @@ pdfcraft-ui-egui = { workspace = true }
 craft = { workspace = true, features = ["automation", "platform-browser", "ui", "window"] }
 # The host messages (storytold/craft-libs): one contract and one bridge for the web builds.
 # The page command API (storytold/craft-libs#413): window.pdfcraft over the UI control channel.
-craft-web-api = { git = "https://github.com/Uninexus/craft-libs", rev = "ce7563e70bb6e1f4a556b6ab14479d8a33df2884", version = "0.1.0" }
-craft-web-host = { git = "https://github.com/Uninexus/craft-libs", rev = "ce7563e70bb6e1f4a556b6ab14479d8a33df2884", version = "0.1.0" }
+craft-web-api = { git = "https://github.com/Uninexus/craft-libs", rev = "d771cdb234fcc7ae365d4018dbbf68d0bfc88aab", version = "0.1.0" }
+craft-web-host = { git = "https://github.com/Uninexus/craft-libs", rev = "d771cdb234fcc7ae365d4018dbbf68d0bfc88aab", version = "0.1.0" }
 eframe = { workspace = true, features = ["default_fonts", "glow", "persistence", "accesskit"] }
 egui = { workspace = true, features = ["default_fonts", "monochrome_emoji_fonts"] }
 serde_json = { workspace = true }
