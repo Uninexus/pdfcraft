@@ -254,6 +254,27 @@ fn locks_a_changed_value(doc: &Document, old: &Document, field: &Field, value: &
     })
 }
 
+/// The signed fields of `doc` whose locks cover the field `name`.
+pub fn signatures_locking(doc: &Document, name: &str) -> Vec<String> {
+    let covers = |field: &Field, value: &Dict| {
+        let Ok(rules) = rules(doc, field, value) else { return false };
+        if rules.is_empty() {
+            return false;
+        }
+        let Some(form) = form_fields(doc) else { return false };
+        let Some(entries) = form.fields.get(name) else { return false };
+        rules.iter().any(|rule| {
+            let locked = rule.locks(&form);
+            entries.iter().any(|e| locked.get(e.node).copied().unwrap_or(false))
+        })
+    };
+    sig_fields(doc)
+        .into_iter()
+        .filter(|field| field.name != name && field.signature(doc).is_some_and(|value| covers(field, &value)))
+        .map(|field| field.name)
+        .collect()
+}
+
 /// One field dictionary in a walk of the form: its fully qualified name, and the one above it.
 struct Node {
     name: String,

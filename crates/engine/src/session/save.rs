@@ -346,6 +346,7 @@ impl Session {
     /// `opts.date` takes the session clock.
     pub fn sign(&self, doc: DocId, id: &pdfcraft_sign::DigitalId, mut opts: SignOptions) -> Result<Arc<Vec<u8>>, EditError> {
         let d = self.get(doc).ok_or(EditError::NoDocument)?;
+        d.check_not_locked_against_signing(opts.field.as_deref())?;
         // Encrypted documents are signed under their permissions (the signer checks them).
         let editor = d.editor.as_ref().ok_or_else(|| EditError::ReadOnly(d.read_only_reason.clone().unwrap_or_default()))?;
         if opts.date.is_empty() {
@@ -366,6 +367,7 @@ impl Session {
         tsa: &dyn pdfcraft_sign::TimestampAuthority,
     ) -> Result<Arc<Vec<u8>>, EditError> {
         let d = self.get(doc).ok_or(EditError::NoDocument)?;
+        d.check_not_locked_against_signing(opts.field.as_deref())?;
         let editor = d.editor.as_ref().ok_or_else(|| EditError::ReadOnly(d.read_only_reason.clone().unwrap_or_default()))?;
         if opts.date.is_empty() {
             opts.date = self.signing_date();

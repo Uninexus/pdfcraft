@@ -16649,3 +16649,63 @@ fn a_second_signer_follows_a_signature_that_locks_nothing() {
     assert_eq!(signatures.len(), 2, "{list}");
     assert!(signatures.iter().all(|s| s["signed"] == true && s["status"] != "invalid"), "{list}");
 }
+
+/// Two signatures, status by field order.
+fn signature_statuses(a: &mut Automation, doc: u64) -> Vec<(bool, String)> {
+    let list = ok(a, "sign_list", json!({ "doc": doc }));
+    list["signatures"].as_array().unwrap().iter().map(|s| (s["signed"] == true, s["status"].as_str().unwrap_or_default().to_owned())).collect()
+}
+
+/// A document with two empty signature fields and a text field, and two signers.
+fn two_signer_form(name: &str) -> (std::path::PathBuf, Automation, u64, String, String, String) {
+    let dir = workdir(name);
+    let mut a = auto(&dir);
+    ok(&mut a, "sign_id_create", json!({ "name": "Ada Lovelace", "key": "p256", "password": "secret12", "path": "ada.p12" }));
+    ok(&mut a, "sign_id_create", json!({ "name": "Grace Hopper", "key": "p256", "password": "secret12", "path": "grace.p12" }));
+    let doc = ok(&mut a, "doc_open", json!({ "path": "a.pdf" }))["doc"].as_u64().unwrap();
+    let add = |a: &mut Automation, kind: &str, rect: Value| {
+        ok(a, "form_add_field", json!({ "doc": doc, "page": 1, "type": kind, "rect": rect }))["field"].as_str().unwrap().to_owned()
+    };
+    let first = add(&mut a, "signature", json!([20, 200, 180, 250]));
+    let second = add(&mut a, "signature", json!([200, 200, 380, 250]));
+    let text = add(&mut a, "text", json!([20, 100, 180, 120]));
+    (dir, a, doc, first, second, text)
+}
+
+/// Locking at signing leaves the other empty signature fields open: a co-signer signs, both signatures stand, and the
+/// other fields stay locked.
+#[test]
+fn a_co_signer_follows_a_signature_that_locks_the_fields() {
+    // The co-signer locking too, the usual end of a contract, or not.
+    for co_signer_locks in [false, true] {
+        let (_dir, mut a, doc, first, second, text) = two_signer_form(&format!("cosign-lock-{co_signer_locks}"));
+        let args = json!({ "doc": doc, "id": "ada.p12", "password": "secret12", "field": first, "lock_fields": true, "out": "one.pdf" });
+        ok(&mut a, "sign_document", args);
+        let args =
+            json!({ "doc": doc, "id": "grace.p12", "password": "secret12", "field": second, "lock_fields": co_signer_locks, "out": "two.pdf" });
+        ok(&mut a, "sign_document", args);
+        let statuses = signature_statuses(&mut a, doc);
+        assert!(statuses.len() == 2 && statuses.iter().all(|(signed, status)| *signed && status != "invalid"), "{statuses:?}");
+        let mut values = serde_json::Map::new();
+        values.insert(text, json!("changed after signing"));
+        assert!(a.call("form_fill", &json!({ "doc": doc, "values": values })).is_err(), "the other fields stay locked");
+    }
+}
+
+/// A signature whose lock covers every field, the other signature fields included (as other programs write it): signing
+/// one of them is refused, naming the signature, and the first stands.
+#[test]
+fn signing_a_field_another_signature_locks_is_refused() {
+    let (dir, mut a, doc, first, second, _text) = two_signer_form("cosign-refused");
+    ok(&mut a, "signature_field_lock", json!({ "doc": doc, "field": first, "action": "all" }));
+    ok(&mut a, "sign_document", json!({ "doc": doc, "id": "ada.p12", "password": "secret12", "field": first, "out": "one.pdf" }));
+    let args = json!({ "doc": doc, "id": "grace.p12", "password": "secret12", "field": second, "out": "two.pdf" });
+    match a.call("sign_document", &args) {
+        Err(ToolError::Failed(why)) => assert!(why.contains("covered by the lock of the signature in field") && why.contains(&first), "{why}"),
+        other => panic!("{other:?}"),
+    }
+    assert!(!dir.join("two.pdf").exists(), "nothing was written");
+    let statuses = signature_statuses(&mut a, doc);
+    assert_eq!(statuses.iter().filter(|(signed, _)| *signed).count(), 1, "{statuses:?}");
+    assert!(statuses.iter().all(|(_, status)| status != "invalid"), "{statuses:?}");
+}
