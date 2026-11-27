@@ -329,8 +329,13 @@ impl CanvasTool for CommentsTool<'_> {
         *self.pressed = false;
     }
 
+    /// The comment tool's claims; when it makes none, those of the tool beneath (the text caret's keys).
     fn claims(&self) -> ToolClaims {
-        self.annotate.claims()
+        let own = self.annotate.claims();
+        match &self.beneath {
+            Some(beneath) if own == ToolClaims::NONE => beneath.claims(),
+            _ => own,
+        }
     }
 
     fn key(&mut self, key: &ToolKey, cx: &mut ToolContext<'_>) -> bool {
@@ -361,7 +366,8 @@ impl CanvasTool for CommentsTool<'_> {
             }
             return false;
         }
-        self.annotate.key(key, cx)
+        // Keys the comment tool leaves go on to the text beneath Select: the caret's.
+        self.annotate.key(key, cx) || matches!(self.quick, QuickTool::Select) && self.beneath.as_mut().is_some_and(|beneath| beneath.key(key, cx))
     }
 
     fn takes(&self, button: PointerButton, mods: Mods) -> bool {

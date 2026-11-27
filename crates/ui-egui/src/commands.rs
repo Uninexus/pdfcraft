@@ -614,6 +614,18 @@ impl PdfCraftApp {
                     view.show_grid = !view.show_grid;
                 }
             }
+            "view.caret_browsing" => {
+                if let Some(view) = active.and_then(|i| self.views.get_mut(i)) {
+                    let on = !view.caret_browsing();
+                    view.set_caret_browsing(on);
+                    // The caret is the Select tool's.
+                    if on {
+                        self.quick_tool = crate::QuickTool::Select;
+                    }
+                    let said = if on { tl!("Caret browsing on") } else { tl!("Caret browsing off") };
+                    craft::ui::runtime::access::announce(ctx, said.to_string(), craft::ui::contract::Politeness::Polite);
+                }
+            }
             "view.show_rulers" => {
                 if let Some(view) = active.and_then(|i| self.views.get_mut(i)) {
                     view.show_rulers = !view.show_rulers;

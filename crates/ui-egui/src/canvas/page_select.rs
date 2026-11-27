@@ -1,13 +1,15 @@
 //! The Select tool on the page view: the framework's text selection, and the pick of a picture under a click.
 
 use craft::behavior::{CancelReason, Cursor};
+use craft::keymap::Key;
 use craft::pages::ui::{PageTexts, PlacedPage, TextSelectState, TextSelectTool, TextSelection};
-use craft::ui::canvas::{CanvasTool, ToolAction, ToolContext, ToolKey, ToolPath, ToolPointer};
+use craft::ui::canvas::{CanvasTool, ToolAction, ToolClaims, ToolContext, ToolKey, ToolPath, ToolPointer};
 use craft::ui::primitives::Draw;
 use pdfcraft_render::DocInfo;
 
 use crate::canvas::PageXform;
 use crate::canvas::image_pick::PickedImage;
+use crate::canvas::text_caret::{CARET_KEYS, Move, Step};
 
 /// What a press on the page sets or lets go: the click whose picture is still being looked for, the picture found,
 /// and the selection whose action bar Copy closed.
@@ -56,6 +58,8 @@ pub(crate) struct PageSelectTool<'a> {
     /// single-glyph press anchor on release, as production's text selection did.
     dragged: &'a mut bool,
     column: bool,
+    /// Where the keys of the text caret are queued, while caret browsing is on.
+    caret: Option<&'a mut Vec<Move>>,
 }
 
 impl<'a> PageSelectTool<'a> {
@@ -74,7 +78,17 @@ impl<'a> PageSelectTool<'a> {
         generation: u64,
         dragged: &'a mut bool,
     ) -> Self {
-        Self { text: TextSelectTool::new(pages, texts, text), info, picks, xforms, generation, cap_clicks: false, dragged, column: false }
+        Self {
+            text: TextSelectTool::new(pages, texts, text),
+            info,
+            picks,
+            xforms,
+            generation,
+            cap_clicks: false,
+            dragged,
+            column: false,
+            caret: None,
+        }
     }
 
     /// The Column Select tool is active.
@@ -82,6 +96,47 @@ impl<'a> PageSelectTool<'a> {
         self.text = self.text.column(on);
         self.column = on;
         self
+    }
+
+    /// Caret browsing is on: the arrows, Home and End move the caret, whose moves are queued in `moves`.
+    pub(crate) fn caret(mut self, moves: Option<&'a mut Vec<Move>>) -> Self {
+        self.caret = moves;
+        self
+    }
+
+    /// Queues the caret's move for `key`; false when caret browsing is off or the key is not one of its own.
+    fn caret_key(&mut self, key: &ToolKey) -> bool {
+        let Some(moves) = self.caret.as_mut() else { return false };
+        let (step, shift) = match key {
+            ToolKey::Nudge { direction, mods, .. } => {
+                let across = direction.x.abs() > direction.y.abs();
+                let step = match (across, if across { direction.x > 0.0 } else { direction.y > 0.0 }) {
+                    (true, true) => Step::Right,
+                    (true, false) => Step::Left,
+                    (false, true) => Step::Down,
+                    (false, false) => Step::Up,
+                };
+                (step, mods.shift)
+            }
+            ToolKey::Kept(chord) if CARET_KEYS.contains(chord) => {
+                let word = chord.mods.cmd;
+                let step = match chord.key {
+                    Key::Home => Step::LineStart,
+                    Key::End => Step::LineEnd,
+                    Key::Left if word => Step::WordLeft,
+                    Key::Right if word => Step::WordRight,
+                    Key::Left => Step::Left,
+                    Key::Right => Step::Right,
+                    Key::Up => Step::Up,
+                    Key::Down => Step::Down,
+                    _ => return false,
+                };
+                (step, chord.mods.shift)
+            }
+            _ => return false,
+        };
+        moves.push(Move { step, extend: shift });
+        true
     }
 
     /// Markup and redaction tools cap rapid multi-clicks at a word (clicks > 2 act as a single click).
@@ -143,6 +198,9 @@ impl CanvasTool for PageSelectTool<'_> {
 
     /// Escape lets go of the picked picture, or of a click whose picture is not known yet, before it clears the text; clearing the text takes it.
     fn key(&mut self, key: &ToolKey, cx: &mut ToolContext<'_>) -> bool {
+        if self.caret_key(key) {
+            return true;
+        }
         if matches!(key, ToolKey::Cancel) && self.picks.held() {
             self.picks.let_go();
             return true;
@@ -150,6 +208,10 @@ impl CanvasTool for PageSelectTool<'_> {
         // Esc clears a text selection (Select All too) and counts as taken, so full screen stays until the next Esc
         // (#5302, L-318): the text tool answers true only when it had a selection to clear.
         self.text.key(key, cx)
+    }
+
+    fn claims(&self) -> ToolClaims {
+        if self.caret.is_some() { self.text.claims().keys(CARET_KEYS) } else { self.text.claims() }
     }
 
     fn paint(&self, draw: &Draw<'_>, cx: &ToolContext<'_>) {

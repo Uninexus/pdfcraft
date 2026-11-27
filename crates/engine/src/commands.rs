@@ -292,6 +292,15 @@ const ALL_COMMANDS: &[CommandSpec] = &[
     c("edit.snapshot", "Take a snapshot", EDIT, None, Copying, "camera"),
     c("view.full_screen", "Full screen mode", VIEW, Some(Shortcut::cmd("L")), Document, "maximize"),
     c("view.read_mode", "Read mode", VIEW, Some(Shortcut { command: true, shift: false, mac_ctrl: true, key: "H" }), Document, "book-open"),
+    // A caret on the page's text, moved by keys, so part of it can be selected without a pointer (view state, never saved).
+    c(
+        "view.caret_browsing",
+        "Caret browsing",
+        VIEW,
+        Some(Shortcut { command: false, shift: false, mac_ctrl: false, key: "F7" }),
+        Document,
+        "text-cursor-input",
+    ),
     // Split view (Acrobat's Window ▸ Split): the current document in two panes, or back to one;
     // a tab's right-click menu also splits right or down with any tab.
     c("view.split", "Split", VIEW, Some(Shortcut::cmd("\\")), Document, "columns-2"),
