@@ -275,6 +275,30 @@ pub fn signatures_locking(doc: &Document, name: &str) -> Vec<String> {
         .collect()
 }
 
+/// Every field a signature's lock covers, as the signed field and the names it locks, with the form walked once: for
+/// drawing a whole form, where asking [`signatures_locking`] field by field would walk it once each.
+pub fn names_locked_by_signatures(doc: &Document) -> Vec<(String, Vec<String>)> {
+    let signed: Vec<(Field, Dict)> = sig_fields(doc).into_iter().filter_map(|f| f.signature(doc).map(|value| (f, value))).collect();
+    if signed.is_empty() {
+        return Vec::new();
+    }
+    let Some(form) = form_fields(doc) else { return Vec::new() };
+    signed
+        .into_iter()
+        .filter_map(|(field, value)| {
+            let locks: Vec<Vec<bool>> = rules(doc, &field, &value).ok()?.iter().map(|rule| rule.locks(&form)).collect();
+            let covered = |e: &Entry| locks.iter().any(|locked| locked.get(e.node).copied().unwrap_or(false));
+            let names: Vec<String> = form
+                .fields
+                .iter()
+                .filter(|(name, entries)| **name != field.name && entries.iter().any(covered))
+                .map(|(name, _)| name.clone())
+                .collect();
+            (!names.is_empty()).then_some((field.name, names))
+        })
+        .collect()
+}
+
 /// One field dictionary in a walk of the form: its fully qualified name, and the one above it.
 struct Node {
     name: String,

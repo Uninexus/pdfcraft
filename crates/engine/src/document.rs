@@ -902,6 +902,17 @@ impl Document {
         locking.into_iter().find(|by| self.signatures.iter().any(|s| s.field == *by && s.status != pdfcraft_sign::pdf::Status::Invalid))
     }
 
+    /// The names of every field a signature's lock covers, as [`Self::signature_locking`] judges each. Reads the form:
+    /// keep the answer while the document is unchanged.
+    pub fn locked_fields(&self) -> std::collections::BTreeSet<String> {
+        let Some(editor) = self.editor.as_ref().filter(|_| self.is_signed()) else { return Default::default() };
+        pdfcraft_sign::pdf::names_locked_by_signatures(&editor.cos)
+            .into_iter()
+            .filter(|(by, _)| self.signatures.iter().any(|s| s.field == *by && s.status != pdfcraft_sign::pdf::Status::Invalid))
+            .flat_map(|(_, names)| names)
+            .collect()
+    }
+
     /// Refuses to sign the existing field `field` when a signature's lock covers it: signing it would break that
     /// signature. The words are the signing plan's for the same refusal.
     pub fn check_not_locked_against_signing(&self, field: Option<&str>) -> Result<(), crate::EditError> {

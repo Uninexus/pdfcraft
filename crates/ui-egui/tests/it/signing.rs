@@ -957,6 +957,20 @@ fn signature_properties_show_a_signatures_details() {
     assert_eq!(value(&h, "Reason"), "I approve");
 }
 
+/// Whether a field-sized filled box is painted over the page point: the field highlight.
+fn highlighted(h: &Harness<'static, PdfCraftApp>, x: f32, y: f32) -> bool {
+    fn covers(shape: &egui::Shape, spot: Pos2, widest: f32) -> bool {
+        match shape {
+            egui::Shape::Rect(r) => r.fill.a() > 0 && r.rect.contains(spot) && r.rect.width() < widest && r.rect.height() < widest / 4.0,
+            egui::Shape::Vec(shapes) => shapes.iter().any(|s| covers(s, spot, widest)),
+            _ => false,
+        }
+    }
+    let spot = at(h, x, y);
+    let widest = h.state().views[0].page_screen_rect(0).expect("page 1 on screen").width() * 0.8;
+    h.output().shapes.iter().any(|c| covers(&c.shape, spot, widest))
+}
+
 /// The sign window's checkbox locks the form fields with the signature.
 #[test]
 fn signing_can_lock_all_form_fields() {
@@ -980,6 +994,7 @@ fn signing_can_lock_all_form_fields() {
         d.new_id.file_password = "test".into();
     }
     h.run_steps(1);
+    assert!(highlighted(&h, 100.0, 50.0), "the empty field is highlighted as one to fill");
     h.get_by_label("Continue").click();
     h.run_steps(4);
     h.get_by_label("Continue").click();
@@ -996,6 +1011,7 @@ fn signing_can_lock_all_form_fields() {
     let doc = s.session.get(s.views[0].id).unwrap();
     assert!(doc.signatures.iter().any(|x| x.signed));
     assert!(doc.bytes.windows(8).any(|w| w == b"FieldMDP"), "the signature locks the fields");
+    assert!(!highlighted(&h, 100.0, 50.0), "a locked field is no longer highlighted");
     // A click on the locked field says so, and nothing opens to type into.
     h.state_mut().quick_tool = QuickTool::Select;
     h.run_steps(4);
