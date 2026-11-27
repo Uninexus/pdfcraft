@@ -315,3 +315,46 @@ fn opening_a_side_panel_by_keys_moves_the_focus_into_it() {
     press(&mut h, Key::Tab);
     assert!(focused(&h).is_some_and(|(_, name)| name != "Comments panel"));
 }
+
+/// How many outlines are painted about the focused control: stroked rects within a ring's reach of its edges.
+fn outlines_about(h: &H, rect: egui::Rect) -> usize {
+    h.output()
+        .shapes
+        .iter()
+        .filter(|clipped| match &clipped.shape {
+            egui::Shape::Rect(shape) => {
+                shape.stroke.width > 0.0 && rect.expand(6.0).contains_rect(shape.rect) && shape.rect.expand(6.0).contains_rect(rect)
+            }
+            _ => false,
+        })
+        .count()
+}
+
+/// The side panel rail's buttons open and close their panel by Enter and Space and are ringed while focused, as is the
+/// All tools list before a row of it is chosen.
+#[test]
+fn the_side_rail_opens_panels_by_enter_and_space_and_shows_focus() {
+    use pdfcraft_ui_egui::RightPanel;
+    let mut h = open(book());
+    let panel = |h: &H| crate::ui::right(h.state());
+    // A document with bookmarks opens on them.
+    assert_eq!(panel(&h), Some(RightPanel::Bookmarks));
+    let rail = |h: &H, name: &str| h.get_by_role_and_label(Role::Button, name).rect();
+    let (bookmarks, tools) = (rail(&h, "Bookmarks"), h.get_by_role_and_label(Role::List, "All tools").rect());
+    let (plain_button, plain_list) = (outlines_about(&h, bookmarks), outlines_about(&h, tools));
+
+    tab_to(&mut h, Role::List, "All tools");
+    assert!(outlines_about(&h, tools) > plain_list, "the focused Tools list shows no ring");
+
+    tab_to(&mut h, Role::Button, "Bookmarks");
+    assert!(outlines_about(&h, bookmarks) > plain_button, "the focused rail button shows no ring");
+    press(&mut h, Key::Enter);
+    assert_eq!(panel(&h), None, "Enter on the open panel's button did not close it");
+    press(&mut h, Key::Space);
+    assert_eq!(panel(&h), Some(RightPanel::Bookmarks), "Space did not open the panel");
+    h.get_by_label("Finish");
+
+    tab_to(&mut h, Role::Button, "Layers");
+    press(&mut h, Key::Enter);
+    assert_eq!(panel(&h), Some(RightPanel::Layers), "Enter did not open the panel");
+}

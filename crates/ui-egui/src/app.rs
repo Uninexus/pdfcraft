@@ -314,8 +314,6 @@ impl PdfCraftApp {
             prefs_return: None,
             panel_focus: None,
             panel_stop: None,
-            zoom_field: None,
-            zoom_held: false,
             left_rulers: Vec::new(),
             toolbar_before_rulers: None,
             window_narrow: false,
