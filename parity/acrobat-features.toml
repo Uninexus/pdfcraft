@@ -1468,11 +1468,11 @@ title = "Find in comments and bookmarks"
 area = "B"
 tier = "P2"
 milestone = "M12"
-status = "planned"
+status = "partial"
 commands = []
 tools = []
-evidence = []
-notes = ""
+evidence = ["crates/ui-egui/tests/it/find_bookmarks.rs::the_find_bar_finds_a_bookmark_only_when_asked_to_and_goes_where_it_goes", "crates/ui-egui/tests/it/find_comments.rs::the_find_bar_finds_a_comment_only_when_asked_to"]
+notes = "In the find bar: Include comments finds the text of comments and replies, and moving to one selects it; Include bookmarks finds bookmark titles, goes where the bookmark goes and names it under the checkboxes. Bookmarks that go to no page of the document, and bookmarks past what the Bookmarks panel lists, are not searched. Not yet: either option in the Advanced search panel, in folder search or as an automation tool, and the choices are not remembered."
 
 [[feature]]
 id = "view.find-results-panel"

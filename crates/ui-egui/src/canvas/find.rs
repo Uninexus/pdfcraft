@@ -7,9 +7,12 @@ use craft::text::ui::find::{FindBar, FindBarState, FindRequest};
 use craft::ui::canvas_controls::TaskBar;
 use craft::ui::choice::Checkbox;
 use craft::ui::contract::{Bind, Props as _, Show as _, ShowContainer as _};
+use craft::ui::display::Text;
 use craft::ui::layout_components::Row;
 
 use std::collections::HashMap;
+
+use pdfcraft_render::{DestView, OutlineItem};
 
 use super::{DocView, Rect, ViewAction};
 
@@ -18,12 +21,27 @@ use super::{DocView, Rect, ViewAction};
 const COMMENT_PAGE_BASE: usize = usize::MAX / 2;
 /// The most comments one search lists.
 const MAX_COMMENT_HITS: usize = 2000;
+/// The same for bookmark hits, past every comment's number, so that they come last.
+const BOOKMARK_PAGE_BASE: usize = COMMENT_PAGE_BASE + usize::MAX / 4;
+/// The most bookmarks one search lists, and the deepest it reads.
+const MAX_BOOKMARK_HITS: usize = 2000;
+const MAX_BOOKMARK_DEPTH: usize = 256;
+/// The most characters of a found bookmark's title the bar shows.
+const SHOWN_TITLE_CHARS: usize = 80;
 
 /// A comment the search found: its `(page, index)` and where it sits on its page (for scrolling to it).
 #[derive(Clone, Debug, PartialEq)]
 struct CommentHit {
     key: (usize, usize),
     rect: [f32; 4],
+}
+
+/// A bookmark the search found: its title and where it goes.
+#[derive(Clone, Debug, PartialEq)]
+struct BookmarkHit {
+    title: String,
+    page: usize,
+    view: DestView,
 }
 
 /// The find bar (⌘F): query, matches across the document, current match.
@@ -52,6 +70,12 @@ pub struct Find {
     comment_hits: Vec<CommentHit>,
     /// A comment the search just moved to, which the bar scrolls to once it has the document.
     reveal_comment: Option<CommentHit>,
+    /// Also search the titles of the document's bookmarks ("Include bookmarks").
+    pub include_bookmarks: bool,
+    /// The bookmarks found, in outline order; hit `i` stands in `matches` as page `BOOKMARK_PAGE_BASE + i`.
+    bookmark_hits: Vec<BookmarkHit>,
+    /// A bookmark the search just moved to, which the bar follows once it has the document.
+    reveal_bookmark: Option<BookmarkHit>,
 }
 
 impl Find {
@@ -62,9 +86,25 @@ impl Find {
         marks.map(|(i, m)| TextMark::new(m.page, m.range.clone(), current == Some(i))).collect()
     }
 
-    /// Forget the comments listed among the matches, after the matches were started over.
-    pub(super) fn forget_comment_hits(&mut self) {
+    /// Forget the comments and bookmarks listed among the matches, after the matches were started over.
+    pub(super) fn forget_listed_hits(&mut self) {
         self.comment_hits.clear();
+        self.bookmark_hits.clear();
+    }
+
+    /// The bookmark a match stands for, when it is a bookmark's.
+    fn bookmark_at(&self, page: usize) -> Option<&BookmarkHit> {
+        self.bookmark_hits.get(page.checked_sub(BOOKMARK_PAGE_BASE)?)
+    }
+
+    /// The title of the bookmark that is the current match, shortened to fit the bar.
+    fn current_bookmark(&self) -> Option<String> {
+        let title = &self.bookmark_at(self.matches.current_match()?.page)?.title;
+        let mut shown: String = title.chars().take(SHOWN_TITLE_CHARS).collect();
+        if shown.len() < title.len() {
+            shown.push('…');
+        }
+        Some(shown)
     }
 
     /// The comment a match stands for, when it is a comment's.
@@ -98,8 +138,8 @@ impl DocView {
         // automatic choice has already scrolled them to a match.
         let from = f.matches.from().unwrap_or(current);
         f.matches = FindMatches::new(from);
-        // The new matches hold no comments: the next sync adds them again.
-        f.comment_hits.clear();
+        // The new matches hold no comments or bookmarks: the next sync adds them again.
+        f.forget_listed_hits();
         if f.case_query.trim().is_empty() {
             return;
         }
@@ -147,6 +187,29 @@ impl DocView {
         f.comment_hits = hits;
     }
 
+    /// The same for bookmarks: with "Include bookmarks" on, those whose title holds the query.
+    pub(super) fn sync_find_bookmarks(&mut self, doc: &pdfcraft_engine::Document, editing: bool) {
+        let Some(f) = self.find.as_mut() else { return };
+        let on = f.include_bookmarks && !f.in_panel && !editing && !f.case_query.trim().is_empty();
+        let hits = if on { find_bookmark_hits(&doc.info.outline, &f.case_query, &f.options) } else { Vec::new() };
+        if hits == f.bookmark_hits {
+            return;
+        }
+        for i in 0..f.bookmark_hits.len() {
+            f.matches.set_page(BOOKMARK_PAGE_BASE + i, Vec::<std::ops::Range<usize>>::new());
+        }
+        for i in 0..hits.len() {
+            f.matches.set_page(BOOKMARK_PAGE_BASE + i, std::iter::once(0usize..1).collect::<Vec<_>>());
+        }
+        f.bookmark_hits = hits;
+    }
+
+    /// Go where the bookmark the search moved to goes, now that the document is at hand.
+    fn reveal_found_bookmark(&mut self, info: &pdfcraft_render::DocInfo) {
+        let Some(hit) = self.find.as_mut().and_then(|f| f.reveal_bookmark.take()) else { return };
+        self.go_to_dest(hit.page, hit.view, info);
+    }
+
     /// Scroll to the comment the search moved to, now that the document is at hand.
     fn reveal_found_comment(&mut self, info: &pdfcraft_render::DocInfo) {
         let Some(hit) = self.find.as_mut().and_then(|f| f.reveal_comment.take()) else { return };
@@ -185,6 +248,13 @@ impl DocView {
             self.go_to_page(hit.key.0);
             if let Some(f) = self.find.as_mut() {
                 f.reveal_comment = Some(hit);
+            }
+            return;
+        }
+        // A bookmark: go where it goes once the bar has the document.
+        if let Some(hit) = self.find.as_ref().and_then(|f| f.bookmark_at(p)).cloned() {
+            if let Some(f) = self.find.as_mut() {
+                f.reveal_bookmark = Some(hit);
             }
             return;
         }
@@ -282,6 +352,32 @@ fn find_comment_hits(doc: &pdfcraft_engine::Document, query: &str, options: &Fin
     hits
 }
 
+/// The bookmarks whose title holds `query` under the find `options`, in outline order. A bookmark that goes to no
+/// page of this document (a web address, another file) is left out: finding it must not run it.
+fn find_bookmark_hits(outline: &[OutlineItem], query: &str, options: &FindOptions) -> Vec<BookmarkHit> {
+    fn walk(items: &[OutlineItem], depth: usize, pattern: &FindPattern, out: &mut Vec<BookmarkHit>) {
+        if depth >= MAX_BOOKMARK_DEPTH {
+            return;
+        }
+        for item in items {
+            if out.len() >= MAX_BOOKMARK_HITS {
+                return;
+            }
+            if let Some(page) = item.page
+                && !pattern.find_all(&item.title, 1).is_empty()
+            {
+                out.push(BookmarkHit { title: item.title.clone(), page, view: item.view });
+            }
+            walk(&item.children, depth + 1, pattern, out);
+        }
+    }
+    let mut hits = Vec::new();
+    if let Ok(pattern) = FindPattern::compile(query, options) {
+        walk(outline, 0, &pattern, &mut hits);
+    }
+    hits
+}
+
 /// The find bar at the page view's top edge, end-aligned. In Edit text mode (`editing`) it offers a
 /// Replace row: Replace changes the highlighted match, Replace all every match, each inside its own
 /// paragraph.
@@ -289,6 +385,8 @@ pub(super) fn find_bar(view: &mut DocView, doc: &pdfcraft_engine::Document, area
     let pages = doc.info.pages.len();
     view.sync_find_comments(doc, editing);
     view.reveal_found_comment(&doc.info);
+    view.sync_find_bookmarks(doc, editing);
+    view.reveal_found_bookmark(&doc.info);
     let searched = view.session.texts.len() + view.session.text_failed.len();
     let key = view.pane.key;
     let Some(find) = view.find.as_mut() else { return };
@@ -297,11 +395,13 @@ pub(super) fn find_bar(view: &mut DocView, doc: &pdfcraft_engine::Document, area
         return;
     }
     // One id per pane, so two panes' bars do not share a field id (and so the focus).
-    let mut comments_changed = false;
+    let mut included_changed = false;
+    let bookmark = find.current_bookmark();
     let shown = ui
         .push_id(("find-bar", key), |ui| {
             TaskBar::at_edge(tl!("Find"), Align::End).show(ui, area.shrink2(egui::vec2(6.0, 12.0)), |ui, _cx| {
-                let Find { query, options, matches, bar, replacement, replacing, substitute_font, include_comments, .. } = &mut *find;
+                let Find { query, options, matches, bar, replacement, replacing, substitute_font, include_comments, include_bookmarks, .. } =
+                    &mut *find;
                 // Read before the bar borrows it: the bar may switch the row on in this pass, and the
                 // checkbox then follows on the repaint asked for below.
                 let replacing_before = *replacing;
@@ -322,13 +422,21 @@ pub(super) fn find_bar(view: &mut DocView, doc: &pdfcraft_engine::Document, area
                                     .show(ui);
                             });
                         }
-                        // Off, a search finds page text only; on, it also finds comments (and replies) holding the query.
+                        // Off, a search finds page text only; on, it also finds comments (and replies) or bookmark titles
+                        // holding the query.
                         if !editing {
-                            let before = *include_comments;
+                            let before = (*include_comments, *include_bookmarks);
                             Row::new().show(ui, |ui, _| {
                                 Checkbox::new(Bind::bound(&mut *include_comments)).label(tl!("Include comments").to_string()).show(ui);
                             });
-                            comments_changed = before != *include_comments;
+                            Row::new().show(ui, |ui, _| {
+                                Checkbox::new(Bind::bound(&mut *include_bookmarks)).label(tl!("Include bookmarks").to_string()).show(ui);
+                            });
+                            included_changed = before != (*include_comments, *include_bookmarks);
+                            // A bookmark has no highlight on the page: say which one the current match is.
+                            if let Some(title) = &bookmark {
+                                Text::new(crate::i18n::fmt(tl!("Bookmark: {title}"), &[("title", title)])).show(ui);
+                            }
                         }
                         out
                     })
@@ -350,12 +458,15 @@ pub(super) fn find_bar(view: &mut DocView, doc: &pdfcraft_engine::Document, area
         Some(FindRequest::ReplaceAll { .. }) => view.pending_action = Some(ViewAction::Replace { all: true }),
         _ => {}
     }
-    if out.search || comments_changed {
+    if out.search || included_changed {
         view.rerun_find();
         view.sync_find_comments(doc, editing);
+        view.sync_find_bookmarks(doc, editing);
     }
     if out.stepped {
         // The bar already stepped the matches.
         view.show_current_match();
+        // The bookmark line was laid out before this step.
+        ui.ctx().request_repaint();
     }
 }
