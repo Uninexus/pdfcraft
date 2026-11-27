@@ -1803,3 +1803,37 @@ fn numbered_paragraphs_are_word_lists() {
     // RTF keeps the numbers as text.
     assert!(rtf(std::slice::from_ref(&p)).contains("3. Pay the rent."));
 }
+
+/// An item that starts further right than the one before it is a level below it, in its own marker's style, and the
+/// outer list goes on after it.
+#[test]
+fn indented_items_are_word_sub_levels() {
+    let items: [(&str, f64); 7] = [
+        ("1. Rent", 72.0),
+        ("a) monthly", 100.0),
+        ("b) in advance", 100.0),
+        ("2. Repairs", 72.0),
+        ("a) the roof", 100.0),
+        ("\u{2022} slates", 128.0),
+        ("3. Notice", 72.5),
+    ];
+    let blocks: Vec<Block> = items.iter().enumerate().map(|(n, (t, x))| line(t, *x, 300.0, 700.0 - 40.0 * n as f64)).collect();
+    let p = Page { width: 612.0, height: 792.0, blocks, ..Page::default() };
+    let read = craft_docx::read(&docx(std::slice::from_ref(&p), "Terms")).unwrap();
+    let listed: Vec<(String, u32, u8)> = read
+        .body
+        .iter()
+        .filter_map(|b| match &**b {
+            craft_wordmodel::Block::Para(p) => p.props.numbering.map(|n| (p.text.clone(), n.num, n.level)),
+            _ => None,
+        })
+        .collect();
+    let levels: Vec<u8> = listed.iter().map(|(.., level)| *level).collect();
+    assert_eq!(levels, [0, 1, 1, 0, 1, 2, 0], "{listed:?}");
+    let num = |i: usize| listed[i].1;
+    assert!(num(0) == num(3) && num(3) == num(6), "the numbers go on: {listed:?}");
+    assert!(num(1) == num(2) && num(1) != num(4), "letters start again under the next number: {listed:?}");
+    let sub = read.numbering.level(num(1), 1).unwrap();
+    assert_eq!((sub.text.as_str(), sub.start), ("%2)", 1), "a letter stays a letter below");
+    assert_eq!(sub.format, craft_wordmodel::section::NumFormat::LowerLetter);
+}
