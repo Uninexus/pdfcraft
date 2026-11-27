@@ -429,6 +429,18 @@ impl Session {
     /// XFDF with these comments (0-based page, position in the page's `/Annots`) and their
     /// replies: what Copy puts on the clipboard; [`Edit::PasteComments`] takes it back in.
     pub fn export_comments(&self, id: DocId, which: &[(usize, usize)]) -> Result<String, EditError> {
+        let (cos, name) = self.copy_for_export(id)?;
+        guard(|| pdfcraft_xfdf::export_xfdf_comments(&cos, which, &name)).map_err(EditError::Write)
+    }
+
+    /// The same comments and replies as FDF.
+    pub fn export_comments_fdf(&self, id: DocId, which: &[(usize, usize)]) -> Result<Vec<u8>, EditError> {
+        let (cos, name) = self.copy_for_export(id)?;
+        guard(|| pdfcraft_xfdf::export_fdf_comments(&cos, which, &name)).map_err(EditError::Write)?.map_err(|e| EditError::Write(e.to_string()))
+    }
+
+    /// The document `id` as it stands, and its name, for an export of some of it.
+    fn copy_for_export(&self, id: DocId) -> Result<(pdfcraft_cos::Document, String), EditError> {
         let doc = self.get(id).ok_or(EditError::NoDocument)?;
         let cos = match doc.editor.as_ref() {
             Some(e) => e.cos.clone(),
@@ -436,7 +448,7 @@ impl Session {
                 pdfcraft_cos::Document::open_with_password(doc.bytes.clone(), doc.password.as_deref()).map_err(|e| EditError::Write(e.to_string()))?
             }
         };
-        guard(|| pdfcraft_xfdf::export_xfdf_comments(&cos, which, &doc.name)).map_err(EditError::Write)
+        Ok((cos, doc.name.clone()))
     }
 
     /// What stops Print's comment summary joining a print of document `id` laid out as `settings`
