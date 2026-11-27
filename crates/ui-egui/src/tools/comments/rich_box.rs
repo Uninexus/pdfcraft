@@ -405,23 +405,71 @@ impl Host<'_> {
         out
     }
 
-    /// Draws the text, each character in its own face where the layout puts it.
+    /// Draws the text a word at a time, each word starting and ending where the saved box has it.
     fn paint(&self, painter: &egui::Painter) {
         let size = (self.open.size * self.zoom) as f32;
         let ink = color32(self.open.color);
+        // The interface face is wider than Helvetica: one size for each of regular and bold makes the whole text fit,
+        // so that words of a face don't differ in height.
+        let fit = [false, true].map(|bold| {
+            let (mut shown, mut saved) = (0.0, 0.0);
+            for (ch, &style) in self.open.text.chars().zip(&self.open.styles).filter(|(ch, s)| s.0 == bold && !ch.is_control()) {
+                let job = word_job(ch.encode_utf8(&mut [0; 4]), (bold, false), size, ink, 0.0);
+                shown += painter.layout_job(job).size().x;
+                saved += (advance(ch, style, self.open.size) * self.zoom) as f32;
+            }
+            if shown > saved && saved > 0.0 { size * (saved / shown) } else { size }
+        });
         for (line, chars) in self.line_ranges().into_iter().enumerate() {
             let columns = self.columns(chars.clone());
-            let styles = self.open.styles.iter().skip(chars.start);
-            for ((ch, &(bold, italic)), x) in self.slice(chars).chars().zip(styles).zip(columns) {
-                let family = if bold { FontFamily::Name("semibold".into()) } else { FontFamily::Proportional };
-                let format = egui::TextFormat { font_id: FontId::new(size, family), color: ink, italics: italic, ..Default::default() };
-                let mut job = egui::text::LayoutJob::default();
-                job.append(ch.encode_utf8(&mut [0; 4]), 0.0, format);
-                let glyphs = painter.layout_job(job);
-                painter.galley(self.origin + vec2(x, line as f32 * self.line_height()), glyphs, ink);
+            let text: Vec<char> = self.slice(chars.clone()).chars().collect();
+            let styles = self.open.styles.get(chars).unwrap_or_default();
+            for word in words(&text, styles) {
+                let style = styles.get(word.start).copied().unwrap_or_default();
+                let (Some(&from), Some(&to)) = (columns.get(word.start), columns.get(word.end)) else { continue };
+                let text: String = text.get(word).unwrap_or_default().iter().collect();
+                let size = if style.0 { fit[1] } else { fit[0] };
+                let galley = fitted(painter, &text, style, size, ink, to - from);
+                // On the line's baseline, whatever size the word was fitted at.
+                let top = line as f32 * self.line_height() + ((self.open.size * self.zoom) as f32 - size) * 0.8;
+                painter.galley(self.origin + vec2(from, top), galley, ink);
             }
         }
     }
+}
+
+/// The stretches of a line drawn at once: runs of characters of one style, spaces left out, as ranges of its characters.
+fn words(text: &[char], styles: &[Style]) -> Vec<Range<usize>> {
+    let mut out: Vec<Range<usize>> = Vec::new();
+    for (at, (ch, style)) in text.iter().zip(styles).enumerate() {
+        if ch.is_whitespace() {
+            continue;
+        }
+        match out.last_mut() {
+            Some(last) if last.end == at && styles.get(last.start) == Some(style) => last.end = at + 1,
+            _ => out.push(at..at + 1),
+        }
+    }
+    out
+}
+
+fn word_job(text: &str, (bold, italic): Style, size: f32, ink: Color32, spacing: f32) -> egui::text::LayoutJob {
+    let family = if bold { FontFamily::Name("semibold".into()) } else { FontFamily::Proportional };
+    let format =
+        egui::TextFormat { font_id: FontId::new(size, family), color: ink, italics: italic, extra_letter_spacing: spacing, ..Default::default() };
+    let mut job = egui::text::LayoutJob::default();
+    job.append(text, 0.0, format);
+    job
+}
+
+/// `text` laid out `width` wide: its own letter shapes and kerning, the difference shared out between the letters.
+fn fitted(painter: &egui::Painter, text: &str, style: Style, size: f32, ink: Color32, width: f32) -> std::sync::Arc<egui::Galley> {
+    let natural = painter.layout_job(word_job(text, style, size, ink, 0.0));
+    let gaps = text.chars().count().saturating_sub(1);
+    if gaps == 0 {
+        return natural;
+    }
+    painter.layout_job(word_job(text, style, size, ink, (width - natural.size().x) / gaps as f32))
 }
 
 impl TextEditorHost for Host<'_> {
@@ -687,4 +735,23 @@ pub(crate) fn show(ui: &mut egui::Ui, body: &PageBody<'_>, session: &mut PageSes
         return open.edit(info, prefs);
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A word of the preview takes the width the saved box gives it, wider or narrower than the interface face's own.
+    #[test]
+    fn a_preview_word_is_fitted_to_its_saved_width() {
+        let ctx = egui::Context::default();
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            for factor in [0.9, 1.1] {
+                let natural = fitted(ui.painter(), "R", (false, false), 20.0, Color32::BLACK, 0.0).size().x;
+                let wanted = fitted(ui.painter(), "Really.", (false, false), 20.0, Color32::BLACK, natural * 5.0 * factor);
+                assert!((wanted.size().x - natural * 5.0 * factor).abs() < 1.5, "{} {}", wanted.size().x, natural * 5.0 * factor);
+            }
+        });
+        output.textures_delta.clear();
+    }
 }
