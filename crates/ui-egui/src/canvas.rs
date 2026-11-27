@@ -2499,6 +2499,9 @@ fn apply_frame_requests(app: &mut PdfCraftApp, ctx: &egui::Context, index: usize
         match n {
             crate::forms_ui::FormNotice::Security => app.notify_tr("The document's security settings don't allow filling in form fields"),
             crate::forms_ui::FormNotice::ReadOnly(name) => app.notify_fmt("{name} is read-only", &[("name", &name)]),
+            crate::forms_ui::FormNotice::Locked(name, signature) => {
+                app.notify_fmt("{name} is locked by the signature in {signature}", &[("name", &name), ("signature", &signature)])
+            }
             crate::forms_ui::FormNotice::NoAction(name) => app.notify_fmt("{name} has no action", &[("name", &name)]),
         }
     }
