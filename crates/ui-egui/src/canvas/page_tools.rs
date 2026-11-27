@@ -331,7 +331,7 @@ pub(crate) fn page_tool<'a>(
                         .and_then(|(page, index)| session.signature_drag.aspect_ratio(page, index).map(|r| (page, index, r)));
                     let view = &mut session.comments;
                     let map = comments::PageMap::new(cx.info, cx.pages, cx.rotation, cx.view);
-                    let annotate = CommentsTool::new(&mut view.tool, &mut view.paste, map, &mut view.tool_done, &mut view.tool_pressed)
+                    let annotate = CommentsTool::new(&mut view.tool, &mut view.paste, map, &mut view.escaped_tool, &mut view.tool_pressed)
                         .image_aspect(aspect)
                         .settings(tool, cx.comment_prefs, cx.allowed, cx.doc.comments_hidden())
                         .outcome(&mut session.pending_edit, &mut view.notice)
@@ -387,7 +387,7 @@ pub(crate) fn page_tool<'a>(
             };
             let place = FillSignTool::new(&cx, input, fill, *press);
             let map = comments::PageMap::new(cx.info, cx.pages, cx.rotation, cx.view);
-            let annotate = CommentsTool::new(&mut view.tool, &mut view.paste, map, &mut view.tool_done, &mut view.tool_pressed)
+            let annotate = CommentsTool::new(&mut view.tool, &mut view.paste, map, &mut view.escaped_tool, &mut view.tool_pressed)
                 .image_aspect(aspect)
                 .settings(tool, cx.comment_prefs, cx.allowed, cx.doc.comments_hidden())
                 .outcome(&mut session.pending_edit, &mut view.notice)
@@ -510,6 +510,9 @@ impl ToolFinish {
     pub(crate) fn apply(&mut self, fill: Option<FillOutcome>, area_mark: Option<AreaMarkResult>, session: &mut PageSession, cx: &PageToolCx<'_>) {
         if let Some(edit) = self.edit.take() {
             session.pending_edit = Some(edit);
+        }
+        if std::mem::take(&mut session.comments.escaped_tool) {
+            self.back_to_select = true;
         }
         if let Some(done) = self.crop.take()
             && let Some(edit) = super::crop::crop_edit(cx.info, &done)

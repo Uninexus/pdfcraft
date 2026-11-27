@@ -59,7 +59,7 @@ pub(crate) struct CommentsTool<'a> {
 
 impl<'a> CommentsTool<'a> {
     /// The tool over `annotate` (kept in `CommentView::tool`, so a gesture lasts across passes), the paste slot, the
-    /// pages on screen, the flag Escape sets when it leaves the tool (`CommentView::tool_done`) and whether the
+    /// pages on screen, the flag Escape sets when it leaves the tool (`CommentView::escaped_tool`) and whether the
     /// annotation tool took the open press (`CommentView::tool_pressed`, kept across passes with the gesture).
     pub(crate) fn new(
         annotate: &'a mut AnnotateTool,
