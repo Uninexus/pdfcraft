@@ -15,7 +15,7 @@ use craft::behavior::dock::{
 use craft::behavior::{Axis, DockSide, IconId};
 use craft::keymap::CommandRef;
 use craft::ui::buttons::IconButton;
-use craft::ui::contract::{Bind, BodyCx, PlainData, Props as _, Show as _};
+use craft::ui::contract::{Bind, BodyCx, PlainData, Show as _};
 use craft::ui::docking::{DockConfig, DockPanels, GroupAt, HidePanels, IconicMode, PanelKey, PanelSpec, PanelSpecs};
 use craft::ui::menu::PanelRow;
 use craft::ui::patterns::dock::DockArea;
@@ -558,8 +558,8 @@ impl DockPanels<PanelId> for Panels<'_> {
                 if self.app.left == LeftPanel::CalculationOrder {
                     crate::calc_order_ui::header(ui);
                 } else if crate::organize_panel::showing(self.app) {
+                    // Back only: the dock's own Close ends Organize (`close_ends_organize`).
                     IconButton::command(IconSpec::svg(IconId::new("chevron_left")), CommandRef::new("tools.all")).show(ui);
-                    IconButton::command(IconSpec::svg(IconId::new("close")), CommandRef::new("page.organize")).label(tl!("Close panel")).show(ui);
                 } else if self.app.left == LeftPanel::AllTools {
                     IconButton::command(IconSpec::svg(IconId::new("maximize_2")), CommandRef::new("tools.expand")).show(ui);
                 }
@@ -638,6 +638,23 @@ pub(crate) fn rail_anchor(app: &PdfCraftApp) -> Option<PanelId> {
     })
 }
 
+/// While the page grid shows, the left panel is Organize pages, and its Close ends Organize rather than hiding the
+/// panel beside a grid left without it: the grid closes and the workspace's own panel comes back.
+fn close_ends_organize(app: &mut PdfCraftApp, actions: &mut Vec<Action<PanelId>>) {
+    if app.active.is_none() || !crate::organize_panel::showing(app) {
+        return;
+    }
+    let before = actions.len();
+    actions.retain(|action| !matches!(action, Action::Close { panel: PanelId::Tools, .. } | Action::CloseGroup { panel: PanelId::Tools, .. }));
+    if actions.len() == before {
+        return;
+    }
+    if let Some(view) = app.active.and_then(|i| app.views.get_mut(i)) {
+        view.organize = false;
+    }
+    app.left = crate::organize_panel::workspace_panel(app.mode);
+}
+
 /// Draws the dock. Call after the top bars and before the central panel.
 ///
 /// The area gets the app's workspace `Arc` and reports every change of the pass; they are applied to `app.dock` here,
@@ -705,7 +722,8 @@ pub fn dock(app: &mut PdfCraftApp, ui: &mut Ui) {
     app.dock_specs = specs;
     app.dock_shown = shown;
     let before = right_of(&app.dock);
-    let actions: Vec<_> = output.actions.into_iter().chain(output.requested).collect();
+    let mut actions: Vec<_> = output.actions.into_iter().chain(output.requested).collect();
+    close_ends_organize(app, &mut actions);
     if !actions.is_empty() {
         let dock = Arc::make_mut(&mut app.dock);
         for action in actions {

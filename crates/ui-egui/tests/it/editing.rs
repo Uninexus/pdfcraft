@@ -8643,11 +8643,14 @@ fn organize_panel_comes_with_the_grid_and_closes_it() {
     h.get_by_label("Insert");
     h.get_by_label("Bates numbering");
     h.get_by_label("Page properties");
-    h.get_by_label("Close panel").click();
+    // One Close for the panel, beside Back to all tools.
+    assert!(h.query_by_label("Close panel").is_none(), "no second close button");
+    h.get_by_label("Close Organize pages").click();
     h.run_steps(3);
     assert!(!h.state().views[0].organize, "Close ends Organize");
     assert_eq!(h.state().left, pdfcraft_ui_egui::LeftPanel::AllTools);
     assert!(h.query_by_label("Page properties").is_none(), "the panel is gone");
+    assert!(h.query_all_by_label("Close All tools").next().is_some(), "the left pane stays, with the panel it showed before");
 }
 
 /// Organize pages ▸ Page properties ▸ Tab Order sets the tab order of the selected pages only,
