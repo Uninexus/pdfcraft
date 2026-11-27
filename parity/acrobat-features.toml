@@ -9097,9 +9097,10 @@ evidence = [
     "crates/ui-egui/tests/it/keyboard_only.rs::closing_preferences_returns_the_focus_to_its_opener",
     "crates/ui-egui/tests/it/keyboard_only.rs::markup_after_select_all_marks_every_page",
     "crates/ui-egui/tests/it/keyboard_only.rs::opening_a_side_panel_by_keys_moves_the_focus_into_it",
+    "crates/ui-egui/tests/it/keyboard_only.rs::the_side_rail_opens_panels_by_enter_and_space_and_shows_focus",
     "crates/ui-egui/tests/it/accessibility.rs::tab_goes_round_the_window_without_losing_the_focus_or_hiding_panels",
 ]
-notes = "By keys alone: open from Home, move between pages, zoom, the menu bar (F10), the Tools pane, the command palette, a sticky note written in the Comments panel, filling a form, Preferences and Print, opening a side panel from the palette, the View menu or F4 and acting on a row, switching tabs and saving. Missing: the side panel rail's buttons take the focus but Enter and Space do nothing; the rail buttons and the Tools list show no focus ring; text can only be selected by Select All, so a part of a page cannot be highlighted; a sticky note cannot be placed at a chosen point. Closing Preferences gives the focus back to what opened it; a markup tool after Select All marks every page; a side panel opened by keys takes the focus (its list, else the start of the panel). Not audited: tools and dialogs beyond these."
+notes = "By keys alone: open from Home, move between pages, zoom, the menu bar (F10), the Tools pane, the command palette, a sticky note written in the Comments panel, filling a form, Preferences and Print, opening a side panel from the palette, the View menu or F4 and acting on a row, switching tabs and saving. The side panel rail's buttons open and close their panel by Enter and Space; they and the Tools list show a focus ring; Tab moves on from the zoom field. Missing: text can only be selected by Select All, so a part of a page cannot be highlighted; a sticky note cannot be placed at a chosen point. Closing Preferences gives the focus back to what opened it; a markup tool after Select All marks every page; a side panel opened by keys takes the focus (its list, else the start of the panel). Not audited: tools and dialogs beyond these."
 
 [[feature]]
 id = "a11y.checker"

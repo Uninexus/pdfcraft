@@ -362,10 +362,6 @@ pub struct PdfCraftApp {
     pub(crate) panel_focus: Option<(RightPanel, u8)>,
     /// The panel whose start holds the focus, while it does.
     pub(crate) panel_stop: Option<RightPanel>,
-    /// The rail's zoom field, once it has been shown.
-    pub(crate) zoom_field: Option<egui::Id>,
-    /// The zoom field had the focus as this frame's input arrived, and the rail has not moved it on yet.
-    pub(crate) zoom_held: bool,
     /// The left rulers the last pass drew: the floating toolbar is kept off them.
     pub(crate) left_rulers: Vec<egui::Rect>,
     /// Where the floating toolbar stood before a ruler moved it, and where it was moved to.

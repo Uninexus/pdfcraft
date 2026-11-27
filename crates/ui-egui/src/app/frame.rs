@@ -22,9 +22,6 @@ impl PdfCraftApp {
             self.panel_focus = passes.checked_sub(1).map(|left| (panel, left));
             ctx.request_repaint();
         }
-        // Asked before the framework moves the focus for this input: only a Tab pressed on the zoom field counts, not the
-        // one that brings the focus to it. The press itself is read in the pass, where automation's input has arrived too.
-        self.zoom_held = self.zoom_field.is_some_and(|id| craft::ui::runtime::focus::has(ctx, id));
         self.set_title_bar_choice(ctx, self.title_bar_choice);
         self.control_before_input(ctx);
         embed::before_input(ctx, |output| {

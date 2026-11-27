@@ -10,7 +10,7 @@ use craft::ui::contract::{Bind, PopupKind, Props as _, Show as _, ShowContainer 
 use craft::ui::display::Text;
 use craft::ui::menu::{Menu, MenuItem};
 use craft::ui::runtime::env::Env;
-use craft::ui::runtime::focus::{self, FocusTarget};
+use craft::ui::runtime::focus;
 use craft::ui::text::{TextField, ZoomField, ZoomScale};
 use egui::Ui;
 
@@ -67,14 +67,10 @@ pub(crate) fn show(app: &mut PdfCraftApp, ui: &mut Ui) {
     let of = crate::i18n::fmt(crate::i18n::t("Page {p} of {n}"), &[("p", &shown.to_string()), ("n", &page_count.to_string())]);
     Text::new(super::page_position(current, page_count, label)).role(TypeRole::Caption).tooltip(of).show(ui);
 
-    // The controls around the zoom field, nearest last before it and nearest first after it.
-    let before = [
-        edit.response.clone(),
-        IconButton::command(IconId::new("chevron_left"), "view.previous_view").show(ui).response,
-        IconButton::command(IconId::new("chevron_right"), "view.next_view").show(ui).response,
-        IconButton::command(IconId::new("chevron_up"), "view.previous_page").show(ui).response,
-        IconButton::command(IconId::new("chevron_down"), "view.next_page").show(ui).response,
-    ];
+    IconButton::command(IconId::new("chevron_left"), "view.previous_view").show(ui);
+    IconButton::command(IconId::new("chevron_right"), "view.next_view").show(ui);
+    IconButton::command(IconId::new("chevron_up"), "view.previous_page").show(ui);
+    IconButton::command(IconId::new("chevron_down"), "view.next_page").show(ui);
 
     // The percent suffix and three digits need the rail's full width, not an icon button's width.
     let zoom_size = egui::vec2(ui.available_width(), field_size.y);
@@ -84,32 +80,10 @@ pub(crate) fn show(app: &mut PdfCraftApp, ui: &mut Ui) {
         view.apply_canvas_view(edited);
     }
 
-    let after = [
-        IconButton::command(IconId::new("zoom_in"), "view.zoom.in").show(ui).response,
-        IconButton::command(IconId::new("zoom_out"), "view.zoom.out").show(ui).response,
-        IconButton::command(IconId::new("maximize_2"), "view.fit_toggle").show(ui).response,
-        IconButton::command(IconId::new("rotate_cw"), "view.rotate.cw").show(ui).response,
-    ];
-    // The framework's zoom field keeps Tab for itself (Tab rewrites the typed number and selects it), which left no way
-    // off it by keyboard: Tab and Shift+Tab move to the neighbouring control that can take the focus.
-    app.zoom_field = Some(field.response.id);
-    let pressed = ui.input(|i| {
-        i.raw.events.iter().find_map(|event| match event {
-            egui::Event::Key { key: egui::Key::Tab, pressed: true, modifiers, .. } if !(modifiers.command || modifiers.ctrl || modifiers.alt) => {
-                Some(!modifiers.shift)
-            }
-            _ => None,
-        })
-    });
-    if let Some(forward) = pressed
-        && std::mem::take(&mut app.zoom_held)
-    {
-        let next = if forward { after.iter().find(|r| r.enabled()) } else { before.iter().rev().find(|r| r.enabled()) };
-        if let Some(next) = next {
-            focus::request(ui.ctx(), FocusTarget::Id(next.id));
-            ui.ctx().request_repaint();
-        }
-    }
+    IconButton::command(IconId::new("zoom_in"), "view.zoom.in").show(ui);
+    IconButton::command(IconId::new("zoom_out"), "view.zoom.out").show(ui);
+    IconButton::command(IconId::new("maximize_2"), "view.fit_toggle").show(ui);
+    IconButton::command(IconId::new("rotate_cw"), "view.rotate.cw").show(ui);
 
     // The rows' marks come from the commands' checked state (the catalog), not from here.
     let display_icon = if view.view.display == PageDisplay::Single { "file-text" } else { "columns-2" };

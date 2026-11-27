@@ -173,11 +173,13 @@ to 16 and directory entries to 32,768. Cyclic includes are skipped.
 ## Shared libraries (craft-libs)
 
 This fork takes every craft-libs crate from [Uninexus/craft-libs](https://github.com/Uninexus/craft-libs),
-a fork of storytold/craft-libs, at one revision pinned in `Cargo.toml`. The fork adds one change
+a fork of storytold/craft-libs, at one revision pinned in `Cargo.toml`. The fork adds two changes
 on top of the upstream revision: a titled dock panel header is inset by the panel padding, and a
-dock column with an empty column bar no longer draws it. The change is to be offered upstream;
-once storytold/craft-libs has it, point the dependencies back there. `xtask/src/pdf_deps.rs` and
-`deny.toml` name the same source.
+dock column with an empty column bar no longer draws it; and for keyboard use, side rail icons
+activate on Enter and Space and show focus, a focused list with no row chosen is ringed, and the
+zoom field lets Tab move on once it has rewritten the number. The changes are to be offered
+upstream; once storytold/craft-libs has them, point the dependencies back there.
+`xtask/src/pdf_deps.rs` and `deny.toml` name the same source.
 
 ## Fonts and attribution
 
