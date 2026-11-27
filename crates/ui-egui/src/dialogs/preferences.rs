@@ -136,6 +136,7 @@ struct PrefsDraft {
     reopen_last_session: bool,
     restore_last_view: bool,
     reload_changed_files: bool,
+    autosave_minutes: u32,
     update_check_at_start: bool,
     show_secured_notice: bool,
     recent_limit: usize,
@@ -185,6 +186,7 @@ impl PrefsDraft {
             reopen_last_session: app.reopen_last_session,
             restore_last_view: app.restore_last_view,
             reload_changed_files: app.reload_changed_files,
+            autosave_minutes: app.autosave_minutes,
             update_check_at_start: app.update_check_at_start,
             show_secured_notice: app.show_secured_notice,
             recent_limit: app.recent_limit,
@@ -238,6 +240,7 @@ impl PrefsDraft {
             reopen_last_session: false,
             restore_last_view: true,
             reload_changed_files: true,
+            autosave_minutes: 1,
             update_check_at_start: true,
             show_secured_notice: true,
             recent_limit: crate::RECENT_FILES_DEFAULT,
@@ -610,6 +613,7 @@ impl PreferencesModel for Prefs<'_> {
             ("general.reopen", PrefValue::Bool(v)) => d.reopen_last_session = v,
             ("general.restore_view", PrefValue::Bool(v)) => d.restore_last_view = v,
             ("general.reload", PrefValue::Bool(v)) => d.reload_changed_files = v,
+            ("general.autosave", PrefValue::Int(v)) => d.autosave_minutes = u32::try_from(v).unwrap_or(1).clamp(1, crate::AUTOSAVE_MINUTES_MAX),
             ("general.updates", PrefValue::Bool(v)) => d.update_check_at_start = v,
             ("general.secured_notice", PrefValue::Bool(v)) => d.show_secured_notice = v,
             ("general.recent", PrefValue::Int(v)) => d.recent_limit = usize::try_from(v).unwrap_or(0).min(crate::RECENT_FILES_MAX),
@@ -830,6 +834,7 @@ impl PreferencesModel for Prefs<'_> {
                 d.reopen_last_session = fresh.reopen_last_session;
                 d.restore_last_view = fresh.restore_last_view;
                 d.reload_changed_files = fresh.reload_changed_files;
+                d.autosave_minutes = fresh.autosave_minutes;
                 d.update_check_at_start = fresh.update_check_at_start;
                 d.show_secured_notice = fresh.show_secured_notice;
                 d.recent_limit = fresh.recent_limit;
@@ -928,6 +933,9 @@ impl PreferencesDraft for Prefs<'_> {
         self.app.reopen_last_session = d.reopen_last_session;
         self.app.restore_last_view = d.restore_last_view;
         self.app.reload_changed_files = d.reload_changed_files;
+        if self.app.autosave_minutes != d.autosave_minutes {
+            self.app.set_autosave_minutes(d.autosave_minutes);
+        }
         self.app.update_check_at_start = d.update_check_at_start;
         self.app.show_secured_notice = d.show_secured_notice;
         self.app.recent_limit = d.recent_limit;
@@ -1030,6 +1038,14 @@ impl Prefs<'_> {
                 RowKind::Bool(d.restore_last_view),
             ));
             rows.push(RowSpec::new("general.reload", tl!("Reload documents when their files change on disk"), RowKind::Bool(d.reload_changed_files)));
+            rows.push(
+                RowSpec::new(
+                    "general.autosave",
+                    tl!("Minutes between recovery copies"),
+                    RowKind::int(i64::from(d.autosave_minutes), 1..=i64::from(crate::AUTOSAVE_MINUTES_MAX)),
+                )
+                .help(tl!("Unsaved work is copied this often, and offered again after a crash.")),
+            );
             rows.push(RowSpec::new("general.updates", tl!("Check for updates when PdfCraft starts"), RowKind::Bool(d.update_check_at_start)));
         }
         rows.push(RowSpec::new("general.secured_notice", tl!("Show a notice when a document is secured"), RowKind::Bool(d.show_secured_notice)));

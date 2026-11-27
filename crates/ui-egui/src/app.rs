@@ -380,6 +380,7 @@ impl PdfCraftApp {
             last_session: Default::default(),
             session_keeper: Default::default(),
             reload_changed_files: true,
+            autosave_minutes: 1,
             update_check_at_start: true,
             show_secured_notice: true,
             text_links: true,

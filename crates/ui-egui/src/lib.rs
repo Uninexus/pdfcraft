@@ -90,7 +90,7 @@ pub const MIN_WINDOW_SIZE: [f32; 2] = [480.0, 520.0];
 pub use dialogs::properties::PropsTab;
 pub use editing::SaveTarget;
 pub use files::{ExtractOptions, FilePurpose, SplitPlan};
-pub use recovery::AUTOSAVE_SECS;
+pub use recovery::{AUTOSAVE_MINUTES_MAX, AUTOSAVE_SECS};
 pub use workflows::js_dialogs::JsDialog;
 pub use workflows::ocr_verify::{OcrVerify, Phase};
 
@@ -514,6 +514,9 @@ pub struct PdfCraftApp {
     session_keeper: craft::platform::session::SessionKeeper,
     /// Preferences: reload a document when its file changes on disk (#431).
     pub reload_changed_files: bool,
+    /// Preferences: the minutes between recovery copies of unsaved work (set with
+    /// [`PdfCraftApp::set_autosave_minutes`]).
+    pub autosave_minutes: u32,
     /// Preferences: ask for a newer release when the desktop app starts (#5737). Off, the app
     /// asks only from Help ▸ Check for updates.
     pub update_check_at_start: bool,

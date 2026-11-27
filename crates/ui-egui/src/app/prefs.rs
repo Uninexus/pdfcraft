@@ -162,6 +162,7 @@ impl PdfCraftApp {
             last_views: json_text(&self.last_views_to_save()),
             system_title_bar: Some(self.title_bar_choice == TitleBarPref::System),
             reload_changed_files: Some(self.reload_changed_files),
+            autosave_minutes: Some(self.autosave_minutes),
             update_check_at_start: Some(self.update_check_at_start),
             show_secured_notice: Some(self.show_secured_notice),
             text_links: Some(self.text_links),
@@ -389,6 +390,9 @@ impl PdfCraftApp {
         }
         if let Some(on) = s.reload_changed_files {
             self.reload_changed_files = on;
+        }
+        if let Some(minutes) = s.autosave_minutes {
+            self.set_autosave_minutes(minutes);
         }
         if let Some(on) = s.update_check_at_start {
             self.update_check_at_start = on;

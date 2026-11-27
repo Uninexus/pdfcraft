@@ -10575,8 +10575,8 @@ milestone = "M14"
 status = "partial"
 commands = []
 tools = []
-evidence = ["crates/ui-egui/tests/it/preferences.rs::preference_rows_apply_live_and_survive_closing", "crates/ui-egui/tests/it/recent_files.rs::at_zero_home_has_no_recent_section", "crates/ui-egui/tests/it/recent_files.rs::a_settings_file_can_not_ask_for_a_limit_that_is_not_one"]
-notes = "Preferences ▸ Documents and view: Recent files to keep, from 0 to 50 with 12 by default (#5572). At 0 Home has no Recent section and File ▸ Open Recent is disabled; Restore the last view keeps its own record of paths under its own switch. Still missing: the autosave interval (recovery snapshots run every AUTOSAVE_SECS, 60 s) and the rest of Acrobat's Documents page."
+evidence = ["crates/ui-egui/src/persist/recovery.rs::a_longer_interval_waits_that_long_for_the_copy", "crates/ui-egui/tests/it/preferences.rs::preference_rows_apply_live_and_survive_closing", "crates/ui-egui/tests/it/recent_files.rs::at_zero_home_has_no_recent_section", "crates/ui-egui/tests/it/recent_files.rs::a_settings_file_can_not_ask_for_a_limit_that_is_not_one"]
+notes = "Preferences ▸ Documents and view: Recent files to keep, from 0 to 50 with 12 by default (#5572). At 0 Home has no Recent section and File ▸ Open Recent is disabled; Restore the last view keeps its own record of paths under its own switch. Preferences ▸ Minutes between recovery copies (1 to 60, 1 by default; also ui.set autosave-minutes) sets how often unsaved work is copied for crash recovery; copies can't be turned off. Still missing: the rest of Acrobat's Documents page."
 
 [[feature]]
 id = "misc.prefs-commenting"

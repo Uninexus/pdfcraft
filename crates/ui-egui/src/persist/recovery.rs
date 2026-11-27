@@ -22,8 +22,10 @@ use craft::ui::dialog::{DialogResult, RecoveredDocument, RecoveryAnswer, Recover
 
 use crate::PdfCraftApp;
 
-/// How often unsaved changes are written to the recovery folder.
+/// How often unsaved changes are written to the recovery folder, unless Preferences say otherwise.
 pub const AUTOSAVE_SECS: f64 = 60.0;
+/// The longest interval Preferences offer, in minutes; the shortest is one. Recovery copies can't be turned off.
+pub const AUTOSAVE_MINUTES_MAX: u32 = 60;
 
 /// The folder an earlier PdfCraft kept its recovery entries in (the portable data folder's
 /// `Recovery`, else `~/Library/Application Support/PdfCraft/Recovery` on macOS,
@@ -80,6 +82,15 @@ impl PdfCraftApp {
     pub fn autosave_now(&mut self) {
         self.autosave.autosave_now();
         self.autosave_pass(web_time::Instant::now());
+    }
+
+    /// Writes recovery copies every `minutes` (1 to [`AUTOSAVE_MINUTES_MAX`]) from now on. Without a recovery folder
+    /// there is nothing to time.
+    pub fn set_autosave_minutes(&mut self, minutes: u32) {
+        self.autosave_minutes = minutes.clamp(1, AUTOSAVE_MINUTES_MAX);
+        if self.recovery.is_some() {
+            self.autosave.set_interval(Some(std::time::Duration::from_secs_f64(f64::from(self.autosave_minutes) * AUTOSAVE_SECS)));
+        }
     }
 
     /// Decide what is due at `now` and write it. Whatever the timer stops tracking (a saved,
@@ -453,6 +464,24 @@ mod idle_tests {
             delay = frame(&mut app, &ctx, base + Duration::from_secs(121));
         }
         assert_eq!(delay, Duration::MAX, "the second snapshot also lets the window sleep");
+    }
+
+    /// The interval chosen in Preferences times the next copy.
+    #[test]
+    fn a_longer_interval_waits_that_long_for_the_copy() {
+        let dir = TestDir::new();
+        let folder = dir.path().join("recovery");
+        let (mut app, ..) = app_in(Some(&folder));
+        app.set_autosave_minutes(5);
+        let bytes = app.session.create_blank(200.0, 300.0, 1).unwrap();
+        app.session.open_new("Untitled.pdf", bytes).unwrap();
+        let ctx = egui::Context::default();
+        let base = web_time::Instant::now();
+        frame(&mut app, &ctx, base);
+        frame(&mut app, &ctx, base + Duration::from_secs(299));
+        assert!(copies(&folder).is_empty(), "not before five minutes");
+        frame(&mut app, &ctx, base + Duration::from_secs(300));
+        assert_eq!(copies(&folder).len(), 1);
     }
 
     /// Check that a clean document and a document with recovery disabled never schedule an autosave.
