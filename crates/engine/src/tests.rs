@@ -16435,3 +16435,16 @@ fn hiding_a_comment_type_hides_those_comments_only_and_never_changes_the_file() 
     assert!(s.set_hidden_comment_types(id, Default::default()));
     assert!(drawn(&s, 100) && drawn(&s, 160) && drawn(&s, 40));
 }
+
+/// A tool listed as planned is shown dimmed and does nothing, so none of them may have a command that works.
+#[test]
+fn no_listed_tool_with_a_command_is_marked_planned() {
+    let stale: Vec<&str> = crate::catalog::TOOL_GROUPS
+        .iter()
+        .flat_map(|group| group.sections.iter())
+        .flat_map(|section| section.items.iter())
+        .filter(|item| matches!(item.availability, crate::catalog::Availability::Planned(_)) && crate::commands::command(item.command).is_some())
+        .map(|item| item.command)
+        .collect();
+    assert!(stale.is_empty(), "listed as planned, but registered: {stale:?}");
+}

@@ -494,6 +494,7 @@ const ALL_COMMANDS: &[CommandSpec] = &[
     c("export.image", "Export to image…", FILE, None, Copying, "image"),
     c("optimize.reduce", "Reduce file size…", FILE, None, Document, "file-down"),
     c("optimize.advanced", "Optimize PDF…", FILE, None, Document, "settings-2"),
+    c("optimize.audit", "Audit space usage…", None, None, Document, "gauge"),
     c("optimize.batch", "Optimize multiple files…", FILE, None, Nothing, "files"),
     c("export.text", "Export to text…", FILE, None, Copying, "type"),
     c("export.docx", "Export to Word…", FILE, None, Copying, "file-text"),

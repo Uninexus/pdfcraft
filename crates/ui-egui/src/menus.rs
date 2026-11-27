@@ -465,18 +465,30 @@ impl PdfCraftApp {
     /// View ▸ Tools: the All tools groups, each a submenu of its ready tools that no other menu
     /// lists, sections apart.
     fn tools_menu(&self, used: &[&str], mac: bool) -> Vec<Node> {
+        // A command is in the menus once: a group made of one command keeps it (Add a stamp) from a group that also
+        // offers it (Add comments), and otherwise the first group to list it has it.
+        let owned: Vec<(&str, &str)> = TOOL_GROUPS
+            .iter()
+            .filter(|g| g.availability == Availability::Ready)
+            .filter_map(|group| {
+                let mut commands = group.sections.iter().flat_map(|s| s.items.iter()).filter(|t| t.availability == Availability::Ready);
+                let only = commands.next().filter(|t| t.actions.is_empty())?;
+                commands.next().is_none().then_some((only.command, group.id))
+            })
+            .collect();
+        let mut seen: Vec<&str> = Vec::new();
         TOOL_GROUPS
             .iter()
             .filter(|g| g.availability == Availability::Ready)
             .map(|group| {
                 let mut nodes = Vec::new();
-                let mut seen: Vec<&str> = Vec::new();
                 for section in group.sections {
                     nodes.push(Node::Separator);
                     for tool in section.items.iter().filter(|t| t.availability == Availability::Ready) {
                         let actions: &[&'static str] = if tool.actions.is_empty() { std::slice::from_ref(&tool.command) } else { tool.actions };
                         for &id in actions {
-                            if commands::command(id).is_none() || used.contains(&id) || seen.contains(&id) {
+                            let elsewhere = owned.iter().any(|(command, owner)| *command == id && *owner != group.id);
+                            if commands::command(id).is_none() || used.contains(&id) || seen.contains(&id) || elsewhere {
                                 continue;
                             }
                             seen.push(id);
