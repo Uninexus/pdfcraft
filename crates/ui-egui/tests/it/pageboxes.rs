@@ -162,3 +162,26 @@ fn the_page_transitions_dialog_sets_and_removes_a_transition_on_every_page() {
     h.run_steps(4);
     assert!(transitions(&h).is_empty(), "{:?}", transitions(&h));
 }
+
+/// In full screen a page with a display time turns once: the page after it, which has none, stays.
+#[test]
+fn full_screen_turns_one_page_when_a_display_time_is_up() {
+    let mut h = harness();
+    let ctx = h.ctx.clone();
+    let id = h.state().views[0].id;
+    let blank = pdfcraft_engine::Edit::InsertBlankPage { at: 2, width: 300.0, height: 400.0 };
+    assert!(h.state_mut().apply_edit(&ctx, blank));
+    let spec = pdfcraft_engine::TransitionSpec { transition: None, display: Some(1.0) };
+    assert!(h.state_mut().apply_edit(&ctx, pdfcraft_engine::Edit::SetTransition { pages: vec![0], spec }));
+    h.run_steps(8);
+    assert_eq!(h.state().session.get(id).unwrap().info.pages.len(), 3);
+    assert!(h.execute("view.first_page"));
+    h.run_steps(4);
+    assert_eq!(h.state().views[0].current(), 0);
+    assert!(h.execute("view.full_screen"));
+    for _ in 0..60 {
+        h.step();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert_eq!(h.state().views[0].current(), 1, "turned to the second page and stayed");
+}

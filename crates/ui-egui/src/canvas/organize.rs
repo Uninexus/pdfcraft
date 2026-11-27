@@ -227,8 +227,15 @@ pub(super) fn organize_grid(view: &mut DocView, doc: &pdfcraft_engine::Document,
     // PLAN: assumed `PageThumbnails::invert_middle(bool)` beside `middle_button` (pdf-canvas-w6).
     // With nothing picked, the current page shows as the picked one, as in production; that is a display, so the view's
     // own selection stays empty until a click changes it.
-    let seeded = view.selected.items.is_empty() && current < n;
-    let mut shown = if seeded { Selection::new(vec![current], Some(current), Some(current)) } else { view.selected.clone() };
+    // The page shown as picked stays the one from before a press: the press makes the pressed page current, and
+    // were that page shown as picked, its check would untick it on release instead of adding it.
+    let seed_id = id.with("seed");
+    let pressing = cx.ui.input(|i| i.pointer.any_down() || i.pointer.any_released());
+    let latched = cx.ui.data(|d| d.get_temp::<usize>(seed_id)).filter(|page| pressing && *page < n);
+    let seed = latched.unwrap_or(current);
+    cx.ui.data_mut(|d| d.insert_temp(seed_id, seed));
+    let seeded = view.selected.items.is_empty() && seed < n;
+    let mut shown = if seeded { Selection::new(vec![seed], Some(seed), Some(seed)) } else { view.selected.clone() };
     let out = PageThumbnails::new(tl!("Pages"), &pages, &mut shown, current, DataColor::new(egui::Color32::WHITE))
         .id(id)
         .arrangement(ThumbnailArrangement::Organize)
@@ -241,7 +248,7 @@ pub(super) fn organize_grid(view: &mut DocView, doc: &pdfcraft_engine::Document,
         .invert_middle(cx.invert_middle)
         .reveal(reveal)
         .show(cx.ui);
-    if !seeded || shown.items != [current] {
+    if !seeded || (shown.items != [seed] && shown.items != [current]) {
         view.selected = shown;
     }
     view.middle_scrolling = out.auto_scrolling;

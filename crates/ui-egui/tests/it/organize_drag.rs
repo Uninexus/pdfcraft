@@ -58,6 +58,22 @@ fn selected_pages_keep_actions_without_pointer_hover() {
     }
 }
 
+/// The check boxes add pages to the picked ones and take them out again, starting beside the current page.
+#[test]
+fn page_check_boxes_pick_several_pages() {
+    let mut h = organize();
+    let picked = |h: &Harness<'static, PdfCraftApp>| {
+        let mut pages = h.state().views[0].selected.items.clone();
+        pages.sort_unstable();
+        pages
+    };
+    for (label, expected) in [("Select 3", vec![0, 2]), ("Select 4", vec![0, 2, 3]), ("Select 3", vec![0, 3])] {
+        h.get_by_label(label).click();
+        h.run_steps(4);
+        assert_eq!(picked(&h), expected, "after {label}");
+    }
+}
+
 #[test]
 fn organize_header_paints_a_close_label() {
     let h = organize();
