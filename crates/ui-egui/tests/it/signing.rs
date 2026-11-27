@@ -964,6 +964,13 @@ fn signing_can_lock_all_form_fields() {
     std::fs::create_dir_all(&dir).unwrap();
     let mut h = harness(dir.clone());
     let p12 = concat!(env!("CARGO_MANIFEST_DIR"), "/../sign/tests/data/ec-p256.p12");
+    let field = pdfcraft_engine::Edit::AddField {
+        page: 0,
+        rect: [20.0, 40.0, 180.0, 60.0],
+        kind: pdfcraft_engine::NewField::Text { multiline: false },
+        name: None,
+    };
+    assert!(h.state_mut().apply_edit(&egui::Context::default(), field));
     h.state_mut().start_signing(&egui::Context::default(), 0, Some([20.0, 110.0, 280.0, 140.0]), None, None);
     h.run_steps(2);
     {
@@ -989,4 +996,11 @@ fn signing_can_lock_all_form_fields() {
     let doc = s.session.get(s.views[0].id).unwrap();
     assert!(doc.signatures.iter().any(|x| x.signed));
     assert!(doc.bytes.windows(8).any(|w| w == b"FieldMDP"), "the signature locks the fields");
+    // Changing a locked field is refused, and says why.
+    let name = h.state().session.get(h.state().views[0].id).unwrap().form[0].name.clone();
+    let edit = pdfcraft_engine::Edit::SetFieldValue { name, value: pdfcraft_engine::FieldValue::Text("changed".into()) };
+    assert!(!h.state_mut().apply_edit(&egui::Context::default(), edit), "the locked field keeps its value");
+    h.run_steps(2);
+    let said = support::shown_notice(&h).expect("the refusal is said");
+    assert!(said.contains("locks that form field"), "{said}");
 }

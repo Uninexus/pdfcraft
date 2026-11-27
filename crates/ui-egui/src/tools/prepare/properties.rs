@@ -232,7 +232,7 @@ fn signed_section(ui: &mut egui::Ui, d: &mut FieldDraft) {
     note(
         ui,
         tl!(
-            "Choose Lock nothing and Set the lock to take a lock out. These buttons change the file at once; Undo in the Edit menu takes them back, and Cancel does not. The lock and the seed values are notes stored in this file for the one who signs and for other programs. PdfCraft does not make the locked fields read-only after a signature and does not read the seed values when it signs; nothing is signed or sent."
+            "Choose Lock nothing and Set the lock to take a lock out. These buttons change the file at once; Undo in the Edit menu takes them back, and Cancel does not. The lock and the seed values are notes stored in this file for the one who signs and for other programs. After a signature PdfCraft refuses to change what the locked fields hold; it does not read the seed values when it signs; nothing is signed or sent."
         ),
     );
 }

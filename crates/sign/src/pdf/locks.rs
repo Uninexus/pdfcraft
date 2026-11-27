@@ -12,6 +12,7 @@
 
 use std::collections::{BTreeMap, HashSet as NameSet};
 
+use super::listing::sig_fields;
 use super::listing::{Field, MAX_ENTRIES, MAX_FIELD_NAME_BYTES, MAX_FIELDS, MAX_NAME_BYTES};
 use super::{Dict, Document, HashSet, ObjRef, Object};
 
@@ -215,6 +216,44 @@ pub(super) fn locked_fields(doc: &Document, old: &Document, field: &Field, value
     Locked::Kept
 }
 
+/// The signed fields of `before` whose locks the change to `after` would break by giving a locked field another value
+/// (typing, ticking, clearing) or by removing it: asked before such a change is kept. Other changes to a locked field,
+/// to its properties say, are the validator's and their own commands' to judge. A signature that `after` no longer
+/// holds locks nothing, and a lock that can't be read or compared is left to the validator.
+pub fn signatures_locking_changed_values(before: &Document, after: &Document) -> Vec<String> {
+    let still_signed: NameSet<String> = sig_fields(after).into_iter().filter(|f| f.signature(after).is_some()).map(|f| f.name).collect();
+    sig_fields(before)
+        .into_iter()
+        .filter(|field| still_signed.contains(&field.name))
+        .filter(|field| field.signature(before).is_some_and(|value| locks_a_changed_value(after, before, field, &value)))
+        .map(|field| field.name)
+        .collect()
+}
+
+/// Whether a field the lock of `field` covers has another value in `doc` than in `old`, or is gone.
+fn locks_a_changed_value(doc: &Document, old: &Document, field: &Field, value: &Dict) -> bool {
+    let Ok(rules) = rules(old, field, value) else { return false };
+    if rules.is_empty() {
+        return false;
+    }
+    let (Some(before), Some(now)) = (form_fields(old), form_fields(doc)) else { return false };
+    let mut locked_nodes = vec![false; before.nodes.len()];
+    for rule in &rules {
+        for (l, r) in locked_nodes.iter_mut().zip(rule.locks(&before)) {
+            *l |= r;
+        }
+    }
+    let mut same = Same { old, doc, left: MAX_COMPARED, assumed: HashSet::new() };
+    before.fields.iter().filter(|(_, entries)| entries.iter().any(|e| locked_nodes.get(e.node).copied().unwrap_or(false))).any(|(name, was)| {
+        // The signature's own field holds the signature, not something typed.
+        if *name == field.name {
+            return false;
+        }
+        let Some(is) = now.fields.get(name) else { return true };
+        was.iter().zip(is).any(|(w, i)| same.entry(before.value_of(w.node), now.value_of(i.node)) == Some(false))
+    })
+}
+
 /// One field dictionary in a walk of the form: its fully qualified name, and the one above it.
 struct Node {
     name: String,
@@ -237,6 +276,19 @@ struct Form {
 }
 
 impl Form {
+    /// The value of node `at`: its own `/V`, else the one it inherits.
+    fn value_of(&self, at: usize) -> Option<&Object> {
+        let mut node = self.nodes.get(at);
+        for _ in 0..=MAX_FIELD_DEPTH {
+            let here = node?;
+            if let Some(value) = here.dict.get(b"V") {
+                return Some(value);
+            }
+            node = here.parent.and_then(|p| self.nodes.get(p));
+        }
+        None
+    }
+
     /// Whether field `e` has a widget with no appearance of its own, which a reader draws from the
     /// form's defaults: a separate widget without `/AP`, or a field that is its own widget.
     fn lacks_appearance(&self, e: &Entry) -> bool {
