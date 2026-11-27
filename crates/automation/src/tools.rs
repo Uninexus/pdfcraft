@@ -1093,24 +1093,24 @@ fn all_tools() -> Vec<ToolDef> {
                 json!({ "doc": doc(), "page": { "type": "integer", "minimum": 1 }, "index": { "type": "integer", "minimum": 1 }, "password": { "type": "string", "description": "Optional password for the linked PDF." }, "allow_absolute": { "type": "boolean", "description": "Explicitly allow an absolute local GoToR target (default false). Existing validation and --root confinement still apply." } }),
                 &["doc", "page", "index"],
             )),
-        t("link_add", "Add a link", "Add a link over rect on page that opens url or goes to to_page, shown at zoom: fit_page (default), fit_width, fit_height, fit_visible, actual, inherit (keep the reader's zoom) or a percentage. Appearance: visible (rectangle), color, width 1-3, highlight none/invert/outline/inset. Undoable.")
+        t("link_add", "Add a link", "Add a link over rect on page that opens url or goes to to_page, shown at zoom: fit_page (default), fit_width, fit_height, fit_visible, actual, inherit (keep the reader's zoom) or a percentage; position with a percentage goes to that point of the page. Appearance: visible (rectangle), color, width 1-3, highlight none/invert/outline/inset. Undoable.")
             .cmd("edit.link")
             .with(schema(
                 json!({
                     "doc": doc(), "page": { "type": "integer", "minimum": 1 }, "rect": { "type": "array", "items": { "type": "number" }, "minItems": 4, "maxItems": 4 },
                     "url": { "type": "string" }, "to_page": { "type": "integer", "minimum": 1 },
-                    "zoom": { "description": "fit_page, fit_width, fit_height, fit_visible, actual, inherit, or a percentage" },
+                    "zoom": { "description": "fit_page, fit_width, fit_height, fit_visible, actual, inherit, or a percentage" }, "position": { "type": "array", "items": { "type": "number" }, "minItems": 2, "maxItems": 2, "description": "[x, y] on to_page, points from its top-left: shown at the window's top-left; needs zoom as a percentage" },
                     "visible": { "type": "boolean" }, "color": { "type": "string" }, "width": { "type": "number" }, "highlight": { "type": "string", "enum": ["none", "invert", "outline", "inset"] },
                 }),
                 &["doc", "page", "rect"],
             )),
-        t("link_edit", "Edit a link", "Change a link's rect, destination (url, or to_page and zoom as in link_add; a new to_page keeps the link's zoom, a zoom alone keeps its page) or appearance. Undoable.")
+        t("link_edit", "Edit a link", "Change a link's rect, destination (url, or to_page and zoom as in link_add; a new to_page keeps the link's zoom, a zoom alone keeps its page; position as in link_add) or appearance. Undoable.")
             .with(schema(
                 json!({
                     "doc": doc(), "page": { "type": "integer", "minimum": 1 }, "index": { "type": "integer", "minimum": 1 },
                     "rect": { "type": "array", "items": { "type": "number" }, "minItems": 4, "maxItems": 4 },
                     "url": { "type": "string" }, "to_page": { "type": "integer", "minimum": 1 },
-                    "zoom": { "description": "fit_page, fit_width, fit_height, fit_visible, actual, inherit, or a percentage" },
+                    "zoom": { "description": "fit_page, fit_width, fit_height, fit_visible, actual, inherit, or a percentage" }, "position": { "type": "array", "items": { "type": "number" }, "minItems": 2, "maxItems": 2, "description": "[x, y] on to_page, points from its top-left: shown at the window's top-left; needs zoom as a percentage" },
                     "visible": { "type": "boolean" }, "color": { "type": "string" }, "width": { "type": "number" }, "highlight": { "type": "string", "enum": ["none", "invert", "outline", "inset"] },
                 }),
                 &["doc", "page", "index"],

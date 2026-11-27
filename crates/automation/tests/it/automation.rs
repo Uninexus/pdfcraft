@@ -16568,3 +16568,27 @@ fn text_box_runs_through_tools() {
         assert!(a.call("comment_edit", &json!({ "doc": doc, "page": page, "index": index, "text_runs": bad })).is_err(), "{bad}");
     }
 }
+
+/// A position with a percentage is a view: that point of the page at the window's top-left.
+#[test]
+fn link_position_through_tools() {
+    let dir = workdir("link-position");
+    std::fs::write(dir.join("notes.txt"), "Contents").unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_create", json!({ "from": "text", "path": "notes.txt" }))["doc"].as_u64().unwrap();
+    let rect = json!([72, 300, 200, 320]);
+    ok(&mut a, "link_add", json!({ "doc": doc, "page": 1, "rect": rect, "to_page": 1, "zoom": 150, "position": [40, 90] }));
+    let link = ok(&mut a, "link_list", json!({ "doc": doc }))["links"][0].clone();
+    assert_eq!(link["zoom"], json!(150.0), "{link}");
+    let to = &link["destination"];
+    assert_eq!((to["fit"].clone(), to["zoom"].clone()), (json!("XYZ"), json!(1.5)), "{link}");
+    assert_eq!((to["left"].clone(), to["top"].clone()), (json!(40.0), json!(90.0)), "{link}");
+    // A position needs a percentage and a page.
+    for args in [
+        json!({ "doc": doc, "page": 1, "rect": rect, "to_page": 1, "position": [40, 90] }),
+        json!({ "doc": doc, "page": 1, "rect": rect, "to_page": 1, "zoom": "fit_page", "position": [40, 90] }),
+        json!({ "doc": doc, "page": 1, "rect": rect, "zoom": 150, "position": [40, 90] }),
+    ] {
+        assert!(matches!(a.call("link_add", &args), Err(ToolError::InvalidArgs(_))), "{args}");
+    }
+}

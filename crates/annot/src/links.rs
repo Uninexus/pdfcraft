@@ -36,6 +36,10 @@ pub enum LinkZoom {
     /// `/XYZ null null z` with z = percent / 100; 100 is Actual Size. A new zoom is written
     /// within 1–6400%; a link rewritten with the zoom it has keeps its own factor.
     Percent(f64),
+    /// `/XYZ left top z`: the point (left, top), in the target page's user space, at the window's
+    /// upper-left corner, at `percent`. Only written: a link read back reports its zoom, and an
+    /// edit that leaves page and zoom alone keeps the position as written.
+    View { left: f64, top: f64, percent: f64 },
 }
 
 impl LinkZoom {
@@ -74,6 +78,12 @@ impl LinkZoom {
                     return Err(AnnotError::Invalid("the link's zoom must be a positive percentage".into()));
                 }
                 vec![Object::name("XYZ"), Object::Null, Object::Null, Object::Real((p / 100.0).clamp(0.01, 64.0))]
+            }
+            LinkZoom::View { left, top, percent } => {
+                if !(left.is_finite() && top.is_finite() && percent.is_finite() && percent > 0.0) {
+                    return Err(AnnotError::Invalid("the link's view needs a position and a positive zoom".into()));
+                }
+                vec![Object::name("XYZ"), Object::Real(left), Object::Real(top), Object::Real((percent / 100.0).clamp(0.01, 64.0))]
             }
         })
     }

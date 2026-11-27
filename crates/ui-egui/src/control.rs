@@ -142,8 +142,8 @@ impl PdfCraftApp {
         }
     }
 
-    /// A `ui.key` press that a text box being typed into takes before the app's shortcuts, as it takes the
-    /// keyboard's. Anything else, a held key or a request the framework refuses goes on as input.
+    /// A `ui.key` press that a text box being typed into, or the link view bar, takes before the app's shortcuts, as
+    /// they take the keyboard's. Anything else, a held key or a request the framework refuses goes on as input.
     fn text_box_key(&mut self, ctx: &egui::Context, params: &Value) -> bool {
         // The framework's own check of the request comes first: what it refuses goes on to be refused.
         if !KeyPress::from_params(params).is_ok_and(|press| !press.hold) {
@@ -162,7 +162,7 @@ impl PdfCraftApp {
             mac_cmd: command && mac,
             command: command || ctrl && !mac,
         };
-        crate::comments::text_box_control_key(self, ctx, key, modifiers)
+        crate::comments::text_box_control_key(self, ctx, key, modifiers) || crate::link_ui::view_key(self, key, modifiers)
     }
 
     /// The reply to one request: the framework's methods, then the app's.

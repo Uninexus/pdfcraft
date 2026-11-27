@@ -230,3 +230,47 @@ fn the_link_context_menu_shows_only_for_a_right_click_on_a_link() {
     assert!(links(&h).is_empty());
     assert_eq!(h.state().session.get(h.state().views[0].id).unwrap().can_undo(), Some("Remove all links"));
 }
+
+/// Link Properties is put away while the user scrolls and zooms, and comes back with that view: the link goes to the
+/// point at the window's top-left, at the zoom on screen. Escape comes back with the draft as it was.
+#[test]
+fn a_link_takes_the_view_chosen_in_the_document() {
+    use pdfcraft_engine::LinkZoom;
+    let mut h = harness();
+    assert!(h.execute("edit.link"));
+    let (a, b) = (at(&h, 40.0, 300.0), at(&h, 160.0, 320.0));
+    drag(&mut h, a, b);
+    h.get_by_label("Go to a page view").click();
+    h.run_steps(3);
+    let choose = |h: &mut Harness<'static, PdfCraftApp>| {
+        h.get_by_label("Choose the view in the document…").scroll_to_me();
+        h.run_steps(3);
+        h.get_by_label("Choose the view in the document…").click();
+        h.run_steps(4);
+        assert!(h.query_by_role_and_label(Role::Dialog, "Create Link").is_none(), "the dialog is put away");
+    };
+    choose(&mut h);
+    h.key_press(egui::Key::Escape);
+    h.run_steps(4);
+    h.get_by_role_and_label(Role::Dialog, "Create Link");
+    assert!(links(&h).is_empty());
+
+    choose(&mut h);
+    h.state_mut().set_option(&egui::Context::default(), "zoom", "300").unwrap();
+    h.run_steps(8);
+    h.get_by_label("Set link view").click();
+    h.run_steps(4);
+    h.get_by_role_and_label(Role::Dialog, "Create Link");
+    h.get_by_label("OK").click();
+    h.run_steps(3);
+    let action = links(&h)[0].action.clone();
+    let LinkAction::Page { page: 0, zoom: LinkZoom::Percent(percent) } = action else { panic!("{action:?}") };
+    assert!((percent - 300.0).abs() < 1.0, "{percent}");
+    // The position is written, not left to the reader.
+    let id = h.state().views[0].id;
+    let bytes = h.state().session.save_bytes(id).unwrap();
+    let text = String::from_utf8_lossy(&bytes);
+    let dest = &text[text.rfind("/XYZ").expect("an XYZ destination")..];
+    let operands: Vec<&str> = dest.split([' ', ']']).skip(1).take(3).collect();
+    assert!(operands.iter().all(|v| v.parse::<f64>().is_ok()), "{operands:?}");
+}
