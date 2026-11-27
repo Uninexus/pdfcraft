@@ -488,3 +488,69 @@ fn finding_untagged_content_shows_the_focused_accessibility_results() {
     let active: Vec<Rule> = report.results.iter().filter(|result| result.status != Status::Skipped).map(|result| result.rule).collect();
     assert_eq!(active, [Rule::TaggedContent, Rule::TaggedAnnotations, Rule::TaggedFormFields]);
 }
+
+/// A plain two-page document in a window tall enough for the whole rail.
+fn keyboard_app() -> egui_kittest::Harness<'static, pdfcraft_ui_egui::PdfCraftApp> {
+    let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(|cc| {
+        crate::support::install_runtime(&cc.egui_ctx);
+        let mut app = crate::control::new_app();
+        app.set_option(&egui::Context::default(), "language", "en").unwrap();
+        app.open_bytes(&egui::Context::default(), "doc.pdf", None, crate::control::fixture(2)).unwrap();
+        app
+    });
+    h.run_steps(6);
+    h
+}
+
+/// The focused control, as its name and where it is; `None` when nothing has the focus.
+fn focused_control(h: &egui_kittest::Harness<'static, pdfcraft_ui_egui::PdfCraftApp>) -> Option<String> {
+    use egui_kittest::kittest::{NodeT as _, Queryable as _};
+    h.query_by(|node| node.is_focused()).map(|node| format!("{}|{:?}", node.accesskit_node().label().unwrap_or_default(), node.rect().min))
+}
+
+fn tab(h: &mut egui_kittest::Harness<'static, pdfcraft_ui_egui::PdfCraftApp>, modifiers: egui::Modifiers) {
+    h.key_press_modifiers(modifiers, egui::Key::Tab);
+    h.run_steps(3);
+}
+
+/// Tab and Shift+Tab pass through the rail's zoom field; it used to keep them.
+#[test]
+fn tab_and_shift_tab_get_past_the_zoom_field() {
+    for modifiers in [egui::Modifiers::NONE, egui::Modifiers::SHIFT] {
+        let mut h = keyboard_app();
+        let on_zoom = |h: &egui_kittest::Harness<'static, pdfcraft_ui_egui::PdfCraftApp>| focused_control(h).is_some_and(|c| c.starts_with("Zoom|"));
+        for _ in 0..80 {
+            tab(&mut h, modifiers);
+            if on_zoom(&h) {
+                break;
+            }
+        }
+        assert!(on_zoom(&h), "{modifiers:?}: never reached the zoom field");
+        tab(&mut h, modifiers);
+        assert!(focused_control(&h).is_some() && !on_zoom(&h), "{modifiers:?}: the zoom field keeps the focus");
+    }
+}
+
+/// Tab goes round the window: past the last control comes the first, something always has the focus, and no press
+/// hides the interface on the way.
+#[test]
+fn tab_goes_round_the_window_without_losing_the_focus_or_hiding_panels() {
+    for modifiers in [egui::Modifiers::NONE, egui::Modifiers::SHIFT] {
+        let mut h = keyboard_app();
+        let page_view = h.state().views[0].viewport_rect();
+        tab(&mut h, modifiers);
+        let first = focused_control(&h).expect("the first Tab focuses a control");
+        let mut round = false;
+        for press in 0..120 {
+            tab(&mut h, modifiers);
+            let now = focused_control(&h);
+            assert!(now.is_some(), "{modifiers:?}: nothing is focused after {press} more presses");
+            assert_eq!(h.state().views[0].viewport_rect(), page_view, "{modifiers:?}: the interface changed after {press} more presses");
+            if now.as_ref() == Some(&first) {
+                round = true;
+                break;
+            }
+        }
+        assert!(round, "{modifiers:?}: Tab never came back to {first}");
+    }
+}
