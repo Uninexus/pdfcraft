@@ -432,6 +432,7 @@ const ALL_COMMANDS: &[CommandSpec] = &[
     c("arrange.distribute_horizontal", "Distribute objects horizontally", None, None, Modification, "columns-3"),
     c("arrange.distribute_vertical", "Distribute objects vertically", None, None, Modification, "rows-3"),
     c("edit.bates_remove", "Remove Bates numbering", None, None, Marks(crate::MarkKind::Bates), "hash"),
+    c("edit.bates_remove_pages", "Remove Bates numbering from pages…", None, None, Marks(crate::MarkKind::Bates), "hash"),
     c("edit.image", "Add image…", None, None, Modification, "image-plus"),
     c("redact.mark", "Redact text and images", None, None, Modification, "rectangle"),
     c("redact.pages", "Redact pages…", None, None, Modification, "file-x"),

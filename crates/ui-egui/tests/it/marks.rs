@@ -708,3 +708,63 @@ fn update_previews_the_page_without_the_marks_it_replaces() {
     let page = wait_for_preview(&mut h, "the page without the old header", |i| count(i, blue) == 0).image;
     assert!(at(&page, 0.5, 0.75) == yellow && count(&page, red) > 200, "the background and watermark stay");
 }
+
+/// Remove Bates numbering from pages: the dialog's page range says which pages lose their number.
+#[test]
+fn removing_bates_numbering_from_chosen_pages_leaves_the_others() {
+    use pdfcraft_engine::{Edit, HeaderFooter};
+    let mut h = harness();
+    assert!(!h.execute("edit.bates_remove_pages"), "nothing to remove yet");
+    let mut hf = HeaderFooter::default();
+    hf.text[5] = "<<Bates Number#6#1##>>".into();
+    let ctx = h.ctx.clone();
+    assert!(h.state_mut().apply_edit(&ctx, Edit::AddHeaderFooter { pages: vec![0, 1, 2], settings: hf, replace: false }));
+    h.steps(2);
+
+    let id = dialog_id("edit.bates_remove_pages");
+    let open = |h: &mut Rig| {
+        assert!(h.execute("edit.bates_remove_pages"));
+        h.steps(3);
+        assert!(is_open(h));
+    };
+    let confirm = |h: &mut Rig| {
+        h.get_by_label("OK").click();
+        h.steps(4);
+        assert!(!is_open(h));
+    };
+    let range = |h: &mut Rig, range: PageRange| {
+        let value = serde_json::to_value(PageRangeOptions::field_value(&range)).unwrap();
+        let ctx = h.ctx.clone();
+        h.state_mut().dialogs.set_json_field(&ctx, id, "pages", value).unwrap();
+        h.steps(1);
+    };
+
+    // Cancelled: nothing changes.
+    open(&mut h);
+    h.get_by_label("Cancel").click();
+    h.steps(4);
+    assert!(!is_open(&h));
+    assert_eq!(marks(&h), [MarkKind::Bates]);
+
+    // The second page alone: the others keep their numbers.
+    open(&mut h);
+    range(&mut h, PageRange { scope: PageScope::Range, from: 2, to: Some(2), subset: Subset::All });
+    confirm(&mut h);
+    assert_eq!(marks(&h), [MarkKind::Bates], "pages 1 and 3 are still numbered");
+
+    // It is gone from the second page: asked again, there is nothing there to remove, and that is said.
+    open(&mut h);
+    range(&mut h, PageRange { scope: PageScope::Range, from: 2, to: Some(2), subset: Subset::All });
+    confirm(&mut h);
+    assert!(support::shown_notice(&h.h).is_some_and(|n| n.contains("nothing")), "{:?}", support::shown_notice(&h.h));
+    assert_eq!(marks(&h), [MarkKind::Bates]);
+
+    // The rest: the first and third.
+    for page in [1, 3] {
+        open(&mut h);
+        range(&mut h, PageRange { scope: PageScope::Range, from: page, to: Some(page), subset: Subset::All });
+        confirm(&mut h);
+    }
+    assert!(marks(&h).is_empty(), "no page is numbered");
+    assert!(!h.execute("edit.bates_remove_pages"));
+}

@@ -118,6 +118,9 @@ fn results(app: &mut PdfCraftApp, ctx: &egui::Context) {
     }
     // Edit.
     app.link_props_pass(ctx);
+    if let Some(fields) = param_ok(app, crate::bates_remove::KEY) {
+        crate::bates_remove::finish(ctx, app, &fields);
+    }
     // Print and OCR.
     app.print_pass(ctx);
     app.recognize_text_pass(ctx);

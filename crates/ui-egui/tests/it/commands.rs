@@ -203,7 +203,7 @@ fn every_registered_command_is_implemented() {
                 },
             );
         }
-        if spec.id == "edit.bates_remove" {
+        if matches!(spec.id, "edit.bates_remove" | "edit.bates_remove_pages") {
             use pdfcraft_engine::{Edit, HeaderFooter};
             let mut hf = HeaderFooter::default();
             hf.text[5] = "<<Bates Number#6#1##>>".into();

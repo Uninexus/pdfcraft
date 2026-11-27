@@ -118,6 +118,7 @@ use canvas::image_pick;
 pub use canvas::scroll_speed;
 use canvas::signature_drag;
 use canvas::zoom_snap;
+use dialogs::bates_remove;
 pub use dialogs::bookmark_styles_ui;
 use dialogs::comment_props;
 use dialogs::convert_colours_ui;
