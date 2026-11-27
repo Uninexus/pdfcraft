@@ -2,7 +2,7 @@
 //! The pickers are scripted and the files they name are kept in memory; the document's own folder is a real one.
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use craft::host::{Picked, ScriptedFiles};
 use craft_zip::{Archive, Compression, Limits, Writer};
@@ -14,8 +14,11 @@ use pdfcraft_ui_egui::PdfCraftApp;
 
 use crate::support::{AppHarness as _, shown_notice};
 
+/// The blank document every test here starts from. It is made once: a new file carries the time it was written, so two
+/// made a second apart differ, and the tests compare bytes.
 fn fixture() -> Vec<u8> {
-    Session::new().create_blank(300.0, 400.0, 1).unwrap().as_ref().clone()
+    static BLANK: OnceLock<Vec<u8>> = OnceLock::new();
+    BLANK.get_or_init(|| Session::new().create_blank(300.0, 400.0, 1).unwrap().as_ref().clone()).clone()
 }
 
 fn plan() -> Plan {
