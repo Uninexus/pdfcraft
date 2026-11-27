@@ -40,6 +40,7 @@ mod guides;
 pub(super) mod image_pick;
 mod navigation;
 pub(crate) mod organize;
+mod page_end;
 pub(crate) mod rulers;
 // PLAN: no sheet assigns the `mod` lines of the four new page-body files (pdf-canvas-w9 `page_parts.rs`,
 // `page_tools.rs`; pdf-canvas-w10 `pictures.rs`; pdf-canvas-w15 `page_overlays.rs`); the host writes them here.
@@ -1727,6 +1728,9 @@ pub fn document_area_at(app: &mut PdfCraftApp, index: usize, rect: Rect, ui: &mu
     let out = pages_at(app, index, strips.map_or(rect, |s| s.pages), ui);
     if let Some(strips) = strips.filter(|_| out.is_some()) {
         rulers::show(app, index, ui, &strips, ruler_input);
+    }
+    if let Some(out) = &out {
+        page_end::show(app, index, ui, rect, out.canvas.response.id);
     }
     out
 }

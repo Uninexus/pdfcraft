@@ -82,6 +82,8 @@ pub struct FormView {
     /// The editor handed the keys on (Tab, Shift+Tab): the field the session moved to takes the key focus in the
     /// next pass, from its page part, as Tab onto the part would give it.
     pub(crate) refocus: bool,
+    /// Tab (`true`) or Shift+Tab ran past the end of the tab order: the focus leaves the fields after this pass.
+    pub(crate) leave: Option<bool>,
     /// The text field a press opened, as (field, widget) in the form, and the frame of the press. The press takes the
     /// key focus to the field's part (`PagePart::takes_focus`), and the arrival that reports in the next frame is the
     /// press's own: it hands the keys to the editor and opens nothing again (a refused value the press committed has
@@ -924,7 +926,8 @@ fn paint_unbaked_widget(
 
 /// Tab / Shift+Tab: commits the field and moves to the next fillable widget in the document's tab
 /// order, opening it with its whole value selected so typing replaces it. A widget not wholly in view is scrolled
-/// into it after the pass. Returns the commit's edit to apply.
+/// into it after the pass. Tab on the last widget and Shift+Tab on the first close the field and leave the fields
+/// (`FormView::leave`), so the keyboard is never held on the page. Returns the commit's edit to apply.
 fn tab_to_next_field(
     session: &mut PageSession,
     info: &DocInfo,
@@ -955,6 +958,12 @@ fn tab_to_next_field(
     } else {
         None
     };
+    let ends = exact.is_some_and(|at| if forward { at + 1 == order.len() } else { at == 0 });
+    if ends {
+        session.forms.focus = None;
+        session.forms.leave = Some(forward);
+        return pending;
+    }
     if let Some(pos) = exact.or(same_field).or(next_after_removed) {
         // A focused widget that left the order is replaced by the field's first remaining stop.
         let k = if next_after_removed.is_some() || (forward && exact.is_none()) {

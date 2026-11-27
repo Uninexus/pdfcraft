@@ -2740,3 +2740,46 @@ fn what_auto_complete_remembered_is_kept_in_the_settings_and_a_hostile_list_is_c
     again.apply_settings(&pdfcraft_ui_egui::settings::import_json(r#"{"form_entries": [5, null, ""]}"#).0);
     assert!(again.session.form_entries().is_empty(), "nothing that is text is nothing remembered");
 }
+
+/// Tab and Shift+Tab get off a form's page: they walk the fields, and past the last one and before the first the focus
+/// leaves the page view and goes on to the controls around it.
+#[test]
+fn tab_leaves_the_page_view_at_both_ends_of_the_form() {
+    for modifiers in [egui::Modifiers::NONE, egui::Modifiers::SHIFT] {
+        let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(|cc| {
+            crate::support::install_runtime(&cc.egui_ctx);
+            let mut app = crate::control::new_app();
+            app.set_option(&egui::Context::default(), "language", "en").unwrap();
+            app.open_bytes(&egui::Context::default(), "form.pdf", None, include_bytes!("../data/form.pdf").to_vec()).unwrap();
+            app
+        });
+        h.run_steps(6);
+        let view = h.state().views[0].viewport_rect();
+        let focused =
+            |h: &Harness<'static, PdfCraftApp>, label: &str| h.query_by(|n| n.is_focused() && n.label().as_deref() == Some(label)).is_some();
+        let press = |h: &mut Harness<'static, PdfCraftApp>, modifiers| {
+            h.key_press_modifiers(modifiers, egui::Key::Tab);
+            h.run_steps(3);
+        };
+        // Into the form from the top of the window, at its first field.
+        for _ in 0..40 {
+            if focused(&h, "name") {
+                break;
+            }
+            press(&mut h, egui::Modifiers::NONE);
+        }
+        assert!(focused(&h, "name"), "Tab never reached the first field");
+        let mut walked = false;
+        let mut left = false;
+        for _ in 0..20 {
+            press(&mut h, modifiers);
+            walked |= focused(&h, "city");
+            if h.query_by(|n| n.is_focused()).is_some_and(|n| !view.intersects(n.rect().shrink(1.0))) {
+                left = true;
+                break;
+            }
+        }
+        assert!(left, "{modifiers:?}: the page view keeps the focus");
+        assert_eq!(walked, modifiers.is_none(), "{modifiers:?}: Tab walks on through the fields, Shift+Tab from the first leaves at once");
+    }
+}
