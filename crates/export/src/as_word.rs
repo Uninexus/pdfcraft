@@ -236,13 +236,16 @@ impl<'a> Builder<'a> {
                     push_text(&mut p, &r.text, chr(r.block.size, r.block.bold, r.block.italic, r.block.color));
                 }
                 // A numbered heading keeps its number as text.
+                let left = runs.first().map_or(0.0, |r| r.block.rect[0]);
                 if self.rtf.is_none()
                     && !matches!(lvl, 1 | 2)
                     && let Some((marker, count)) = crate::word_lists::marker(&p.text)
-                    && let Some(item) = self.lists.item(&mut self.doc, marker)
+                    && let Some(item) = self.lists.item(&mut self.doc, marker, left)
                     && crate::word_lists::strip(&mut p, count)
                 {
                     p.props.numbering = Some(item);
+                } else {
+                    self.lists.interrupt();
                 }
                 self.body.push(Block::Para(p));
             }
