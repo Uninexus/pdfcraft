@@ -2242,7 +2242,7 @@ status = "partial"
 commands = ["edit.edit_text"]
 tools = ["image_edit"]
 evidence = ["crates/edit/src/tests.rs::an_image_turns_by_any_angle_about_its_centre_and_saves_the_matrix", "crates/ui-egui/tests/it/editing.rs::dragging_the_rotate_knob_turns_a_page_image", "crates/ui-egui/tests/it/editing.rs::a_page_image_turns_by_the_degrees_typed", "crates/automation/tests/it/automation.rs::editing_page_images_through_tools"]
-notes = "drag the knob above a selected image (Shift: 15 degree steps) type the degrees in the Edit panel's Selected picture ▸ Rotate by, or image_edit action rotate_by with degrees; the angle is clockwise about the visible centre and is written as one extra cm (undoable). Missing: no live pixel preview while turning (an outline is drawn), the selection frame and corner handles of a turned image are its axis-aligned bounds, corner handles of an already turned image scale its axis-aligned bounds (not tested), no angle shown for an already turned image"
+notes = "drag the knob above a selected image (Shift: 15 degree steps) type the degrees in the Edit panel's Selected picture ▸ Rotate by, or image_edit action rotate_by with degrees; the angle is clockwise about the visible centre and is written as one extra cm (undoable). Missing: no live pixel preview while turning (an outline is drawn), resizing an already turned image by its handles is not tested (the selection frame and its handles turn with the picture), no angle shown for an already turned image"
 
 [[feature]]
 id = "edit.image-crop"
