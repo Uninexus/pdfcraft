@@ -83,6 +83,7 @@ pub struct Behavior {
     pub default_page_gaps: Option<bool>,
     /// Full screen fills the screen with one page at a time (off keeps the page display).
     pub full_screen_fill: Option<bool>,
+    pub full_screen_advance: Option<u32>,
     /// Esc leaves full screen (off leaves it to ⌘L / Ctrl+L only).
     pub full_screen_escape_exits: Option<bool>,
     pub units: Option<crate::units::Unit>,
@@ -628,6 +629,7 @@ pub fn import_json(text: &str) -> (PdfCraftSettings, Vec<SectionError>) {
         Behavior {
             default_page_gaps: r.bool("default_page_gaps"),
             full_screen_fill: r.bool("full_screen_fill"),
+            full_screen_advance: r.f64("full_screen_advance").filter(|n| *n >= 0.0 && n.is_finite() && n.fract() == 0.0).map(|n| n as u32),
             full_screen_escape_exits: r.bool("full_screen_escape_exits"),
             units: r.typed("units"),
             grid_spacing: r.f64("grid_spacing"),

@@ -332,9 +332,28 @@ fn presenter_frame(ctx: &egui::Context, v: &mut DocView, info: &DocInfo, shown: 
 /// [`presenter_frame`] with the Animation effects preference as given (`false` also when the
 /// system asks for no animations).
 fn presenter_frame_animating(ctx: &egui::Context, v: &mut DocView, info: &DocInfo, shown: &[PlacedPage], now: f64, animates: bool) -> bool {
+    presenter_frame_with(ctx, v, info, shown, now, animates, None)
+}
+
+/// [`presenter_frame_animating`] with the seconds Preferences give a page that has no display time of its own.
+fn presenter_frame_with(
+    ctx: &egui::Context,
+    v: &mut DocView,
+    info: &DocInfo,
+    shown: &[PlacedPage],
+    now: f64,
+    animates: bool,
+    every: Option<f64>,
+) -> bool {
     let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
         let painter = ui.ctx().layer_painter(egui::LayerId::background());
-        let at = presenter::PresentAt { current: v.view.current, display: v.view.display, continuous: v.view.continuous, rotation: v.view.rotation };
+        let at = presenter::PresentAt {
+            current: v.view.current,
+            display: v.view.display,
+            continuous: v.view.continuous,
+            rotation: v.view.rotation,
+            every,
+        };
         let rect = Rect::from_min_size(Pos2::ZERO, vec2(900.0, 400.0));
         let asked = presenter::frame(&mut v.session.presenter, presenter::Shown { pages: shown, rect }, at, info, &painter, now, animates, None);
         // The page view takes the turn on its next pass: one row on, a spread in two-page view.
@@ -521,6 +540,29 @@ fn a_page_without_a_display_time_never_advances_by_itself() {
         presenter_frame(&ctx, &mut v, &info, &shown, now);
     }
     assert_eq!(v.view.current, 0, "no /Dur: the page waits for the presenter");
+}
+
+/// The time set in Preferences turns a page that has none of its own; a page's own display time still counts, and the
+/// last page stays.
+#[test]
+fn the_preferred_time_turns_pages_without_one_of_their_own() {
+    let ctx = egui::Context::default();
+    let (mut v, info) = presenting_view(3, PageDisplay::Single, vec![trans(1, None, 1.0, Some(30.0))]);
+    let at = |page| [placed(page, 0, ready(&ctx))];
+    let every = Some(2.0);
+    presenter_frame_with(&ctx, &mut v, &info, &at(0), 0.0, true, every);
+    presenter_frame_with(&ctx, &mut v, &info, &at(0), 1.0, true, every);
+    assert_eq!(v.view.current, 0, "not yet");
+    presenter_frame_with(&ctx, &mut v, &info, &at(0), 2.5, true, every);
+    assert_eq!(v.view.current, 1, "turned after the preferred time");
+    presenter_frame_with(&ctx, &mut v, &info, &at(1), 3.0, true, every);
+    presenter_frame_with(&ctx, &mut v, &info, &at(1), 10.0, true, every);
+    assert_eq!(v.view.current, 1, "page 2's own half minute counts");
+    presenter_frame_with(&ctx, &mut v, &info, &at(1), 34.0, true, every);
+    assert_eq!(v.view.current, 2);
+    presenter_frame_with(&ctx, &mut v, &info, &at(2), 35.0, true, every);
+    presenter_frame_with(&ctx, &mut v, &info, &at(2), 100.0, true, every);
+    assert_eq!(v.view.current, 2, "the last page stays");
 }
 
 /// A display time of 0 seconds advances as soon as the page is on screen: zero is a number the

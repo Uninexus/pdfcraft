@@ -91,6 +91,8 @@ pub use dialogs::properties::PropsTab;
 pub use editing::SaveTarget;
 pub use files::{ExtractOptions, FilePurpose, SplitPlan};
 pub use recovery::{AUTOSAVE_MINUTES_MAX, AUTOSAVE_SECS};
+/// The longest time Preferences let full screen wait before turning a page, in seconds.
+pub const FULL_SCREEN_ADVANCE_MAX: u32 = 3600;
 pub use workflows::js_dialogs::JsDialog;
 pub use workflows::ocr_verify::{OcrVerify, Phase};
 
@@ -512,6 +514,8 @@ pub struct PdfCraftApp {
     pub last_session: craft::platform::session::Session,
     /// What a quit that closes unsaved tabs one by one began with.
     session_keeper: craft::platform::session::SessionKeeper,
+    /// Preferences: the seconds after which full screen turns a page that has no display time of its own; 0 never.
+    pub full_screen_advance: u32,
     /// Preferences: reload a document when its file changes on disk (#431).
     pub reload_changed_files: bool,
     /// Preferences: the minutes between recovery copies of unsaved work (set with
