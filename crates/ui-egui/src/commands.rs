@@ -1115,6 +1115,7 @@ impl PdfCraftApp {
             // PLAN: assumed `js_dialogs::{open_console, open_document_scripts}(&mut PdfCraftApp)` at `crate::js_dialogs` (pdf-forms-w17); the latter starts a fresh draft.
             "tools.js_console" => crate::js_dialogs::open_console(self),
             "tools.document_js" => crate::js_dialogs::open_document_scripts(self),
+            "optimize.audit" => crate::optimize_ui::open_space_audit(self, ctx, false),
             "a11y.report" => self.show_accessibility_report(),
             "a11y.autotag" => {
                 if self.apply_edit(ctx, pdfcraft_engine::Edit::AutoTagText) {

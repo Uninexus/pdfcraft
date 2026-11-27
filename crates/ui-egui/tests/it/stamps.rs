@@ -218,3 +218,35 @@ fn a_dynamic_custom_stamp_keeps_its_line_and_fills_it_in_when_placed() {
     again.apply_settings(&s.settings_snapshot());
     assert_eq!(again.custom_stamps[0].line, s.custom_stamps[0].line, "kept with the library");
 }
+
+/// The tool lists' rows for tools that work are not dimmed as planned: a click on each one does its job.
+#[test]
+fn tool_list_rows_for_working_tools_run_them() {
+    use pdfcraft_ui_egui::LeftPanel;
+    let open = |group: &'static str, row: &str| {
+        let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(|cc| {
+            crate::support::install_runtime(&cc.egui_ctx);
+            let mut app = crate::control::new_app();
+            app.set_option(&egui::Context::default(), "language", "en").unwrap();
+            app.open_bytes(&egui::Context::default(), "form.pdf", None, include_bytes!("../data/form.pdf").to_vec()).unwrap();
+            app
+        });
+        h.run_steps(4);
+        h.state_mut().left = LeftPanel::Tool(group);
+        h.run_steps(4);
+        h.get_by_label(row).click();
+        h.run_steps(4);
+        h
+    };
+    assert!(format!("{:?}", open("comment", "Cloud").state().quick_tool).contains("Cloud"));
+    assert_eq!(open("comment", "Stamp").state().left, LeftPanel::Tool("stamp"));
+    for (group, row, shown) in [
+        ("javascript", "Console", "JavaScript Console"),
+        ("javascript", "Document JavaScripts", "Document JavaScripts"),
+        ("compress", "Audit space usage", "Space Audit"),
+        ("actions", "Make accessible", "Make Accessible"),
+    ] {
+        let h = open(group, row);
+        assert!(h.query_by_role_and_label(egui::accesskit::Role::Dialog, shown).is_some(), "{row} opens {shown}");
+    }
+}
