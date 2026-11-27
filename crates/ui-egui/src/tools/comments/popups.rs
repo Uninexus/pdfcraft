@@ -221,7 +221,8 @@ pub(crate) fn note_popups(
             };
             let drafts: &mut NoteDrafts = view.session.comments.popup_drafts.entry((page, a.index)).or_default();
             let mut window = NotePopup::new(popup_id, window_label, rect, &msgs, drafts).color(color).selected(selected).now(now).allowed(allowed);
-            if let Some(mark) = mark {
+            // The anchor only draws the line to the window.
+            if let Some(mark) = mark.filter(|_| prefs.connector_lines) {
                 window = window.anchor(mark, hovered == Some((page, a.index)));
             }
             let out = window.show(ui);

@@ -4347,11 +4347,11 @@ title = "Connector lines between markups and pop-ups"
 area = "E"
 tier = "P2"
 milestone = "M5"
-status = "partial"
+status = "shipped"
 commands = []
 tools = []
-evidence = []
-notes = "a faint wedge in the comment's colour from the comment's edge nearest its open pop-up, widening to the window's side that faces it, while the pointer is on either or the comment is selected (Acrobat's roll-over lines). Not yet: the preference to turn them off. Partial since the craft framework UI port (#8160): its UI test (`a_connector_line_joins_a_comment_to_its_open_pop_up_while_the_pointer_is_on_either`) was lost in the port and needs replacing before this is shipped again."
+evidence = ["crates/ui-egui/tests/it/comments.rs::a_connector_line_joins_a_comment_to_its_open_pop_up_unless_turned_off"]
+notes = "a faint wedge in the comment's colour from the comment's edge nearest its open pop-up, widening to the window's side that faces it, while the pointer is on either or the comment is selected (Acrobat's roll-over lines). Preferences ▸ Show lines joining comments to their pop-ups (on by default, remembered; also ui.set connector-lines) turns them off."
 
 [[feature]]
 id = "comment.review-history"
