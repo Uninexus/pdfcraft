@@ -222,6 +222,23 @@ impl<'a> FdfCopy<'a> {
 /// Source `/Page` and `/Pages` dictionaries become null at every copy depth.
 /// Refuses exports above the object, value, direct-depth or data budget instead of losing data.
 pub fn export_fdf(doc: &Document, comments: bool, fields: bool, file: &str) -> Result<Vec<u8>, DataError> {
+    write_fdf(doc, comments, fields, file, None)
+}
+
+/// FDF with just these comments (0-based page, position in the page's `/Annots`) and their replies: the FDF of
+/// [`crate::export_xfdf_comments`]'s selection.
+pub fn export_fdf_comments(doc: &Document, which: &[(usize, usize)], file: &str) -> Result<Vec<u8>, DataError> {
+    write_fdf(doc, true, false, file, Some(&crate::xfdf::annots_with_replies(doc, which)))
+}
+
+/// [`export_fdf`], keeping only the comments at the positions in `only` when it is given.
+fn write_fdf(
+    doc: &Document,
+    comments: bool,
+    fields: bool,
+    file: &str,
+    only: Option<&std::collections::HashSet<(usize, usize)>>,
+) -> Result<Vec<u8>, DataError> {
     let mut copy = FdfCopy::new(doc);
     copy.charge(file.len().saturating_mul(8))?;
     let mut body: Vec<u8> = b"<< /FDF << ".to_vec();
@@ -274,6 +291,9 @@ pub fn export_fdf(doc: &Document, comments: bool, fields: bool, file: &str) -> R
             let before = picked.len();
             if let Some(values) = owner.as_ref().and_then(|owner| owner.object().as_array()) {
                 for (ai, a) in values.iter().enumerate() {
+                    if only.is_some_and(|only| !only.contains(&(pi, ai))) {
+                        continue;
+                    }
                     let value = FdfValue::resolve(doc, a);
                     let Some(d) = value.object().as_dict() else { continue };
                     if d.name(b"Subtype").is_some_and(|sub| SUBTYPES.iter().any(|(s, _)| s.as_bytes() == sub)) {

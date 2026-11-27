@@ -5436,7 +5436,22 @@ fn a_text_box_in_another_face_keeps_the_composer_card() {
 /// The comment menu saves just the selected comment to an XFDF file.
 #[test]
 fn the_selected_comment_is_exported_to_a_data_file() {
-    let out = std::path::PathBuf::from("/scripted/picked.xfdf");
+    let text = export_the_second_note("/scripted/picked.xfdf");
+    assert!(text.starts_with("<?xml"), "{text}");
+    assert!(text.contains("taken out") && !text.contains("kept here"), "{text}");
+}
+
+/// A name ending in .fdf makes it FDF.
+#[test]
+fn the_selected_comment_is_exported_as_fdf_by_its_name() {
+    let text = export_the_second_note("/scripted/picked.fdf");
+    assert!(text.starts_with("%FDF-"), "{text}");
+    assert!(text.contains("taken out") && !text.contains("kept here"), "{text}");
+}
+
+/// Two notes; the second is exported from its menu to the file `to`, whose text is returned.
+fn export_the_second_note(to: &str) -> String {
+    let out = std::path::PathBuf::from(to);
     let files = std::sync::Arc::new(ScriptedFiles::answering([Picked::Paths(vec![out.clone()])]));
     let written = files.clone();
     let mut h = harness_on_files(files, |_| {});
@@ -5456,6 +5471,5 @@ fn the_selected_comment_is_exported_to_a_data_file() {
     h.get_by_label("Export comment to data file…").click();
     h.run_steps(6);
     let bytes = written.file(&out).expect("the picked file is written");
-    let xfdf = String::from_utf8(bytes.to_vec()).unwrap();
-    assert!(xfdf.contains("taken out") && !xfdf.contains("kept here"), "{xfdf}");
+    String::from_utf8_lossy(&bytes).into_owned()
 }

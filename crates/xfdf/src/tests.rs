@@ -2437,6 +2437,22 @@ fn exporting_selected_comments_takes_them_and_their_replies() {
     assert!(empty.contains("<annots>\n</annots>"), "{empty}");
 }
 
+/// The same selection as FDF: it imports as the note and its reply, and nothing else.
+#[test]
+fn exporting_selected_comments_as_fdf_takes_them_and_their_replies() {
+    let src = filled();
+    let note = summaries(&src).into_iter().find(|s| s.subtype == "Text").unwrap();
+    let fdf = export_fdf_comments(&src, &[(note.page, note.index)], "form.pdf").unwrap();
+    let mut dst = blank();
+    let r = import(&mut dst, &fdf).unwrap();
+    assert_eq!((r.comments, r.fields), (2, 0), "{r:?}");
+    let all = summaries(&dst);
+    assert!(all.iter().all(|s| s.subtype == "Text"), "other comments stay: {all:?}");
+    // A position that is no comment gives a file with none.
+    let empty = export_fdf_comments(&src, &[(7, 7)], "form.pdf").unwrap();
+    assert_eq!(import(&mut blank(), &empty).map(|r| r.comments).unwrap_or(0), 0);
+}
+
 /// Paste: the copies land on the asked-for page under names of their own, so nothing is
 /// replaced and a second paste gives a second set; the reply keeps its copied parent.
 #[test]

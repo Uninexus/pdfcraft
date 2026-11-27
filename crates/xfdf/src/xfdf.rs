@@ -14,7 +14,7 @@ use craft_xfdf::grammar::{
 /// with every reply to them (and to those replies), so a thread travels whole. Positions, not
 /// references: other tools write comments straight into the page's array, without an object of
 /// their own, and those copy too.
-fn annots_with_replies(doc: &Document, which: &[(usize, usize)]) -> HashSet<(usize, usize)> {
+pub(crate) fn annots_with_replies(doc: &Document, which: &[(usize, usize)]) -> HashSet<(usize, usize)> {
     let pages = pdfcraft_model::pages(doc);
     let annots = |p: &pdfcraft_model::Page| -> Vec<Object> {
         p.dict.get(b"Annots").map(|a| doc.resolve(a)).and_then(|a| a.as_array().cloned()).unwrap_or_default()
