@@ -121,6 +121,8 @@ pub struct SignDraft {
     pub field: Option<String>,
     /// Certify (DocMDP) with these permissions: 1 none, 2 form fill and signing, 3 also comments.
     pub certify: Option<u8>,
+    /// Lock every form field with an approval signature.
+    pub lock_fields: bool,
     pub step: SignStep,
     pub selected: Option<usize>,
     pub password: String,
@@ -145,6 +147,7 @@ impl SignDraft {
             rect,
             field,
             certify,
+            lock_fields: false,
             step: if ids.is_empty() { SignStep::Configure } else { SignStep::Choose },
             selected: ids.iter().position(|e| e.unusable.is_none()),
             password: String::new(),
@@ -498,6 +501,7 @@ impl PdfCraftApp {
             // Preferences > Identity > Email is the signer's contact information.
             contact: some(&self.identity_email),
             certify: d.certify,
+            lock_fields: d.lock_fields && d.certify.is_none(),
             appearance: d.appearance.clone(),
             // The labels the preview shows: in the interface language, or all in English.
             appearance_labels: appearance_labels(crate::i18n::current()).0,

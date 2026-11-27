@@ -311,6 +311,10 @@ impl Automation {
             }),
             Some(v) => Some(v.as_u64().filter(|n| (1..=3).contains(n)).ok_or_else(|| bad("certify must be 1, 2 or 3"))? as u8),
         };
+        let lock_fields = a.opt_bool("lock_fields")?.unwrap_or(false);
+        if lock_fields && certify.is_some() {
+            return Err(bad("lock_fields goes with an approval signature, not certify"));
+        }
         let graphic = match a.get("graphic") {
             None | Some(Value::Null) => None,
             Some(g) if rect.is_none() && field.is_none() => return Err(bad(format!("graphic {g} needs a visible signature: pass rect or field"))),
@@ -362,8 +366,20 @@ impl Automation {
         } else {
             Vec::new()
         };
-        let opts =
-            SignOptions { field, page, rect, reason, location, contact, certify, appearance, appearance_labels, graphic, ..SignOptions::default() };
+        let opts = SignOptions {
+            field,
+            page,
+            rect,
+            reason,
+            location,
+            contact,
+            certify,
+            lock_fields,
+            appearance,
+            appearance_labels,
+            graphic,
+            ..SignOptions::default()
+        };
         let signed = self.session.sign(doc_id, &id, opts).map_err(|e| match e {
             // A graphic the signer refuses is the caller's to fix.
             pdfcraft_engine::EditError::Sign(m) if m.starts_with("the signature graphic") => bad(m),

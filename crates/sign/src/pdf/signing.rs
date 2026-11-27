@@ -82,6 +82,9 @@ pub struct SignOptions {
     pub date: String,
     /// Certify with these DocMDP permissions (1 no changes, 2 form fill and signing, 3 also comments).
     pub certify: Option<u8>,
+    /// Lock every form field with this signature (FieldMDP, action All): a later change to any of them makes it
+    /// invalid. Not with `certify`, whose permissions say what may change.
+    pub lock_fields: bool,
     pub appearance: Appearance,
     /// The words of the labels the visible signature shows.
     pub appearance_labels: AppearanceLabels,
@@ -182,6 +185,9 @@ fn sign_inner(
         return Err(SignError::Pdf("save the document's new security settings before signing it".into()));
     }
     check_signing_permissions(doc, opts)?;
+    if opts.lock_fields && opts.certify.is_some() {
+        return Err(SignError::Pdf("a certification has its own permitted actions: lock the fields with an approval signature instead".into()));
+    }
     let mut doc = doc.clone();
     let earlier_signatures = has_signatures(&doc);
     let root = doc.root().ok_or_else(|| SignError::Pdf("the document has no catalog".into()))?;
@@ -217,6 +223,19 @@ fn sign_inner(
         sr.set(b"Type".to_vec(), Object::name("SigRef"));
         sr.set(b"TransformMethod".to_vec(), Object::name("DocMDP"));
         sr.set(b"TransformParams".to_vec(), Object::Dict(tp));
+        v.set(b"Reference".to_vec(), Object::Array(vec![Object::Dict(sr)]));
+    }
+    if opts.lock_fields {
+        let mut tp = Dict::new();
+        tp.set(b"Type".to_vec(), Object::name("TransformParams"));
+        tp.set(b"Action".to_vec(), Object::name("All"));
+        tp.set(b"V".to_vec(), Object::name("1.2"));
+        let mut sr = Dict::new();
+        sr.set(b"Type".to_vec(), Object::name("SigRef"));
+        sr.set(b"TransformMethod".to_vec(), Object::name("FieldMDP"));
+        sr.set(b"TransformParams".to_vec(), Object::Dict(tp));
+        // The object the transform reads: the catalog (ISO 32000-2 Table 256).
+        sr.set(b"Data".to_vec(), Object::Ref(root));
         v.set(b"Reference".to_vec(), Object::Array(vec![Object::Dict(sr)]));
     }
     let sig = doc.add(Object::Dict(v.clone()));

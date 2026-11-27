@@ -956,3 +956,37 @@ fn signature_properties_show_a_signatures_details() {
     h.get_by_role_and_label(Role::Dialog, "Signature properties");
     assert_eq!(value(&h, "Reason"), "I approve");
 }
+
+/// The sign window's checkbox locks the form fields with the signature.
+#[test]
+fn signing_can_lock_all_form_fields() {
+    let dir = dir().join("lock");
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut h = harness(dir.clone());
+    let p12 = concat!(env!("CARGO_MANIFEST_DIR"), "/../sign/tests/data/ec-p256.p12");
+    h.state_mut().start_signing(&egui::Context::default(), 0, Some([20.0, 110.0, 280.0, 140.0]), None, None);
+    h.run_steps(2);
+    {
+        let d = h.state_mut().sign_draft.as_mut().unwrap();
+        d.new_id.create = false;
+        d.new_id.file = p12.into();
+        d.new_id.file_password = "test".into();
+    }
+    h.run_steps(1);
+    h.get_by_label("Continue").click();
+    h.run_steps(4);
+    h.get_by_label("Continue").click();
+    h.run_steps(2);
+    h.get_by_label("Lock all form fields after signing").scroll_to_me();
+    h.run_steps(3);
+    h.get_by_label("Lock all form fields after signing").click();
+    h.run_steps(2);
+    h.state_mut().sign_draft.as_mut().unwrap().password = "test".into();
+    support::outside_menus(&h, "Sign").click();
+    h.run_steps(6);
+    let s = h.state();
+    assert_eq!(s.sign_draft.as_ref().and_then(|d| d.error.clone()), None);
+    let doc = s.session.get(s.views[0].id).unwrap();
+    assert!(doc.signatures.iter().any(|x| x.signed));
+    assert!(doc.bytes.windows(8).any(|w| w == b"FieldMDP"), "the signature locks the fields");
+}
