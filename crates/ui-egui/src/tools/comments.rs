@@ -55,7 +55,7 @@ pub(crate) use menu::{CommentMenuCx, MenuRights, context_rows, popover_from, qui
 pub(crate) use overlay::{Hover, show};
 pub(crate) use popups::note_popups;
 pub use rich_box::RichBox;
-pub(crate) use rich_box::{BoxCx, on_page as typed_on_page, show as rich_box, take_keys as take_text_box_keys};
+pub(crate) use rich_box::{BoxCx, control_key as text_box_control_key, on_page as typed_on_page, show as rich_box, take_keys as take_text_box_keys};
 pub(crate) use state::PageCx;
 #[cfg(test)]
 use state::after_delete;

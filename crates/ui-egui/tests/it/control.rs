@@ -2155,3 +2155,45 @@ fn print_readiness_thresholds_are_set_and_reported_through_the_control_channel()
     ok(&mut h, &c, "ui.set", json!({"key":"readiness-ink-limit","value":"default"}));
     assert_eq!(state(&mut h)["ink_limit"], json!(null));
 }
+
+/// A text box's own keys work through the control channel as from the keyboard: Ctrl+B bolds instead of adding a
+/// bookmark, and Tab, Shift+Tab and Escape walk and leave its bar.
+#[test]
+fn a_text_boxs_keys_are_driven_through_the_control_channel() {
+    let (mut h, c) = harness();
+    ok(&mut h, &c, "ui.command", json!({ "id": "comment.freetext" }));
+    h.run_steps(3);
+    let st = ok(&mut h, &c, "ui.state", json!({}));
+    let r = &st["active"]["pages_on_screen"][0]["rect"];
+    ok(&mut h, &c, "ui.click", json!({ "x": r[0].as_f64().unwrap() + 40.0, "y": r[1].as_f64().unwrap() + 40.0 }));
+    h.run_steps(3);
+    let focused = |h: &mut Harness<'static, PdfCraftApp>, c: &ControlClient| {
+        let found = ok(h, c, "ui.inspect", json!({}));
+        let widgets = found["widgets"].as_array().unwrap();
+        widgets.iter().find(|w| w["focused"] == true).and_then(|w| w["label"].as_str()).unwrap_or_default().to_string()
+    };
+    let key = |h: &mut Harness<'static, PdfCraftApp>, c: &ControlClient, params: Value| {
+        ok(h, c, "ui.key", params);
+        h.run_steps(3);
+    };
+    ok(&mut h, &c, "ui.type", json!({ "text": "one " }));
+    key(&mut h, &c, json!({ "key": "B", "ctrl": !cfg!(target_os = "macos"), "command": cfg!(target_os = "macos") }));
+    ok(&mut h, &c, "ui.type", json!({ "text": "two" }));
+    h.run_steps(3);
+
+    key(&mut h, &c, json!({ "key": "Tab" }));
+    assert_eq!(focused(&mut h, &c), "Bold");
+    key(&mut h, &c, json!({ "key": "Tab" }));
+    assert_eq!(focused(&mut h, &c), "Italic");
+    key(&mut h, &c, json!({ "key": "Tab", "shift": true }));
+    assert_eq!(focused(&mut h, &c), "Bold");
+    key(&mut h, &c, json!({ "key": "Escape" }));
+    assert_eq!(focused(&mut h, &c), "Type text");
+    key(&mut h, &c, json!({ "key": "Enter", "command": true }));
+    h.run_steps(4);
+
+    let app = h.state();
+    let doc = app.session.get(app.views[0].id).unwrap();
+    assert!(doc.info.outline.is_empty(), "no bookmark was added");
+    assert_eq!(doc.comment_text_runs(0, 0).iter().map(|r| (r.start, r.end, r.bold)).collect::<Vec<_>>(), [(4, 7, true)]);
+}

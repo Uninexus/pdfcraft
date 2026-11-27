@@ -75,7 +75,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use craft::automation::dialogs::dialog_method;
 use craft::automation::screenshot::{DocumentId, ScreenshotParams, settle_ms};
-use craft::automation::synthetic::input_method;
+use craft::automation::synthetic::{KeyPress, input_method};
 use craft::automation::{ControlRequest, Reply, access};
 use craft::ui::runtime::motion;
 use craft::ui::runtime::windows::WindowHost;
@@ -142,10 +142,37 @@ impl PdfCraftApp {
         }
     }
 
+    /// A `ui.key` press that a text box being typed into takes before the app's shortcuts, as it takes the
+    /// keyboard's. Anything else, a held key or a request the framework refuses goes on as input.
+    fn text_box_key(&mut self, ctx: &egui::Context, params: &Value) -> bool {
+        // The framework's own check of the request comes first: what it refuses goes on to be refused.
+        if !KeyPress::from_params(params).is_ok_and(|press| !press.hold) {
+            return false;
+        }
+        let Some(key) = params.get("key").and_then(Value::as_str).and_then(egui::Key::from_name) else { return false };
+        // Modifiers come as fields of their own or under `modifiers`.
+        let down = |name: &str| [Some(params), params.get("modifiers")].iter().flatten().any(|p| p.get(name).and_then(Value::as_bool) == Some(true));
+        let (ctrl, mac) = (down("ctrl"), cfg!(target_os = "macos"));
+        // As the keyboard reports them: Ctrl is also the command modifier, except on macOS.
+        let command = down("command");
+        let modifiers = egui::Modifiers {
+            alt: down("alt"),
+            shift: down("shift"),
+            ctrl: ctrl || command && !mac,
+            mac_cmd: command && mac,
+            command: command || ctrl && !mac,
+        };
+        crate::comments::text_box_control_key(self, ctx, key, modifiers)
+    }
+
     /// The reply to one request: the framework's methods, then the app's.
     fn answer(&mut self, ctx: &egui::Context, req: &ControlRequest) -> Reply {
         let (method, params) = (req.method.as_str(), &req.params);
         let host = WindowHost::of(ctx);
+        if method == "ui.key" && self.text_box_key(ctx, params) {
+            ctx.request_repaint();
+            return Reply::AfterInput;
+        }
         if let Some(queued) = input_method(method, params, &host, ViewportId::ROOT, &|_, _| None) {
             return match queued {
                 Ok(()) => {

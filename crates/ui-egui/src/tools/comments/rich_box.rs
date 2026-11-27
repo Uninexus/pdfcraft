@@ -68,6 +68,8 @@ pub struct RichBox {
     border: f64,
     /// The editor takes the keyboard in its next pass.
     focus: bool,
+    /// The text has the keyboard.
+    in_text: bool,
     /// The bar button with the keyboard, by its place in the bar.
     in_bar: Option<usize>,
     /// The bar button to give the keyboard to in the next pass.
@@ -213,6 +215,30 @@ impl RichBox {
         self.typing = at.checked_sub(1).and_then(|i| self.styles.get(i)).or_else(|| self.styles.first()).copied().unwrap_or_default();
     }
 
+    /// A key pressed while the box, its text or its bar, has the keyboard: Ctrl+B and Ctrl+I (Command on macOS) bold
+    /// and italicise, and in the bar Tab and Shift+Tab walk the buttons, Escape goes back to the text and Cmd+Enter
+    /// commits. False for a key the box leaves be.
+    fn take_key(&mut self, ctx: &egui::Context, key: egui::Key, modifiers: egui::Modifiers) -> bool {
+        if let Some(button) = self.in_bar {
+            if self.bar_key(button, key, modifiers) {
+                return true;
+            }
+        } else if !self.in_text {
+            return false;
+        }
+        if !modifiers.command || modifiers.shift || modifiers.alt {
+            return false;
+        }
+        let italic = match key {
+            egui::Key::B => false,
+            egui::Key::I => true,
+            _ => return false,
+        };
+        let on = self.toggle(italic);
+        say(ctx, italic, on);
+        true
+    }
+
     /// A key pressed with the keyboard on bar button `button`; false when the bar leaves it be.
     fn bar_key(&mut self, button: usize, key: egui::Key, modifiers: egui::Modifiers) -> bool {
         // Post (2) is passed over while there is nothing to post.
@@ -323,6 +349,7 @@ fn adopt(session: &mut PageSession, cx: &BoxCx<'_>) {
         color,
         border,
         focus: true,
+        in_text: false,
         in_bar: None,
         wanted: None,
         commit: false,
@@ -405,23 +432,71 @@ impl Host<'_> {
         out
     }
 
-    /// Draws the text, each character in its own face where the layout puts it.
+    /// Draws the text a word at a time, each word starting and ending where the saved box has it.
     fn paint(&self, painter: &egui::Painter) {
         let size = (self.open.size * self.zoom) as f32;
         let ink = color32(self.open.color);
+        // The interface face is wider than Helvetica: one size for each of regular and bold makes the whole text fit,
+        // so that words of a face don't differ in height.
+        let fit = [false, true].map(|bold| {
+            let (mut shown, mut saved) = (0.0, 0.0);
+            for (ch, &style) in self.open.text.chars().zip(&self.open.styles).filter(|(ch, s)| s.0 == bold && !ch.is_control()) {
+                let job = word_job(ch.encode_utf8(&mut [0; 4]), (bold, false), size, ink, 0.0);
+                shown += painter.layout_job(job).size().x;
+                saved += (advance(ch, style, self.open.size) * self.zoom) as f32;
+            }
+            if shown > saved && saved > 0.0 { size * (saved / shown) } else { size }
+        });
         for (line, chars) in self.line_ranges().into_iter().enumerate() {
             let columns = self.columns(chars.clone());
-            let styles = self.open.styles.iter().skip(chars.start);
-            for ((ch, &(bold, italic)), x) in self.slice(chars).chars().zip(styles).zip(columns) {
-                let family = if bold { FontFamily::Name("semibold".into()) } else { FontFamily::Proportional };
-                let format = egui::TextFormat { font_id: FontId::new(size, family), color: ink, italics: italic, ..Default::default() };
-                let mut job = egui::text::LayoutJob::default();
-                job.append(ch.encode_utf8(&mut [0; 4]), 0.0, format);
-                let glyphs = painter.layout_job(job);
-                painter.galley(self.origin + vec2(x, line as f32 * self.line_height()), glyphs, ink);
+            let text: Vec<char> = self.slice(chars.clone()).chars().collect();
+            let styles = self.open.styles.get(chars).unwrap_or_default();
+            for word in words(&text, styles) {
+                let style = styles.get(word.start).copied().unwrap_or_default();
+                let (Some(&from), Some(&to)) = (columns.get(word.start), columns.get(word.end)) else { continue };
+                let text: String = text.get(word).unwrap_or_default().iter().collect();
+                let size = if style.0 { fit[1] } else { fit[0] };
+                let galley = fitted(painter, &text, style, size, ink, to - from);
+                // On the line's baseline, whatever size the word was fitted at.
+                let top = line as f32 * self.line_height() + ((self.open.size * self.zoom) as f32 - size) * 0.8;
+                painter.galley(self.origin + vec2(from, top), galley, ink);
             }
         }
     }
+}
+
+/// The stretches of a line drawn at once: runs of characters of one style, spaces left out, as ranges of its characters.
+fn words(text: &[char], styles: &[Style]) -> Vec<Range<usize>> {
+    let mut out: Vec<Range<usize>> = Vec::new();
+    for (at, (ch, style)) in text.iter().zip(styles).enumerate() {
+        if ch.is_whitespace() {
+            continue;
+        }
+        match out.last_mut() {
+            Some(last) if last.end == at && styles.get(last.start) == Some(style) => last.end = at + 1,
+            _ => out.push(at..at + 1),
+        }
+    }
+    out
+}
+
+fn word_job(text: &str, (bold, italic): Style, size: f32, ink: Color32, spacing: f32) -> egui::text::LayoutJob {
+    let family = if bold { FontFamily::Name("semibold".into()) } else { FontFamily::Proportional };
+    let format =
+        egui::TextFormat { font_id: FontId::new(size, family), color: ink, italics: italic, extra_letter_spacing: spacing, ..Default::default() };
+    let mut job = egui::text::LayoutJob::default();
+    job.append(text, 0.0, format);
+    job
+}
+
+/// `text` laid out `width` wide: its own letter shapes and kerning, the difference shared out between the letters.
+fn fitted(painter: &egui::Painter, text: &str, style: Style, size: f32, ink: Color32, width: f32) -> std::sync::Arc<egui::Galley> {
+    let natural = painter.layout_job(word_job(text, style, size, ink, 0.0));
+    let gaps = text.chars().count().saturating_sub(1);
+    if gaps == 0 {
+        return natural;
+    }
+    painter.layout_job(word_job(text, style, size, ink, (width - natural.size().x) / gaps as f32))
 }
 
 impl TextEditorHost for Host<'_> {
@@ -537,30 +612,24 @@ fn say(ctx: &egui::Context, italic: bool, on: bool) {
     announce(ctx, words.to_string(), Politeness::Polite);
 }
 
-/// The keys a box being typed into takes from the frame's input before the app's shortcuts read it: Ctrl+B and Ctrl+I
-/// (Command on macOS) to bold and italicise, and, in the bar, Tab and Shift+Tab to walk its buttons, Escape to go back
-/// to the text and Cmd+Enter to commit.
+fn open_box(app: &mut crate::PdfCraftApp) -> Option<&mut RichBox> {
+    app.active.and_then(|i| app.views.get_mut(i)).and_then(|view| view.session.comments.rich.as_mut())
+}
+
+/// The keys a box being typed into takes from the frame's input before the app's shortcuts read it
+/// ([`RichBox::take_key`]).
 pub(crate) fn take_keys(app: &mut crate::PdfCraftApp, ctx: &egui::Context, raw: &mut egui::RawInput) {
-    let Some(open) = app.active.and_then(|i| app.views.get_mut(i)).and_then(|view| view.session.comments.rich.as_mut()) else { return };
+    let Some(open) = open_box(app) else { return };
     raw.events.retain(|event| {
         let egui::Event::Key { key, pressed: true, modifiers, .. } = event else { return true };
-        if let Some(button) = open.in_bar
-            && open.bar_key(button, *key, *modifiers)
-        {
-            return false;
-        }
-        if !modifiers.command || modifiers.shift || modifiers.alt {
-            return true;
-        }
-        let italic = match key {
-            egui::Key::B => false,
-            egui::Key::I => true,
-            _ => return true,
-        };
-        let on = open.toggle(italic);
-        say(ctx, italic, on);
-        false
+        !open.take_key(ctx, *key, *modifiers)
     });
+}
+
+/// The same keys sent through the control channel, whose input joins the frame after the app has read it: true when
+/// the box took the key, which then goes no further.
+pub(crate) fn control_key(app: &mut crate::PdfCraftApp, ctx: &egui::Context, key: egui::Key, modifiers: egui::Modifiers) -> bool {
+    open_box(app).is_some_and(|open| open.take_key(ctx, key, modifiers))
 }
 
 /// What the editor reads of the document and the view in a pass.
@@ -578,8 +647,8 @@ pub(crate) fn show(ui: &mut egui::Ui, body: &PageBody<'_>, session: &mut PageSes
     let &BoxCx { info, prefs, .. } = cx;
     adopt(session, cx);
     let open = session.comments.rich.as_mut()?;
-    // Known again once the bar is drawn: a box scrolled out of view takes no keys.
-    open.in_bar = None;
+    // Known again once the box is drawn: one scrolled out of view takes no keys.
+    (open.in_text, open.in_bar) = (false, None);
     let placed = body.pages.iter().find(|p| p.page == open.page)?;
     let page = info.pages.get(open.page)?;
     let zoom = placed.scale;
@@ -616,10 +685,12 @@ pub(crate) fn show(ui: &mut egui::Ui, body: &PageBody<'_>, session: &mut PageSes
     let editor = TextEditor::new(tl!("Type text"), &mut host, Bind::bound(&mut selection)).esc_commits(false).mode(EditorMode::FieldLines);
     let out = if fresh { editor.request_focus(FocusRequest::Take) } else { editor }.show_at(ui, rect);
     let (changed, moved) = (out.changed, out.selection_changed);
+    let in_text = craft::ui::runtime::focus::has(ui.ctx(), out.response.id);
     let ended = out.ended.filter(|end| !(fresh && *end == EditorEnd::Commit));
     ui.set_clip_rect(clip);
     let open = session.comments.rich.as_mut()?;
     open.selection = selection;
+    open.in_text = in_text;
     if moved && !changed {
         open.follow_caret();
     }
@@ -687,4 +758,23 @@ pub(crate) fn show(ui: &mut egui::Ui, body: &PageBody<'_>, session: &mut PageSes
         return open.edit(info, prefs);
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A word of the preview takes the width the saved box gives it, wider or narrower than the interface face's own.
+    #[test]
+    fn a_preview_word_is_fitted_to_its_saved_width() {
+        let ctx = egui::Context::default();
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            for factor in [0.9, 1.1] {
+                let natural = fitted(ui.painter(), "R", (false, false), 20.0, Color32::BLACK, 0.0).size().x;
+                let wanted = fitted(ui.painter(), "Really.", (false, false), 20.0, Color32::BLACK, natural * 5.0 * factor);
+                assert!((wanted.size().x - natural * 5.0 * factor).abs() < 1.5, "{} {}", wanted.size().x, natural * 5.0 * factor);
+            }
+        });
+        output.textures_delta.clear();
+    }
 }
