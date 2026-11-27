@@ -1658,11 +1658,11 @@ title = "Rulers"
 area = "B"
 tier = "P2"
 milestone = "M12"
-status = "planned"
-commands = []
+status = "shipped"
+commands = ["view.show_rulers"]
 tools = []
-evidence = []
-notes = ""
+evidence = ["crates/ui-egui/tests/it/rulers.rs::a_guide_is_dragged_out_of_the_top_ruler_moved_by_its_line_and_dropped_on_the_ruler", "crates/ui-egui/tests/it/rulers.rs::a_ruler_reached_by_tab_adds_a_guide_in_the_middle_of_the_view_and_says_where", "crates/ui-egui/src/canvas/rulers.rs::ticks_are_numbered_every_few_dozen_points_and_halved_between"]
+notes = "View > Show Rulers (view.show_rulers, per tab, off by default): rulers along the top and left of the document area in the Preferences measuring unit, shaded where a page lies and counted from its edges; dragging from one, or Enter/Space on one reached by Tab, adds a guide (see view.guides). They do not follow a split view or full screen."
 
 [[feature]]
 id = "view.grid"
