@@ -39,6 +39,9 @@ pub(crate) const PRESENT_KEYS: &[Chord] = &[Chord::plain(Key::Space), Chord::pla
 pub(crate) struct Presenter {
     /// The page wholly in view, and since when (its transition over).
     shown: Option<(usize, f64)>,
+    /// The showing whose display time has already asked for its turn: the view moves after the pass that asks, so a
+    /// later one still sees the same page and would turn twice, past a page that should stay.
+    turned: Option<(usize, f64)>,
     /// That page's picture, which the next page's transition starts from: in the frame that turns
     /// to the next page, the page view no longer places the page before.
     picture: Option<CachedTexture>,
@@ -297,6 +300,7 @@ pub(super) fn frame(
     // A page with a display time advances once it is up, else after the time Preferences set (not past the last page).
     let mut step = None;
     if let Some((shown, since)) = presenter.shown
+        && presenter.turned != presenter.shown
         && shown == page
         && page + 1 < info.pages.len()
         && let Some(seconds) = entry(info, page).and_then(|t| t.display).map(f64::from).filter(|d| d.is_finite() && *d >= 0.0).or(at.every)
@@ -305,6 +309,7 @@ pub(super) fn frame(
         if left <= 0.0 {
             // In two-page view the last spread can't advance: the caller repaints only if it did.
             step = Some(true);
+            presenter.turned = presenter.shown;
         } else {
             request_repaint_after(ctx, left);
         }
