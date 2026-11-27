@@ -186,6 +186,9 @@ pub(crate) fn context_rows(ui: &mut egui::Ui, cx: CommentMenuCx<'_>) -> Option<C
             if copy.show(ui).ran {
                 action = Some(CanvasAction::Command("edit.copy"));
             }
+            if row(ui, tl!(if several { "Export comments to data file…" } else { "Export comment to data file…" }), true) {
+                action = Some(CanvasAction::Command("comment.export_selected"));
+            }
             let mut paste = MenuItem::new(tl!("Paste comments")).enabled(allowed && can_paste);
             if let Some(text) = chord(ui, "edit.paste") {
                 paste = paste.shortcut(text);

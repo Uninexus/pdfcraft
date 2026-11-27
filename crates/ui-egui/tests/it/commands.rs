@@ -165,8 +165,8 @@ fn every_registered_command_is_implemented() {
             }
             assert!(app.select_page_objects_for_test(0) >= 3, "{}", spec.id);
         }
-        // Copying comments needs a selected comment; pasting needs copied ones.
-        if matches!(spec.id, "comment.copy" | "comment.paste") {
+        // Copying or exporting selected comments needs a selected comment; pasting needs copied ones.
+        if matches!(spec.id, "comment.copy" | "comment.paste" | "comment.export_selected") {
             let shape = pdfcraft_engine::Shape::Rectangle { rect: [10.0, 10.0, 50.0, 50.0] };
             let style = pdfcraft_engine::Style::default_for(&shape);
             assert!(app.apply_edit(

@@ -375,6 +375,7 @@ const ALL_COMMANDS: &[CommandSpec] = &[
     c("comment.import", "Import comments…", None, None, Modification, "file-input"),
     c("comment.stamp", "Add a stamp", None, None, Annotate, "stamp"),
     c("comment.export", "Export all comments to data file…", None, None, HasComments, "file-output"),
+    c("comment.export_selected", "Export selected comments to data file…", None, None, HasComments, "file-output"),
     c("comment.hide_all", "Hide all comments", None, None, Document, "eye_off"),
     c("comment.show_all_types", "Show all comment types", None, None, Document, "eye_off"),
     c("comment.toggle_type.text", "Show or hide Note comments", None, None, Document, "eye_off"),

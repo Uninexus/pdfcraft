@@ -478,6 +478,7 @@ pub(crate) fn header(
     rows.extend([
         Entry::new("comment.summarize", tl!("Create PDF comment summary…").to_string()).enabled(enabled("comment.summarize")),
         Entry::new("comment.export", tl!("Export all to data file…").to_string()).enabled(enabled("comment.export")),
+        Entry::new("comment.export_selected", tl!("Export selected to data file…").to_string()).enabled(enabled("comment.export_selected")),
         Entry::new("comment.import", tl!("Import comments…").to_string()).enabled(enabled("comment.import")),
         // Into the pages, for good once saved: apart from the list's other commands.
         Entry::separator(),
