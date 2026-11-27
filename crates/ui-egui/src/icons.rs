@@ -151,7 +151,7 @@ mod tests {
     /// The icon of every command in the app's catalog, which menus and command bars draw beside the command: the
     /// engine's commands and the UI's own.
     fn command_icons() -> Vec<(String, Cow<'static, str>)> {
-        let catalog = crate::commands::catalog::catalog(false).expect("the command catalog builds");
+        let catalog = crate::commands::catalog::catalog(false, false).expect("the command catalog builds");
         catalog.defs().iter().filter_map(|def| Some((format!("command {}", def.command.id), def.icon.clone()?))).collect()
     }
 
