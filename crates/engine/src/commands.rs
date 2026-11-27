@@ -432,6 +432,8 @@ const ALL_COMMANDS: &[CommandSpec] = &[
     c("arrange.align_bottom", "Align objects bottom", None, None, Modification, "layout_grid"),
     c("arrange.distribute_horizontal", "Distribute objects horizontally", None, None, Modification, "columns-3"),
     c("arrange.distribute_vertical", "Distribute objects vertically", None, None, Modification, "rows-3"),
+    c("arrange.center_page_horizontal", "Center horizontally on page", None, None, Modification, "layout_grid"),
+    c("arrange.center_page_vertical", "Center vertically on page", None, None, Modification, "layout_grid"),
     c("edit.bates_remove", "Remove Bates numbering", None, None, Marks(crate::MarkKind::Bates), "hash"),
     c("edit.bates_remove_pages", "Remove Bates numbering from pages…", None, None, Marks(crate::MarkKind::Bates), "hash"),
     c("edit.image", "Add image…", None, None, Modification, "image-plus"),

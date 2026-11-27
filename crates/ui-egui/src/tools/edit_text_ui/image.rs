@@ -779,6 +779,9 @@ pub(crate) fn picture_menu(ui: &mut egui::Ui, session: &mut PageSession, menu: &
     if raster && img.has_editor_crop() && item(ui, true, tl!("Remove crop")) {
         session.pending_edit = edit(E::RemoveCrop);
     }
+    for id in ["arrange.center_page_horizontal", "arrange.center_page_vertical"] {
+        MenuItem::command(craft::keymap::CommandRef::new(id)).show(ui);
+    }
     if item(ui, true, tl!("Flip horizontal")) {
         session.pending_edit = edit(E::Flip { horizontal: flip_user_axis(true, rotation) });
     }

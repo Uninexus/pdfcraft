@@ -28,11 +28,15 @@ pub enum ArrangeOp {
     DistributeHorizontal,
     /// Equal gaps between objects from top to bottom; the outer two stay.
     DistributeVertical,
+    /// The selection, as one block, midway between the page's left and right edges.
+    CenterOnPageHorizontal,
+    /// The selection, as one block, midway between the page's top and bottom edges.
+    CenterOnPageVertical,
 }
 
 impl ArrangeOp {
     /// Every operation, in menu order.
-    pub const ALL: [ArrangeOp; 8] = [
+    pub const ALL: [ArrangeOp; 10] = [
         ArrangeOp::AlignLeft,
         ArrangeOp::AlignCenter,
         ArrangeOp::AlignRight,
@@ -41,6 +45,8 @@ impl ArrangeOp {
         ArrangeOp::AlignBottom,
         ArrangeOp::DistributeHorizontal,
         ArrangeOp::DistributeVertical,
+        ArrangeOp::CenterOnPageHorizontal,
+        ArrangeOp::CenterOnPageVertical,
     ];
 
     /// Whether this spreads objects out (three or more needed) rather than lines them up.
@@ -48,13 +54,24 @@ impl ArrangeOp {
         matches!(self, ArrangeOp::DistributeHorizontal | ArrangeOp::DistributeVertical)
     }
 
+    /// Whether this places the selection against the page rather than its objects against each other.
+    pub fn on_page(self) -> bool {
+        matches!(self, ArrangeOp::CenterOnPageHorizontal | ArrangeOp::CenterOnPageVertical)
+    }
+
     /// How many objects the operation needs.
     pub fn needs(self) -> usize {
-        if self.distributes() { 3 } else { 2 }
+        if self.on_page() {
+            1
+        } else if self.distributes() {
+            3
+        } else {
+            2
+        }
     }
 
     /// The name automation takes: `left`, `center`, `right`, `top`, `middle`, `bottom`,
-    /// `distribute_horizontal` or `distribute_vertical`.
+    /// `distribute_horizontal`, `distribute_vertical`, `page_center` or `page_middle`.
     pub fn name(self) -> &'static str {
         match self {
             ArrangeOp::AlignLeft => "left",
@@ -65,6 +82,8 @@ impl ArrangeOp {
             ArrangeOp::AlignBottom => "bottom",
             ArrangeOp::DistributeHorizontal => "distribute_horizontal",
             ArrangeOp::DistributeVertical => "distribute_vertical",
+            ArrangeOp::CenterOnPageHorizontal => "page_center",
+            ArrangeOp::CenterOnPageVertical => "page_middle",
         }
     }
 
@@ -79,6 +98,8 @@ impl ArrangeOp {
             ArrangeOp::AlignBottom => "arrange.align_bottom",
             ArrangeOp::DistributeHorizontal => "arrange.distribute_horizontal",
             ArrangeOp::DistributeVertical => "arrange.distribute_vertical",
+            ArrangeOp::CenterOnPageHorizontal => "arrange.center_page_horizontal",
+            ArrangeOp::CenterOnPageVertical => "arrange.center_page_vertical",
         }
     }
 
@@ -113,7 +134,22 @@ pub fn plan_offsets(rects: &[[f64; 4]], op: ArrangeOp) -> Option<Vec<[f64; 2]>> 
         ArrangeOp::AlignMiddle => each(&|r| [0.0, by - (r[1] + r[3]) / 2.0]),
         ArrangeOp::DistributeHorizontal => spread(rects, 0),
         ArrangeOp::DistributeVertical => spread(rects, 1),
+        // The page's size is not among the rectangles: [`page_offsets`] lays these out.
+        ArrangeOp::CenterOnPageHorizontal | ArrangeOp::CenterOnPageVertical => return None,
     })
+}
+
+/// The offsets that put the bounds of `rects`, moved as one block, midway across (or down) a page of `size`.
+fn page_offsets(rects: &[[f64; 4]], op: ArrangeOp, size: [f64; 2]) -> Option<Vec<[f64; 2]>> {
+    if rects.is_empty() || rects.iter().flatten().chain(&size).any(|v| !v.is_finite()) {
+        return None;
+    }
+    let axis = usize::from(op == ArrangeOp::CenterOnPageVertical);
+    let lo = rects.iter().map(|r| r[axis]).fold(f64::INFINITY, f64::min);
+    let hi = rects.iter().map(|r| r[axis + 2]).fold(f64::NEG_INFINITY, f64::max);
+    let mut by = [0.0; 2];
+    by[axis] = size[axis] / 2.0 - (lo + hi) / 2.0;
+    Some(vec![by; rects.len()])
 }
 
 /// Offsets along `axis` (0: x, 1: y) that give equal gaps; the first and last by centre stay.
@@ -170,7 +206,7 @@ impl Document {
     /// of `page`), or `None` when every object is already in place.
     pub fn arrange_objects(&self, page: usize, targets: &[ObjectTarget], op: ArrangeOp) -> Result<Option<Edit>, String> {
         if targets.len() < op.needs() {
-            return Err(format!("select at least {} objects", op.needs()));
+            return Err(format!("select at least {} object(s)", op.needs()));
         }
         let info = self.info.pages.get(page).ok_or("the page no longer exists")?;
         let inventory = self.editable_objects(page)?;
@@ -189,7 +225,8 @@ impl Document {
                 [a[0].min(b[0]), a[1].min(b[1]), a[0].max(b[0]), a[1].max(b[1])]
             })
             .collect();
-        let plan = plan_offsets(&shown, op).ok_or("these objects can't be arranged")?;
+        let size = [f64::from(info.width), f64::from(info.height)];
+        let plan = if op.on_page() { page_offsets(&shown, op, size) } else { plan_offsets(&shown, op) }.ok_or("these objects can't be arranged")?;
         let mut moves = Vec::new();
         for (object, delta) in found.iter().zip(plan) {
             if delta.iter().all(|v| v.abs() < NO_MOVE) {

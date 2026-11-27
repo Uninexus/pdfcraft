@@ -314,6 +314,11 @@ fn object_rows(ui: &mut egui::Ui, view: &mut DocView, doc: &pdfcraft_engine::Doc
             object_row(ui, view, doc, op, label);
         }
     });
+    Menu::submenu_row_enabled(ui, tl!("Center on page").to_string(), can_modify && count >= 1, |ui, _| {
+        for (op, label) in [(A::CenterOnPageHorizontal, "Horizontally"), (A::CenterOnPageVertical, "Vertically")] {
+            object_row(ui, view, doc, op, label);
+        }
+    });
     Menu::submenu_row_enabled(ui, tl!("Distribute objects").to_string(), can_modify && count >= 3, |ui, _| {
         for (op, label) in [(A::DistributeHorizontal, "Horizontally"), (A::DistributeVertical, "Vertically")] {
             object_row(ui, view, doc, op, label);
