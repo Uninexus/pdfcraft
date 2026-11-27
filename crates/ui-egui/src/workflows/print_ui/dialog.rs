@@ -116,6 +116,7 @@ impl PdfCraftApp {
             // Per job, like copies and the layout: a summary is asked for each time, never carried over from the last
             // job or another document, and the document decides whether it can take one.
             comment_summary: false,
+            comment_summary_sort: pdfcraft_engine::SummarySort::Page,
             comment_summary_no_copying: no_copying,
             comment_summary_low_resolution: low_resolution,
             ..keep

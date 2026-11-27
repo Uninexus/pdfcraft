@@ -604,8 +604,8 @@ impl PdfCraftApp {
     /// and whether the summary found no comments to add.
     fn print_pdf_for_draft(&self, id: pdfcraft_engine::DocId, settings: &print::Settings) -> Result<(Vec<u8>, bool), String> {
         if self.print_draft.comment_summary_wanted() {
-            let (bytes, summary) =
-                self.session.print_pdf_with_comment_summary(id, settings, pdfcraft_engine::SummarySort::Page).map_err(|e| e.to_string())?;
+            let sort = self.print_draft.comment_summary_sort;
+            let (bytes, summary) = self.session.print_pdf_with_comment_summary(id, settings, sort).map_err(|e| e.to_string())?;
             Ok((bytes, summary == pdfcraft_engine::CommentSummary::NoComments))
         } else {
             self.session.print_pdf(id, settings).map(|bytes| (bytes, false)).map_err(|e| e.to_string())
