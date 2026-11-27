@@ -3,6 +3,7 @@
 //! (`/AF`, PDF 2.0) shows its relationship, and its menu sets the relationship or takes it off the list.
 // PLAN: assumed `super::right::PanelResult` and a `BodyCx` passed to `show` (pdf-chrome-w13 calls `show(app, ui)` today).
 
+use crate::app::commands::{FocusIf as _, list_focus};
 use std::sync::Arc;
 
 use craft::behavior::{DisplayOrder, IconId, ItemSource};
@@ -136,7 +137,8 @@ pub(crate) fn show(app: &mut PdfCraftApp, ui: &mut egui::Ui, cx: &mut BodyCx<'_>
         }
         parts.join("  ·  ")
     };
-    let out = List::<usize>::new(tl!("Attachments").to_string()).select(SelectMode::Single).natural_height(true).show_items(
+    let take = list_focus(&mut app.panel_focus, crate::RightPanel::Attachments, !doc.info.attachments.is_empty());
+    let out = List::<usize>::new(tl!("Attachments").to_string()).focus_if(take).select(SelectMode::Single).natural_height(true).show_items(
         ui,
         &Attached(info.attachments.len()),
         &mut |key, _| {

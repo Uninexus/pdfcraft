@@ -1,4 +1,6 @@
 use super::{DocId, LeftPanel, Mode, PdfCraftApp, QuickTool, RightPanel, edit_text_ui};
+use craft::ui::contract::Props;
+use craft::ui::runtime::focus::FocusRequest;
 
 impl PdfCraftApp {
     /// Run a catalogue command. Commands that aren't implemented yet say which milestone ships them.
@@ -202,6 +204,33 @@ impl PdfCraftApp {
 
     /// F4: closes the side panel, or reopens the one open last.
     pub(crate) fn toggle_side_panel(&mut self) {
-        self.choose_right_panel(if self.right().is_some() { None } else { Some(self.last_right) });
+        self.open_panel_for_keys(if self.right().is_some() { None } else { Some(self.last_right) });
+    }
+
+    /// Shows `panel` as a command asks (the palette, a menu, F4): one that opens takes the keyboard.
+    pub(crate) fn open_panel_for_keys(&mut self, panel: Option<RightPanel>) {
+        self.choose_right_panel(panel);
+        self.panel_focus = panel.map(|panel| (panel, 3));
     }
 }
+
+/// The focus request for the list of `panel`, once, when the panel was just opened by keys and its list has rows.
+pub(crate) fn list_focus(waiting: &mut Option<(RightPanel, u8)>, panel: RightPanel, has_rows: bool) -> Option<FocusRequest> {
+    let due = has_rows && waiting.is_some_and(|(wanted, passes)| wanted == panel && passes <= 1);
+    due.then(|| {
+        *waiting = None;
+        FocusRequest::Take
+    })
+}
+
+/// [`Props::request_focus`] for a request that may not be there.
+pub(crate) trait FocusIf: Props + Sized {
+    fn focus_if(self, request: Option<FocusRequest>) -> Self {
+        match request {
+            Some(request) => self.request_focus(request),
+            None => self,
+        }
+    }
+}
+
+impl<T: Props + Sized> FocusIf for T {}

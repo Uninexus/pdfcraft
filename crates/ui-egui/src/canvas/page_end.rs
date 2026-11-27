@@ -46,7 +46,7 @@ pub(super) fn show(app: &mut PdfCraftApp, index: usize, ui: &mut Ui, rect: Rect,
 }
 
 /// The focus ring round the page view.
-pub(super) fn ring(ui: &Ui, rect: Rect) {
+pub(crate) fn ring(ui: &Ui, rect: Rect) {
     let env = Env::of(ui);
     let [r, g, b, a] = env.tokens.color.status.info.solid.0;
     let stroke = Stroke::new(2.0 * env.tokens.stroke.thin, egui::Color32::from_rgba_unmultiplied(r, g, b, a));
@@ -62,8 +62,8 @@ pub(crate) struct PageEndStyle {
 
 /// What the stop reports.
 pub(crate) struct PageEndOutput {
-    response: egui::Response,
-    focused: bool,
+    pub(crate) response: egui::Response,
+    pub(crate) focused: bool,
 }
 
 impl Outcome for PageEndOutput {
@@ -74,7 +74,8 @@ impl Outcome for PageEndOutput {
     }
 }
 
-/// A Tab stop that does nothing but hold the focus after the page view.
+/// A Tab stop that does nothing but hold the focus: after the page view, and at the start of a side panel that has no
+/// list to take it.
 #[derive(Component)]
 #[component(canvas_control, sample = PageEnd::sample)]
 pub(crate) struct PageEnd {
@@ -84,7 +85,7 @@ pub(crate) struct PageEnd {
 }
 
 impl PageEnd {
-    fn new(name: String) -> Self {
+    pub(crate) fn new(name: String) -> Self {
         PageEnd { common: Common::new(), focused: false }.label(Label::from(name))
     }
 

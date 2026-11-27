@@ -1,5 +1,6 @@
 use super::right::PanelResult;
 use super::{Nav, PdfCraftApp};
+use crate::app::commands::{FocusIf as _, list_focus};
 use craft::behavior::IconId;
 use craft::behavior::{DisplayOrder, GesturePhase, ItemSource, Mixed, Selection};
 use craft::keymap::CommandRef;
@@ -263,11 +264,13 @@ pub(super) fn body(app: &mut PdfCraftApp, ui: &mut egui::Ui) -> PanelResult {
     let mut rows = Vec::new();
     Rows::collect(outline, &mut Vec::new(), &open, &mut rows);
     let rows = Rows(rows);
+    let take = list_focus(&mut app.panel_focus, crate::RightPanel::Bookmarks, !rows.0.is_empty());
 
     let list_id = list_id(id);
     let mut held = Selection::<Vec<usize>>::default();
     let row_key = |key: &Vec<usize>| item_at(outline, key).map(|i| vec![i.title.clone().into()]).unwrap_or_default();
     let list = List::<Vec<usize>>::new(tl!("Bookmarks"))
+        .focus_if(take)
         .id(list_id)
         .tree(true)
         .select(SelectMode::Single)

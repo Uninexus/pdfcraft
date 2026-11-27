@@ -376,7 +376,7 @@ fn open_side(workspace: &Workspace<PanelId>) -> Option<PanelId> {
 }
 
 /// The label of a side panel, which its icon in the collapsed column and its tab share: production's rail button name.
-fn side_label(panel: RightPanel) -> String {
+pub(crate) fn side_label(panel: RightPanel) -> String {
     let title = match panel {
         RightPanel::Comments => "Comments",
         RightPanel::Bookmarks => "Bookmarks",

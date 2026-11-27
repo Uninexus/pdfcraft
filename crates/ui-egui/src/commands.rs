@@ -227,7 +227,7 @@ impl PdfCraftApp {
                     }
                 }
             }
-            crate::menus::PANEL => self.choose_right_panel(crate::menus::panel(&fired.command)),
+            crate::menus::PANEL => self.open_panel_for_keys(crate::menus::panel(&fired.command)),
             crate::menus::DOCUMENT => {
                 if let Some(i) = crate::menus::param_index(&fired.command).filter(|&i| i < self.views.len()) {
                     self.active = Some(i);

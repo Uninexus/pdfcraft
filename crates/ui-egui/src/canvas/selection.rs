@@ -262,6 +262,15 @@ impl PageSession {
         info: &DocInfo,
         geo: PageGeometry<'_>,
     ) -> ToolMarks {
+        // Select All of a continuous view holds no range of its own: a marking tool takes it as the run from the first
+        // page to the end of the last, whose pages are read before anything is marked.
+        if finished
+            && self.all_text
+            && let Some(last) = geo.sizes.len().checked_sub(1)
+        {
+            self.all_text = false;
+            self.text.selection = Some(TextSelection::new(0, FwSpan::run(0, last, usize::MAX)));
+        }
         let Some(sel) = self.text.selection else {
             self.marks_waiting = None;
             return ToolMarks::None;
