@@ -1087,6 +1087,11 @@ impl Document {
         Some(SecuritySummary { method: method.into(), owner: h.auth() == pdfcraft_cos::Auth::Owner && !pending, permissions, pending })
     }
 
+    /// The bold and italic parts of the text box at `(page, index)`.
+    pub fn comment_text_runs(&self, page: usize, index: usize) -> Vec<pdfcraft_annot::TextRun> {
+        self.editor.as_ref().and_then(|e| pdfcraft_annot::text_runs(&e.cos, page, index).ok()).unwrap_or_default()
+    }
+
     /// Comment properties of the comment at `(page, index)` (Comment Properties dialog).
     pub fn comment_props(&self, page: usize, index: usize) -> Option<pdfcraft_annot::Props> {
         self.editor.as_ref().and_then(|e| pdfcraft_annot::props(&e.cos, page, index))

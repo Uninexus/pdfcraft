@@ -81,6 +81,7 @@ pub(crate) fn scope_of(edit: &Edit) -> Scope {
         | Edit::StyleAnnotation { .. }
         | Edit::FillAnnotation { .. }
         | Edit::PartOpacity { .. }
+        | Edit::TextRunsAnnotation { .. }
         | Edit::FontSizeAnnotation { .. }
         | Edit::BorderColorAnnotation { .. }
         | Edit::BorderShapeAnnotation { .. }

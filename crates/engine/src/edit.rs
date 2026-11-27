@@ -297,6 +297,12 @@ pub enum Edit {
         fill: Option<f64>,
         text: Option<f64>,
     },
+    /// The bold and italic parts of a text box's text, replacing those it had; none makes it all plain.
+    TextRunsAnnotation {
+        page: usize,
+        index: usize,
+        runs: Vec<pdfcraft_annot::TextRun>,
+    },
     /// Change the font size (pt) of a text box, typewriter text or callout.
     FontSizeAnnotation {
         page: usize,

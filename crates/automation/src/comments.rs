@@ -232,6 +232,12 @@ impl Automation {
                 // Unchanged on a page the viewer could not read, as `rect` is.
                 "popup": c.popup.map(|w| json!({ "rect": crate::view_rect(&doc.info, c.page, w.rect), "open": w.open })),
             });
+            if c.subtype == "FreeText" {
+                let runs = doc.comment_text_runs(c.page, c.index);
+                if !runs.is_empty() {
+                    v["text_runs"] = runs.iter().map(|r| json!({ "start": r.start, "end": r.end, "bold": r.bold, "italic": r.italic })).collect();
+                }
+            }
             // A text box's or typed text's oval or circle (a rectangle is not reported).
             if c.subtype == "FreeText"
                 && let Some(shape) = doc.comment_props(c.page, c.index).and_then(|p| p.border_shape).filter(|s| *s != BorderShape::Rectangle)
@@ -844,6 +850,10 @@ impl Automation {
             }
             edits.push(Edit::FontSizeAnnotation { page, index, size });
         }
+        // After `contents`: the positions count the new text.
+        if let Some(runs) = a.get("text_runs") {
+            edits.push(Edit::TextRunsAnnotation { page, index, runs: text_runs(runs)? });
+        }
         if let Some(r) = a.nums::<4>("rect")? {
             // The rectangle as comment_list reports it: where the comment is drawn.
             let doc = self.doc(a)?;
@@ -871,7 +881,7 @@ impl Automation {
         }
         if edits.is_empty() {
             return Err(ToolError::InvalidArgs(
-                "nothing to change: pass contents, color, opacity, fill_opacity, text_opacity, width, fill, border_color, border_shape, font_size, rect, move or points".into(),
+                "nothing to change: pass contents, color, opacity, fill_opacity, text_opacity, width, fill, border_color, border_shape, font_size, text_runs, rect, move or points".into(),
             ));
         }
         let edit = if edits.len() == 1 { edits.remove(0) } else { Edit::Batch { label: "Edit comment".into(), edits } };
@@ -1007,6 +1017,24 @@ fn comment_types(a: &Args) -> Result<Option<Vec<String>>> {
         out.push((*known).to_owned());
     }
     Ok(Some(out))
+}
+
+/// `text_runs`: an array of `{start, end, bold, italic}`, positions in characters of the text, `end` excluded.
+fn text_runs(value: &Value) -> Result<Vec<pdfcraft_engine::TextRun>> {
+    let wrong = || ToolError::InvalidArgs("text_runs must be an array of {start, end, bold, italic}: character positions, end excluded".into());
+    value
+        .as_array()
+        .ok_or_else(wrong)?
+        .iter()
+        .map(|run| {
+            let at = |key: &str| run.get(key).and_then(Value::as_u64).and_then(|n| usize::try_from(n).ok()).ok_or_else(wrong);
+            let flag = |key: &str| match run.get(key) {
+                None => Ok(false),
+                Some(v) => v.as_bool().ok_or_else(wrong),
+            };
+            Ok(pdfcraft_engine::TextRun { start: at("start")?, end: at("end")?, bold: flag("bold")?, italic: flag("italic")? })
+        })
+        .collect()
 }
 
 #[cfg(test)]

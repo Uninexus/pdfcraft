@@ -1562,7 +1562,7 @@ fn draw_free_text(context: &AppearanceContext<'_>, mut drawing: AppearanceDrawin
         rg(text_color)
     ));
     let mut out = c.into_bytes();
-    let lines = pdfcraft_fonts::wrap_with(&text, size, width, |s, size| text_width_in(face, s, size));
+    let (lines, rich) = free_text_lines(d, &text, face, size, width);
     let mut y = rect[3] - pad - size * reach(&lines)[0];
     if round {
         y -= ((rect[3] - rect[1] - 2.0 * pad - text_lines_height(&lines, size)) / 2.0).max(0.0);
@@ -1573,17 +1573,31 @@ fn draw_free_text(context: &AppearanceContext<'_>, mut drawing: AppearanceDrawin
     let mut fonts = font_resources(face);
     let (pieces, shaped) = shaped_text::appearance_lines(&lines, &mut fonts);
     let mut current = None;
-    for pieces in &pieces {
+    for (number, pieces) in pieces.iter().enumerate() {
         if y < rect[1] - size {
             break;
         }
         let lw = shaped_text::pieces_width(pieces, size, 0.0, |s, size| face.text_width(s, size));
-        let x = match q {
-            1 => rect[0] + pad + (width - lw) / 2.0,
-            2 => rect[2] - pad - lw,
-            _ => rect[0] + pad,
-        };
-        shaped.show_line(&mut out, pieces, x, y, size, crate::text_style::resource_name(face), win_ansi, |s| face.text_width(s, size), &mut current);
+        let x = line_start(q, [rect[0], rect[2]], pad, lw);
+        match rich.as_ref().and_then(|rich| rich.get(number)) {
+            // The line is placed as a whole, its stretches one after another.
+            Some(segments) => {
+                show_runs(&mut out, &mut fonts, segments, line_start(q, [rect[0], rect[2]], pad, crate::rich::line_width(segments, size)), y, size);
+            }
+            None => {
+                shaped.show_line(
+                    &mut out,
+                    pieces,
+                    x,
+                    y,
+                    size,
+                    crate::text_style::resource_name(face),
+                    win_ansi,
+                    |s| face.text_width(s, size),
+                    &mut current,
+                );
+            }
+        }
         y -= size * 1.2;
     }
     out.extend_from_slice(b"ET\n");
@@ -1593,6 +1607,45 @@ fn draw_free_text(context: &AppearanceContext<'_>, mut drawing: AppearanceDrawin
         stream.dict.set(b"Matrix".to_vec(), Object::Array(m.iter().copied().map(Object::Real).collect()));
     }
     Some(stream)
+}
+
+/// A line of a text box with bold or italic runs: stretches of one face each.
+type RunLines = Vec<Vec<crate::rich::Segment>>;
+
+/// The lines of a text box's `text`, `width` wide, and for one with bold or italic runs each line's stretches: runs
+/// break lines by their own widths.
+fn free_text_lines(d: &Dict, text: &str, face: pdfcraft_fonts::Std14, size: f64, width: f64) -> (Vec<String>, Option<RunLines>) {
+    let runs = crate::modify::runs_in(d);
+    if runs.is_empty() || crate::rich::shaped_only(text) {
+        return (pdfcraft_fonts::wrap_with(text, size, width, |s, size| text_width_in(face, s, size)), None);
+    }
+    let rich = crate::rich::wrap(text, &runs, face, size, width);
+    let lines = rich.iter().map(|line| line.iter().map(|(_, t)| t.as_str()).collect()).collect();
+    (lines, Some(rich))
+}
+
+/// Draw `segments` from (`x`, `y`), each in its own face, which joins `fonts`.
+fn show_runs(out: &mut Vec<u8>, fonts: &mut Dict, segments: &[crate::rich::Segment], x: f64, y: f64, size: f64) {
+    let mut pen = x;
+    for (face, words) in segments {
+        let name = crate::text_style::resource_name(*face);
+        if let Some(font) = font_resources(*face).get(name.as_bytes()) {
+            fonts.set(name.as_bytes().to_vec(), font.clone());
+        }
+        out.extend(format!("/{name} {} Tf 1 0 0 1 {} {} Tm ", n(size), n(pen), n(y)).bytes());
+        out.extend(literal(&win_ansi(words)));
+        out.extend_from_slice(b" Tj\n");
+        pen += face.text_width(words, size);
+    }
+}
+
+/// Where a line `line` wide starts in a text box from `left` to `right`, as `/Q` aligns it.
+fn line_start(q: i64, [left, right]: [f64; 2], pad: f64, line: f64) -> f64 {
+    match q {
+        1 => left + pad + ((right - left - 2.0 * pad).max(1.0) - line) / 2.0,
+        2 => right - pad - line,
+        _ => left + pad,
+    }
 }
 
 fn draw_icon(context: &AppearanceContext<'_>, name: &str, fallback: Rgb, mut drawing: AppearanceDrawing) -> Option<Stream> {
