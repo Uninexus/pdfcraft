@@ -514,6 +514,8 @@ pub enum ViewAction {
     InsertFromFile,
     /// Insert files at a gap of the page grid (0 = before the first page).
     InsertFromFileAt(usize),
+    /// Insert what the clipboard holds at a gap of the page grid.
+    InsertFromClipboardAt(usize),
     /// Replace the selected pages with pages from another file.
     ReplacePages,
     /// Save the document as the grid shows it.
