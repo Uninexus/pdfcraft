@@ -27,10 +27,7 @@ pub(super) fn show(app: &mut PdfCraftApp, index: usize, ui: &mut Ui, rect: Rect,
     let strip = Rect::from_min_max(egui::pos2(rect.left(), rect.bottom() - 1.0), rect.max);
     let end = PageEnd::new(tl!("End of page content").to_string()).id(id).show_at(ui, strip);
     if end.focused {
-        let env = Env::of(ui);
-        let [r, g, b, a] = env.tokens.color.status.info.solid.0;
-        let ring = Stroke::new(2.0 * env.tokens.stroke.thin, egui::Color32::from_rgba_unmultiplied(r, g, b, a));
-        ui.painter().rect_stroke(rect, 0.0, ring, StrokeKind::Inside);
+        ring(ui, rect);
     }
     let Some(view) = app.views.get_mut(index) else { return };
     // The value typed in the field left behind is stored first: a refused one reopens its field, which keeps the keys.
@@ -46,6 +43,14 @@ pub(super) fn show(app: &mut PdfCraftApp, index: usize, ui: &mut Ui, rect: Rect,
         focus::request(ui.ctx(), FocusTarget::Id(target));
         ui.ctx().request_repaint();
     }
+}
+
+/// The focus ring round the page view.
+pub(super) fn ring(ui: &Ui, rect: Rect) {
+    let env = Env::of(ui);
+    let [r, g, b, a] = env.tokens.color.status.info.solid.0;
+    let stroke = Stroke::new(2.0 * env.tokens.stroke.thin, egui::Color32::from_rgba_unmultiplied(r, g, b, a));
+    ui.painter().rect_stroke(rect, 0.0, stroke, StrokeKind::Inside);
 }
 
 /// The style of the stop: it paints nothing of its own.

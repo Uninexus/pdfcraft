@@ -352,6 +352,8 @@ pub struct PdfCraftApp {
     /// Whether the Tools pane was in the dock when the floating toolbar was last placed: the toolbar follows the page area's
     /// left edge as the pane closes and opens.
     pub(crate) toolbar_tools_open: bool,
+    /// The last input was a key, not the pointer: the focus then shows on controls the framework draws no ring for.
+    pub(crate) keyboard_last: bool,
     /// The rail's zoom field, once it has been shown.
     pub(crate) zoom_field: Option<egui::Id>,
     /// The zoom field had the focus as this frame's input arrived, and the rail has not moved it on yet.

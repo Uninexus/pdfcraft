@@ -67,6 +67,7 @@ mod ink_manager;
 mod insert_clipboard;
 mod javascript;
 mod javascripts_window;
+mod keyboard_only;
 mod layer_actions;
 mod layout_table;
 mod legacy_settings;

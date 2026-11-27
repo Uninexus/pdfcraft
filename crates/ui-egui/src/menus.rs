@@ -288,10 +288,10 @@ pub(crate) fn layout_options() -> LayoutOptions<'static> {
     LayoutOptions::new(APP_NAME).label(&translate)
 }
 
-/// Whether a dialog, a prompt or the command palette holds the window: the one gate over commands
-/// and the menus.
+/// Whether a dialog or a prompt holds the window: the one gate over commands and the menus. The command palette is not
+/// one: it lists the commands to run them, and its own modal layer keeps keys and presses off what it covers.
 pub(crate) fn gated(app: &PdfCraftApp) -> bool {
-    app.modal_open() || app.palette_open
+    app.modal_open()
 }
 
 /// Whether a text field has the keyboard: the one signal behind the Edit rows' state and the native
