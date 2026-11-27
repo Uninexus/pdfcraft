@@ -40,6 +40,7 @@ mod guides;
 pub(super) mod image_pick;
 mod navigation;
 pub(crate) mod organize;
+pub(crate) mod rulers;
 // PLAN: no sheet assigns the `mod` lines of the four new page-body files (pdf-canvas-w9 `page_parts.rs`,
 // `page_tools.rs`; pdf-canvas-w10 `pictures.rs`; pdf-canvas-w15 `page_overlays.rs`); the host writes them here.
 pub(crate) mod page_overlays;
@@ -192,6 +193,13 @@ pub struct DocView {
     /// View > Show Grid: draw the page grid (Preferences > Grid) over its pages. View state: never saved, and
     /// not part of an edit; off when a tab opens.
     pub show_grid: bool,
+    /// View > Show Rulers: a ruler along the top and left of the document area, to drag guides from. View state:
+    /// never saved, and not part of an edit; off when a tab opens.
+    pub show_rulers: bool,
+    /// The guide a drag moved in the last pass, for the app to apply once the page body no longer borrows the session.
+    guide_move: Option<guides::GuideMove>,
+    /// The guide a press is dragging: dropped when the button comes up over a ruler.
+    guide_drag: Option<u64>,
     pub organize: bool,
     pub page_input: String,
     /// Text was typed into the page box since it last showed a page's label: while the box keeps the focus,
@@ -607,6 +615,9 @@ impl DocView {
             middle_scrolling: false,
             show_guides: false,
             show_grid: false,
+            show_rulers: false,
+            guide_move: None,
+            guide_drag: None,
             organize: false,
             page_input: "1".into(),
             page_input_draft: false,
@@ -692,6 +703,7 @@ impl DocView {
         fresh.organize = self.organize;
         fresh.show_guides = self.show_guides;
         fresh.show_grid = self.show_grid;
+        fresh.show_rulers = self.show_rulers;
         fresh.thumbnail_zoom = self.thumbnail_zoom;
         fresh.notice_dismissed = self.notice_dismissed;
         fresh.cut_notice_dismissed = std::mem::take(&mut self.cut_notice_dismissed);
@@ -734,6 +746,7 @@ impl DocView {
         v.page_input = self.page_input.clone();
         v.show_guides = self.show_guides;
         v.show_grid = self.show_grid;
+        v.show_rulers = self.show_rulers;
         v.notice_dismissed = self.notice_dismissed;
         v.scripts_off_noted = self.scripts_off_noted;
         v.full_screen_fill = self.full_screen_fill;
@@ -933,6 +946,8 @@ struct PageBodyCx<'a> {
     guides: &'a [pdfcraft_engine::guides::Guide],
     /// The page grid to draw (none unless View > Show Grid is on).
     grid: Option<pdfcraft_engine::guides::Grid>,
+    /// The rulers are shown (View > Show Rulers): the guides can be dragged.
+    rulers: bool,
     table_preview: Option<&'a crate::field_table_ui::Preview>,
 }
 
@@ -979,6 +994,8 @@ struct BodyOut {
     over_part: bool,
     /// The page a primary press started on in this pass, so clicking a page in continuous view makes it current.
     pressed_page: Option<usize>,
+    /// A guide a drag moved this pass.
+    guide_move: Option<guides::GuideMove>,
 }
 
 /// The part list of a pass, in paint order: pictures, paragraphs and added items, links and text links (only under
@@ -1068,6 +1085,14 @@ fn page_parts_of(ui: &mut egui::Ui, body: &PageBody<'_>, session: &mut PageSessi
     }
     if cx.tool == QuickTool::EditText && cx.can_modify {
         crate::object_ui::page_parts(&mut parts, session, cx.doc, cx.info, body.pages, geo);
+    }
+    // The guides can be dragged while the rulers are shown (a guide is only there when guides are shown).
+    if cx.rulers && shown {
+        let reach = Env::of(ui).hit_reach();
+        for placed in body.pages {
+            let xf = PageXform::of(placed, cx.rotation, cx.sizes.get(placed.page).copied().unwrap_or_default());
+            parts.extend(guides::parts(&xf, placed.page, cx.guides, reach));
+        }
     }
     parts
 }
@@ -1221,7 +1246,7 @@ fn route_press(
                 session.sign.field = Some(field.name.clone());
             }
         }
-        Owner::Badge { .. } => {}
+        Owner::Badge { .. } | Owner::Guide { .. } => {}
         // PLAN: assumed `prepare::tool::field_press(session, form, press)` (pdf-forms-w9).
         Owner::PrepareField { .. } => crate::prepare::tool::field_press(session, cx.form, press),
         // The Edit text families' presses, a modified press first taking it for the objects selected together.
@@ -1231,6 +1256,15 @@ fn route_press(
             }
         }
     }
+}
+
+/// Where a primary press on guide `id` has taken it, as the move to ask for.
+fn guide_dragged(session: &PageSession, press: &PagePress, id: usize, cx: &PageBodyCx<'_>, body: &PageBody<'_>) -> Option<guides::GuideMove> {
+    let id = u64::try_from(id).ok()?;
+    let guide = cx.guides.iter().find(|g| g.id == id)?;
+    let xf = session.page_xform(press.page, cx.geometry(body))?;
+    let position = guides::drag_position(&xf, guide, &press.phase)?;
+    Some(guides::GuideMove { id, position })
 }
 
 /// Request the clipboard at a page-space menu point.
@@ -1336,7 +1370,13 @@ fn page_before(ui: &mut egui::Ui, body: &PageBody<'_>, callbacks: &mut PageCallb
         if matches!(press.phase, PressPhase::Down { .. }) {
             session.all_text = false;
         }
-        route_press(ui, session, press, &parts, cx, body, out);
+        if let Owner::Guide { id } = press.owner
+            && pressed_by(&press.phase, PointerButton::Primary)
+        {
+            out.guide_move = guide_dragged(session, press, id, cx, body);
+        } else {
+            route_press(ui, session, press, &parts, cx, body, out);
+        }
     }
     if let Some(at) = parts_out.context {
         background_context(ui, session, cx, body, at);
@@ -1679,8 +1719,21 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
 ///
 /// It records the pass's facts on the view for readers between frames (`textures`, `spacing`, the viewport, the
 /// canvas view, the middle-button scroll); nothing in the next pass reads them to compute its result.
-#[allow(clippy::cognitive_complexity)]
 pub fn document_area_at(app: &mut PdfCraftApp, index: usize, rect: Rect, ui: &mut egui::Ui) -> Option<PageViewOutput> {
+    // With the rulers shown, the pages take the room inside them: a press on a ruler never reaches the page view.
+    let strips = rulers::layout(app, index, ui, rect);
+    // The rulers take their input before the page view, which keeps Tab for itself once it has the focus.
+    let ruler_input = strips.and_then(|strips| rulers::input(app, index, ui, &strips));
+    let out = pages_at(app, index, strips.map_or(rect, |s| s.pages), ui);
+    if let Some(strips) = strips.filter(|_| out.is_some()) {
+        rulers::show(app, index, ui, &strips, ruler_input);
+    }
+    out
+}
+
+/// The pages of the tab at `index` in `rect`, as [`document_area_at`] draws them.
+#[allow(clippy::cognitive_complexity)]
+fn pages_at(app: &mut PdfCraftApp, index: usize, rect: Rect, ui: &mut egui::Ui) -> Option<PageViewOutput> {
     // The seam returns `None` for a tab that closes, has no pages or shows the Organize grid: no page view runs there,
     // and `PageViewOutput` cannot be built outside its crate.
     // The Search panel closed: its search moves to the find bar.
@@ -1753,6 +1806,7 @@ pub fn document_area_at(app: &mut PdfCraftApp, index: usize, rect: Rect, ui: &mu
     let form = doc.form.clone();
     let guides = if app.views[index].show_guides { app.session.guides(doc_id, None).unwrap_or_default() } else { Vec::new() };
     let grid = app.views[index].show_grid.then(|| crate::grid_prefs::effective(&app.session));
+    let view_rulers = app.views[index].show_rulers;
     let paper = app.session.reading_colors(doc_id).and_then(|c| c.params).map_or(Color32::WHITE, |p| {
         let [r, g, b] = p.background;
         Color32::from_rgb(r, g, b)
@@ -1902,6 +1956,7 @@ pub fn document_area_at(app: &mut PdfCraftApp, index: usize, rect: Rect, ui: &mu
         find_marks: &find_marks,
         guides: &guides,
         grid,
+        rulers: view_rulers,
         table_preview: table_preview.as_ref(),
     };
     let source = DocPages::new(&app.session, doc_id).rotated(state.rotation).revisions(revisions).reports(reports);
@@ -1944,6 +1999,10 @@ pub fn document_area_at(app: &mut PdfCraftApp, index: usize, rect: Rect, ui: &mu
     }
     if let Some(action) = body_out.action.take() {
         view.pending_action = Some(action);
+    }
+    if let Some(moved) = body_out.guide_move.take() {
+        view.guide_drag = Some(moved.id);
+        view.guide_move = Some(moved);
     }
     match view.session.pending_page.take() {
         Some((page, Some(rect))) => view.reveal_rect(page, rect, info),

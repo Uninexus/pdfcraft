@@ -614,7 +614,8 @@ pub(crate) fn edit_text_press(
         | Owner::Field { .. }
         | Owner::PrepareField { .. }
         | Owner::SignTab { .. }
-        | Owner::Badge { .. } => None,
+        | Owner::Badge { .. }
+        | Owner::Guide { .. } => None,
     }
 }
 

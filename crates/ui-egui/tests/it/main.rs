@@ -115,6 +115,7 @@ mod redact_pattern;
 mod reference_xobjects_ui;
 mod reload;
 mod role_class_map;
+mod rulers;
 mod scan_clean;
 mod script_noop;
 mod search_open_docs;

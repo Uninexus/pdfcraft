@@ -255,6 +255,9 @@ const ALL_COMMANDS: &[CommandSpec] = &[
     c("view.clear_guides", "Clear Guides", None, None, Document, "eraser"),
     // View > Show Grid: the page grid of Preferences > Grid (view state, never saved or printed) drawn over the pages.
     c("view.show_grid", "Show Grid", None, None, Document, "ruler"),
+    // View > Show Rulers: a ruler along the top and left of the document area, in the measuring units, to drag guides from
+    // (view state, never saved or printed).
+    c("view.show_rulers", "Show Rulers", None, None, Document, "ruler"),
     c("view.layout.cover", "Show cover page in two-page view", None, None, TwoPageView, "bookmark"),
     // Acrobat's view modes, a page display and a zoom at once (the rail's Page display menu).
     c("view.fit_width_scrolling", "Fit to width scrolling", None, None, Document, "swap_horizontal"),
@@ -670,7 +673,7 @@ mod tests {
 
     #[test]
     fn the_guide_commands_are_registered_for_the_palette_and_need_a_document() {
-        for id in ["view.show_guides", "view.clear_guides", "view.show_grid"] {
+        for id in ["view.show_guides", "view.clear_guides", "view.show_grid", "view.show_rulers"] {
             let spec = command(id).unwrap_or_else(|| panic!("{id} is not registered"));
             assert!(matches!(spec.needs, Needs::Document), "{id}");
         }
@@ -679,6 +682,7 @@ mod tests {
         assert_eq!(command("view.show_guides").unwrap().label, "Show Guides");
         assert_eq!(command("view.clear_guides").unwrap().label, "Clear Guides");
         assert_eq!(command("view.show_grid").unwrap().label, "Show Grid");
+        assert_eq!(command("view.show_rulers").unwrap().label, "Show Rulers");
     }
 
     #[test]

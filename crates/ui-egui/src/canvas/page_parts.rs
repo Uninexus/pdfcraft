@@ -43,6 +43,8 @@ pub(crate) enum Owner {
     SignTab { field: usize },
     /// A signed signature's validation badge, by its index on the page: shows the verdict tooltip on hover.
     Badge { index: usize },
+    /// A ruler guide (View > Show Rulers lets it be dragged), by its id.
+    Guide { id: usize },
 }
 
 const COMMENT: PartKey = PartKey::new("comment");
@@ -61,6 +63,7 @@ const FRAME: PartKey = PartKey::new("frame");
 const ADDED: PartKey = PartKey::new("added");
 const SIGN_TAB: PartKey = PartKey::new("sign_tab");
 const BADGE: PartKey = PartKey::new("badge");
+const GUIDE: PartKey = PartKey::new("guide");
 
 /// `high` in the upper 32 bits of a part index and `low` in the lower; `None` when either does not fit, so no two
 /// things ever share an index.
@@ -95,6 +98,7 @@ impl Owner {
             Owner::Added { index } => (ADDED, pack(page, index)?),
             Owner::SignTab { field } => (SIGN_TAB, pack(page, field)?),
             Owner::Badge { index } => (BADGE, pack(page, index)?),
+            Owner::Guide { id } => (GUIDE, pack(page, id)?),
         };
         Some(key.at(index))
     }
@@ -118,6 +122,7 @@ impl Owner {
             ADDED => paged(Owner::Added { index: low }),
             SIGN_TAB => paged(Owner::SignTab { field: low }),
             BADGE => paged(Owner::Badge { index: low }),
+            GUIDE => paged(Owner::Guide { id: low }),
             _ => None,
         }
     }

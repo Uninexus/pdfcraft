@@ -230,6 +230,11 @@ impl PdfCraftApp {
                 "off" => v.show_guides = false,
                 _ => return Err("guides must be on or off".into()),
             },
+            ("rulers", Some(v)) => match value {
+                "on" => v.show_rulers = true,
+                "off" => v.show_rulers = false,
+                _ => return Err("rulers must be on or off".into()),
+            },
             ("grid", Some(v)) => match value {
                 "on" => v.show_grid = true,
                 "off" => v.show_grid = false,
