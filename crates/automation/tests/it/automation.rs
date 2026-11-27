@@ -16592,3 +16592,35 @@ fn link_position_through_tools() {
         assert!(matches!(a.call("link_add", &args), Err(ToolError::InvalidArgs(_))), "{args}");
     }
 }
+
+/// An approval signature that locks the fields is broken by a later change to any of them; without the lock, filling
+/// in after signing is allowed.
+#[test]
+fn signing_can_lock_the_form_fields() {
+    let dir = workdir("sign-lock");
+    let mut a = auto(&dir);
+    ok(&mut a, "sign_id_create", json!({ "name": "Ada Lovelace", "key": "p256", "password": "secret12", "path": "ada.p12" }));
+    for lock in [true, false] {
+        let doc = ok(&mut a, "doc_open", json!({ "path": "a.pdf" }))["doc"].as_u64().unwrap();
+        let text = ok(&mut a, "form_add_field", json!({ "doc": doc, "page": 1, "type": "text", "rect": [20, 100, 180, 120] }))["field"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let out = format!("signed-{lock}.pdf");
+        let args =
+            json!({ "doc": doc, "id": "ada.p12", "password": "secret12", "page": 1, "rect": [20, 200, 180, 250], "lock_fields": lock, "out": out });
+        ok(&mut a, "sign_document", args);
+        let before = ok(&mut a, "sign_list", json!({ "doc": doc }));
+        let mut values = serde_json::Map::new();
+        values.insert(text, json!("changed after signing"));
+        ok(&mut a, "form_fill", json!({ "doc": doc, "values": values }));
+        ok(&mut a, "doc_save", json!({ "doc": doc, "path": out }));
+        let after = ok(&mut a, "sign_list", json!({ "doc": doc }));
+        let status = |list: &Value| list["signatures"][0]["status"].as_str().unwrap().to_owned();
+        assert_ne!(status(&before), "invalid", "{before}");
+        assert_eq!(status(&after) == "invalid", lock, "lock {lock}: {after}");
+    }
+    let doc = ok(&mut a, "doc_open", json!({ "path": "a.pdf" }))["doc"].as_u64().unwrap();
+    let both = json!({ "doc": doc, "id": "ada.p12", "password": "secret12", "certify": "form_fill", "lock_fields": true, "out": "no.pdf" });
+    assert!(matches!(a.call("sign_document", &both), Err(ToolError::InvalidArgs(_))));
+}

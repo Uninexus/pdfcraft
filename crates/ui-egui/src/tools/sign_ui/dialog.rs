@@ -524,6 +524,11 @@ fn sign_as(
             Select::new(tl!("Permitted actions after certifying"), Bind::bound(&mut permitted), &entries).show(ui);
         });
         d.certify = Some(permitted);
+    } else {
+        Checkbox::new(Bind::bound(&mut d.lock_fields)).label(tl!("Lock all form fields after signing").to_owned()).show(ui);
+        if d.lock_fields {
+            caption(tl!("A later change to any field makes this signature invalid. PdfCraft does not yet stop you from typing in them.")).show(ui);
+        }
     }
     for (label, value) in [(tl!("Reason"), &mut d.reason), (tl!("Location"), &mut d.location)] {
         Field::new(label).show(ui, |ui, _| {
