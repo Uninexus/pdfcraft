@@ -254,7 +254,8 @@ fn follow_theme_takes_one_colour_back_to_the_theme_and_leaves_the_other() {
     assert!(h.state().required_field_color.is_some(), "the other colour was not reset");
 }
 
-/// A check box row is one line high, so a label that wraps is cut off. Every English check box label fits on one.
+/// Every English check box label fits on one line, so Preferences stay easy to scan. A wrapped label is no longer cut off
+/// (craft-libs gives it the height of its lines and tests that): this guards only the length of the wording.
 #[test]
 fn no_check_box_label_is_cut_off() {
     use egui_kittest::kittest::NodeT as _;
