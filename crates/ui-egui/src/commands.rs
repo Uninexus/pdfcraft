@@ -796,6 +796,13 @@ impl PdfCraftApp {
                 let Some(tool) = crate::comments::CommentTool::from_command(tool) else { return Some(false) };
                 self.comment_prefs.group_tool[tool.group()] = tool;
                 self.quick_tool = crate::QuickTool::Comment(tool);
+                // A sticky note picked by keys, or with a caret to put it at, is placed from the page: it takes the keys.
+                if tool == crate::comments::CommentTool::Note
+                    && let Some(view) = active.and_then(|i| self.views.get_mut(i))
+                    && (self.keyboard_last || view.caret_browsing())
+                {
+                    view.take_keys();
+                }
                 // Acrobat opens the Comments panel with the commenting tools, unless the user closed it.
                 if self.right().is_none() && !self.comments_panel_closed {
                     self.choose_right_panel(Some(RightPanel::Comments));

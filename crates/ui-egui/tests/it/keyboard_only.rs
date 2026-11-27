@@ -511,3 +511,81 @@ fn caret_browsing_selects_across_pages() {
     shift(&mut h, Key::ArrowLeft);
     assert_eq!(selected(&h), "one");
 }
+
+/// The page's comments as (subtype, contents, rect in user space).
+fn page_comments(h: &H) -> Vec<(String, Option<String>, [f32; 4])> {
+    let app = h.state();
+    let doc = app.session.get(app.views[0].id).unwrap();
+    doc.info.annotations.iter().map(|a| (a.subtype.clone(), a.contents.clone(), a.rect)).collect()
+}
+
+fn marker(h: &H) -> Option<egui::Pos2> {
+    h.state().views[0].note_marker_screen_pos()
+}
+
+/// The Sticky note tool by keys: a marker in the middle of the page view, moved by the arrows, further with Shift, and
+/// announced; Escape puts it away and leaves the tool.
+#[test]
+fn a_sticky_note_marker_moves_by_keys_and_escape_cancels_it() {
+    let mut h = open(lines());
+    support::settle(&mut h);
+    assert!(marker(&h).is_none());
+    tab_to(&mut h, Role::Canvas, "Pages");
+    palette(&mut h, "comment.note");
+    assert_eq!(focused(&h), Some((Role::Canvas, "Pages".into())));
+    let start = marker(&h).expect("a marker on the page");
+    assert!(h.state().views[0].viewport_rect().shrink(40.0).contains(start), "{start:?} is not mid view");
+
+    assert!(announces(&mut h, Modifiers::NONE, Key::ArrowRight, "Note marker: page 1, middle"), "the place is announced");
+    let near = marker(&h).unwrap();
+    assert!(near.x > start.x && near.y == start.y, "{start:?} {near:?}");
+    shift(&mut h, Key::ArrowRight);
+    let far = marker(&h).unwrap();
+    assert!(far.x - near.x > near.x - start.x, "Shift steps further: {start:?} {near:?} {far:?}");
+    press(&mut h, Key::ArrowUp);
+    assert!(marker(&h).unwrap().y < far.y);
+    for _ in 0..40 {
+        shift(&mut h, Key::ArrowLeft);
+    }
+    for _ in 0..40 {
+        shift(&mut h, Key::ArrowUp);
+    }
+    assert!(announces(&mut h, Modifiers::NONE, Key::ArrowUp, "Note marker: page 1, top left"), "it stays on the page");
+
+    press(&mut h, Key::Escape);
+    h.run_steps(4);
+    assert!(marker(&h).is_none());
+    assert_eq!(h.state().quick_tool, pdfcraft_ui_egui::QuickTool::Select);
+    assert!(page_comments(&h).is_empty());
+}
+
+/// Enter places the note at the marker and opens its text, as a click does; with caret browsing on the marker starts at
+/// the caret.
+#[test]
+fn a_sticky_note_is_placed_at_the_caret_by_keys() {
+    let mut h = open(lines());
+    support::settle(&mut h);
+    tab_to(&mut h, Role::Canvas, "Pages");
+    press(&mut h, Key::F7);
+    press(&mut h, Key::ArrowDown);
+    press(&mut h, Key::End);
+
+    palette(&mut h, "comment.note");
+    // The Comments panel opens beside the pages, which moves them: the caret is read where it stands now.
+    let caret = h.state().views[0].caret_screen_rect().expect("a caret");
+    let at = marker(&h).expect("a marker on the page");
+    assert!(at.distance(caret.center_top()) < 3.0, "{at:?} is not at the caret {caret:?}");
+    press(&mut h, Key::Enter);
+    h.run_steps(4);
+    assert!(marker(&h).is_none(), "the note's text is being written");
+    assert!(h.state().views[0].session.comments.composer.is_some(), "the composer opened");
+    type_text(&mut h, "Here");
+    command(&mut h, Key::Enter);
+    h.run_steps(8);
+    let comments = page_comments(&h);
+    assert_eq!(comments.len(), 1, "{comments:?}");
+    let (subtype, contents, rect) = &comments[0];
+    assert_eq!((subtype.as_str(), contents.as_deref()), ("Text", Some("Here")));
+    // The second line stands about 126 points up the 200 point page, and its end is right of the middle.
+    assert!(rect[0] > 100.0 && rect[3] > 110.0 && rect[3] < 160.0, "{rect:?}");
+}

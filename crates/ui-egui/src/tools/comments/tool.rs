@@ -1,6 +1,6 @@
 use craft::behavior::kurbo::Point;
 use craft::behavior::{CancelReason, Cursor, CursorIcon, EditEvent, PointerButton, PressPhase};
-use craft::keymap::Mods;
+use craft::keymap::{Key, Mods};
 use craft::review::ui::annotate::{
     AnnotateTool, AnnotateWords, DrawOptions, EmptyPress, EraseMode, FarNudge, HandlesWhileDrawing, InkStrokes, MarkupPress, OpenOn, SelectOptions,
     ToggleMods,
@@ -13,6 +13,7 @@ use egui::Pos2;
 use super::bridge::{self, PageMap};
 use super::state::{Composer, ComposerKind, PageCx};
 use super::{CommentPrefs, CommentTool, CommentView, DocInfo, Edit, MAX_LINE_WIDTH, QuickTool};
+use crate::canvas::note_marker::{MARKER_KEYS, MarkerKey};
 use crate::canvas::page_parts::{Owner, PagePress};
 use crate::canvas::{PageGeometry, PageSession};
 
@@ -52,6 +53,8 @@ pub(crate) struct CommentsTool<'a> {
     hidden: bool,
     caret: Option<CaretSnap>,
     image_aspect: Option<(craft::review::AnnotationId, f64)>,
+    /// Where the keys of the sticky note marker are queued, while it shows.
+    marker: Option<&'a mut Vec<MarkerKey>>,
 }
 
 impl<'a> CommentsTool<'a> {
@@ -68,6 +71,7 @@ impl<'a> CommentsTool<'a> {
         CommentsTool {
             annotate,
             beneath: None,
+            marker: None,
             paste,
             placed: None,
             notice: None,
@@ -81,6 +85,12 @@ impl<'a> CommentsTool<'a> {
             caret: None,
             image_aspect: None,
         }
+    }
+
+    /// Where the sticky note marker's keys are queued: `None` while there is no marker.
+    pub(crate) fn marker(mut self, keys: Option<&'a mut Vec<MarkerKey>>) -> Self {
+        self.marker = keys;
+        self
     }
 
     /// The tool a press no comment takes goes on to: the text selection, or Fill & Sign's placing.
@@ -142,6 +152,32 @@ impl<'a> CommentsTool<'a> {
     /// release and cancel are its, else the tool's beneath.
     fn annotating(&self) -> bool {
         *self.pressed || !self.annotate.drawing().is_empty()
+    }
+
+    /// Queues the sticky note marker's move, placement or cancelling for `key`; false without a marker, or while a
+    /// comment is selected, which the arrows then move.
+    fn marker_key(&mut self, key: &ToolKey) -> bool {
+        let Some(keys) = self.marker.as_mut() else { return false };
+        if !self.annotate.selected.is_empty() {
+            return false;
+        }
+        let queued = match key {
+            ToolKey::Nudge { direction, mods, .. } => MarkerKey::Move { direction: *direction, far: mods.shift },
+            ToolKey::Kept(chord) if MARKER_KEYS.contains(chord) => {
+                let direction = match chord.key {
+                    Key::Left => egui::Vec2::LEFT,
+                    Key::Right => egui::Vec2::RIGHT,
+                    Key::Up => egui::Vec2::UP,
+                    _ => egui::Vec2::DOWN,
+                };
+                MarkerKey::Move { direction, far: true }
+            }
+            ToolKey::Submit => MarkerKey::Place,
+            ToolKey::Cancel => MarkerKey::Cancel,
+            _ => return false,
+        };
+        keys.push(queued);
+        true
     }
 
     fn place(&mut self, page: usize, at: Pos2) {
@@ -329,9 +365,13 @@ impl CanvasTool for CommentsTool<'_> {
         *self.pressed = false;
     }
 
-    /// The comment tool's claims; when it makes none, those of the tool beneath (the text caret's keys).
+    /// The comment tool's claims, and the sticky note marker's keys while it shows; when the comment tool makes none,
+    /// those of the tool beneath (the text caret's keys).
     fn claims(&self) -> ToolClaims {
         let own = self.annotate.claims();
+        if self.marker.is_some() && own == ToolClaims::NONE {
+            return own.keys(MARKER_KEYS);
+        }
         match &self.beneath {
             Some(beneath) if own == ToolClaims::NONE => beneath.claims(),
             _ => own,
@@ -360,11 +400,18 @@ impl CanvasTool for CommentsTool<'_> {
             if matches!(self.quick, QuickTool::Select) {
                 return self.beneath.as_mut().is_some_and(|beneath| beneath.key(key, cx));
             }
+            // The marker's Escape puts it away and leaves the tool at once.
+            if self.marker_key(key) {
+                return true;
+            }
             if matches!(self.quick, QuickTool::Comment(_)) {
                 *self.done = true;
                 return true;
             }
             return false;
+        }
+        if self.marker_key(key) {
+            return true;
         }
         // Keys the comment tool leaves go on to the text beneath Select: the caret's.
         self.annotate.key(key, cx) || matches!(self.quick, QuickTool::Select) && self.beneath.as_mut().is_some_and(|beneath| beneath.key(key, cx))
