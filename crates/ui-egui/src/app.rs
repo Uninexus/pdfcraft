@@ -309,6 +309,7 @@ impl PdfCraftApp {
             last_right: RightPanel::Comments,
             notice_inset: 0.0,
             toolbar_tools_open: true,
+            keyboard_last: false,
             zoom_field: None,
             zoom_held: false,
             left_rulers: Vec::new(),

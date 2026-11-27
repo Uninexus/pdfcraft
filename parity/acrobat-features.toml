@@ -9086,11 +9086,17 @@ title = "Full keyboard operation of the app"
 area = "M"
 tier = "P0"
 milestone = "M14"
-status = "planned"
+status = "partial"
 commands = []
 tools = []
-evidence = []
-notes = ""
+evidence = [
+    "crates/ui-egui/tests/it/keyboard_only.rs::open_read_zoom_use_the_menu_and_a_tool_then_switch_tabs_and_save_by_keys",
+    "crates/ui-egui/tests/it/keyboard_only.rs::comment_fill_a_form_and_use_the_side_panels_and_dialogs_by_keys",
+    "crates/ui-egui/tests/it/keyboard_only.rs::the_command_palette_runs_the_command_it_lists",
+    "crates/ui-egui/tests/it/keyboard_only.rs::the_page_view_shows_where_the_keyboard_is",
+    "crates/ui-egui/tests/it/accessibility.rs::tab_goes_round_the_window_without_losing_the_focus_or_hiding_panels",
+]
+notes = "By keys alone: open from Home, move between pages, zoom, the menu bar (F10), the Tools pane, the command palette, a sticky note written in the Comments panel, filling a form, Preferences and Print, opening a side panel from the palette, the View menu or F4 and acting on a row, switching tabs and saving. Missing: the side panel rail's buttons take the focus but Enter and Space do nothing; the rail buttons and the Tools list show no focus ring; text can only be selected by Select All, so a part of a page cannot be highlighted, and in a continuous view of several pages the markup tools do nothing with a Select All; a sticky note cannot be placed at a chosen point; closing Preferences opened from the title bar button leaves nothing focused. Not audited: tools and dialogs beyond these."
 
 [[feature]]
 id = "a11y.checker"

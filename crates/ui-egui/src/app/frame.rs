@@ -8,7 +8,14 @@ impl PdfCraftApp {
     /// the runtime hands over what it gathered since the last frame (the commands fired) and takes this frame's root values,
     /// command states and host. eframe calls the hook once per frame, before the first pass, so
     /// a second pass of the same frame runs on what this call set and fires nothing twice.
-    pub(super) fn prepare_raw_input(&mut self, ctx: &egui::Context, _raw: &mut egui::RawInput) {
+    pub(super) fn prepare_raw_input(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
+        for event in &raw.events {
+            match event {
+                egui::Event::Key { pressed: true, .. } => self.keyboard_last = true,
+                egui::Event::PointerButton { pressed: true, .. } => self.keyboard_last = false,
+                _ => {}
+            }
+        }
         // Asked before the framework moves the focus for this input: only a Tab pressed on the zoom field counts, not the
         // one that brings the focus to it. The press itself is read in the pass, where automation's input has arrived too.
         self.zoom_held = self.zoom_field.is_some_and(|id| craft::ui::runtime::focus::has(ctx, id));

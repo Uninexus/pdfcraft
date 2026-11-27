@@ -1731,6 +1731,10 @@ pub fn document_area_at(app: &mut PdfCraftApp, index: usize, rect: Rect, ui: &mu
     }
     if let Some(out) = &out {
         page_end::show(app, index, ui, rect, out.canvas.response.id);
+        // The page view draws no ring of its own: show where the keyboard is when it was brought here by keys.
+        if app.keyboard_last && focus::has(ui.ctx(), out.canvas.response.id) {
+            page_end::ring(ui, rect);
+        }
     }
     out
 }
