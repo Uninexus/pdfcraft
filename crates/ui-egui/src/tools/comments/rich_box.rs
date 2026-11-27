@@ -68,6 +68,8 @@ pub struct RichBox {
     border: f64,
     /// The editor takes the keyboard in its next pass.
     focus: bool,
+    /// The text has the keyboard.
+    in_text: bool,
     /// The bar button with the keyboard, by its place in the bar.
     in_bar: Option<usize>,
     /// The bar button to give the keyboard to in the next pass.
@@ -213,6 +215,30 @@ impl RichBox {
         self.typing = at.checked_sub(1).and_then(|i| self.styles.get(i)).or_else(|| self.styles.first()).copied().unwrap_or_default();
     }
 
+    /// A key pressed while the box, its text or its bar, has the keyboard: Ctrl+B and Ctrl+I (Command on macOS) bold
+    /// and italicise, and in the bar Tab and Shift+Tab walk the buttons, Escape goes back to the text and Cmd+Enter
+    /// commits. False for a key the box leaves be.
+    fn take_key(&mut self, ctx: &egui::Context, key: egui::Key, modifiers: egui::Modifiers) -> bool {
+        if let Some(button) = self.in_bar {
+            if self.bar_key(button, key, modifiers) {
+                return true;
+            }
+        } else if !self.in_text {
+            return false;
+        }
+        if !modifiers.command || modifiers.shift || modifiers.alt {
+            return false;
+        }
+        let italic = match key {
+            egui::Key::B => false,
+            egui::Key::I => true,
+            _ => return false,
+        };
+        let on = self.toggle(italic);
+        say(ctx, italic, on);
+        true
+    }
+
     /// A key pressed with the keyboard on bar button `button`; false when the bar leaves it be.
     fn bar_key(&mut self, button: usize, key: egui::Key, modifiers: egui::Modifiers) -> bool {
         // Post (2) is passed over while there is nothing to post.
@@ -323,6 +349,7 @@ fn adopt(session: &mut PageSession, cx: &BoxCx<'_>) {
         color,
         border,
         focus: true,
+        in_text: false,
         in_bar: None,
         wanted: None,
         commit: false,
@@ -585,30 +612,24 @@ fn say(ctx: &egui::Context, italic: bool, on: bool) {
     announce(ctx, words.to_string(), Politeness::Polite);
 }
 
-/// The keys a box being typed into takes from the frame's input before the app's shortcuts read it: Ctrl+B and Ctrl+I
-/// (Command on macOS) to bold and italicise, and, in the bar, Tab and Shift+Tab to walk its buttons, Escape to go back
-/// to the text and Cmd+Enter to commit.
+fn open_box(app: &mut crate::PdfCraftApp) -> Option<&mut RichBox> {
+    app.active.and_then(|i| app.views.get_mut(i)).and_then(|view| view.session.comments.rich.as_mut())
+}
+
+/// The keys a box being typed into takes from the frame's input before the app's shortcuts read it
+/// ([`RichBox::take_key`]).
 pub(crate) fn take_keys(app: &mut crate::PdfCraftApp, ctx: &egui::Context, raw: &mut egui::RawInput) {
-    let Some(open) = app.active.and_then(|i| app.views.get_mut(i)).and_then(|view| view.session.comments.rich.as_mut()) else { return };
+    let Some(open) = open_box(app) else { return };
     raw.events.retain(|event| {
         let egui::Event::Key { key, pressed: true, modifiers, .. } = event else { return true };
-        if let Some(button) = open.in_bar
-            && open.bar_key(button, *key, *modifiers)
-        {
-            return false;
-        }
-        if !modifiers.command || modifiers.shift || modifiers.alt {
-            return true;
-        }
-        let italic = match key {
-            egui::Key::B => false,
-            egui::Key::I => true,
-            _ => return true,
-        };
-        let on = open.toggle(italic);
-        say(ctx, italic, on);
-        false
+        !open.take_key(ctx, *key, *modifiers)
     });
+}
+
+/// The same keys sent through the control channel, whose input joins the frame after the app has read it: true when
+/// the box took the key, which then goes no further.
+pub(crate) fn control_key(app: &mut crate::PdfCraftApp, ctx: &egui::Context, key: egui::Key, modifiers: egui::Modifiers) -> bool {
+    open_box(app).is_some_and(|open| open.take_key(ctx, key, modifiers))
 }
 
 /// What the editor reads of the document and the view in a pass.
@@ -626,8 +647,8 @@ pub(crate) fn show(ui: &mut egui::Ui, body: &PageBody<'_>, session: &mut PageSes
     let &BoxCx { info, prefs, .. } = cx;
     adopt(session, cx);
     let open = session.comments.rich.as_mut()?;
-    // Known again once the bar is drawn: a box scrolled out of view takes no keys.
-    open.in_bar = None;
+    // Known again once the box is drawn: one scrolled out of view takes no keys.
+    (open.in_text, open.in_bar) = (false, None);
     let placed = body.pages.iter().find(|p| p.page == open.page)?;
     let page = info.pages.get(open.page)?;
     let zoom = placed.scale;
@@ -664,10 +685,12 @@ pub(crate) fn show(ui: &mut egui::Ui, body: &PageBody<'_>, session: &mut PageSes
     let editor = TextEditor::new(tl!("Type text"), &mut host, Bind::bound(&mut selection)).esc_commits(false).mode(EditorMode::FieldLines);
     let out = if fresh { editor.request_focus(FocusRequest::Take) } else { editor }.show_at(ui, rect);
     let (changed, moved) = (out.changed, out.selection_changed);
+    let in_text = craft::ui::runtime::focus::has(ui.ctx(), out.response.id);
     let ended = out.ended.filter(|end| !(fresh && *end == EditorEnd::Commit));
     ui.set_clip_rect(clip);
     let open = session.comments.rich.as_mut()?;
     open.selection = selection;
+    open.in_text = in_text;
     if moved && !changed {
         open.follow_caret();
     }
