@@ -13448,6 +13448,18 @@ fn objects_align_and_distribute_through_the_tool_in_one_undo_step() {
     assert!((first - second).abs() < 0.05, "{spread:?}");
     assert_eq!((spread[0], spread[2]), (start[0], start[2]), "the outer objects stay");
     assert!(a.call("objects_align", &json!({"doc":doc,"page":1,"objects":[{"kind":"added","index":1}],"kind":"left"})).is_err());
+    // Centred on a turned page, the block is midway across what the reader sees; object_list's rectangles are as shown.
+    ok(&mut a, "page_rotate", json!({"doc":doc,"pages":[1],"degrees":90}));
+    let shown_width = ok(&mut a, "doc_info", json!({"doc":doc}))["pages"][0]["width"].as_f64().unwrap();
+    let before = rects(&mut a);
+    ok(&mut a, "objects_align", json!({"doc":doc,"page":1,"objects":added,"kind":"page_center"}));
+    let centred = rects(&mut a);
+    let bounds = |r: &[[f64; 4]], lo: usize| {
+        (r.iter().map(|v| v[lo]).fold(f64::INFINITY, f64::min) + r.iter().map(|v| v[lo + 2]).fold(f64::NEG_INFINITY, f64::max)) / 2.0
+    };
+    assert!((bounds(&centred, 0) - shown_width / 2.0).abs() < 0.05, "midway across the page as shown: {centred:?}");
+    assert!((bounds(&centred, 1) - bounds(&before, 1)).abs() < 0.05, "not moved down it: {before:?} {centred:?}");
+    ok(&mut a, "objects_align", json!({"doc":doc,"page":1,"objects":[{"kind":"added","index":1}],"kind":"page_middle"}));
 }
 
 /// Edit a PDF's ⌘A, ⌘C / ⌘X and ⌘V headlessly: every object of a page copied, pasted into

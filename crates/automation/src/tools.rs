@@ -367,10 +367,10 @@ fn all_tools() -> Vec<ToolDef> {
                 "all":{"type":"boolean","description":"Every object on the page, instead of objects."},
                 "offset":{"type":"array","items":{"type":"number"},"minItems":2,"maxItems":2},
                 "generation":{"type":"integer","minimum":0,"description":"Use generation returned by object_list to reject a stale selection."}}), &["doc","page","offset"])),
-        t("objects_align", "Align or distribute objects", "Align 2 or more (distribute: 3 or more) references from object_list, or with all: true every object on the page, as one undo step. kind left/center/right/top/middle/bottom lines them up on the selection's bounds in displayed page space; distribute_horizontal/distribute_vertical gives equal gaps between them and keeps the outermost two where they are. Returns how many objects moved (0 when they were already in place). Same limits and refusals as object_move; a bad or stale reference changes nothing.")
+        t("objects_align", "Align or distribute objects", "Align 2 or more (distribute: 3 or more) references from object_list, or with all: true every object on the page, as one undo step. kind left/center/right/top/middle/bottom lines them up on the selection's bounds in displayed page space; distribute_horizontal/distribute_vertical gives equal gaps between them and keeps the outermost two where they are; page_center/page_middle move 1 or more objects as one block to the middle of the page across or down. Returns how many objects moved (0 when they were already in place). Same limits and refusals as object_move; a bad or stale reference changes nothing.")
             .with(schema(json!({"doc":doc(),"page":{"type":"integer","minimum":1},
-                "kind":{"type":"string","enum":["left","center","right","top","middle","bottom","distribute_horizontal","distribute_vertical"]},
-                "objects":{"type":"array","minItems":2,"maxItems":1000,"uniqueItems":true,"items":{
+                "kind":{"type":"string","enum":["left","center","right","top","middle","bottom","distribute_horizontal","distribute_vertical","page_center","page_middle"]},
+                "objects":{"type":"array","minItems":1,"maxItems":1000,"uniqueItems":true,"items":{
                     "type":"object","properties":{"kind":{"type":"string","enum":["added","text","image"]},"index":{"type":"integer","minimum":1}},"required":["kind","index"],"additionalProperties":false}},
                 "all":{"type":"boolean","description":"Every object on the page, instead of objects."},
                 "generation":{"type":"integer","minimum":0,"description":"Use generation returned by object_list to reject a stale selection."}}), &["doc","page","kind"])),

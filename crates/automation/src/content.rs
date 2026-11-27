@@ -424,8 +424,9 @@ impl Automation {
         let page = self.page(a)?;
         let targets = self.object_targets(a, page)?;
         let name = a.opt_str("kind")?.ok_or_else(|| bad("kind is required"))?;
-        let op = pdfcraft_engine::ArrangeOp::from_name(name)
-            .ok_or_else(|| bad("kind must be left, center, right, top, middle, bottom, distribute_horizontal or distribute_vertical"))?;
+        let op = pdfcraft_engine::ArrangeOp::from_name(name).ok_or_else(|| {
+            bad("kind must be left, center, right, top, middle, bottom, distribute_horizontal, distribute_vertical, page_center or page_middle")
+        })?;
         let edit = self.doc(a)?.arrange_objects(page, &targets, op).map_err(failed)?;
         let Some(edit) = edit else {
             let mut result = self.applied(a)?;

@@ -223,6 +223,15 @@ fn single(session: &PageSession, page: usize) -> Option<ObjectTarget> {
     }
 }
 
+/// What Center on page moves: the objects selected together, else the one picture (added with this app or part of the
+/// page) selected by itself.
+pub(crate) fn centerable(session: &PageSession) -> Option<(usize, Vec<ObjectTarget>)> {
+    session.objects.selection().or_else(|| {
+        let page = session.content.selected.map(|(page, _)| page).or_else(|| session.image_selection.as_ref().map(|s| s.page))?;
+        single(session, page).filter(|t| t.kind != ObjectKind::Text).map(|t| (page, vec![t]))
+    })
+}
+
 fn leave_single(session: &mut PageSession) {
     session.content.selected = None;
     session.image_selection = None;

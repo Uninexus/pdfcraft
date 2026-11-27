@@ -158,6 +158,8 @@ const ALL_GROUPS: &[ToolGroup] = &[
                             "arrange.align_bottom",
                             "arrange.distribute_horizontal",
                             "arrange.distribute_vertical",
+                            "arrange.center_page_horizontal",
+                            "arrange.center_page_vertical",
                         ],
                     ),
                     menu_item("Bates numbering", "hash", &["edit.bates", "edit.bates_multi", "edit.bates_remove", "edit.bates_remove_pages"]),

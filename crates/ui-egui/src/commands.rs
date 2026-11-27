@@ -281,7 +281,11 @@ impl PdfCraftApp {
             && (spec.needs != commands::Needs::TwoPageView || self.active.and_then(|i| self.views.get(i)).is_some_and(crate::DocView::cover_applies))
             && match spec.id {
                 arrange if pdfcraft_engine::ArrangeOp::from_command(arrange).is_some() => pdfcraft_engine::ArrangeOp::from_command(arrange)
-                    .is_some_and(|op| self.active.and_then(|i| self.views.get(i)).is_some_and(|v| v.session.objects.count() >= op.needs())),
+                    .is_some_and(|op| {
+                        self.active.and_then(|i| self.views.get(i)).is_some_and(|v| {
+                            if op.on_page() { crate::object_ui::centerable(&v.session).is_some() } else { v.session.objects.count() >= op.needs() }
+                        })
+                    }),
                 "comment.copy" | "comment.export_selected" => {
                     self.active.and_then(|i| self.views.get(i)).is_some_and(|v| v.session.comments.primary().is_some())
                 }
@@ -321,7 +325,14 @@ impl PdfCraftApp {
     fn arrange_selected_objects(&mut self, ctx: &egui::Context, op: pdfcraft_engine::ArrangeOp) -> bool {
         let Some((i, id)) = self.active_ids() else { return false };
         let Some(doc) = self.session.get(id) else { return false };
-        match self.views[i].session.objects.arrange(doc, op) {
+        // One picture selected by itself is not among the objects selected together: place it directly.
+        let alone =
+            (op.on_page() && self.views[i].session.objects.count() == 0).then(|| crate::object_ui::centerable(&self.views[i].session)).flatten();
+        let arranged = match alone {
+            Some((page, targets)) => doc.arrange_objects(page, &targets, op),
+            None => self.views[i].session.objects.arrange(doc, op),
+        };
+        match arranged {
             Ok(Some(edit)) => self.apply_edit(ctx, edit),
             Ok(None) => {
                 self.notify_tr("The objects are already in place");
@@ -340,7 +351,9 @@ impl PdfCraftApp {
             && self.active.is_some()
             && self.command_enabled_by_document(spec)
         {
-            return if op.distributes() {
+            return if op.on_page() {
+                tl!("Select an object first").to_string()
+            } else if op.distributes() {
                 tl!("Select three or more objects first").to_string()
             } else {
                 tl!("Select two or more objects first").to_string()

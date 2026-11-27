@@ -4846,6 +4846,61 @@ fn shrink_the_picture(h: &mut Harness<'static, PdfCraftApp>) {
     h.run_steps(4);
 }
 
+/// A picture selected by itself can be centered on the page, across and then down, each one undo step.
+#[test]
+fn a_selected_picture_is_centered_on_the_page() {
+    let mut png = Vec::new();
+    image::RgbImage::from_pixel(80, 40, image::Rgb([200, 40, 40])).write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).unwrap();
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |cc| {
+        crate::support::install_runtime(&cc.egui_ctx);
+        {
+            let mut app = crate::control::new_app();
+            app.set_option(&egui::Context::default(), "language", "en").unwrap();
+            app.open_bytes(&egui::Context::default(), "picture.png", None, png.clone()).expect("opens");
+            app
+        }
+    });
+    h.run_steps(4);
+    shrink_the_picture(&mut h);
+    let id = h.state().views[0].id;
+    // Off centre: into the lower left quarter.
+    let [x0, y0, x1, y1] = h.state().session.get(id).unwrap().page_images(0)[0].rect;
+    let (w, hh) = (x1 - x0, y1 - y0);
+    let ctx = h.ctx.clone();
+    let change = pdfcraft_engine::ImageEdit::Move([1.0, 1.0, 1.0 + w, 1.0 + hh]);
+    assert!(h.state_mut().apply_edit(&ctx, pdfcraft_engine::Edit::EditPageImage { page: 0, index: 0, change }));
+    assert!(h.execute("edit.edit_text"));
+    h.run_steps(3);
+    let screen = h.state().views[0].page_screen_rect(0).expect("on screen");
+    let page = h.state().session.get(id).unwrap().info.pages[0].clone();
+    let (pw, ph) = (page.width, page.height);
+    let spot =
+        egui::pos2(screen.left() + (1.0 + w as f32 / 2.0) / pw * screen.width(), screen.bottom() - (1.0 + hh as f32 / 2.0) / ph * screen.height());
+    h.hover_at(spot);
+    h.run_steps(1);
+    h.drag_at(spot);
+    h.run_steps(1);
+    h.drop_at(spot);
+    h.run_steps(3);
+    assert!(h.state().views[0].session.image_selection.is_some(), "selected");
+    let middle = |h: &Harness<'static, PdfCraftApp>| {
+        let [x0, y0, x1, y1] = h.state().session.get(id).unwrap().page_images(0)[0].rect;
+        (((x0 + x1) / 2.0) as f32, ((y0 + y1) / 2.0) as f32)
+    };
+    let start = middle(&h);
+    assert!(h.execute("arrange.center_page_horizontal"));
+    h.run_steps(3);
+    let across = middle(&h);
+    assert!((across.0 - pw / 2.0).abs() < 0.5 && (across.1 - start.1).abs() < 0.5, "across only: {start:?} -> {across:?}");
+    assert!(h.execute("arrange.center_page_vertical"));
+    h.run_steps(3);
+    let both = middle(&h);
+    assert!((both.1 - ph / 2.0).abs() < 0.5 && (both.0 - across.0).abs() < 0.5, "then down: {across:?} -> {both:?}");
+    h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Z);
+    h.run_steps(3);
+    assert!((middle(&h).1 - start.1).abs() < 0.5, "one undo takes back one centering");
+}
+
 #[test]
 fn image_right_click_context_menu_items_and_actions() {
     let mut png = Vec::new();
