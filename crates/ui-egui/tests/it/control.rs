@@ -365,6 +365,18 @@ fn close_requested(h: &Harness<'static, PdfCraftApp>) -> bool {
     h.output().viewport_output.values().any(|v| v.commands.iter().any(|c| matches!(c, egui::ViewportCommand::Close)))
 }
 
+/// Preferences is a modal window of its own, which keeps the main window from closing: a quit closes it first.
+#[test]
+fn control_quit_closes_preferences_and_the_window() {
+    let (mut h, c) = harness();
+    ok(&mut h, &c, "ui.command", json!({ "id": "app.preferences" }));
+    h.run_steps(3);
+    assert_eq!(ok(&mut h, &c, "ui.state", json!({}))["dialog"], "preferences");
+    assert_eq!(ok(&mut h, &c, "ui.quit", json!({})), json!({ "quitting": true, "needs_confirmation": false }));
+    assert!(close_requested(&h));
+    assert_ne!(ok(&mut h, &c, "ui.state", json!({}))["dialog"], "preferences");
+}
+
 #[test]
 fn control_quit_preserves_dirty_documents_and_cancel_keeps_them_open() {
     let (mut h, c) = harness();

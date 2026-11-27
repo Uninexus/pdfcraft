@@ -155,6 +155,9 @@ impl PdfCraftApp {
     /// Returns false while the save/discard/cancel questions need a decision, or while an OCR
     /// review is still to be accepted or rejected.
     pub(crate) fn request_quit(&mut self, ctx: &egui::Context) -> bool {
+        // Preferences is a modal window of its own: while it is open the main window refuses to close and takes no
+        // answers. Its rows apply as they change, so closing it loses nothing.
+        self.preferences = None;
         if self.hold_for_any_ocr_review() {
             ctx.request_repaint();
             return false;
