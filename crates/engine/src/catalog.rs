@@ -160,7 +160,7 @@ const ALL_GROUPS: &[ToolGroup] = &[
                             "arrange.distribute_vertical",
                         ],
                     ),
-                    menu_item("Bates numbering", "hash", &["edit.bates", "edit.bates_multi", "edit.bates_remove"]),
+                    menu_item("Bates numbering", "hash", &["edit.bates", "edit.bates_multi", "edit.bates_remove", "edit.bates_remove_pages"]),
                     menu_item("Background", "palette", &["edit.background", "edit.background.update", "edit.background.remove"]),
                     item("Attach file", "paperclip", "edit.attach", Ready),
                 ],

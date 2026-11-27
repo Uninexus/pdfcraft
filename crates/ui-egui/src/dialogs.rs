@@ -8,6 +8,7 @@ pub(crate) mod ai_prefs;
 pub(crate) mod ai_ui;
 pub(crate) mod associated_files;
 pub(crate) mod attachment_description;
+pub(crate) mod bates_remove;
 pub mod bookmark_styles_ui;
 pub(super) mod comment_props;
 pub(super) mod convert_colours_ui;

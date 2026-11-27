@@ -892,6 +892,7 @@ impl PdfCraftApp {
                 }
             }
             "edit.search_folder" => self.open_folder_search(),
+            "edit.bates_remove_pages" => crate::bates_remove::open(self, ctx),
             "edit.bates_multi" => self.open_bates_multi(ctx),
             "export.all_images" => crate::export_ui::open(self, ctx, crate::export_ui::ExportKind::AllImages),
             "edit.text" => {
