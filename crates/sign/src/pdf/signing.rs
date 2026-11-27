@@ -82,8 +82,9 @@ pub struct SignOptions {
     pub date: String,
     /// Certify with these DocMDP permissions (1 no changes, 2 form fill and signing, 3 also comments).
     pub certify: Option<u8>,
-    /// Lock every form field with this signature (FieldMDP, action All): a later change to any of them makes it
-    /// invalid. Not with `certify`, whose permissions say what may change.
+    /// Lock the form fields with this signature (FieldMDP): a later change to any of them makes it invalid. The
+    /// document's other empty signature fields stay open for other signers (action Exclude naming them; All when there
+    /// are none). Not with `certify`, whose permissions say what may change.
     pub lock_fields: bool,
     pub appearance: Appearance,
     /// The words of the labels the visible signature shows.
@@ -228,7 +229,18 @@ fn sign_inner(
     if opts.lock_fields {
         let mut tp = Dict::new();
         tp.set(b"Type".to_vec(), Object::name("TransformParams"));
-        tp.set(b"Action".to_vec(), Object::name("All"));
+        // The signature fields others are still to sign: empty ones, the one being signed apart.
+        let open: Vec<Object> = sig_fields(&doc)
+            .into_iter()
+            .filter(|f| f.signature(&doc).is_none() && !f.has_foreign_value(&doc) && opts.field.as_deref() != Some(f.name.as_str()))
+            .map(|f| PdfString::text(&f.name).into())
+            .collect();
+        if open.is_empty() {
+            tp.set(b"Action".to_vec(), Object::name("All"));
+        } else {
+            tp.set(b"Action".to_vec(), Object::name("Exclude"));
+            tp.set(b"Fields".to_vec(), Object::Array(open));
+        }
         tp.set(b"V".to_vec(), Object::name("1.2"));
         let mut sr = Dict::new();
         sr.set(b"Type".to_vec(), Object::name("SigRef"));

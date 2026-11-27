@@ -1004,3 +1004,46 @@ fn signing_can_lock_all_form_fields() {
     let said = support::shown_notice(&h).expect("the refusal is said");
     assert!(said.contains("locks that form field"), "{said}");
 }
+
+/// Two empty signature fields, the first with a lock over every field (as other programs write it).
+const LOCKS_THE_OTHER: &[u8] = b"%PDF-1.7
+1 0 obj << /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [4 0 R 5 0 R] >> >> endobj
+2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Annots [4 0 R 5 0 R] >> endobj
+4 0 obj << /Type /Annot /Subtype /Widget /FT /Sig /T (First) /F 4 /P 3 0 R /Rect [20 110 130 150] /Lock << /Type /SigFieldLock /Action /All >> >> endobj
+5 0 obj << /Type /Annot /Subtype /Widget /FT /Sig /T (Second) /F 4 /P 3 0 R /Rect [150 110 280 150] >> endobj
+trailer << /Root 1 0 R >>
+%%EOF";
+
+/// A field an earlier signature locks is not offered for signing: the window does not open, and the signature is named.
+#[test]
+fn a_locked_signature_field_is_not_offered_for_signing() {
+    let dir = dir().join("locked-field");
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut h = harness(dir.clone());
+    h.state_mut().open_bytes(&egui::Context::default(), "two.pdf", None, LOCKS_THE_OTHER.to_vec()).expect("opens");
+    h.run_steps(4);
+    let p12 = concat!(env!("CARGO_MANIFEST_DIR"), "/../sign/tests/data/ec-p256.p12");
+    h.state_mut().start_signing(&egui::Context::default(), 0, None, Some("First".into()), None);
+    h.run_steps(2);
+    {
+        let d = h.state_mut().sign_draft.as_mut().unwrap();
+        d.new_id.create = false;
+        d.new_id.file = p12.into();
+        d.new_id.file_password = "test".into();
+    }
+    h.run_steps(1);
+    h.get_by_label("Continue").click();
+    h.run_steps(4);
+    h.get_by_label("Continue").click();
+    h.run_steps(2);
+    h.state_mut().sign_draft.as_mut().unwrap().password = "test".into();
+    support::outside_menus(&h, "Sign").click();
+    h.run_steps(6);
+    assert!(h.state().sign_draft.is_none(), "the first signature is in");
+    h.state_mut().start_signing(&egui::Context::default(), 0, None, Some("Second".into()), None);
+    h.run_steps(2);
+    assert!(h.state().sign_draft.is_none(), "no sign window for a locked field");
+    let said = support::shown_notice(&h).expect("the lock is said");
+    assert!(said.contains("covered by the lock of the signature in field \"First\""), "{said}");
+}

@@ -892,6 +892,27 @@ impl Document {
         self.signatures.iter().any(|s| s.signed)
     }
 
+    /// The signature field whose lock covers the field `name`, if any. A signature already invalid holds nothing back.
+    /// Reads the form: for a click or a command, not for every frame.
+    pub fn signature_locking(&self, name: &str) -> Option<String> {
+        if !self.is_signed() {
+            return None;
+        }
+        let locking = pdfcraft_sign::pdf::signatures_locking(&self.editor.as_ref()?.cos, name);
+        locking.into_iter().find(|by| self.signatures.iter().any(|s| s.field == *by && s.status != pdfcraft_sign::pdf::Status::Invalid))
+    }
+
+    /// Refuses to sign the existing field `field` when a signature's lock covers it: signing it would break that
+    /// signature. The words are the signing plan's for the same refusal.
+    pub fn check_not_locked_against_signing(&self, field: Option<&str>) -> Result<(), crate::EditError> {
+        match field.and_then(|name| self.signature_locking(name)) {
+            Some(by) => Err(crate::EditError::Invalid(format!(
+                "this field is covered by the lock of the signature in field {by:?}, so signing it is a change that signature forbids (locked field); the document was not signed"
+            ))),
+            None => Ok(()),
+        }
+    }
+
     /// Whether comments are hidden (Comments ▸ Hide all comments).
     pub fn comments_hidden(&self) -> bool {
         self.config.hide_comments

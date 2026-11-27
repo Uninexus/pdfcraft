@@ -276,6 +276,13 @@ impl PdfCraftApp {
     /// Start signing: the rectangle (or field) is known; show Sign with a Digital ID, after a
     /// dynamic form's preSign scripts for the field.
     pub fn start_signing(&mut self, ctx: &egui::Context, page: usize, rect: Option<[f64; 4]>, field: Option<String>, certify: Option<u8>) {
+        // A field an earlier signature locks is said to be so now, before an identity and a password are asked for.
+        if let Some((_, id)) = self.active_ids()
+            && let Some(doc) = self.session.get(id)
+            && let Err(e) = doc.check_not_locked_against_signing(field.as_deref())
+        {
+            return self.notify_error(e);
+        }
         self.refresh_os_key_store_ids();
         let mut draft = SignDraft::new(page, rect, field.clone(), certify, &self.digital_ids);
         draft.graphic = match &self.sign_graphic {

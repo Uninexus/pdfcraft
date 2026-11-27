@@ -527,7 +527,7 @@ fn sign_as(
     } else {
         Checkbox::new(Bind::bound(&mut d.lock_fields)).label(tl!("Lock all form fields after signing").to_owned()).show(ui);
         if d.lock_fields {
-            caption(tl!("After signing, PdfCraft refuses to change what the fields hold. A change made elsewhere makes this signature invalid."))
+            caption(tl!("After signing, PdfCraft refuses to change what the fields hold; a change made elsewhere makes this signature invalid. Empty signature fields stay open for other signers."))
                 .show(ui);
         }
     }
