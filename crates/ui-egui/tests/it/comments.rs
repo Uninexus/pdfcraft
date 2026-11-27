@@ -5432,3 +5432,30 @@ fn a_text_box_in_another_face_keeps_the_composer_card() {
     let session = &h.state().views[0].session.comments;
     assert!(session.rich.is_none() && session.composer.is_some());
 }
+
+/// The comment menu saves just the selected comment to an XFDF file.
+#[test]
+fn the_selected_comment_is_exported_to_a_data_file() {
+    let out = std::path::PathBuf::from("/scripted/picked.xfdf");
+    let files = std::sync::Arc::new(ScriptedFiles::answering([Picked::Paths(vec![out.clone()])]));
+    let written = files.clone();
+    let mut h = harness_on_files(files, |_| {});
+    for (at, text) in [((50.0, 150.0), "kept here"), ((200.0, 60.0), "taken out")] {
+        let edit = pdfcraft_engine::Edit::AddAnnotation(pdfcraft_engine::NewAnnotation {
+            page: 0,
+            shape: pdfcraft_engine::Shape::Note { at: [at.0, at.1], icon: pdfcraft_engine::NoteIcon::Comment },
+            style: pdfcraft_engine::Style { color: [1.0, 0.8, 0.0], opacity: 1.0, width: 1.0, ..Default::default() },
+            contents: text.into(),
+            author: "Tester".into(),
+        });
+        h.state_mut().apply_edit(&egui::Context::default(), edit);
+    }
+    h.run_steps(4);
+    right_click_pt(&mut h, (205.0, 55.0));
+    h.run_steps(4);
+    h.get_by_label("Export comment to data file…").click();
+    h.run_steps(6);
+    let bytes = written.file(&out).expect("the picked file is written");
+    let xfdf = String::from_utf8(bytes.to_vec()).unwrap();
+    assert!(xfdf.contains("taken out") && !xfdf.contains("kept here"), "{xfdf}");
+}

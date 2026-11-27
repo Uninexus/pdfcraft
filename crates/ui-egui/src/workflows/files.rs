@@ -982,6 +982,39 @@ impl PdfCraftApp {
     }
 }
 
+impl PdfCraftApp {
+    /// Save the selected comments, each with its replies, as an XFDF file the user names. They are taken as selected
+    /// when asked, so a change made while the save panel is open can't pick others.
+    pub fn export_selected_comments_dialog(&mut self, ctx: &egui::Context) {
+        if !self.commit_form_typing(ctx) {
+            return;
+        }
+        let Some((index, id)) = self.active_ids() else { return };
+        let keys = self.views.get(index).map(|v| v.session.comments.selection()).unwrap_or_default();
+        let Some(doc) = self.session.get(id) else { return };
+        if keys.is_empty() {
+            return;
+        }
+        let stem = doc.name.trim_end_matches(".pdf").trim_end_matches(".PDF").to_string();
+        let folder = document_folder(doc.path.as_deref());
+        let xfdf = match self.session.export_comments(id, &keys) {
+            Ok(xfdf) => xfdf,
+            Err(e) => return self.notify_error(e),
+        };
+        let mut request = PickRequest::save("export.data").title(tl!("Export comments")).file_name(format!("{stem}.xfdf")).filter("XFDF", &["xfdf"]);
+        if let Some(folder) = folder {
+            request = request.default_directory(folder);
+        }
+        self.pick_file(request, None, move |app, _, picked| {
+            let Some(path) = picked.first_path() else { return };
+            match app.host.files().write(&path, xfdf.as_bytes(), WriteIntent::SaveAs) {
+                Ok(_) => app.notify_fmt("Exported to {path}", &[("path", &path.display().to_string())]),
+                Err(e) => app.notify_fmt("Couldn't write {name}: {e}", &[("name", &path.display().to_string()), ("e", &e.to_string())]),
+            }
+        });
+    }
+}
+
 /// A file that couldn't be read: its name and why.
 type Unread = (String, String);
 

@@ -282,7 +282,9 @@ impl PdfCraftApp {
             && match spec.id {
                 arrange if pdfcraft_engine::ArrangeOp::from_command(arrange).is_some() => pdfcraft_engine::ArrangeOp::from_command(arrange)
                     .is_some_and(|op| self.active.and_then(|i| self.views.get(i)).is_some_and(|v| v.session.objects.count() >= op.needs())),
-                "comment.copy" => self.active.and_then(|i| self.views.get(i)).is_some_and(|v| v.session.comments.primary().is_some()),
+                "comment.copy" | "comment.export_selected" => {
+                    self.active.and_then(|i| self.views.get(i)).is_some_and(|v| v.session.comments.primary().is_some())
+                }
                 "comment.paste" => self.comment_clipboard.is_some(),
                 "view.previous_view" => self.active.and_then(|i| self.views.get(i)).is_some_and(|v| !v.back.is_empty()),
                 "view.next_view" => self.active.and_then(|i| self.views.get(i)).is_some_and(|v| !v.forward.is_empty()),
@@ -914,6 +916,7 @@ impl PdfCraftApp {
                 self.reveal_tools();
             }
             "comment.export" => self.export_data_dialog(ctx, true, false),
+            "comment.export_selected" => self.export_selected_comments_dialog(ctx),
             "comment.summarize" => self.open_summarize(ctx),
             "edit.column_select" => self.quick_tool = crate::QuickTool::ColumnSelect,
             "edit.snapshot" => {
