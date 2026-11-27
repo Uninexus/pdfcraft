@@ -72,8 +72,6 @@ pub(crate) struct TextCaret {
     goal_x: Option<f32>,
     /// Keys taken in this pass, applied after it.
     pub(crate) moves: Vec<Move>,
-    /// Passes left in which the page view takes the keyboard (the palette or menu gives its own focus back first).
-    pub(crate) take_focus: u8,
 }
 
 /// The text layers the caret moves over: `None` for a page not read yet.
@@ -125,7 +123,7 @@ impl TextCaret {
     /// The caret at the start of `page`'s text.
     pub(crate) fn at_page(page: usize) -> Self {
         let head = Place { page, at: 0 };
-        Self { head, anchor: head, line_end: false, goal_x: None, moves: Vec::new(), take_focus: 3 }
+        Self { head, anchor: head, line_end: false, goal_x: None, moves: Vec::new() }
     }
 
     /// The selection from the anchor to the caret, `None` when it covers no glyph.
@@ -277,6 +275,14 @@ impl DocView {
     /// Puts a caret at the start of the current page's text, or takes it away; the selection stays.
     pub(crate) fn set_caret_browsing(&mut self, on: bool) {
         self.session.caret = on.then(|| TextCaret::at_page(self.view.current));
+        if on {
+            self.take_keys();
+        }
+    }
+
+    /// The page view takes the keyboard in the next passes (the palette or menu gives its own focus back first).
+    pub(crate) fn take_keys(&mut self) {
+        self.session.take_focus = 3;
     }
 
     /// Where the text caret is drawn: `None` while caret browsing is off, its page is off screen or has no text.

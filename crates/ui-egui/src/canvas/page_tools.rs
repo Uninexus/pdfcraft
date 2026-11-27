@@ -334,7 +334,8 @@ pub(crate) fn page_tool<'a>(
                     let annotate = CommentsTool::new(&mut view.tool, &mut view.paste, map, &mut view.tool_done, &mut view.tool_pressed)
                         .image_aspect(aspect)
                         .settings(tool, cx.comment_prefs, cx.allowed, cx.doc.comments_hidden())
-                        .outcome(&mut session.pending_edit, &mut view.notice);
+                        .outcome(&mut session.pending_edit, &mut view.notice)
+                        .marker(session.note_marker.as_mut().map(|marker| &mut marker.keys));
                     let annotate = match snap {
                         Some(snap) => annotate.caret_snap(snap),
                         None => annotate,

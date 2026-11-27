@@ -39,6 +39,7 @@ mod grid;
 mod guides;
 pub(super) mod image_pick;
 mod navigation;
+pub(crate) mod note_marker;
 pub(crate) mod organize;
 pub(crate) mod page_end;
 pub(crate) mod rulers;
@@ -311,6 +312,10 @@ pub struct PageSession {
     pub text: TextSelectState,
     /// Whether the current Select-tool primary press has dragged past the click threshold.
     pub(crate) select_dragged: bool,
+    /// Passes left in which the page view takes the keyboard.
+    pub(crate) take_focus: u8,
+    /// The sticky note marker the keys move, while the Sticky note tool and the page view have them.
+    pub(crate) note_marker: Option<note_marker::NoteMarker>,
     /// The text caret while caret browsing is on (View > Caret browsing).
     pub(crate) caret: Option<text_caret::TextCaret>,
     /// Select All while scrolling continuously (#2639): the text of every page of the document,
@@ -446,6 +451,8 @@ impl PageSession {
             select_dragged: false,
             all_text: false,
             caret: None,
+            note_marker: None,
+            take_focus: 0,
             actions_dismissed: None,
             marks_waiting: None,
             texts: HashMap::new(),
@@ -1739,10 +1746,10 @@ pub fn document_area_at(app: &mut PdfCraftApp, index: usize, rect: Rect, ui: &mu
         rulers::show(app, index, ui, &strips, ruler_input);
     }
     if let Some(out) = &out {
-        if let Some(caret) = app.views.get_mut(index).and_then(|view| view.session.caret.as_mut())
-            && caret.take_focus > 0
+        if let Some(view) = app.views.get_mut(index)
+            && view.session.take_focus > 0
         {
-            caret.take_focus -= 1;
+            view.session.take_focus -= 1;
             focus::request(ui.ctx(), FocusTarget::Id(out.canvas.response.id));
             ui.ctx().request_repaint();
         }
@@ -1753,6 +1760,17 @@ pub fn document_area_at(app: &mut PdfCraftApp, index: usize, rect: Rect, ui: &mu
             let painter = ui.painter().with_clip_rect(rect);
             painter.rect_filled(line.expand(1.0), 0.0, Color32::from_black_alpha(200));
             painter.rect_filled(line, 0.0, Color32::from_rgba_unmultiplied(r, g, b, a));
+        }
+        if let Some(at) = app.views.get(index).and_then(DocView::note_marker_screen_pos) {
+            let [r, g, b, a] = craft::ui::runtime::env::Env::of(ui).tokens.color.status.info.solid.0;
+            let painter = ui.painter().with_clip_rect(rect);
+            // A ring with a cross through the point, edged so that it shows on any page.
+            for (width, color) in [(4.0, Color32::from_white_alpha(220)), (2.0, Color32::from_rgba_unmultiplied(r, g, b, a))] {
+                let stroke = egui::Stroke::new(width, color);
+                painter.circle_stroke(at, 7.0, stroke);
+                painter.line_segment([at - egui::vec2(12.0, 0.0), at + egui::vec2(12.0, 0.0)], stroke);
+                painter.line_segment([at - egui::vec2(0.0, 12.0), at + egui::vec2(0.0, 12.0)], stroke);
+            }
         }
         page_end::show(app, index, ui, rect, out.canvas.response.id);
         // The page view draws no ring of its own: show where the keyboard is when it was brought here by keys.
@@ -2071,6 +2089,12 @@ fn pages_at(app: &mut PdfCraftApp, index: usize, rect: Rect, ui: &mut egui::Ui) 
         view.view.step(forward);
     }
     text_caret::move_caret(view, info, rect, ui.ctx());
+    let marking = chosen == QuickTool::Comment(crate::comments::CommentTool::Note)
+        && allowed
+        && unobstructed
+        && view.session.comments.composer.is_none()
+        && focus::has(ui.ctx(), out.canvas.response.id);
+    body_out.back_to_select |= note_marker::update(view, info, rect, ui.ctx(), marking);
     // The records readers between frames take; no pass reads them back.
     view.textures = out.textures;
     view.spacing = Some(out.spacing);
