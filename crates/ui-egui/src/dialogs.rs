@@ -44,6 +44,7 @@ pub(super) mod signing_handoff_ui;
 pub(super) mod signing_plan_ui;
 pub(super) mod standards_ui;
 pub(crate) mod summarize;
+pub(super) mod transitions_ui;
 pub(super) mod word_count_ui;
 
 pub(crate) use prompts::shorten_middle;

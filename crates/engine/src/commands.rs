@@ -551,6 +551,7 @@ const ALL_COMMANDS: &[CommandSpec] = &[
     c("page.reverse", "Reverse pages", PAGES, None, Assembly, "swap_vertical"),
     c("page.crop", "Crop pages", PAGES, None, Assembly, "crop"),
     c("page.boxes", "Set page boxes…", PAGES, None, Assembly, "square-dashed-mouse-pointer"),
+    c("page.transitions", "Page transitions…", PAGES, None, Assembly, "presentation"),
     c("page.remove_white_margins", "Remove white margins…", PAGES, None, Assembly, "scan"),
     c("page.insert", "Insert pages from file…", PAGES, None, Assembly, "file-input"),
     c("page.insert_clipboard", "Insert pages from clipboard", PAGES, None, Assembly, "clipboard-paste"),

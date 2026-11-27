@@ -138,3 +138,27 @@ fn the_crop_tool_leaves_the_page_grid_so_a_page_can_be_cropped() {
     assert!((w - 150.0).abs() < 2.0 && (hh - 200.0).abs() < 2.0, "{w}×{hh}");
     assert_eq!(size(&h, 1), (300.0, 400.0));
 }
+
+#[test]
+fn the_page_transitions_dialog_sets_and_removes_a_transition_on_every_page() {
+    let mut h = harness();
+    let transitions = |h: &Harness<'static, PdfCraftApp>| h.state().session.get(h.state().views[0].id).unwrap().info.transitions.clone();
+    assert!(h.execute("page.transitions"));
+    h.run_steps(3);
+    h.get_by_role_and_label(Role::Dialog, "Page Transitions");
+    h.get_by_label("Turn the page automatically").click();
+    h.run_steps(2);
+    h.get_by_label("OK").click();
+    h.run_steps(4);
+    let set = transitions(&h);
+    assert!(set.iter().map(|t| t.page).eq([0, 1]) && set.iter().all(|t| t.display.is_some_and(|s| s > 0.0)), "all pages by default: {set:?}");
+    assert_eq!(h.state().session.get(h.state().views[0].id).unwrap().can_undo(), Some("Set page transitions"));
+    // Opened again it shows what the page has; clearing the box removes it.
+    assert!(h.execute("page.transitions"));
+    h.run_steps(3);
+    h.get_by_label("Turn the page automatically").click();
+    h.run_steps(2);
+    h.get_by_label("OK").click();
+    h.run_steps(4);
+    assert!(transitions(&h).is_empty(), "{:?}", transitions(&h));
+}

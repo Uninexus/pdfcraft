@@ -531,6 +531,7 @@ impl PdfCraftApp {
             hairlines_draft: Default::default(),
             text_style_draft: Default::default(),
             boxes_draft: Default::default(),
+            transition_seed: None,
             marks_draft: Default::default(),
             marks_preview: None,
             attachment_description: None,
