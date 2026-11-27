@@ -354,6 +354,14 @@ pub struct PdfCraftApp {
     pub(crate) toolbar_tools_open: bool,
     /// The last input was a key, not the pointer: the focus then shows on controls the framework draws no ring for.
     pub(crate) keyboard_last: bool,
+    /// What had the focus when Preferences was not open, and, once it has closed, the passes left before the focus
+    /// goes back there.
+    pub(crate) focus_before_prefs: Option<egui::Id>,
+    pub(crate) prefs_return: Option<u8>,
+    /// A side panel just opened by a command, and the passes it has left to take the focus.
+    pub(crate) panel_focus: Option<(RightPanel, u8)>,
+    /// The panel whose start holds the focus, while it does.
+    pub(crate) panel_stop: Option<RightPanel>,
     /// The rail's zoom field, once it has been shown.
     pub(crate) zoom_field: Option<egui::Id>,
     /// The zoom field had the focus as this frame's input arrived, and the rail has not moved it on yet.

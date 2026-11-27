@@ -1,7 +1,8 @@
-use craft::ui::contract::BodyCx;
+use craft::ui::contract::{BodyCx, Props as _, Show as _};
 
 use super::bookmarks::BmAction;
 use super::{Nav, PdfCraftApp, RightPanel};
+use crate::canvas::page_end::PageEnd;
 
 /// What a side panel's body asked for. The post-pass of [`panel_body`] applies it, so one pass makes one edit.
 #[derive(Default)]
@@ -29,6 +30,19 @@ pub(crate) struct PanelResult {
 pub fn panel_body(app: &mut PdfCraftApp, ui: &mut egui::Ui, cx: &mut BodyCx<'_>, panel: RightPanel) {
     let ctx = ui.ctx().clone();
     let Some((index, id)) = app.active_ids() else { return };
+    // The start of the panel, for one opened by keys that has no list to take the focus.
+    let waiting = app.panel_focus.is_some_and(|(wanted, passes)| wanted == panel && passes <= 1);
+    let start = (waiting || app.panel_stop == Some(panel)).then(|| {
+        let name = crate::i18n::fmt(tl!("{name} panel"), &[("name", &crate::side_panels::side_label(panel))]);
+        let at = egui::Rect::from_min_size(ui.cursor().min, egui::vec2(ui.available_width(), 1.0));
+        let whole = ui.max_rect();
+        let stop = PageEnd::new(name).id(egui::Id::unique(("pdfcraft-panel-start", crate::side_panels::PanelId::from(panel).name())));
+        let stop = stop.show_at(ui, at);
+        if stop.focused {
+            crate::canvas::page_end::ring(ui, whole);
+        }
+        stop
+    });
     // PLAN: the replies line of Comments and the "{n} pages selected" note of Pages are the first line of those
     // bodies (L-86): `comments_panel::show` (pdf-comments-w12) and `pages::body` (pdf-chrome-w14) draw them.
     let mut result = match panel {
@@ -156,5 +170,14 @@ pub fn panel_body(app: &mut PdfCraftApp, ui: &mut egui::Ui, cx: &mut BodyCx<'_>,
             v.session.flash = Some((p, r, 0.0));
         }
         None => {}
+    }
+    if let Some(start) = start {
+        if waiting && app.panel_focus.is_some_and(|(wanted, _)| wanted == panel) {
+            app.panel_focus = None;
+            app.panel_stop = Some(panel);
+            craft::ui::runtime::focus::request(&ctx, craft::ui::runtime::focus::FocusTarget::Id(start.response.id));
+        } else if !start.focused {
+            app.panel_stop = None;
+        }
     }
 }

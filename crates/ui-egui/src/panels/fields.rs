@@ -2,6 +2,7 @@
 //! a form a field can move earlier or later in its page's tab order (Acrobat: Order Tabs Manually).
 // PLAN: assumed `super::right::PanelResult` (pdf-chrome-w13).
 
+use crate::app::commands::{FocusIf as _, list_focus};
 use std::collections::HashMap;
 
 use craft::behavior::{DisplayOrder, IconId, ItemSource, Selection, SelectionChange};
@@ -160,10 +161,13 @@ pub(crate) fn show(app: &mut PdfCraftApp, ui: &mut egui::Ui) -> PanelResult {
         None,
     );
     let mode = if preparing { SelectMode::Multi } else { SelectMode::None };
-    let out = List::<FieldRow>::new(tl!("Fields").to_string()).select(mode).selection(Bind::given(shown)).natural_height(true).show_items(
-        ui,
-        &rows,
-        &mut |key, _| {
+    let take = list_focus(&mut app.panel_focus, crate::RightPanel::Fields, !doc.info.fields.is_empty());
+    let out = List::<FieldRow>::new(tl!("Fields").to_string())
+        .focus_if(take)
+        .select(mode)
+        .selection(Bind::given(shown))
+        .natural_height(true)
+        .show_items(ui, &rows, &mut |key, _| {
             let Some(row) = rows.get(key) else { return ListRow::new("") };
             let Some(field) = row.field else {
                 let page = if let FieldRow::Page(p) = &row.key { *p } else { None };
@@ -181,8 +185,7 @@ pub(crate) fn show(app: &mut PdfCraftApp, ui: &mut egui::Ui) -> PanelResult {
                     .trailing_part(LATER, TrailingFace::Icon(IconSpec::svg(IconId::new("chevron-down"))), named("Later in tab order"));
             }
             list_row
-        },
-    );
+        });
     let mut flashed = false;
     let mut flash = |key: &FieldRow, result: &mut PanelResult| {
         if let Some(Row { field: Some(f), .. }) = rows.get(key)

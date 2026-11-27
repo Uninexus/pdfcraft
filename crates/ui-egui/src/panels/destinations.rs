@@ -2,6 +2,7 @@
 //! dictionary, ISO 32000-2 12.3.2.4) with the page each goes to. A double click or Enter goes to the page; Delete
 //! takes the name out as one undoable edit. No name is added here: the engine only reads and removes them.
 
+use crate::app::commands::{FocusIf as _, list_focus};
 use craft::behavior::{DisplayOrder, IconId, ItemSource, Mixed};
 use craft::ui::contract::{Bind, BodyCx, CollectionEvent, Entry, SelectMode, Show as _, ShowCollection as _};
 use craft::ui::list::{List, ListRow, RowEvent, TrailingFace, TrailingPart};
@@ -95,7 +96,9 @@ pub(crate) fn show(app: &mut PdfCraftApp, ui: &mut egui::Ui, cx: &mut BodyCx<'_>
         (None, _) => tl!("No page").to_string(),
     };
     let row_key = |key: &usize| names.get(*key).map(|n| vec![n.name.clone().into()]).unwrap_or_default();
+    let take = list_focus(&mut app.panel_focus, crate::RightPanel::Destinations, !names.is_empty());
     let out = List::<usize>::new(tl!("Named destinations").to_string())
+        .focus_if(take)
         .select(SelectMode::Single)
         .empty(tl!("No matches."))
         .filter(&query, row_key)

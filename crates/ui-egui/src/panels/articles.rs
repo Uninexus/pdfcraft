@@ -3,6 +3,7 @@
 //! out as one undoable edit. The engine reads no bead's rectangle and adds no thread, so the panel does not scroll to
 //! a bead, step from bead to bead or add an article.
 
+use crate::app::commands::{FocusIf as _, list_focus};
 use craft::behavior::{DisplayOrder, IconId, ItemSource, Mixed};
 use craft::ui::contract::{Bind, BodyCx, CollectionEvent, Entry, SelectMode, Show as _, ShowCollection as _};
 use craft::ui::list::{List, ListRow, RowEvent, TrailingFace, TrailingPart};
@@ -106,7 +107,9 @@ pub(crate) fn show(app: &mut PdfCraftApp, ui: &mut egui::Ui, cx: &mut BodyCx<'_>
         }
     };
     let row_key = |key: &usize| articles.get(*key).map(|a| vec![a.title.clone().into()]).unwrap_or_default();
+    let take = list_focus(&mut app.panel_focus, crate::RightPanel::Articles, !articles.is_empty());
     let out = List::<usize>::new(tl!("Articles").to_string())
+        .focus_if(take)
         .select(SelectMode::Single)
         .empty(tl!("No matches."))
         .filter(&query, row_key)

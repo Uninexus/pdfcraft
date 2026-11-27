@@ -262,3 +262,56 @@ fn comment_fill_a_form_and_use_the_side_panels_and_dialogs_by_keys() {
     press(&mut h, Key::Escape);
     assert_eq!(focused(&h), Some((Role::Canvas, "Pages".into())));
 }
+
+/// Preferences opened with the title bar's button gives the keyboard back to that button.
+#[test]
+fn closing_preferences_returns_the_focus_to_its_opener() {
+    let mut h = open(book());
+    tab_to(&mut h, Role::Button, "Preferences…");
+    press(&mut h, Key::Enter);
+    h.run_steps(8);
+    assert_eq!(focused(&h), Some((Role::TextInput, "Search settings".into())));
+    press(&mut h, Key::Escape);
+    h.run_steps(8);
+    assert_eq!(focused(&h), Some((Role::Button, "Preferences…".into())));
+}
+
+/// Select All of a continuous view of several pages, then a text markup tool, marks the text of every page.
+#[test]
+fn markup_after_select_all_marks_every_page() {
+    for command_id in ["comment.highlight", "comment.underline", "comment.strikeout"] {
+        let mut h = open(crate::control::fixture(3));
+        support::settle(&mut h);
+        command(&mut h, Key::A);
+        support::settle(&mut h);
+        palette(&mut h, command_id);
+        support::settle(&mut h);
+        let app = h.state();
+        let mut pages: Vec<usize> = app.session.get(app.views[0].id).unwrap().info.annotations.iter().map(|a| a.page).collect();
+        pages.sort_unstable();
+        pages.dedup();
+        assert_eq!(pages, [0, 1, 2], "{command_id}");
+    }
+}
+
+/// A side panel opened by keys takes the keyboard: its list where it has one, else the start of the panel.
+#[test]
+fn opening_a_side_panel_by_keys_moves_the_focus_into_it() {
+    // By the palette.
+    let mut h = open(book());
+    palette(&mut h, "Bookmarks");
+    h.run_steps(8);
+    assert_eq!(focused(&h), Some((Role::List, "Bookmarks".into())), "palette");
+    // F4 closes it and brings it back.
+    press(&mut h, Key::F4);
+    press(&mut h, Key::F4);
+    h.run_steps(8);
+    assert_eq!(focused(&h), Some((Role::List, "Bookmarks".into())), "F4");
+    // By the View menu's command.
+    let mut h = open(book());
+    palette(&mut h, "Comments");
+    h.run_steps(8);
+    assert_eq!(focused(&h).map(|(_, name)| name), Some("Comments panel".into()), "comments");
+    press(&mut h, Key::Tab);
+    assert!(focused(&h).is_some_and(|(_, name)| name != "Comments panel"));
+}

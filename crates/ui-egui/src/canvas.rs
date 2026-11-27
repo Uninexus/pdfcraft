@@ -40,7 +40,7 @@ mod guides;
 pub(super) mod image_pick;
 mod navigation;
 pub(crate) mod organize;
-mod page_end;
+pub(crate) mod page_end;
 pub(crate) mod rulers;
 // PLAN: no sheet assigns the `mod` lines of the four new page-body files (pdf-canvas-w9 `page_parts.rs`,
 // `page_tools.rs`; pdf-canvas-w10 `pictures.rs`; pdf-canvas-w15 `page_overlays.rs`); the host writes them here.

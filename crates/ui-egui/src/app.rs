@@ -25,7 +25,7 @@ use craft::ui::runtime::env::{RootEnv, Scale};
 use craft::ui::shell::embed;
 
 mod clipboard;
-mod commands;
+pub(crate) mod commands;
 mod control;
 mod files;
 mod frame;
@@ -310,6 +310,10 @@ impl PdfCraftApp {
             notice_inset: 0.0,
             toolbar_tools_open: true,
             keyboard_last: false,
+            focus_before_prefs: None,
+            prefs_return: None,
+            panel_focus: None,
+            panel_stop: None,
             zoom_field: None,
             zoom_held: false,
             left_rulers: Vec::new(),

@@ -2,6 +2,7 @@
 //! menu's rows.
 // PLAN: assumed `super::right::PanelResult` (pdf-chrome-w13).
 
+use crate::app::commands::{FocusIf as _, list_focus};
 use craft::behavior::{ColumnKey, ColumnWidth, DisplayOrder, IconId, ItemSource, SelectionChange};
 use craft::keymap::CommandRef;
 use craft::ui::contract::{CollectionEvent, ColumnSpec, SelectMode, ShowCollection as _};
@@ -86,7 +87,9 @@ pub(crate) fn show(app: &mut PdfCraftApp, ui: &mut egui::Ui) -> PanelResult {
         ColumnSpec::toggle(EYE, Label::Empty, craft::ui::contract::ToggleColumn::sweepable()).icon(IconId::new("eye")),
         ColumnSpec::new(NAME, Label::Empty, ColumnWidth::fill(1.0)),
     ];
+    let take = list_focus(&mut app.panel_focus, crate::RightPanel::Layers, !doc.info.layers.is_empty());
     let out = List::<usize>::new(tl!("Layers").to_string())
+        .focus_if(take)
         .header(false)
         .tree(true)
         .natural_height(true)
