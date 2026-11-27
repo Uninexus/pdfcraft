@@ -107,6 +107,7 @@ pub fn panel_body(app: &mut PdfCraftApp, ui: &mut egui::Ui, cx: &mut BodyCx<'_>,
     }
     match sig_action {
         Some(crate::sign_ui::PanelAction::Validate) => app.run_command(&ctx, "sign.validate"),
+        Some(crate::sign_ui::PanelAction::Properties(field)) => app.open_signature_properties(Some(field)),
         Some(crate::sign_ui::PanelAction::GoTo(p)) => app.views[index].go_to_page(p),
         Some(crate::sign_ui::PanelAction::Trust(c)) => app.trust_certificate(*c),
         Some(crate::sign_ui::PanelAction::ViewCertificate(chain)) => crate::sign_ui::cert_viewer::open(app, chain),

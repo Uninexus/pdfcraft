@@ -74,6 +74,8 @@ pub enum PanelAction {
     ExportCertificate(Box<Certificate>),
     /// Certificate Viewer for the signer's chain (signer first).
     ViewCertificate(Vec<Certificate>),
+    /// Signature properties of the field named.
+    Properties(String),
 }
 
 /// A row of the Signatures tree: a signature's head, or one line of what its open head shows.
@@ -97,6 +99,8 @@ enum Child {
     Pair(&'static str, String),
     /// The field's page, as a link that goes there.
     Page(usize),
+    /// The "Properties…" button, on a line of its own: a row holds four buttons at most.
+    Properties,
     /// The buttons under the details.
     Buttons,
 }
@@ -132,6 +136,7 @@ fn children(s: &SignatureInfo) -> Vec<Child> {
         Some(p) => Child::Page(p),
         None => Child::Pair("Field", s.field.clone()),
     });
+    lines.push(Child::Properties);
     lines.push(Child::Buttons);
     lines
 }
@@ -211,6 +216,14 @@ fn line_row<'a>(s: &SignatureInfo, child: &Child, action: &'a RefCell<Option<Pan
             row(Label::Empty).accessible_name(text.clone()).below(Link::new(text), move |out| {
                 if out.clicked() {
                     *action.borrow_mut() = Some(PanelAction::GoTo(p));
+                }
+            })
+        }
+        Child::Properties => {
+            let field = s.field.clone();
+            row(Label::Empty).accessible_name(tl!("Signature properties")).below(Button::new(tl!("Properties…")), move |out| {
+                if out.clicked() {
+                    *action.borrow_mut() = Some(PanelAction::Properties(field));
                 }
             })
         }

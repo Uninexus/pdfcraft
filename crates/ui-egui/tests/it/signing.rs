@@ -914,3 +914,45 @@ fn signing_preserves_destination_opening_attributes() {
     assert_eq!(xattr::get(&dest, "com.apple.quarantine").unwrap(), Some(b"0082;1234;Preview;".to_vec()));
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// Signature properties: from the command and from the signature in the panel, a dialog with the verdict and the
+/// signature's details, closed by Escape.
+#[test]
+fn signature_properties_show_a_signatures_details() {
+    use egui::accesskit::Role;
+    let dir = dir().join("properties");
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut h = harness(dir.clone());
+    // Unsigned: there is nothing to show, and it is said.
+    assert!(h.execute("sign.properties"));
+    h.run_steps(2);
+    assert!(h.state().dialogs.open_dialogs().is_empty());
+    assert_eq!(support::shown_notice(&h).as_deref(), Some("This document has no signatures."));
+
+    create_signing_id(&mut h);
+    sign_with_created_id(&mut h, &dir);
+    let value = |h: &Harness<'static, PdfCraftApp>, label: &str| h.get_by_role_and_label(Role::Group, label).value().unwrap_or_default();
+    assert!(h.execute("sign.properties"));
+    h.run_steps(3);
+    h.get_by_role_and_label(Role::Dialog, "Signature properties");
+    h.get_by_label("Signature validity is UNKNOWN:");
+    assert!(value(&h, "Signer").contains("Grace Hopper"), "{}", value(&h, "Signer"));
+    assert!(value(&h, "Issued by").contains("Grace Hopper"));
+    assert_eq!(value(&h, "Reason"), "I approve");
+    assert!(!value(&h, "Algorithm").is_empty());
+    assert!(!value(&h, "Signing time").is_empty());
+    h.key_press(egui::Key::Escape);
+    h.run_steps(3);
+    assert!(h.state().dialogs.open_dialogs().is_empty(), "Escape closes it");
+
+    // From the signature in the Signatures panel.
+    h.query_all_by_label_contains("Signed by Grace Hopper")
+        .find(|n| matches!(n.accesskit_node().role(), Role::ListItem | Role::TreeItem | Role::Row))
+        .expect("the signature's row")
+        .click();
+    h.run_steps(2);
+    h.get_by_role_and_label(Role::Button, "Properties…").click();
+    h.run_steps(3);
+    h.get_by_role_and_label(Role::Dialog, "Signature properties");
+    assert_eq!(value(&h, "Reason"), "I approve");
+}

@@ -461,6 +461,7 @@ const ALL_COMMANDS: &[CommandSpec] = &[
     c("sign.certify", "Certify (visible signature)", None, None, Document, "badge-check"),
     c("sign.certify_invisible", "Certify (invisible signature)", None, None, Document, "badge-check"),
     c("sign.validate", "Validate all signatures", None, None, Document, "badge-check"),
+    c("sign.properties", "Signature properties…", None, None, Document, "signature"),
     c("sign.panel", "Signatures panel", VIEW, None, Document, "signature"),
     c("sign.audit_report", "Signature audit report…", None, None, Document, "file-check"),
     c("form.signer_report", "Signer labels report…", None, None, Document, "list-checks"),

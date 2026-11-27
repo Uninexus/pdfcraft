@@ -229,6 +229,7 @@ const SIGN: &[&str] = &[
     "form.add.signature",
     SEP,
     "sign.validate",
+    "sign.properties",
     "sign.panel",
     SEP,
     "sign.plan.show",
