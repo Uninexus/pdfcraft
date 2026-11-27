@@ -603,7 +603,7 @@ fn the_shortcuts_window_lists_the_keys_no_command_binds() {
             "caret",
             &["Move the caret by character and line: ← → ↑ ↓", "Move the caret by word: Ctrl+← →", "Extend the selection with the caret: Shift+"][..],
         ),
-        ("note", &["Move the sticky note marker (Shift: further): ← → ↑ ↓", "Place the sticky note at the marker: Enter"][..]),
+        ("marker", &["Move the placing marker (Shift: further): ← → ↑ ↓", "Place the note or box at the marker: Enter"][..]),
         ("tool", &["Leave a comment tool: Esc"][..]),
     ] {
         assert!(h.state_mut().execute(&egui::Context::default(), "help.shortcuts"));
@@ -628,4 +628,36 @@ fn the_shortcuts_window_lists_the_keys_no_command_binds() {
         }
         assert!(h.query_by_label("Search:").is_none(), "the window closed");
     }
+}
+
+/// The Text box tool by keys: the same marker, and Enter opens a text box there as a click does.
+#[test]
+fn a_text_box_is_placed_at_the_marker_by_keys() {
+    let mut h = open(lines());
+    support::settle(&mut h);
+    tab_to(&mut h, Role::Canvas, "Pages");
+    palette(&mut h, "comment.freetext");
+    assert_eq!(focused(&h), Some((Role::Canvas, "Pages".into())));
+    let start = marker(&h).expect("a marker on the page");
+    assert!(announces(&mut h, Modifiers::NONE, Key::ArrowDown, "Text box marker: page 1, "), "the place is announced");
+    assert!(marker(&h).unwrap().y > start.y);
+    press(&mut h, Key::Enter);
+    h.run_steps(4);
+    assert!(marker(&h).is_none(), "the box's text is being written");
+    type_text(&mut h, "Typed");
+    command(&mut h, Key::Enter);
+    h.run_steps(8);
+    let comments = page_comments(&h);
+    assert_eq!(comments.len(), 1, "{comments:?}");
+    assert_eq!((comments[0].0.as_str(), comments[0].1.as_deref()), ("FreeText", Some("Typed")));
+
+    // Escape puts the marker away and leaves the tool.
+    tab_to(&mut h, Role::Canvas, "Pages");
+    palette(&mut h, "comment.freetext");
+    assert!(marker(&h).is_some());
+    press(&mut h, Key::Escape);
+    h.run_steps(4);
+    assert!(marker(&h).is_none());
+    assert_eq!(h.state().quick_tool, pdfcraft_ui_egui::QuickTool::Select);
+    assert_eq!(page_comments(&h).len(), 1);
 }

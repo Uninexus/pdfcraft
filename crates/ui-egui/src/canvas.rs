@@ -314,7 +314,7 @@ pub struct PageSession {
     pub(crate) select_dragged: bool,
     /// Passes left in which the page view takes the keyboard.
     pub(crate) take_focus: u8,
-    /// The sticky note marker the keys move, while the Sticky note tool and the page view have them.
+    /// The marker the keys move to place a sticky note or text box, while its tool and the page view have them.
     pub(crate) note_marker: Option<note_marker::NoteMarker>,
     /// The text caret while caret browsing is on (View > Caret browsing).
     pub(crate) caret: Option<text_caret::TextCaret>,
@@ -2089,11 +2089,8 @@ fn pages_at(app: &mut PdfCraftApp, index: usize, rect: Rect, ui: &mut egui::Ui) 
         view.view.step(forward);
     }
     text_caret::move_caret(view, info, rect, ui.ctx());
-    let marking = chosen == QuickTool::Comment(crate::comments::CommentTool::Note)
-        && allowed
-        && unobstructed
-        && view.session.comments.composer.is_none()
-        && focus::has(ui.ctx(), out.canvas.response.id);
+    let marking = note_marker::Placed::by(chosen)
+        .filter(|_| allowed && unobstructed && view.session.comments.composer.is_none() && focus::has(ui.ctx(), out.canvas.response.id));
     body_out.back_to_select |= note_marker::update(view, info, rect, ui.ctx(), marking);
     // The records readers between frames take; no pass reads them back.
     view.textures = out.textures;
