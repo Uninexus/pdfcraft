@@ -30,17 +30,17 @@ tool.
 Copy and the highlight, underline and strikethrough tools then act on the selection. The keys follow screen directions:
 right-to-left text and turned views are not mirrored.
 
-## Placing a sticky note
+## Placing a sticky note or a text box
 
-Choose Add a sticky note, then focus the page view. A marker appears, at the text caret if caret browsing is on and
+Choose Add a sticky note or Add a text box, then focus the page view. A marker appears, at the text caret if caret browsing is on and
 otherwise in the middle of what shows of the page.
 
 | Keys | What it does |
 | --- | --- |
 | ← → ↑ ↓ | Move the marker (with Shift, further) |
-| Enter | Place the note there and write it |
+| Enter | Place the note or box there and write it |
 | Esc | Cancel |
 
 ## Not yet by keyboard
 
-Only the sticky note can be placed at a chosen point: text boxes, shapes and drawing need a pointer.
+Only sticky notes and text boxes can be placed at a chosen point: shapes, callouts and drawing need a pointer.

@@ -1,5 +1,6 @@
-//! Placing a sticky note by keys: with the Sticky note tool active and the page view focused, a marker stands on the
-//! page. The arrows move it (further with Shift), Enter opens a note there as a click would, and Escape leaves the tool.
+//! Placing a sticky note or a text box by keys: with that tool active and the page view focused, a marker stands on the
+//! page. The arrows move it (further with Shift), Enter opens the note or box there as a click would, and Escape leaves
+//! the tool.
 //!
 //! The comment tool claims the keys while the marker shows ([`MARKER_KEYS`], the arrows and Enter) and queues them here;
 //! they are applied after the page view's pass.
@@ -12,7 +13,8 @@ use pdfcraft_render::DocInfo;
 
 use super::DocView;
 use super::text_caret::Layers as _;
-use crate::comments::{Composer, ComposerKind};
+use crate::QuickTool;
+use crate::comments::{CommentTool, Composer, ComposerKind};
 
 /// The chords the marker takes from the app's shortcuts. Plain arrows and Enter reach the tool anyway.
 pub(crate) const MARKER_KEYS: &[Chord] =
@@ -21,6 +23,31 @@ pub(crate) const MARKER_KEYS: &[Chord] =
 /// How far an arrow moves the marker on screen, in points, without and with Shift.
 const STEP: f32 = 8.0;
 const FAR: f32 = 48.0;
+
+/// What the marker places.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Placed {
+    Note,
+    TextBox,
+}
+
+impl Placed {
+    /// What `tool` places by marker: `None` for a tool that has no marker.
+    pub(crate) fn by(tool: QuickTool) -> Option<Self> {
+        match tool {
+            QuickTool::Comment(CommentTool::Note) => Some(Self::Note),
+            QuickTool::Comment(CommentTool::TextBox) => Some(Self::TextBox),
+            _ => None,
+        }
+    }
+
+    fn composer(self) -> ComposerKind {
+        match self {
+            Self::Note => ComposerKind::Note,
+            Self::TextBox => ComposerKind::TextBox { size: None },
+        }
+    }
+}
 
 /// One queued key.
 #[derive(Clone, Copy, Debug)]
@@ -37,15 +64,16 @@ pub(crate) enum MarkerKey {
 /// The marker of one document tab.
 #[derive(Debug)]
 pub(crate) struct NoteMarker {
+    placed: Placed,
     page: usize,
-    /// Where the note's corner would go, in page view space.
+    /// Where the note's or box's corner would go, in page view space.
     at: [f32; 2],
     /// Keys taken in this pass, applied after it.
     pub(crate) keys: Vec<MarkerKey>,
 }
 
 impl DocView {
-    /// Where the sticky note marker is drawn: `None` without one.
+    /// Where the placing marker is drawn: `None` without one.
     pub fn note_marker_screen_pos(&self) -> Option<Pos2> {
         let marker = self.session.note_marker.as_ref()?;
         self.view_point_on_screen(marker.page, marker.at)
@@ -63,8 +91,8 @@ impl DocView {
     }
 
     /// A new marker: at the text caret when there is one on screen, else in the middle of what shows of the current page.
-    fn new_marker(&self, viewport: Rect) -> Option<NoteMarker> {
-        let marker = |page, at| NoteMarker { page, at, keys: Vec::new() };
+    fn new_marker(&self, viewport: Rect, placed: Placed) -> Option<NoteMarker> {
+        let marker = |page, at| NoteMarker { placed, page, at, keys: Vec::new() };
         if let Some(caret) = &self.session.caret
             && let Some(line) = self.layer(caret.head.page).and_then(|text| caret.line(text))
             && self.view_point_on_screen(caret.head.page, [line[0], line[1]]).is_some_and(|at| viewport.contains(at))
@@ -96,19 +124,25 @@ fn place_words(view: &DocView, marker: &NoteMarker) -> Option<String> {
         (_, _) => crate::i18n::t("bottom right"),
     };
     let page = (marker.page + 1).to_string();
-    Some(crate::i18n::fmt(crate::i18n::t("Note marker: page {page}, {place}"), &[("page", &page), ("place", rough)]))
+    let words = match marker.placed {
+        Placed::Note => crate::i18n::t("Note marker: page {page}, {place}"),
+        Placed::TextBox => crate::i18n::t("Text box marker: page {page}, {place}"),
+    };
+    Some(crate::i18n::fmt(words, &[("page", &page), ("place", rough)]))
 }
 
-/// Keeps the marker while `active` (the Sticky note tool, the page view focused, nothing being written): puts one on
-/// the page, applies the keys the pass queued and reads out where it is. True when it was cancelled: the tool is left.
-pub(super) fn update(view: &mut DocView, info: &DocInfo, viewport: Rect, ctx: &egui::Context, active: bool) -> bool {
+/// Keeps the marker while `active` says what to place (its tool, the page view focused, nothing being written): puts one
+/// on the page, applies the keys the pass queued and reads out where it is. True when it was cancelled: the tool is left.
+pub(super) fn update(view: &mut DocView, info: &DocInfo, viewport: Rect, ctx: &egui::Context, active: Option<Placed>) -> bool {
     let held = view.session.note_marker.take();
-    if !active {
-        return false;
-    }
+    let Some(placed) = active else { return false };
     // The reader has gone to other pages: the marker comes to where they are looking.
-    let Some(mut marker) = held.filter(|m| view.session.placed.iter().any(|placed| placed.page == m.page)) else {
-        view.session.note_marker = view.new_marker(viewport);
+    let Some(mut marker) = held.filter(|m| m.placed == placed && view.session.placed.iter().any(|shown| shown.page == m.page)) else {
+        view.session.note_marker = view.new_marker(viewport, placed);
+        // The arrows and Escape are the marker's now: a comment left selected (one just placed) would take them.
+        if view.session.note_marker.is_some() {
+            view.session.comments.select(None);
+        }
         if let Some(said) = view.session.note_marker.as_ref().and_then(|m| place_words(view, m)) {
             announce(ctx, said, Politeness::Polite);
             ctx.request_repaint();
@@ -120,7 +154,7 @@ pub(super) fn update(view: &mut DocView, info: &DocInfo, viewport: Rect, ctx: &e
     for key in keys {
         match key {
             MarkerKey::Cancel => {
-                announce(ctx, crate::i18n::t("Note marker cancelled"), Politeness::Polite);
+                announce(ctx, crate::i18n::t("Marker cancelled"), Politeness::Polite);
                 ctx.request_repaint();
                 return true;
             }
@@ -140,7 +174,7 @@ pub(super) fn update(view: &mut DocView, info: &DocInfo, viewport: Rect, ctx: &e
                     view.session.comments.composer = Some(Composer {
                         page: marker.page,
                         at: [f64::from(x), f64::from(y)],
-                        kind: ComposerKind::Note,
+                        kind: marker.placed.composer(),
                         text: String::new(),
                         focus: true,
                     });

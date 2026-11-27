@@ -53,7 +53,7 @@ fn fixed_rows(ctx: &egui::Context) -> Vec<FixedRow> {
 }
 
 /// The keys for working without a pointer: moving round the window, the text caret (View ▸ Caret browsing) and placing
-/// a sticky note.
+/// a sticky note or text box.
 fn keyboard_rows(mac: bool) -> Vec<FixedRow> {
     let command = pdfcraft_engine::commands::Shortcut::command_name(mac);
     let name = |k: &str| crate::i18n::key_name(k).to_string();
@@ -62,7 +62,7 @@ fn keyboard_rows(mac: bool) -> Vec<FixedRow> {
     let arrows = "← → ↑ ↓".to_string();
     let window = tl!("Keyboard");
     let caret = tl!("Caret browsing");
-    let note = tl!("Sticky note by keyboard");
+    let note = tl!("Placing a note or text box");
     [
         (window, format!("{tab} / {shift}+{tab}"), tl!("Next / previous control")),
         (window, "F10".to_string(), tl!("Menu bar")),
@@ -72,9 +72,9 @@ fn keyboard_rows(mac: bool) -> Vec<FixedRow> {
         (caret, format!("{command}+← →"), tl!("Move the caret by word")),
         (caret, format!("{} / {}", name("Home"), name("End")), tl!("Start / end of the line")),
         (caret, format!("{shift}+{}", tl!("any of these")), tl!("Extend the selection with the caret")),
-        (note, arrows, tl!("Move the sticky note marker (Shift: further)")),
-        (note, enter.clone(), tl!("Place the sticky note at the marker")),
-        (note, esc, tl!("Cancel placing the sticky note")),
+        (note, arrows, tl!("Move the placing marker (Shift: further)")),
+        (note, enter.clone(), tl!("Place the note or box at the marker")),
+        (note, esc, tl!("Cancel placing")),
     ]
     .into_iter()
     .map(|(group, keys, label)| FixedRow::new(group, label, keys))
