@@ -13,9 +13,9 @@
 //!   destination `/AcroForm`. When only some of a document's pages are copied, a field brings only
 //!   the kids that lead to a widget on those pages: the rest of the form stays behind with its
 //!   values;
-//! - structure-tree links (`/StructParent(s)`) and article beads (`/B`) are removed. Combine puts
-//!   the links back under a structure tree of its own ([`structure`]); the other operations copy
-//!   no structure tree;
+//! - structure-tree links (`/StructParent(s)`) and article beads (`/B`) are removed. Combine,
+//!   Insert pages from a file, Extract and Split put the links back with the elements they lead to
+//!   ([`structure`]); the other operations copy no tags;
 //! - named destinations are resolved against the source's name tree and become explicit ones;
 //! - layers (optional content groups) used by the pages are registered in the destination's
 //!   `/OCProperties`, keeping their default on/off state.
@@ -119,7 +119,16 @@ pub fn insert_file_pages(
     conflicts: FieldConflicts,
 ) -> Result<ImportOutcome, OrganizeError> {
     let before: HashSet<u32> = dst.object_numbers().into_iter().collect();
+    let mut tags = structure::Tags::open(dst);
     let imported = import_pages_mapped(dst, src, src_pages, at, conflicts)?;
+    // Before sharing resources: a form with tags of its own is not another file's.
+    let whole = src_pages.iter().collect::<HashSet<_>>().len() == crate::page_count(src)?;
+    if let Some(tags) = &mut tags {
+        tags.add(dst, src, &imported.page_map, &imported.objects, whole)?;
+    }
+    if let Some(tags) = tags {
+        tags.finish(dst)?;
+    }
     let created = added_objects(dst, &before);
     crate::dedupe::dedupe_resources(dst, &created, true);
     let outline = source_outline(src, imported.page_map);

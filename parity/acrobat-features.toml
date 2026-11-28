@@ -3286,11 +3286,11 @@ title = "Merge structure trees when combining"
 area = "D"
 tier = "P1"
 milestone = "M12"
-status = "planned"
-commands = []
-tools = []
-evidence = []
-notes = ""
+status = "partial"
+commands = ["page.combine", "page.insert", "page.extract"]
+tools = ["doc_combine", "page_insert_file", "page_extract", "doc_split"]
+evidence = ["crates/organize/src/tests.rs::combine_brings_each_files_structure_tree", "crates/organize/src/tests.rs::combine_brings_roles_classes_identifiers_and_namespaces", "crates/organize/src/tests.rs::insert_and_extract_bring_structure_trees", "crates/automation/tests/it/automation.rs::tags_come_through_combine_insert_and_extract"]
+notes = "Combine files, Insert pages from a file, Extract pages and Split carry each file's structure tree with its pages: elements that lead to no copied page are left behind, the parent tree is numbered afresh, and role map, class map, element identifiers and namespaces come along, a clashing name or identifier being renamed for the later file. The result says it is tagged only when everything in it was. Gaps: inserted pages' elements go after the document's own, not at the pages' place in the reading order; Combine orders them by file, also when a file's pages are split into runs; Duplicate and Replace pages copy no tags; /Headers inside a class map attribute are not rewritten on an identifier clash."
 
 [[feature]]
 id = "organize.page-labels-edit"
