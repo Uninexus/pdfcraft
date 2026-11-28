@@ -687,6 +687,18 @@ impl crate::Document {
         image_work: &mut pdfcraft_cos::ImageBudget,
     ) -> (Vec<pdfcraft_export::Page>, Vec<usize>) {
         let Some(cos) = self.editor.as_ref().map(|e| &e.cos) else { return (Vec::new(), Vec::new()) };
+        self.export_pages_from(cos, images, image_budget, image_work)
+    }
+
+    /// [`Self::export_pages_within`] reading `cos`: the document's own objects, or a copy of them
+    /// with recognized words added.
+    fn export_pages_from(
+        &self,
+        cos: &pdfcraft_cos::Document,
+        images: bool,
+        image_budget: usize,
+        image_work: &mut pdfcraft_cos::ImageBudget,
+    ) -> (Vec<pdfcraft_export::Page>, Vec<usize>) {
         let mut truncated = Vec::new();
         // Each image object is encoded once and shared by every place that draws it.
         let mut encoded: HashMap<ObjRef, PreparedImage> = HashMap::new();
@@ -773,7 +785,26 @@ impl crate::Document {
     /// ([`OfficeExport::truncated_pages`]).
     pub fn export_office_checked(&self, format: OfficeFormat) -> OfficeExport {
         // Markdown leaves pictures out.
-        let (pages, mut truncated_pages) = self.export_pages_checked(!matches!(format, OfficeFormat::Markdown), MAX_EXPORT_IMAGE_BYTES);
+        let (pages, truncated_pages) = self.export_pages_checked(!matches!(format, OfficeFormat::Markdown), MAX_EXPORT_IMAGE_BYTES);
+        self.office_file(format, pages, truncated_pages)
+    }
+
+    /// [`Self::export_office_checked`] with the words `found` on scanned pages (what
+    /// [`Session::scan_ocr_job`](crate::Session::scan_ocr_job) read) added first, so they are
+    /// exported too. They are added to a copy: the document does not change.
+    pub fn export_office_with_ocr(&self, format: OfficeFormat, found: &[crate::ocr::OcrPage]) -> Result<OfficeExport, String> {
+        let mut cos = self.editor.as_ref().ok_or("this document can't be read for export")?.cos.clone();
+        for page in found.iter().filter(|p| !p.words.is_empty()) {
+            crate::ocr::layer::add_text(&mut cos, page.page, &page.words).map_err(|e| e.to_string())?;
+        }
+        let images = !matches!(format, OfficeFormat::Markdown);
+        let mut work = pdfcraft_cos::ImageBudget::new(&cos);
+        let (pages, truncated_pages) = self.export_pages_from(&cos, images, MAX_EXPORT_IMAGE_BYTES, &mut work);
+        Ok(self.office_file(format, pages, truncated_pages))
+    }
+
+    /// `pages` written in `format`.
+    fn office_file(&self, format: OfficeFormat, pages: Vec<pdfcraft_export::Page>, mut truncated_pages: Vec<usize>) -> OfficeExport {
         let title = self.info.title.clone().unwrap_or_else(|| self.name.trim_end_matches(".pdf").to_string());
         // Word and HTML name the document's language (`/Lang`), so spelling is checked in it.
         let language = self.initial_view().language;

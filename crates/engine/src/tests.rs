@@ -16485,3 +16485,28 @@ fn a_bookmark_can_be_given_a_web_address_and_back() {
     s.apply(id, Edit::SetBookmarkPage { path: vec![0], page: 0 }).unwrap();
     assert_eq!(first(&s), (Some(0), None));
 }
+
+/// Export of a scan can take recognized words along without changing the document, and only
+/// pictured pages are offered for reading.
+#[test]
+fn a_scanned_page_exports_the_words_recognized_on_it() {
+    use crate::compare::OfficeFormat;
+    use ocr::{OcrPage, OcrSettings, PlacedWord};
+    let mut s = Session::new().with_clock(|| 1_700_000_000);
+    let scan = s.open("scan.pdf", None, scanned_form(Scan::Straight), None).unwrap();
+    let typed = s.open("typed.pdf", None, Arc::new(paper_form()), None).unwrap();
+    assert!(s.scan_ocr_job(scan, OcrSettings::default()).is_some());
+    assert!(s.scan_ocr_job(typed, OcrSettings::default()).is_none(), "no pictures, nothing to read");
+
+    let word =
+        PlacedWord { text: "INVOICE".into(), origin: [40.0, 40.0], across: [60.0, 0.0], up: [0.0, 20.0], confidence: None, source: "ocrs".into() };
+    let found = [OcrPage { page: 0, words: vec![word], already_on_page: 0, skipped: None, notes: Vec::new() }];
+    let doc = s.get(scan).unwrap();
+    let said = |bytes: Vec<u8>| String::from_utf8_lossy(&bytes).into_owned();
+    assert!(!said(doc.export_office(OfficeFormat::Markdown)).contains("INVOICE"));
+    assert!(said(doc.export_office_with_ocr(OfficeFormat::Markdown, &found).unwrap().bytes).contains("INVOICE"));
+    assert!(said(doc.export_office_with_ocr(OfficeFormat::Rtf, &found).unwrap().bytes).contains("INVOICE"));
+    // The document is as it was: no text, nothing to save.
+    assert!(!doc.dirty);
+    assert!(!said(doc.export_office(OfficeFormat::Markdown)).contains("INVOICE"));
+}

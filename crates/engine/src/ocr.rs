@@ -967,6 +967,31 @@ fn crop(image: &pdfcraft_ocr::OcrImage, x0: u32, y0: u32, x1: u32, y1: u32) -> O
 }
 
 impl Session {
+    /// What recognising the scanned pages of document `id` before an export needs: the pages that
+    /// draw a picture, read with `settings` but leaving alone those with text of their own (a
+    /// scan with comments on it is still a scan). `None` when no page draws a picture. Running the
+    /// job and handing the result to
+    /// [`Document::export_office_with_ocr`](crate::Document::export_office_with_ocr) exports the
+    /// words without changing the document.
+    pub fn scan_ocr_job(&self, id: DocId, settings: OcrSettings) -> Option<OcrJob> {
+        let doc = self.get(id)?;
+        let pictured: Vec<usize> = (0..doc.info.pages.len()).filter(|&p| !doc.page_images(p).is_empty()).collect();
+        // No pages at all would mean every page.
+        if pictured.is_empty() {
+            return None;
+        }
+        let settings = OcrSettings {
+            skip_text_pages: true,
+            native_text_only: true,
+            skip_text_files: false,
+            force_ocr: false,
+            region: None,
+            output_mode: OutputMode::Searchable,
+            ..settings
+        };
+        self.ocr_job(id, &pictured, settings)
+    }
+
     /// Capture what recognising `pages` (0-based; empty = all) of document `id` needs.
     pub fn ocr_job(&self, id: DocId, pages: &[usize], settings: OcrSettings) -> Option<OcrJob> {
         let doc = self.get(id)?;
