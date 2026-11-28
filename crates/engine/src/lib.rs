@@ -31,6 +31,7 @@ pub mod commands;
 mod comments;
 pub mod compare;
 mod copy_image;
+pub mod redact_keep;
 pub use copy_image::{PagePicture, picture_at};
 mod arrange;
 pub mod dates;
