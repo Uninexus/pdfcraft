@@ -16804,3 +16804,40 @@ fn lists_through_tools() {
         Err(ToolError::InvalidArgs(_))
     ));
 }
+
+/// text_edit keeps a paragraph in its structure tag, also when the tag opens inside the text object.
+#[test]
+fn text_edit_keeps_the_paragraph_in_its_tag() {
+    let dir = workdir("keep-tags");
+    let content = "BT /F1 12 Tf 20 220 Td /P <</MCID 0>> BDC (First tagged paragraph) Tj EMC 0 -60 Td /P <</MCID 1>> BDC (Second one) Tj EMC ET";
+    let stream = format!("<< /Length {} >>\nstream\n{content}\nendstream", content.len());
+    let pdf = pdf_of(&[
+        "<< /Type /Catalog /Pages 2 0 R /MarkInfo << /Marked true >> /StructTreeRoot 6 0 R >>",
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 300 300] >>",
+        "<< /Type /Page /Parent 2 0 R /StructParents 0 /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
+        &stream,
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        "<< /Type /StructTreeRoot /K [7 0 R 8 0 R] /ParentTree 9 0 R >>",
+        "<< /Type /StructElem /S /P /P 6 0 R /Pg 3 0 R /K 0 >>",
+        "<< /Type /StructElem /S /P /P 6 0 R /Pg 3 0 R /K 1 >>",
+        "<< /Nums [0 [7 0 R 8 0 R]] >>",
+    ]);
+    std::fs::write(dir.join("tagged.pdf"), pdf).unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "tagged.pdf" }))["doc"].as_u64().unwrap();
+    let tagged = |a: &mut Automation, doc: u64, object: u32| {
+        ok(a, "accessibility_tag_content", json!({ "doc": doc, "object": object, "generation": 0 }))["content"][0]["text"].to_string()
+    };
+    assert!(tagged(&mut a, doc, 7).contains("First"));
+    for (paragraph, object, words) in [(1, 7, "Rewritten opening"), (2, 8, "Rewritten ending")] {
+        ok(&mut a, "text_paragraphs", json!({ "doc": doc, "page": 1 }));
+        ok(&mut a, "text_edit", json!({ "doc": doc, "page": 1, "paragraph": paragraph, "text": words }));
+        assert!(tagged(&mut a, doc, object).contains(words), "{}", tagged(&mut a, doc, object));
+    }
+    // And in the saved file, whose objects may be numbered anew.
+    ok(&mut a, "doc_save", json!({ "doc": doc, "path": "kept.pdf" }));
+    let again = ok(&mut a, "doc_open", json!({ "path": "kept.pdf" }))["doc"].as_u64().unwrap();
+    let tags = ok(&mut a, "accessibility_tags", json!({ "doc": again, "types": ["P"] }));
+    let kept: Vec<String> = tags["tags"].as_array().unwrap().iter().map(|t| tagged(&mut a, again, t["object"].as_u64().unwrap() as u32)).collect();
+    assert!(kept.len() == 2 && kept[0].contains("Rewritten opening") && kept[1].contains("Rewritten ending"), "{kept:?}");
+}
