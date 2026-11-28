@@ -510,6 +510,9 @@ impl PdfCraftApp {
                     _ => return Err("text-links must be true or false".into()),
                 };
             }
+            ("caret-on-open", _) => {
+                self.caret_on_open = value.parse::<bool>().map_err(|_| "caret-on-open must be true or false")?;
+            }
             ("ui-scale", _) => self.ui_scale = ui_scale::parse(value)?,
             // `--secured-notice false`: no notice above the pages that a document is secured.
             ("secured-notice", _) => {

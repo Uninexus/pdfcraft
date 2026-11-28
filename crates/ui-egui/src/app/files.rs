@@ -410,6 +410,15 @@ impl PdfCraftApp {
             self.set_right(opens_with);
         }
         self.views.push(view);
+        if self.caret_on_open
+            && let Some(view) = self.views.last_mut()
+        {
+            view.set_caret_browsing(true);
+            // The caret is the Select tool's.
+            if activate {
+                self.quick_tool = crate::QuickTool::Select;
+            }
+        }
         if activate {
             self.active = Some(self.views.len() - 1);
         }

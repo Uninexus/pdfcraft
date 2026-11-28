@@ -159,6 +159,7 @@ impl crate::PdfCraftApp {
             "theme": format!("{:?}", self.root_env(ctx).resolved(ctx).mode),
             "theme_preference": format!("{:?}", self.theme_preference),
             "show_page_edge_shadows": self.show_page_edge_shadows,
+            "caret_on_open": self.caret_on_open,
             "single_key_accelerators": self.single_key_accelerators,
             "identity_email": self.identity_email,
             "required_field_color": self.required_field_color.map(|[r, g, b]| format!("#{r:02X}{g:02X}{b:02X}")),
