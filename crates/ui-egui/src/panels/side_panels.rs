@@ -655,11 +655,24 @@ fn close_ends_organize(app: &mut PdfCraftApp, actions: &mut Vec<Action<PanelId>>
     app.left = crate::organize_panel::workspace_panel(app.mode);
 }
 
+/// A Find choice changed in any view since the last pass becomes the app's, which every view's next search starts with.
+fn share_find_choices(app: &mut PdfCraftApp) {
+    for view in &mut app.views {
+        if let Some(choices) = view.find.as_mut().and_then(crate::canvas::Find::changed_choices) {
+            app.find_choices = choices;
+        }
+    }
+    for view in &mut app.views {
+        view.find_choices = app.find_choices;
+    }
+}
+
 /// Draws the dock. Call after the top bars and before the central panel.
 ///
 /// The area gets the app's workspace `Arc` and reports every change of the pass; they are applied to `app.dock` here,
 /// the area's own actions first, then the ones the bodies requested. A pass applies only what it reported.
 pub fn dock(app: &mut PdfCraftApp, ui: &mut Ui) {
+    share_find_choices(app);
     let active = app.active.is_some();
     let read = app.mode == Mode::Read;
     // The expanded All tools view covers the panels but keeps the rail.

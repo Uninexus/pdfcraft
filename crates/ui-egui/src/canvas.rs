@@ -65,6 +65,7 @@ use bars::{Notice, notices, page_size_hint};
 pub(crate) use cache::{BASE_SIDE, TILE_THRESHOLD, texture_image};
 pub use craft::pages::{Fit, PageDisplay, PageSpacing, ViewDefaults, display_token, parse_display_token};
 pub use find::Find;
+pub(crate) use find::FindChoices;
 pub(crate) use find::Listed;
 use find::find_bar;
 use organize::organize_grid;
@@ -240,6 +241,8 @@ pub struct DocView {
     /// Cut pages whose notice the reader dismissed: a page cut later shows it again.
     cut_notice_dismissed: std::collections::BTreeSet<usize>,
     pub find: Option<Find>,
+    /// The app's Find choices, which a search opened in this view starts with.
+    pub(crate) find_choices: find::FindChoices,
     page_count: usize,
     /// Page sizes (width, height) in points (view space, unrotated by the view), for the page transforms.
     page_sizes: Vec<(f32, f32)>,
@@ -652,6 +655,7 @@ impl DocView {
             full_screen_fill: true,
             cut_notice_dismissed: Default::default(),
             find: None,
+            find_choices: Default::default(),
             page_count: info.pages.len(),
             page_sizes: info.pages.iter().map(|p| (p.width, p.height)).collect(),
             auto_ocr_tried: Default::default(),

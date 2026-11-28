@@ -342,6 +342,7 @@ impl PdfCraftApp {
             full_screen_escape_exits: true,
             full_screen_fill: true,
             full_screen_advance: 0,
+            find_choices: Default::default(),
             language: i18n::AUTO.to_string(),
             ui_scale: None,
             title_bar_choice: Default::default(),

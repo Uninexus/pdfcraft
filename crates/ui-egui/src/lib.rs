@@ -516,6 +516,8 @@ pub struct PdfCraftApp {
     session_keeper: craft::platform::session::SessionKeeper,
     /// Preferences: the seconds after which full screen turns a page that has no display time of its own; 0 never.
     pub full_screen_advance: u32,
+    /// Find's case-sensitive, whole words, Include comments and Include bookmarks, as last chosen.
+    pub(crate) find_choices: crate::canvas::FindChoices,
     /// Preferences: reload a document when its file changes on disk (#431).
     pub reload_changed_files: bool,
     /// Preferences: the minutes between recovery copies of unsaved work (set with

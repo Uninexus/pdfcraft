@@ -84,6 +84,10 @@ pub struct Behavior {
     /// Full screen fills the screen with one page at a time (off keeps the page display).
     pub full_screen_fill: Option<bool>,
     pub full_screen_advance: Option<u32>,
+    pub find_match_case: Option<bool>,
+    pub find_whole_words: Option<bool>,
+    pub find_include_comments: Option<bool>,
+    pub find_include_bookmarks: Option<bool>,
     /// Esc leaves full screen (off leaves it to ⌘L / Ctrl+L only).
     pub full_screen_escape_exits: Option<bool>,
     pub units: Option<crate::units::Unit>,
@@ -631,6 +635,10 @@ pub fn import_json(text: &str) -> (PdfCraftSettings, Vec<SectionError>) {
             full_screen_fill: r.bool("full_screen_fill"),
             full_screen_advance: r.f64("full_screen_advance").filter(|n| *n >= 0.0 && n.is_finite() && n.fract() == 0.0).map(|n| n as u32),
             full_screen_escape_exits: r.bool("full_screen_escape_exits"),
+            find_match_case: r.bool("find_match_case"),
+            find_whole_words: r.bool("find_whole_words"),
+            find_include_comments: r.bool("find_include_comments"),
+            find_include_bookmarks: r.bool("find_include_bookmarks"),
             units: r.typed("units"),
             grid_spacing: r.f64("grid_spacing"),
             grid_subdivisions: r.typed("grid_subdivisions"),

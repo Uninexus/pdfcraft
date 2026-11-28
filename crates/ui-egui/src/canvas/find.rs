@@ -58,9 +58,20 @@ struct BookmarkHit {
     view: DestView,
 }
 
+/// What the reader chose in the find bar and Advanced Search: kept for the next document and the next run.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct FindChoices {
+    pub match_case: bool,
+    pub whole_word: bool,
+    pub include_comments: bool,
+    pub include_bookmarks: bool,
+}
+
 /// The find bar (⌘F): query, matches across the document, current match.
 #[derive(Default)]
 pub struct Find {
+    /// The choices as last handed to the app, so a change made here is told apart from one made elsewhere.
+    seen: FindChoices,
     pub query: String,
     /// Find options (Acrobat's: case-sensitive, whole words only).
     pub options: FindOptions,
@@ -93,6 +104,29 @@ pub struct Find {
 }
 
 impl Find {
+    /// A new search that starts with the reader's `choices`.
+    pub(crate) fn with(choices: FindChoices) -> Self {
+        let mut find =
+            Find { seen: choices, include_comments: choices.include_comments, include_bookmarks: choices.include_bookmarks, ..Default::default() };
+        find.options.match_case = choices.match_case;
+        find.options.whole_word = choices.whole_word;
+        find
+    }
+
+    /// The choices as they stand, when they changed since the last call.
+    pub(crate) fn changed_choices(&mut self) -> Option<FindChoices> {
+        let now = FindChoices {
+            match_case: self.options.match_case,
+            whole_word: self.options.whole_word,
+            include_comments: self.include_comments,
+            include_bookmarks: self.include_bookmarks,
+        };
+        (now != self.seen).then(|| {
+            self.seen = now;
+            now
+        })
+    }
+
     /// The matches as highlights for the page view's text marks, the current one stronger.
     pub fn marks(&self) -> Vec<TextMark> {
         let current = self.matches.current();
@@ -133,14 +167,16 @@ impl Find {
 impl DocView {
     /// Open the find bar (or focus it if already open).
     pub fn open_find(&mut self) {
-        let f = self.find.get_or_insert_with(Find::default);
+        let choices = self.find_choices;
+        let f = self.find.get_or_insert_with(|| Find::with(choices));
         f.bar.open();
     }
 
     /// Open the find bar with its Replace row (Edit text mode shows it): the Find field takes the
     /// keyboard while it is empty, else the Replace field.
     pub fn open_replace(&mut self) {
-        let f = self.find.get_or_insert_with(Find::default);
+        let choices = self.find_choices;
+        let f = self.find.get_or_insert_with(|| Find::with(choices));
         f.in_panel = false;
         f.replacing = true;
         f.bar.open_replace();

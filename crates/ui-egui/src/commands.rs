@@ -901,7 +901,8 @@ impl PdfCraftApp {
             }
             "edit.advanced_search" => {
                 if let Some(i) = self.active {
-                    let f = self.views[i].find.get_or_insert_with(Default::default);
+                    let choices = self.find_choices;
+                    let f = self.views[i].find.get_or_insert_with(|| crate::canvas::Find::with(choices));
                     f.in_panel = true;
                     f.bar.open();
                     self.choose_right_panel(Some(crate::RightPanel::Search));
