@@ -34,6 +34,10 @@ pub struct DigitalIdEntry {
     pub issuer: String,
     pub email: String,
     pub expires: String,
+    /// The certificate's subject, as the distinguished name line of a signature shows it; empty for an ID listed
+    /// before this was kept.
+    #[serde(default)]
+    pub subject: String,
     /// Why the ID can't sign (a Windows store certificate whose key PdfCraft can't use): shown
     /// greyed with the reason, and never selectable.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -296,6 +300,7 @@ pub fn entry_for(path: &str, c: &Certificate) -> DigitalIdEntry {
         issuer: c.issuer.common_name().map(str::to_string).unwrap_or_else(|| c.issuer.display()),
         email: c.subject.email().unwrap_or("").to_string(),
         expires: format!("{:04}.{:02}.{:02}", c.not_after.year, c.not_after.month, c.not_after.day),
+        subject: c.subject.display(),
         unusable: None,
     }
 }
@@ -309,6 +314,7 @@ fn entry_unusable(u: &sign::windows::Unusable) -> DigitalIdEntry {
         issuer: String::new(),
         email: String::new(),
         expires: String::new(),
+        subject: String::new(),
         unusable: Some(u.reason.clone()),
     }
 }
@@ -944,7 +950,15 @@ mod tests {
     }
 
     fn listed(path: &str, name: &str) -> DigitalIdEntry {
-        DigitalIdEntry { path: path.into(), name: name.into(), issuer: String::new(), email: String::new(), expires: String::new(), unusable: None }
+        DigitalIdEntry {
+            path: path.into(),
+            name: name.into(),
+            issuer: String::new(),
+            email: String::new(),
+            expires: String::new(),
+            subject: String::new(),
+            unusable: None,
+        }
     }
 
     /// Issue #1396: an imported ID can be taken off the list (its file stays), the dialog's
@@ -1013,6 +1027,19 @@ mod tests {
         }
     }
 
+    /// The distinguished name follows the name, as signing stamps it, and an ID without a kept subject still has the line.
+    #[test]
+    fn the_preview_shows_the_distinguished_name_when_asked() {
+        let english = AppearanceLabels::default();
+        let asked = Appearance { distinguished_name: true, date: false, ..Appearance::default() };
+        let line = format!("{}CN=Ada, O=Engines", english.distinguished_name);
+        assert_eq!(detail_lines(&asked, &english, ["Ada", "CN=Ada, O=Engines"], "", "", "D")[1..], ["Ada".to_string(), line]);
+        let unknown = detail_lines(&asked, &english, ["Ada", ""], "", "", "D");
+        assert!(unknown.last().is_some_and(|l| l.starts_with(english.distinguished_name.as_str()) && l.len() > english.distinguished_name.len()));
+        let not_asked = Appearance { date: false, ..Appearance::default() };
+        assert!(!detail_lines(&not_asked, &english, ["Ada", "CN=Ada"], "", "", "D").iter().any(|l| l.contains("CN=")));
+    }
+
     /// The preview's details are the stamp's: the label above the name, then each detail after
     /// its label, in the words given, and only the values when the labels are off.
     #[test]
@@ -1022,12 +1049,12 @@ mod tests {
         }
         let (de, _) = appearance_labels(crate::i18n::Lang::from_code("de").unwrap());
         let all = Appearance { reason: true, location: true, ..Appearance::default() };
-        let lines = detail_lines(&all, &de, "Ada", " Genehmigt ", "Berlin", "2026.10.14 09:30:00 Z");
+        let lines = detail_lines(&all, &de, ["Ada", ""], " Genehmigt ", "Berlin", "2026.10.14 09:30:00 Z");
         assert_eq!(lines, ["Digital signiert von", "Ada", "Grund: Genehmigt", "Ort: Berlin", "Datum: 2026.10.14 09:30:00 Z"]);
         let bare = Appearance { labels: false, ..all.clone() };
-        assert_eq!(detail_lines(&bare, &de, "Ada", "Genehmigt", "", "D"), ["Ada", "Genehmigt", "D"]);
+        assert_eq!(detail_lines(&bare, &de, ["Ada", ""], "Genehmigt", "", "D"), ["Ada", "Genehmigt", "D"]);
         let nothing = Appearance { name: false, date: false, ..all };
-        assert!(detail_lines(&nothing, &de, "Ada", "  ", "", "D").is_empty());
+        assert!(detail_lines(&nothing, &de, ["Ada", ""], "  ", "", "D").is_empty());
     }
 
     fn signature(certify: Option<u8>, status: SignatureStatus) -> SignatureInfo {
