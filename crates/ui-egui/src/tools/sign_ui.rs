@@ -543,6 +543,10 @@ impl PdfCraftApp {
                 e => e.to_string(),
             })?
         };
+        // An ID listed before its subject was kept gets it now that it is open, for the preview's distinguished name.
+        if let Some(kept) = self.digital_ids.iter_mut().find(|e| e.path == entry.path && e.subject.is_empty()) {
+            kept.subject = id.certificate.subject.display();
+        }
         let some = |s: &str| (!s.trim().is_empty()).then(|| s.trim().to_string());
         // Only a visible signature shows its graphic.
         let graphic = match self.graphic_sig(&d.graphic) {
