@@ -90,17 +90,14 @@ pub(crate) fn show(app: &mut PdfCraftApp, ui: &mut egui::Ui) -> PanelResult {
     if before != (find.options.whole_word, find.options.match_case) {
         find.case_query.clear();
     }
-    // Comments and bookmarks are not searched in a folder's files.
-    if !folder.on {
-        let before = (find.include_comments, find.include_bookmarks);
-        Row::new().show(ui, |ui, _| {
-            Checkbox::new(Bind::bound(&mut find.include_comments)).label(tl!("Include comments").to_string()).show(ui);
-            Checkbox::new(Bind::bound(&mut find.include_bookmarks)).label(tl!("Include bookmarks").to_string()).show(ui);
-        });
-        // The page view lists them on its next pass.
-        if before != (find.include_comments, find.include_bookmarks) {
-            ui.ctx().request_repaint();
-        }
+    let before = (find.include_comments, find.include_bookmarks);
+    Row::new().show(ui, |ui, _| {
+        Checkbox::new(Bind::bound(&mut find.include_comments)).label(tl!("Include comments").to_string()).show(ui);
+        Checkbox::new(Bind::bound(&mut find.include_bookmarks)).label(tl!("Include bookmarks").to_string()).show(ui);
+    });
+    // The page view lists them on its next pass.
+    if before != (find.include_comments, find.include_bookmarks) {
+        ui.ctx().request_repaint();
     }
     if open_docs.on {
         let (query, case, whole) = (find.query.clone(), find.options.match_case, find.options.whole_word);

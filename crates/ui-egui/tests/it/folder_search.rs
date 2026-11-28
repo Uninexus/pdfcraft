@@ -149,3 +149,31 @@ fn the_edit_menu_lists_it_and_the_panel_leads_back_to_the_document() {
     assert!(!h.state().folder_search.on);
     h.get_by_role_and_label(Role::Button, "Search all PDFs in a folder…");
 }
+
+#[test]
+fn comments_and_bookmarks_of_the_files_are_listed_when_asked() {
+    use pdfcraft_engine::{Edit, NewAnnotation, NoteIcon, Session, Shape};
+
+    let dir = folder();
+    // "cherry" is only in a comment of one file.
+    let mut session = Session::new();
+    let id = session.open("one.pdf", None, pdf(&["alpha invoice"]).into(), None).unwrap();
+    let note = NewAnnotation {
+        page: 0,
+        shape: Shape::Note { at: [20.0, 100.0], icon: NoteIcon::Comment },
+        style: Default::default(),
+        contents: "ripe cherry".into(),
+        author: "Tester".into(),
+    };
+    session.apply(id, Edit::AddAnnotation(note)).unwrap();
+    std::fs::write(dir.path().join("one.pdf"), session.save_bytes(id).unwrap().as_slice()).unwrap();
+    let (mut h, jobs) = harness(dir.path());
+    ready(&mut h, "cherry");
+    h.get_by_label("Include comments").click();
+    h.run_steps(2);
+    h.get_by_role_and_label(Role::Button, "Search folder").click();
+    h.run_steps(2);
+    run_jobs(&mut h, &jobs);
+    let found: Vec<_> = h.state().folder_search.results.iter().flat_map(|f| f.matches.iter()).map(|m| m.snippet()).collect();
+    assert_eq!(found, ["Comment: ripe cherry"]);
+}

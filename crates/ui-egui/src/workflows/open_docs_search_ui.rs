@@ -126,6 +126,7 @@ fn snippet(text: &pdfcraft_render::PageText, page: usize, range: std::ops::Range
     let (start, end) = (range.start.min(n), range.end.min(n));
     let flat = |s: String| s.split_whitespace().collect::<Vec<_>>().join(" ");
     Match {
+        from: pdfcraft_engine::folder_search::Found::Page,
         page,
         before: flat(text.text_of(start.saturating_sub(CONTEXT)..start)),
         text: flat(text.text_of(start..end)),

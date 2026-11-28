@@ -3,7 +3,9 @@
 //! matches are listed by file, and a click on one opens that file at its page. The search runs in the background with a
 //! progress card and Cancel (also the panel's Stop); what it found before it was stopped stays listed and is marked.
 //!
-//! The query and the two options are the Search panel's own (the active document's find state), so a folder search and
+//! Include comments and Include bookmarks add each file's matching comments and bookmark titles after its page matches.
+//!
+//! The query and the options are the Search panel's own (the active document's find state), so a folder search and
 //! a search of the document agree on what a match is.
 
 use std::collections::HashMap;
@@ -20,7 +22,7 @@ use craft::ui::layout_components::Row;
 use craft::ui::list::{List, ListRow};
 use craft::ui::runtime::env::Label;
 use craft::ui::style::{Span, TypeRole};
-use pdfcraft_engine::folder_search::{self, FileOutcome, Match, Options, SkipReason, Summary};
+use pdfcraft_engine::folder_search::{self, FileOutcome, Found, Match, Options, SkipReason, Summary};
 
 use super::job_count::JobCount;
 use crate::PdfCraftApp;
@@ -88,7 +90,15 @@ impl FolderSearch {
     /// Files the worker finished.
     fn absorb(&mut self, outcome: FileOutcome) {
         match outcome {
-            FileOutcome::Searched { path, matches, pages_failed, .. } => {
+            FileOutcome::Searched { path, mut matches, pages_failed, .. } => {
+                // A comment or a bookmark is labelled as the Search panel labels the open documents' ones.
+                for m in &mut matches {
+                    match m.from {
+                        Found::Page => {}
+                        Found::Comment => m.before = format!("{}:", tl!("Comment")),
+                        Found::Bookmark => m.before = format!("{}:", tl!("Bookmark")),
+                    }
+                }
                 self.files_done += 1;
                 self.pages_failed += pages_failed;
                 if !matches.is_empty() {
@@ -154,11 +164,12 @@ impl PdfCraftApp {
             return;
         }
         let (case_sensitive, whole_words) = (find.options.match_case, find.options.whole_word);
+        let (comments, bookmarks) = (find.include_comments, find.include_bookmarks);
         // A result nobody took (an earlier search that was dropped) is not this search's.
         while self.folder_search_jobs.try_recv().is_some() {}
         self.folder_search.clear();
-        let options =
-            Options { case_sensitive, whole_words, recursive: self.folder_search.recursive, max_results: MAX_LISTED, ..Options::new(query) };
+        let recursive = self.folder_search.recursive;
+        let options = Options { case_sensitive, whole_words, comments, bookmarks, recursive, max_results: MAX_LISTED, ..Options::new(query) };
         let progress = Arc::new(JobCount::default());
         let inbox: Arc<Mutex<Vec<FileOutcome>>> = Arc::default();
         let (count, sink, wake) = (progress.clone(), inbox.clone(), self.wake.clone());

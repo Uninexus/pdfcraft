@@ -231,3 +231,36 @@ fn a_name_that_is_not_utf8_is_flagged() {
     assert_eq!(lossy.iter().filter(|l| **l).count(), 1, "{r}");
     assert_eq!(r["count"], 2);
 }
+
+/// Bookmark titles are searched only when asked, and say where they were found.
+#[test]
+fn bookmarks_are_listed_when_asked() {
+    let d = tmp("bookmarks");
+    let objs = [
+        "<< /Type /Catalog /Pages 2 0 R /Outlines 4 0 R >>",
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>",
+        "<< /Type /Outlines /First 5 0 R /Last 5 0 R /Count 1 >>",
+        "<< /Title (damson notes) /Parent 4 0 R /Dest [3 0 R /Fit] >>",
+    ];
+    let mut out = b"%PDF-1.7\n".to_vec();
+    let mut offsets = Vec::new();
+    for (i, o) in objs.iter().enumerate() {
+        offsets.push(out.len());
+        out.extend_from_slice(format!("{} 0 obj\n{o}\nendobj\n", i + 1).as_bytes());
+    }
+    let xref = out.len();
+    out.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1).as_bytes());
+    for o in offsets {
+        out.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+    }
+    out.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objs.len() + 1).as_bytes());
+    write(&d, "a.pdf", &out);
+    let mut a = Automation::new();
+    let without = ok(&mut a, json!({ "folder": d.to_str().unwrap(), "query": "damson" }));
+    assert_eq!(without["count"], 0);
+    let with = ok(&mut a, json!({ "folder": d.to_str().unwrap(), "query": "damson", "include_bookmarks": true }));
+    assert_eq!(with["files"][0]["matches"][0]["from"], "bookmark", "{with}");
+    assert_eq!(with["files"][0]["matches"][0]["page"], 1);
+    let _ = std::fs::remove_dir_all(&d);
+}

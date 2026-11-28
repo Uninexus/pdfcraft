@@ -1,7 +1,7 @@
 //! `text_find_folder`: the text search of every PDF in a folder, as Edit > Advanced search with the Folder
 //! scope runs it (the engine's `folder_search`).
 
-use pdfcraft_engine::folder_search::{self, FileOutcome, MAX_FILES, MAX_RESULTS, Options};
+use pdfcraft_engine::folder_search::{self, FileOutcome, Found, MAX_FILES, MAX_RESULTS, Options};
 
 use super::error::{Result, failed};
 use super::json::Args;
@@ -31,6 +31,8 @@ impl Automation {
         let options = Options {
             case_sensitive: a.opt_bool("case_sensitive")?.unwrap_or(false),
             whole_words: a.opt_bool("whole_words")?.unwrap_or(false),
+            comments: a.opt_bool("include_comments")?.unwrap_or(false),
+            bookmarks: a.opt_bool("include_bookmarks")?.unwrap_or(false),
             recursive: a.opt_bool("recursive")?.unwrap_or(false),
             max_files: bounded(a, "max_files", MAX_FILES, MAX_FILES)?,
             max_results: bounded(a, "limit", 500, MAX_RESULTS)?,
@@ -53,7 +55,12 @@ impl Automation {
                     let matches: Vec<Value> = matches
                         .iter()
                         .map(|m| {
-                            json!({ "page": m.page.saturating_add(1), "text": m.text, "before": m.before, "after": m.after, "snippet": m.snippet() })
+                            let from = match m.from {
+                                Found::Page => "page",
+                                Found::Comment => "comment",
+                                Found::Bookmark => "bookmark",
+                            };
+                            json!({ "from": from, "page": m.page.saturating_add(1), "text": m.text, "before": m.before, "after": m.after, "snippet": m.snippet() })
                         })
                         .collect();
                     Some(json!({ "path": path.to_string_lossy(), "relative": name(path), "path_lossy": lossy(path), "pages": pages,

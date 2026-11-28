@@ -4,13 +4,14 @@
 //! [`PageText::find_opts_limited`], the same matcher the find bar, Advanced search and the
 //! `text_find` tool use, so case-sensitive and whole-word searches agree with them. A file that
 //! cannot be read is reported as skipped and never stops the search. Folders are never followed
-//! through links.
+//! through links. With [`Options::comments`] or [`Options::bookmarks`], a file's matching comments and bookmark
+//! titles follow its page matches.
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use pdfcraft_render::{OpenError, PageRenderer, PageText, RenderConfig, RenderRequest, RequestKind, inspect};
+use pdfcraft_render::{DocInfo, OpenError, OutlineItem, PageRenderer, PageText, RenderConfig, RenderRequest, RequestKind, inspect};
 
 /// Most PDFs one search reads (the first ones, in path order); the rest are counted as `files_found`.
 pub const MAX_FILES: usize = 2000;
@@ -33,12 +34,33 @@ pub const MAX_DEPTH: usize = 32;
 /// Glyphs of context kept on each side of a match in its snippet.
 pub const CONTEXT: usize = 36;
 
+/// Characters of a comment's line or a bookmark's title a match shows.
+const SHOWN_CHARS: usize = 80;
+
+/// Deepest bookmark level searched.
+const MAX_BOOKMARK_DEPTH: usize = 256;
+
+/// Where a match was found.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Found {
+    #[default]
+    Page,
+    /// A comment or a reply in its thread.
+    Comment,
+    /// A bookmark's title; the match's page is the bookmark's.
+    Bookmark,
+}
+
 /// What to search for and where to stop.
 #[derive(Clone, Debug)]
 pub struct Options {
     pub query: String,
     pub case_sensitive: bool,
     pub whole_words: bool,
+    /// Search comments too.
+    pub comments: bool,
+    /// Search bookmark titles too.
+    pub bookmarks: bool,
     /// Enter sub-folders too (links are never followed).
     pub recursive: bool,
     /// At most this many PDFs are read (clamped to [`MAX_FILES`]).
@@ -63,6 +85,8 @@ impl Options {
             query: query.into(),
             case_sensitive: false,
             whole_words: false,
+            comments: false,
+            bookmarks: false,
             recursive: false,
             max_files: MAX_FILES,
             max_results: 500,
@@ -75,9 +99,11 @@ impl Options {
     }
 }
 
-/// One match: a 0-based page, and the text around it with whitespace folded.
+/// One match: a 0-based page, and the text around it with whitespace folded. For a comment or a bookmark, `text` is
+/// its matching line or title and there is nothing before or after.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Match {
+    pub from: Found,
     pub page: usize,
     pub before: String,
     pub text: String,
@@ -417,7 +443,74 @@ fn search_file(root: &Path, path: &Path, options: &Options, allowance: usize, bu
             out.matches.push(snippet(&text, page, range));
         }
     }
+    if (options.comments || options.bookmarks) && !out.cancelled {
+        // The pages were read, so the document opens; one that does not has nothing more to list.
+        if let Ok(info) = inspect(bytes, None) {
+            for found in listed(&info, options) {
+                if out.matches.len() >= allowance {
+                    out.more = true;
+                    break;
+                }
+                out.matches.push(found);
+            }
+        }
+    }
     Ok(out)
+}
+
+/// The comments, then the bookmarks, of one document that hold the query, as the options ask. A comment is matched
+/// with its replies (not its status changes) as one thread, and listed once.
+fn listed(info: &DocInfo, options: &Options) -> Vec<Match> {
+    let holds = |text: &str| !pdfcraft_render::text::find_in_text(text, &options.query, options.case_sensitive, options.whole_words, 1).is_empty();
+    let shown = |text: &str| {
+        let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
+        let mut short: String = flat.chars().take(SHOWN_CHARS).collect();
+        if short.len() < flat.len() {
+            short.push('…');
+        }
+        short
+    };
+    let entry = |from, page, text: &str| Match { from, page, before: String::new(), text: shown(text), after: String::new() };
+    let mut found = Vec::new();
+    if options.comments {
+        let tops = pdfcraft_render::thread_tops(&info.annotations);
+        let mut threads: std::collections::BTreeMap<(usize, usize), String> = Default::default();
+        for a in info.annotations.iter().filter(|a| a.state.is_none()) {
+            let key = (a.page, a.index);
+            if let Some(text) = a.contents.as_deref().filter(|t| !t.is_empty()) {
+                let all = threads.entry(tops.get(&key).copied().unwrap_or(key)).or_default();
+                all.push_str(text);
+                all.push('\n');
+            }
+        }
+        for a in info.annotations.iter().filter(|a| a.is_comment() && !a.is_group_member()) {
+            if let Some(thread) = threads.get(&(a.page, a.index)).filter(|t| holds(t)) {
+                // A match across two lines has no single line to show: the thread's first stands for it.
+                let line = thread.lines().find(|line| holds(line)).or_else(|| thread.lines().next());
+                found.push(entry(Found::Comment, a.page, line.unwrap_or_default()));
+            }
+        }
+        found.sort_by_key(|m| m.page);
+    }
+    if options.bookmarks {
+        bookmarks(&info.outline, 0, &holds, &mut |page, title| found.push(entry(Found::Bookmark, page, title)));
+    }
+    found
+}
+
+/// Every bookmark that goes to a page of this document and whose title `holds`, in outline order.
+fn bookmarks(items: &[OutlineItem], depth: usize, holds: &dyn Fn(&str) -> bool, found: &mut dyn FnMut(usize, &str)) {
+    if depth >= MAX_BOOKMARK_DEPTH {
+        return;
+    }
+    for item in items {
+        if let Some(page) = item.page
+            && holds(&item.title)
+        {
+            found(page, &item.title);
+        }
+        bookmarks(&item.children, depth + 1, holds, found);
+    }
 }
 
 fn snippet(text: &PageText, page: usize, range: std::ops::Range<usize>) -> Match {
@@ -425,6 +518,7 @@ fn snippet(text: &PageText, page: usize, range: std::ops::Range<usize>) -> Match
     let (start, end) = (range.start.min(n), range.end.min(n));
     let flat = |s: String| s.split_whitespace().collect::<Vec<_>>().join(" ");
     Match {
+        from: Found::Page,
         page,
         before: flat(text.text_of(start.saturating_sub(CONTEXT)..start)),
         text: flat(text.text_of(start..end)),
@@ -524,6 +618,43 @@ mod tests {
         let d = folder("blank");
         assert!(search_folder_report(&d, &Options::new("  "), &|| false).is_err());
         assert!(search_folder_report(&d.join("missing"), &Options::new("x"), &|| false).is_err());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn comments_and_bookmarks_are_listed_after_the_page_matches_when_asked() {
+        let d = folder("listed");
+        let mut s = crate::Session::new();
+        let id = s.open("a.pdf", None, pdf("needle in a haystack").into(), None).unwrap();
+        let note = pdfcraft_annot::NewAnnotation {
+            page: 0,
+            shape: pdfcraft_annot::Shape::Note { at: [20.0, 100.0], icon: pdfcraft_annot::NoteIcon::Comment },
+            style: Default::default(),
+            contents: "ripe cherry".into(),
+            author: "Tester".into(),
+        };
+        s.apply(id, crate::Edit::AddAnnotation(note)).unwrap();
+        s.apply(id, crate::Edit::AddBookmark { parent: Vec::new(), index: 0, title: "damson notes".into(), page: 0, left: None, top: None }).unwrap();
+        std::fs::write(d.join("a.pdf"), s.save_bytes(id).unwrap().as_slice()).unwrap();
+        let found = |query: &str, comments: bool, bookmarks: bool| {
+            let options = Options { comments, bookmarks, ..Options::new(query) };
+            let report = search_folder_report(&d, &options, &|| false).unwrap();
+            report
+                .files
+                .into_iter()
+                .flat_map(|f| match f {
+                    FileOutcome::Searched { matches, .. } => matches,
+                    _ => Vec::new(),
+                })
+                .map(|m| (m.from, m.text))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(found("cherry", false, true), []);
+        assert_eq!(found("cherry", true, false), [(Found::Comment, "ripe cherry".to_string())]);
+        assert_eq!(found("damson", true, false), []);
+        assert_eq!(found("damson", false, true), [(Found::Bookmark, "damson notes".to_string())]);
+        // The page matches of every file come as before.
+        assert_eq!(found("needle", true, true).len(), 3);
         let _ = std::fs::remove_dir_all(&d);
     }
 
