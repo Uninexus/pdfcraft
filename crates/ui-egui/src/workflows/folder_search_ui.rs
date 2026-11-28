@@ -17,7 +17,7 @@ use craft::host::PickRequest;
 use craft::ui::buttons::Button;
 use craft::ui::choice::Checkbox;
 use craft::ui::contract::{Bind, CollectionEvent, Props as _, SelectMode, Show as _, ShowCollection as _, ShowContainer as _};
-use craft::ui::display::{Shade, Text};
+use craft::ui::display::{Elide, Shade, Text};
 use craft::ui::layout_components::Row;
 use craft::ui::list::{List, ListRow};
 use craft::ui::runtime::env::Label;
@@ -338,7 +338,9 @@ pub(crate) fn section(ui: &mut egui::Ui, fs: &mut FolderSearch, can_search: bool
         Checkbox::new(Bind::bound(&mut fs.recursive)).label(tl!("Include sub-folders").to_string()).show(ui);
     });
     let place = fs.folder.as_ref().map_or_else(|| tl!("No folder chosen").to_string(), |p| p.to_string_lossy().into_owned());
-    Text::new(place).role(TypeRole::Caption).shade(Shade::Muted).show(ui);
+    // A path has no spaces to wrap at: cut in the middle, or a long one widens the panel past the window's edge and
+    // takes the buttons below it along.
+    Text::new(place).role(TypeRole::Caption).shade(Shade::Muted).elide(Elide::Path).show(ui);
     let (running, ready) = (fs.running(), fs.folder.is_some() && can_search);
     Row::new().wrap(true).show(ui, |ui, _| {
         if running {
