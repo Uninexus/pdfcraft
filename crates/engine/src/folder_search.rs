@@ -312,19 +312,19 @@ pub fn search_folder(folder: &Path, options: &Options, cancel: &dyn Fn() -> bool
 }
 
 #[derive(Default)]
-struct Listing {
-    files: Vec<PathBuf>,
+pub(crate) struct Listing {
+    pub(crate) files: Vec<PathBuf>,
     /// The entry or depth cap cut the listing short.
-    capped: bool,
-    cancelled: bool,
+    pub(crate) capped: bool,
+    pub(crate) cancelled: bool,
     /// Links and special files named `.pdf`.
-    skipped: Vec<(PathBuf, SkipReason)>,
+    pub(crate) skipped: Vec<(PathBuf, SkipReason)>,
     /// Sub-folders that could not be listed.
-    unlistable: Vec<(PathBuf, String)>,
+    pub(crate) unlistable: Vec<(PathBuf, String)>,
 }
 
 /// The `.pdf` files in `folder`, by path.
-fn list_pdfs(folder: &Path, options: &Options, cancel: &dyn Fn() -> bool) -> Result<Listing, String> {
+pub(crate) fn list_pdfs(folder: &Path, options: &Options, cancel: &dyn Fn() -> bool) -> Result<Listing, String> {
     let mut out = Listing::default();
     let mut seen = 0usize;
     let mut stack = vec![(folder.to_path_buf(), 0usize)];
@@ -385,7 +385,7 @@ fn recursive_ok(options: &Options, depth: usize) -> bool {
     options.recursive && depth < MAX_DEPTH
 }
 
-enum Fail {
+pub(crate) enum Fail {
     Skip(SkipReason),
     /// Reading this file would pass the cap on bytes read.
     Budget,
@@ -529,7 +529,7 @@ fn snippet(text: &PageText, page: usize, range: std::ops::Range<usize>) -> Match
 /// The file's bytes, refusing a link or special file swapped in since the listing, a path that
 /// leaves `root`, a file over `max` and one that would pass the remaining `budget`. The file is
 /// checked again after it is open: it must be the same regular file the listing saw.
-fn read_capped(root: &Path, path: &Path, max: u64, budget: u64) -> Result<Vec<u8>, Fail> {
+pub(crate) fn read_capped(root: &Path, path: &Path, max: u64, budget: u64) -> Result<Vec<u8>, Fail> {
     let skip = |r: SkipReason| Fail::Skip(r);
     let before = path.symlink_metadata().map_err(|e| skip(SkipReason::Unreadable(e.to_string())))?;
     if !before.is_file() {
