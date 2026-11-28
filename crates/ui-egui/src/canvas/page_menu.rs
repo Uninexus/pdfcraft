@@ -56,7 +56,7 @@ pub(crate) enum FieldMenu {
     Properties,
     Duplicate(String),
     /// Create Multiple Copies: the field is copied into a grid.
-    Copies(String),
+    Copies(Vec<String>),
 }
 
 /// What a row of the default menu does when picked.
@@ -271,7 +271,9 @@ fn field_rows(
         pick.field = Some(FieldMenu::Duplicate(name.clone()));
     }
     if MenuItem::new(tl!("Create Multiple Copies…").to_string()).enabled(can_modify).show(ui).ran {
-        pick.field = Some(FieldMenu::Copies(name));
+        // The whole selection when the field clicked is part of it, else that field alone.
+        let selected = view.session.prepare.names();
+        pick.field = Some(FieldMenu::Copies(if selected.contains(&name) { selected } else { vec![name] }));
     }
     Divider::horizontal().show(ui);
     let delete = if view.session.prepare.also.is_empty() { "Delete" } else { "Delete selected fields" };

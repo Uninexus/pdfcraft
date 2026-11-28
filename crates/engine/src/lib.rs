@@ -158,7 +158,7 @@ pub use pdfcraft_edit::{
     SpotInk, Watermark,
 };
 pub use pdfcraft_forms::{
-    BorderStyle, CalculatedField, CalculationIssue, CalculationOrder, CheckStyle, Field as FormField, FieldAction, FieldChange, FieldFont,
+    BorderStyle, CalculatedField, CalculationIssue, CalculationOrder, CheckStyle, Field as FormField, FieldAction, FieldChange, FieldCopy, FieldFont,
     FieldKind as FormFieldKind, FieldProps, FieldValue, Look as FieldLook, LookPatch as FieldLookPatch, NewField, SubmitAction, SubmitFields,
     SubmitFormat, TabOrder, Trigger as FieldTrigger, Widget as FormWidget, af as form_scripts, appearance as form_appearance,
     appearance::auto_text_size_by as field_auto_text_size_by, appearance::comb_auto_text_size as field_comb_auto_text_size,

@@ -595,10 +595,20 @@ impl Automation {
         Ok(out)
     }
 
-    /// Copy field `field` into a grid of `rows` by `columns`, the field itself the first cell.
+    /// Copy field `field`, or the block of `fields`, into a grid of `rows` by `columns`, the original the first cell.
     pub(crate) fn form_copy_field_grid(&mut self, a: &Args) -> Result<Value> {
         use pdfcraft_engine::field_copies::{self, FieldGrid};
-        let field = a.str("field")?.to_owned();
+        let single = a.opt_str("field")?;
+        if single.is_some() == a.get("fields").is_some() {
+            return Err(bad("give either field or fields, not both"));
+        }
+        let sources: Vec<String> = match single {
+            Some(field) => vec![field.to_owned()],
+            None => a.strs("fields")?.into_iter().map(str::to_owned).collect(),
+        };
+        if sources.len() > field_copies::MAX_COPIES {
+            return Err(bad("too many fields"));
+        }
         let count = |key: &str| -> Result<usize> { a.int(key).map(|n| usize::try_from(n).unwrap_or(0)) };
         let grid = FieldGrid {
             rows: count("rows")?,
@@ -609,11 +619,19 @@ impl Automation {
         };
         let (edit, names) = {
             let doc = self.doc(a)?;
-            let edit = field_copies::edit(&field, &grid, &doc.info.pages, &doc.form).map_err(|e| bad(e.to_string()))?;
-            let names: Vec<String> = match &edit {
-                Edit::CopyField { copies, .. } => copies.iter().map(|c| c.name.clone()).collect(),
-                _ => Vec::new(),
+            let sources: Vec<&str> = sources.iter().map(String::as_str).collect();
+            let edit = field_copies::edit_block(&sources, &grid, &doc.info.pages, &doc.form).map_err(|e| bad(e.to_string()))?;
+            let parts = match &edit {
+                Edit::Batch { edits, .. } => edits.iter().collect(),
+                one => vec![one],
             };
+            let names: Vec<String> = parts
+                .iter()
+                .flat_map(|part| match part {
+                    Edit::CopyField { copies, .. } => copies.iter().map(|c| c.name.clone()).collect(),
+                    _ => Vec::new(),
+                })
+                .collect();
             (edit, names)
         };
         let mut out = self.apply(a, edit)?;

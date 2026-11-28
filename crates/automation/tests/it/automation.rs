@@ -6206,6 +6206,22 @@ fn adding_a_field_table_through_tools() {
     assert_eq!(count(&mut a), 8, "one undo takes back the whole last table");
 }
 
+/// Several fields are copied as one block: each keeps its place in it and names its own copies.
+#[test]
+fn copying_a_block_of_fields_into_a_grid_through_tools() {
+    let dir = workdir("field-block-copies");
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "a.pdf" }))["doc"].as_u64().unwrap();
+    ok(&mut a, "form_add_field", json!({ "doc": doc, "page": 1, "type": "text", "name": "sku", "rect": [20, 200, 60, 220] }));
+    ok(&mut a, "form_add_field", json!({ "doc": doc, "page": 1, "type": "text", "name": "note", "rect": [70, 200, 120, 220] }));
+    let block = json!({ "doc": doc, "fields": ["sku", "note"], "rows": 2, "columns": 1, "row_gap": 4 });
+    assert_eq!(ok(&mut a, "form_copy_field_grid", block)["fields"], json!(["sku_1", "note_1"]));
+    assert_eq!(ok(&mut a, "form_fields", json!({ "doc": doc }))["fields"].as_array().unwrap().len(), 4);
+    for args in [json!({ "doc": doc, "rows": 2, "columns": 1 }), json!({ "doc": doc, "field": "sku", "fields": ["note"], "rows": 2, "columns": 1 })] {
+        assert!(matches!(a.call("form_copy_field_grid", &args), Err(ToolError::InvalidArgs(m)) if m.contains("either field or fields")));
+    }
+}
+
 /// Create multiple copies of a field: a field copied into a grid, each copy a field of its own with
 /// the same properties and no value, one undo step, and refused whole, with the reason, otherwise.
 #[test]

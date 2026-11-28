@@ -2238,3 +2238,35 @@ fn duplicate_and_multiple_copies_run_as_commands_on_the_selected_field() {
     h.state_mut().views[0].session.prepare.selected = Some(("Gone".into(), 0));
     assert!(!h.execute("form.field.copies"), "a field the document no longer has");
 }
+
+/// With two fields selected Create multiple copies takes them as one block, without a name pattern.
+#[test]
+fn create_multiple_copies_takes_every_selected_field() {
+    use pdfcraft_engine::{Edit, NewField, Session};
+
+    let mut session = Session::new();
+    let bytes = session.create_blank(300.0, 400.0, 1).unwrap();
+    let id = session.open("two.pdf", None, bytes, None).unwrap();
+    for (name, rect) in [("Name", [20.0, 340.0, 80.0, 360.0]), ("Qty", [90.0, 340.0, 130.0, 360.0])] {
+        session.apply(id, Edit::AddField { name: Some(name.into()), page: 0, rect, kind: NewField::Text { multiline: false } }).unwrap();
+    }
+    let mut h = harness_with("two.pdf", session.save_bytes(id).unwrap().to_vec());
+    h.execute("form.prepare");
+    h.run_steps(3);
+    h.state_mut().views[0].session.prepare.selected = Some(("Name".into(), 0));
+    h.state_mut().views[0].session.prepare.also = vec![("Qty".into(), 0)];
+    h.run_steps(2);
+    assert!(h.execute("form.field.copies"));
+    h.run_steps(3);
+    let dialog = h.get_by_role_and_label(Role::Dialog, "Create Multiple Copies");
+    assert!(dialog.query_by_label("Name pattern").is_none(), "each field names its own copies");
+    dialog.get_by_label("OK").click();
+    h.run_steps(4);
+    // Two rows and two columns of the block: three more of each field.
+    let mut got = names(&h);
+    got.sort();
+    assert_eq!(got, ["Name", "Name_1", "Name_2", "Name_3", "Qty", "Qty_1", "Qty_2", "Qty_3"]);
+    h.undo();
+    h.run_steps(2);
+    assert_eq!(names(&h).len(), 2, "one undo takes every copy back");
+}
