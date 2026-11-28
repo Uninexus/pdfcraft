@@ -12,6 +12,7 @@ use craft::ui::display::Text;
 use craft::ui::patterns::form_dialogs::{DialogFields, HostedParamDialog, Param, ParamDialog, ParamKind};
 use craft::ui::runtime::env::Label;
 use pdfcraft_engine::DocId;
+use pdfcraft_engine::compare::OfficeFormat;
 use pdfcraft_engine::ocr::{EngineChoice, LANGUAGES, MergeStrategy, OcrGuard, OcrPage, OcrSettings, OutputMode};
 
 use super::job_count::JobCount;
@@ -61,6 +62,8 @@ pub struct OcrDraft {
     /// Batch: where the searchable copies go (None: ask each time). Remembered from the last
     /// batch's folder pick, so a repeated export into the same place does not re-ask.
     pub output_folder: Option<String>,
+    /// Preferences: recognize the text of scanned pages when exporting to Word and the like.
+    pub export_scans: bool,
 }
 
 impl Default for OcrDraft {
@@ -83,6 +86,7 @@ impl Default for OcrDraft {
             skip_text_pages: true,
             force_ocr: false,
             output_folder: None,
+            export_scans: true,
         }
     }
 }
@@ -143,6 +147,9 @@ impl OcrDraft {
         if let Some(f) = v["output_folder"].as_str().filter(|f| !f.is_empty()) {
             self.output_folder = Some(f.to_string());
         }
+        if let Some(on) = v["export_scans"].as_bool() {
+            self.export_scans = on;
+        }
     }
 
     /// The preferences JSON for `persist`.
@@ -160,6 +167,7 @@ impl OcrDraft {
             "skip_text_pages": self.skip_text_pages,
             "force_ocr": self.force_ocr,
             "output_folder": self.output_folder,
+            "export_scans": self.export_scans,
         })
     }
 }
@@ -195,7 +203,16 @@ struct ScanToRead {
 #[cfg(target_arch = "wasm32")]
 pub type WaitingFiles = (Vec<(String, Vec<u8>)>, OcrSettings);
 
+/// An export waiting for the text of its scanned pages.
+#[derive(Clone, Debug)]
+pub struct ScanExport {
+    pub format: OfficeFormat,
+    pub path: std::path::PathBuf,
+}
+
 pub struct OcrRun {
+    /// The words are for an export, not for the document: written to the file, then dropped.
+    pub export: Option<ScanExport>,
     pub doc: DocId,
     /// Pages done and total, and the cancel request the job reads between pages.
     pub count: Arc<JobCount>,
@@ -669,11 +686,11 @@ impl PdfCraftApp {
         #[cfg(target_arch = "wasm32")]
         {
             let web = Some(crate::ocr_web::Pages::new(job.steps()));
-            self.ocr_run = Some(OcrRun { doc: id, count, guard, automatic: auto, editable, web, web_result: None });
+            self.ocr_run = Some(OcrRun { export: None, doc: id, count, guard, automatic: auto, editable, web, web_result: None });
             self.poll_ocr(ctx);
         }
         #[cfg(not(target_arch = "wasm32"))]
-        self.run_ocr_job(ctx, id, job, settings, count, guard, auto, editable);
+        self.run_ocr_job(ctx, id, job, settings, count, guard, auto, editable, None);
     }
 
     /// Reads the pages on the host's job queue. A cancel keeps the pages read so far, so the
@@ -690,6 +707,7 @@ impl PdfCraftApp {
         guard: OcrGuard,
         auto: Option<AutoOcr>,
         editable: bool,
+        export: Option<ScanExport>,
     ) {
         let reading = count.clone();
         let wake = self.wake.clone();
@@ -707,8 +725,80 @@ impl PdfCraftApp {
                 })
             })
         });
-        self.ocr_run = Some(OcrRun { doc: id, count, guard, automatic: auto, editable });
+        self.ocr_run = Some(OcrRun { export, doc: id, count, guard, automatic: auto, editable });
         self.poll_ocr(ctx);
+    }
+
+    /// Export a scanned document to `target`: its scanned pages are recognized first, in the
+    /// background with progress and a Cancel, and the words go into the file, not the document.
+    /// Without an engine, or while another recognition runs, the file is written without them and
+    /// the notice says why.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn export_scan(&mut self, ctx: &egui::Context, id: DocId, target: ScanExport) {
+        let settings = self.ocr_draft.settings();
+        let busy = self.ocr_run.is_some() || self.ocr_batch_running();
+        let why = if busy { Some(tl!("Text is already being recognized.").to_string()) } else { engine_unavailable_text(settings.engine) };
+        let job = match why {
+            None => self.session.scan_ocr_job(id, settings),
+            Some(why) => {
+                self.write_export_without_text(id, &target, &why);
+                return;
+            }
+        };
+        let Some(job) = job else {
+            self.write_export_without_text(id, &target, "");
+            return;
+        };
+        let (settings, guard) = (job.settings.clone(), job.guard.clone());
+        let count = Arc::new(JobCount::default());
+        count.set(0, job.pages.len());
+        self.run_ocr_job(ctx, id, job, settings, count, guard, None, false, Some(target));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn write_export_without_text(&mut self, id: DocId, target: &ScanExport, why: &str) {
+        let Some(bytes) = self.session.get(id).map(|d| d.export_office(target.format)) else { return };
+        if self.write_export(&target.path, &bytes) && !why.is_empty() {
+            self.notify_fmt("Exported without recognizing the scanned pages: {why}", &[("why", why)]);
+        }
+    }
+
+    /// Write an export's `bytes`, saying where or why not.
+    pub(crate) fn write_export(&mut self, path: &std::path::Path, bytes: &[u8]) -> bool {
+        let shown = path.display().to_string();
+        match self.host.files().write(path, bytes, craft::host::WriteIntent::SaveAs) {
+            Ok(_) => {
+                self.notify_fmt("Exported to {path}", &[("path", &shown)]);
+                true
+            }
+            Err(e) => {
+                self.notify_fmt("Couldn't write {name}: {e}", &[("name", &shown), ("e", &e.to_string())]);
+                false
+            }
+        }
+    }
+
+    /// The recognition an export waited for has ended: write the file with the words, unless it
+    /// was cancelled or the document changed under it.
+    fn land_export(&mut self, doc: DocId, guard: &OcrGuard, target: &ScanExport, cancelled: bool, result: Result<Vec<OcrPage>, String>) {
+        if cancelled {
+            self.notify_tr("Export cancelled");
+            return;
+        }
+        let found = match result {
+            Ok(found) => found,
+            Err(e) => return self.notify_error(e),
+        };
+        if let Some(why) = self.session.stale_reason(guard) {
+            return self.notify_error(why);
+        }
+        let Some(export) = self.session.get(doc).map(|d| d.export_office_with_ocr(target.format, &found)) else { return };
+        match export {
+            Ok(export) => {
+                self.write_export(&target.path, &export.bytes);
+            }
+            Err(e) => self.notify_error(e),
+        }
     }
 
     /// Recognize text in each file, writing the searchable copies into a folder the user picks
@@ -1004,7 +1094,10 @@ impl PdfCraftApp {
         if !automatic {
             notices::end_progress(self, ProgressKey::Ocr);
         }
-        self.ocr_run = None;
+        let export = self.ocr_run.take().and_then(|run| run.export);
+        if let Some(target) = export {
+            return self.land_export(doc, &guard, &target, count.cancelled(), result);
+        }
         self.land_ocr(ctx, doc, guard, auto, editable, result);
     }
 
@@ -1254,6 +1347,7 @@ mod tests {
         let doc = app.active_ids().unwrap().1;
         let generation = app.session.get(doc).unwrap().edit_generation();
         OcrRun {
+            export: None,
             doc,
             count: Arc::default(),
             guard: app.session.ocr_guard(doc).unwrap(),
@@ -1625,5 +1719,43 @@ mod tests {
         assert_eq!(app.session.get(id).unwrap().can_undo(), None, "no invisible layer was written");
         assert!(app.ocr_verify.open, "the review opens, to accept as an editable document");
         assert_eq!(app.ocr_verify.phase, crate::workflows::ocr_verify::Phase::ReviewReady);
+    }
+
+    /// A recognition an export waited for puts its words in the file and leaves the document
+    /// alone; a cancelled one, or one the document changed under, writes nothing.
+    #[test]
+    fn an_export_takes_the_recognized_words_unless_cancelled_or_stale() {
+        let mut app = PdfCraftApp::for_unit_tests();
+        app.open_bytes(&egui::Context::default(), "doc.pdf", None, scan()).unwrap();
+        let id = app.active_ids().unwrap().1;
+        let path = std::env::temp_dir().join(format!("pdfcraft-export-scan-{}.md", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let target = ScanExport { format: OfficeFormat::Markdown, path: path.clone() };
+        let found = || Ok(vec![one_word_page(Some(90.0), Vec::new())]);
+        let guard = app.session.ocr_guard(id).unwrap();
+
+        app.land_export(id, &guard, &target, true, found());
+        assert!(!path.exists(), "cancelled: nothing is written");
+        assert!(posted(&mut app).contains("cancelled"));
+
+        app.land_export(id, &guard, &target, false, found());
+        assert!(std::fs::read_to_string(&path).unwrap().contains("scanned"));
+        assert_eq!(app.session.get(id).unwrap().can_undo(), None, "the document is not changed");
+
+        std::fs::remove_file(&path).unwrap();
+        app.apply_edit(&egui::Context::default(), Edit::RotatePages { pages: vec![0], degrees: 90 });
+        app.land_export(id, &guard, &target, false, found());
+        assert!(!path.exists(), "the pages the words were read from have changed");
+    }
+
+    /// The setting is on unless it was turned off, and is remembered.
+    #[test]
+    fn recognizing_scans_on_export_is_remembered() {
+        let mut draft = OcrDraft::default();
+        assert!(draft.export_scans);
+        draft.export_scans = false;
+        let mut again = OcrDraft::default();
+        again.apply_pref(&draft.to_pref());
+        assert!(!again.export_scans);
     }
 }

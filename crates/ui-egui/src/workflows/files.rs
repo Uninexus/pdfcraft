@@ -885,17 +885,27 @@ impl PdfCraftApp {
         let stem = doc.name.trim_end_matches(".pdf").trim_end_matches(".PDF").to_string();
         let ext = format.extension();
         let folder = document_folder(doc.path.as_deref());
-        let bytes = doc.export_office(format);
+        // Scanned pages have no text until it is recognized, which waits for the file's name.
+        let scanned =
+            cfg!(not(target_arch = "wasm32")) && self.ocr_draft.export_scans && self.session.scan_ocr_job(id, self.ocr_draft.settings()).is_some();
+        let bytes = (!scanned).then(|| doc.export_office(format));
         let mut request =
             PickRequest::save("export.office").title(tl!("Export")).filter(ext.to_uppercase(), &[ext]).file_name(format!("{stem}.{ext}"));
         if let Some(folder) = folder {
             request = request.default_directory(folder);
         }
-        self.pick_file(request, None, move |app, _, picked| {
+        self.pick_file(request, None, move |app, ctx, picked| {
             let Some(path) = picked.first_path() else { return };
-            match app.host.files().write(&path, &bytes, WriteIntent::SaveAs) {
-                Ok(_) => app.notify_fmt("Exported to {path}", &[("path", &path.display().to_string())]),
-                Err(e) => app.notify_fmt("Couldn't write {name}: {e}", &[("name", &path.display().to_string()), ("e", &e.to_string())]),
+            match &bytes {
+                Some(bytes) => {
+                    app.write_export(&path, bytes);
+                }
+                None => {
+                    #[cfg(not(target_arch = "wasm32"))]
+                    app.export_scan(ctx, id, crate::ocr_ui::ScanExport { format, path });
+                    #[cfg(target_arch = "wasm32")]
+                    let _ = ctx;
+                }
             }
         });
     }
