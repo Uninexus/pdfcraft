@@ -2173,3 +2173,46 @@ fn create_multiple_copies_refuses_the_whole_grid_and_says_why() {
     assert_eq!(names(&h), ["Qty"], "nothing was copied");
     assert!(crate::support::shown_notice(&h).is_some(), "the refusal is announced");
 }
+
+/// While Create Multiple Copies is open the page shows where each copy would go, by name, or why none can be made.
+#[test]
+fn create_multiple_copies_previews_the_grid_on_the_page() {
+    let mut h = harness_with("one.pdf", one_field_pdf());
+    open_copies_dialog(&mut h);
+    h.run_steps(2);
+    let painted = |h: &Harness<'static, PdfCraftApp>, words: &str| {
+        fn has(shape: &egui::Shape, words: &str) -> bool {
+            match shape {
+                egui::Shape::Text(text) => text.galley.text().contains(words),
+                egui::Shape::Vec(shapes) => shapes.iter().any(|s| has(s, words)),
+                _ => false,
+            }
+        }
+        h.output().shapes.iter().any(|clipped| has(&clipped.shape, words))
+    };
+    assert!(painted(&h, "Qty_1") && painted(&h, "Qty_3"), "each copy is named where it would go");
+    // The first copy is beside the field, in its row.
+    let field = {
+        let s = h.state();
+        let doc = s.session.get(s.views[0].id).unwrap();
+        let f = doc.form.iter().find(|f| f.name == "Qty").unwrap();
+        pdfcraft_ui_egui::forms_ui::field_screen_rect(&s.views[0], &doc.info, f, 0).expect("on screen")
+    };
+    fn at(shape: &egui::Shape, words: &str) -> Option<egui::Pos2> {
+        match shape {
+            egui::Shape::Text(text) if text.galley.text() == words => Some(text.visual_bounding_rect().center()),
+            egui::Shape::Vec(shapes) => shapes.iter().find_map(|s| at(s, words)),
+            _ => None,
+        }
+    }
+    let copy = h.output().shapes.iter().find_map(|clipped| at(&clipped.shape, "Qty_1")).expect("named");
+    assert!(copy.x > field.right() && (copy.y - field.center().y).abs() < field.height() / 2.0, "{copy:?} beside {field:?}");
+    let ctx = h.ctx.clone();
+    h.state_mut().dialogs.set_json_field(&ctx, craft::ui::dialog::dialog_id("form.copy_field_grid"), "pattern", serde_json::json!("a.b")).unwrap();
+    h.run_steps(3);
+    assert!(!painted(&h, "Qty_1"), "no cells for a grid that can't be made");
+    assert_eq!(names(&h), ["Qty"], "previewing changes nothing");
+    h.key_press(egui::Key::Escape);
+    h.run_steps(3);
+    assert!(!painted(&h, "Qty_1"));
+}

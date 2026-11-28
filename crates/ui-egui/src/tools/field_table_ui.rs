@@ -377,14 +377,32 @@ pub(crate) struct TablePreviewStyle {
 pub(crate) struct TablePreview<'a> {
     #[common]
     common: Common,
-    preview: &'a Preview,
+    shown: Shown<'a>,
+    /// Why there are no cells, as said.
+    reason: Option<String>,
     xf: PageXform,
+}
+
+/// What a preview draws: the cells, or `outline` with the reason there are none.
+#[derive(Clone, Copy)]
+struct Shown<'a> {
+    outline: [f64; 4],
+    cells: Result<&'a [Cell], &'a str>,
 }
 
 impl<'a> TablePreview<'a> {
     /// The preview named `label`, on the page `xf` places on screen.
     pub(crate) fn new(label: impl Into<Label>, preview: &'a Preview, xf: PageXform) -> Self {
-        TablePreview { common: Common::new(), preview, xf }.label(label)
+        let laid = &preview.laid;
+        let shown = Shown { outline: laid.table.rect, cells: laid.cells.as_ref().map(Vec::as_slice).map_err(|_| "") };
+        let reason = laid.cells.as_ref().err().map(|e| e.said(&i18n::words));
+        TablePreview { common: Common::new(), shown, reason, xf }.label(label)
+    }
+
+    /// A preview of `cells` that are not a table's (the copies of one field), or `outline` with why there are none.
+    pub(crate) fn cells(label: impl Into<Label>, outline: [f64; 4], cells: Result<&'a [Cell], &'a str>, xf: PageXform) -> Self {
+        let reason = cells.err().map(str::to_owned);
+        TablePreview { common: Common::new(), shown: Shown { outline, cells }, reason, xf }.label(label)
     }
 }
 
@@ -408,7 +426,7 @@ impl Component for TablePreview<'_> {
 
     fn paint(&mut self, ui: &mut PaintUi<'_>, cx: &Cx<'_, Self>) {
         let draw = ui.draw();
-        paint_table(&draw, &self.xf, cx.visible, self.preview, cx.style);
+        paint_table(&draw, &self.xf, cx.visible, self.shown, self.reason.as_deref(), cx.style);
     }
 
     fn access(&self, access: &mut Access, _: &Cx<'_, Self>) {
@@ -423,10 +441,10 @@ impl Component for TablePreview<'_> {
 /// The least a cell's name needs to be drawn in it, in points on screen.
 const NAME_ROOM: egui::Vec2 = egui::vec2(24.0, 14.0);
 
-fn paint_table(draw: &Draw<'_>, xf: &PageXform, visible: Rect, preview: &Preview, style: &TablePreviewStyle) {
+fn paint_table(draw: &Draw<'_>, xf: &PageXform, visible: Rect, shown: Shown<'_>, reason: Option<&str>, style: &TablePreviewStyle) {
     let on_screen = |r: [f64; 4]| xf.view_rect([r[0] as f32, r[1] as f32, r[2] as f32, r[3] as f32]);
-    let outline = on_screen(preview.laid.table.rect);
-    match &preview.laid.cells {
+    let outline = on_screen(shown.outline);
+    match shown.cells {
         Ok(cells) => {
             for cell in cells {
                 let r = on_screen(cell.rect);
@@ -441,12 +459,13 @@ fn paint_table(draw: &Draw<'_>, xf: &PageXform, visible: Rect, preview: &Preview
                 }
             }
         }
-        Err(e) => {
+        Err(_) => {
             draw.stroke(&PaintShape::Rect(outline, CornerRadius::ZERO), StrokeWidth::Medium, style.bad);
-            let reason = e.said(&i18n::words);
-            draw.clipped(outline, |inside| {
-                inside.text(outline, &TextRun::new(reason.as_str()).color(style.bad).align(HAlign::Center));
-            });
+            if let Some(reason) = reason {
+                draw.clipped(outline, |inside| {
+                    inside.text(outline, &TextRun::new(reason).color(style.bad).align(HAlign::Center));
+                });
+            }
         }
     }
 }
