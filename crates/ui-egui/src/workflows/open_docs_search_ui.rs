@@ -342,7 +342,7 @@ impl PdfCraftApp {
         self.combine_tab.focused = false;
         if let Some(view) = self.views.get_mut(i) {
             if let Some((query, match_case, whole_word)) = carried {
-                let find = view.find.get_or_insert_with(Default::default);
+                let find = view.find.get_or_insert_with(|| crate::canvas::Find::with(view.find_choices));
                 (find.query, find.in_panel) = (query, true);
                 (find.options.match_case, find.options.whole_word) = (match_case, whole_word);
                 find.case_query.clear();

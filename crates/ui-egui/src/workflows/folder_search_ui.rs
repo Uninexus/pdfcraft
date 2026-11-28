@@ -124,7 +124,7 @@ impl PdfCraftApp {
         }
         let Some(i) = self.active else { return };
         if let Some(view) = self.views.get_mut(i) {
-            let find = view.find.get_or_insert_with(Default::default);
+            let find = view.find.get_or_insert_with(|| crate::canvas::Find::with(view.find_choices));
             find.in_panel = true;
             find.bar.open();
         }

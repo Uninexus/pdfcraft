@@ -1471,8 +1471,8 @@ milestone = "M12"
 status = "partial"
 commands = []
 tools = []
-evidence = ["crates/ui-egui/tests/it/find_bookmarks.rs::the_search_panel_lists_comment_and_bookmark_hits_when_asked_to", "crates/ui-egui/tests/it/find_bookmarks.rs::the_find_bar_finds_a_bookmark_only_when_asked_to_and_goes_where_it_goes", "crates/ui-egui/tests/it/find_comments.rs::the_find_bar_finds_a_comment_only_when_asked_to"]
-notes = "In the find bar: Include comments finds the text of comments and replies, and moving to one selects it; Include bookmarks finds bookmark titles, goes where the bookmark goes and names it under the checkboxes. Bookmarks that go to no page of the document, and bookmarks past what the Bookmarks panel lists, are not searched. The Advanced search panel has both options for the current document. Not yet: either option for all open documents, in folder search or as an automation tool, and the choices are not remembered."
+evidence = ["crates/ui-egui/tests/it/find_comments.rs::find_choices_are_kept_for_the_next_search_document_and_run", "crates/ui-egui/tests/it/find_bookmarks.rs::the_search_panel_lists_comment_and_bookmark_hits_when_asked_to", "crates/ui-egui/tests/it/find_bookmarks.rs::the_find_bar_finds_a_bookmark_only_when_asked_to_and_goes_where_it_goes", "crates/ui-egui/tests/it/find_comments.rs::the_find_bar_finds_a_comment_only_when_asked_to"]
+notes = "In the find bar: Include comments finds the text of comments and replies, and moving to one selects it; Include bookmarks finds bookmark titles, goes where the bookmark goes and names it under the checkboxes. Bookmarks that go to no page of the document, and bookmarks past what the Bookmarks panel lists, are not searched. The Advanced search panel has both options for the current document. Not yet: either option for all open documents, in folder search or as an automation tool. Include comments, Include bookmarks, case-sensitive and whole words are remembered for the next search, in other documents and in the next run."
 
 [[feature]]
 id = "view.find-results-panel"

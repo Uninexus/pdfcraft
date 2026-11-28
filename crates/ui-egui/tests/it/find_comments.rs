@@ -5,7 +5,7 @@ use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
 use pdfcraft_ui_egui::PdfCraftApp;
 
-use crate::support;
+use crate::support::{self, AppHarness as _};
 
 /// One 300×200 page whose text has no "zebra", with a note whose text has.
 const FIXTURE: &[u8] = b"%PDF-1.7
@@ -158,4 +158,44 @@ fn stepping_through_text_and_comment_hits_stays_on_real_pages_and_survives_a_reo
     h.state_mut().views[0].find_step(true);
     h.run_steps(3);
     real(&h);
+}
+
+/// What was chosen for one search is there for the next: after closing the bar, in another document, and after the
+/// settings are saved and loaded again.
+#[test]
+fn find_choices_are_kept_for_the_next_search_document_and_run() {
+    let mut h = harness();
+    h.get_by_label("Include comments").click();
+    h.run_steps(3);
+    h.state_mut().views[0].find.as_mut().expect("open").options.match_case = true;
+    h.run_steps(3);
+    let chosen = |h: &Harness<'static, PdfCraftApp>, view: usize| {
+        let find = h.state().views[view].find.as_ref().expect("a search");
+        (find.include_comments, find.include_bookmarks, find.options.match_case, find.options.whole_word)
+    };
+    h.state_mut().views[0].find = None;
+    h.run_steps(3);
+    assert!(h.execute("edit.find"));
+    h.run_steps(3);
+    assert_eq!(chosen(&h, 0), (true, false, true, false), "reopened");
+
+    let ctx = h.ctx.clone();
+    h.state_mut().open_bytes(&ctx, "second.pdf", None, FIXTURE.to_vec()).expect("opens");
+    h.run_steps(4);
+    assert!(h.execute("edit.find"));
+    h.run_steps(3);
+    assert_eq!(chosen(&h, 1), (true, false, true, false), "another document");
+
+    let saved = h.state().settings_snapshot();
+    let mut again = crate::control::new_app();
+    again.apply_settings(&saved);
+    again.open_bytes(&egui::Context::default(), "third.pdf", None, FIXTURE.to_vec()).expect("opens");
+    let mut next = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(|cc| {
+        crate::support::install_runtime(&cc.egui_ctx);
+        again
+    });
+    next.run_steps(6);
+    assert!(next.execute("edit.find"));
+    next.run_steps(3);
+    assert_eq!(chosen(&next, 0), (true, false, true, false), "the next run");
 }

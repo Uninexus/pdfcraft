@@ -204,6 +204,10 @@ impl PdfCraftApp {
             default_page_gaps: Some(self.view_defaults.page_gaps),
             full_screen_fill: Some(self.full_screen_fill),
             full_screen_advance: Some(self.full_screen_advance),
+            find_match_case: Some(self.find_choices.match_case),
+            find_whole_words: Some(self.find_choices.whole_word),
+            find_include_comments: Some(self.find_choices.include_comments),
+            find_include_bookmarks: Some(self.find_choices.include_bookmarks),
             full_screen_escape_exits: Some(self.full_screen_escape_exits),
             units: Some(self.units),
             grid_spacing: grid.map(|g| g.spacing),
@@ -554,6 +558,11 @@ impl PdfCraftApp {
             self.full_screen_fill = fill;
         }
         self.full_screen_advance = b.full_screen_advance.map_or(self.full_screen_advance, |s| s.min(crate::FULL_SCREEN_ADVANCE_MAX));
+        let find = &mut self.find_choices;
+        find.match_case = b.find_match_case.unwrap_or(find.match_case);
+        find.whole_word = b.find_whole_words.unwrap_or(find.whole_word);
+        find.include_comments = b.find_include_comments.unwrap_or(find.include_comments);
+        find.include_bookmarks = b.find_include_bookmarks.unwrap_or(find.include_bookmarks);
         if let Some(exits) = b.full_screen_escape_exits {
             self.full_screen_escape_exits = exits;
         }
