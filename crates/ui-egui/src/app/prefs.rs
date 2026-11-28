@@ -292,6 +292,7 @@ impl PdfCraftApp {
             ),
             trusted: Some(trusted),
             custom_stamps: json_text(&stamps_ui::encode(&self.custom_stamps)),
+            sign_presets: json_text(&self.sign_presets),
             actions: json_text(&actions_ui::encode(&self.custom_actions)),
             javascript: Some(self.session.javascript()),
         };
@@ -772,6 +773,11 @@ impl PdfCraftApp {
         self.sign_graphic = s.sign_graphic.clone().unwrap_or_default();
         if let Some(ids) = &s.digital_ids {
             self.digital_ids = ids.clone();
+        }
+        // A list that can't be read back is dropped, never an error; a longer one is cut to the limit.
+        if let Some(text) = &s.sign_presets {
+            self.sign_presets = serde_json::from_str(text).unwrap_or_default();
+            self.sign_presets.truncate(crate::sign_ui::MAX_SIGN_PRESETS);
         }
         if let Some(stamps) = parsed(&s.custom_stamps) {
             self.custom_stamps = stamps_ui::decode(&stamps);

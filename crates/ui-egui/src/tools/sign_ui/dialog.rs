@@ -24,7 +24,8 @@ use craft::ui::style::DataColor;
 use craft::ui::text::TextField;
 
 use super::{
-    Appearance, AppearanceLabels, DigitalIdEntry, KEY_ALGORITHMS, NewIdDraft, PdfCraftApp, SignDraft, SignGraphic, SignStep, StatusCaptions, sign,
+    Appearance, AppearanceLabels, DigitalIdEntry, KEY_ALGORITHMS, MAX_SIGN_PRESET_NAME, MAX_SIGN_PRESETS, NewIdDraft, PdfCraftApp, SignDraft,
+    SignGraphic, SignPreset, SignStep, StatusCaptions, sign,
 };
 use crate::FilePurpose;
 
@@ -40,6 +41,23 @@ const FIRST_EXTRA: usize = 2;
 
 /// The digital IDs as the rows of a list keyed by position; an unusable ID cannot take the lead.
 struct IdRows<'a>(&'a [DigitalIdEntry]);
+
+impl PdfCraftApp {
+    /// Keeps the appearance chosen in the signing dialog under the name typed there, replacing one of that name.
+    fn save_sign_preset(&mut self) {
+        let Some(d) = &self.sign_draft else { return };
+        let name: String = d.preset_name.trim().chars().take(MAX_SIGN_PRESET_NAME).collect();
+        if name.is_empty() {
+            return;
+        }
+        let preset = SignPreset::new(name, &d.appearance, d.graphic.clone());
+        if let Some(kept) = self.sign_presets.iter_mut().find(|p| p.name == preset.name) {
+            *kept = preset;
+        } else if self.sign_presets.len() < MAX_SIGN_PRESETS {
+            self.sign_presets.push(preset);
+        }
+    }
+}
 
 impl DisplayOrder<usize> for IdRows<'_> {
     fn len(&self) -> usize {
@@ -72,6 +90,10 @@ struct Asked {
     image: bool,
     /// Enter in the password field.
     submit: bool,
+    /// Save appearance: keep what is chosen under the name typed.
+    save_preset: bool,
+    /// Delete appearance: the saved one at this index.
+    delete_preset: Option<usize>,
 }
 
 /// Shows the signing dialog while a signing draft is open, and carries out what it asks.
@@ -100,7 +122,8 @@ pub(crate) fn show(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
     let mut asked = Asked::default();
     let mut open = true;
     let out = {
-        let PdfCraftApp { sign_draft, digital_ids, signature, .. } = &mut *app;
+        let PdfCraftApp { sign_draft, digital_ids, signature, sign_presets, .. } = &mut *app;
+        let presets: &[SignPreset] = sign_presets;
         let Some(draft) = sign_draft.as_mut() else { return };
         let ids: &[DigitalIdEntry] = digital_ids;
         let extras = extra_buttons(draft, ids);
@@ -116,7 +139,7 @@ pub(crate) fn show(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
                 match d.step {
                     SignStep::Choose => choose(ui, d, ids, &mut asked),
                     SignStep::Configure => configure(ui, d, &mut asked),
-                    SignStep::SignAs => sign_as(ui, d, ids, signature.as_ref(), &date, english_note, &mut asked),
+                    SignStep::SignAs => sign_as(ui, d, ids, Kept { signature: signature.as_ref(), presets }, &date, english_note, &mut asked),
                 }
                 true
             })
@@ -168,6 +191,14 @@ fn run(ctx: &egui::Context, app: &mut PdfCraftApp, step: SignStep, picked: Optio
     }
     if asked.image {
         app.pick_sign_graphic_image();
+    }
+    if let Some(at) = asked.delete_preset
+        && at < app.sign_presets.len()
+    {
+        app.sign_presets.remove(at);
+    }
+    if asked.save_preset {
+        app.save_sign_preset();
     }
     let has_ids = !app.digital_ids.is_empty();
     let mut sign_now = asked.submit && step == SignStep::SignAs;
@@ -454,16 +485,56 @@ fn preview(ui: &mut egui::Ui, name: &str, a: &Appearance, lines: &[String], grap
     });
 }
 
+/// Pick a saved appearance, save the one chosen under a name, or delete the one picked. The picked one is whichever
+/// saved appearance matches what is chosen now, so changing a box shows that it is no longer that one.
+fn saved_appearances(ui: &mut egui::Ui, d: &mut SignDraft, presets: &[SignPreset], has_fill_sign: bool, asked: &mut Asked) {
+    let matching = presets.iter().position(|p| p.appearance() == d.appearance && p.graphic == d.graphic);
+    if !presets.is_empty() {
+        let mut entries: Vec<Entry<Option<usize>>> = vec![Entry::new(None, tl!("Not saved").to_owned())];
+        entries.extend(presets.iter().enumerate().map(|(at, p)| Entry::new(Some(at), p.name.clone())));
+        let mut picked = matching;
+        Field::new(tl!("Saved appearance")).show(ui, |ui, _| {
+            Select::new(tl!("Saved appearance"), Bind::bound(&mut picked), &entries).show(ui);
+        });
+        if picked != matching
+            && let Some(preset) = picked.and_then(|at| presets.get(at))
+        {
+            d.appearance = preset.appearance();
+            d.graphic = match &preset.graphic {
+                SignGraphic::FillSign if !has_fill_sign => SignGraphic::Name,
+                graphic => graphic.clone(),
+            };
+            if let SignGraphic::Image(image) = &preset.graphic {
+                d.image = Some(image.clone());
+            }
+            d.preset_name = preset.name.clone();
+        }
+    }
+    Field::new(tl!("Appearance name")).show(ui, |ui, _| {
+        TextField::new(tl!("Appearance name"), Bind::bound(&mut d.preset_name)).placeholder(tl!("Optional")).show(ui);
+    });
+    Row::new().show(ui, |ui, _| {
+        let name = d.preset_name.trim();
+        let room = presets.len() < MAX_SIGN_PRESETS || presets.iter().any(|p| p.name == name);
+        if Button::new(tl!("Save appearance")).enabled(!name.is_empty() && room).show(ui).clicked() {
+            asked.save_preset = true;
+        }
+        if Button::new(tl!("Delete appearance")).enabled(matching.is_some()).show(ui).clicked() {
+            asked.delete_preset = matching;
+        }
+    });
+}
+
+/// What Sign as offers from earlier: the saved Fill & Sign signature and the appearances saved by name.
+#[derive(Clone, Copy)]
+struct Kept<'a> {
+    signature: Option<&'a SavedSignature>,
+    presets: &'a [SignPreset],
+}
+
 /// Sign as: appearance, graphic, permissions, reason, location and the ID's password.
-fn sign_as(
-    ui: &mut egui::Ui,
-    d: &mut SignDraft,
-    ids: &[DigitalIdEntry],
-    saved: Option<&SavedSignature>,
-    date: &str,
-    english_note: &str,
-    asked: &mut Asked,
-) {
+fn sign_as(ui: &mut egui::Ui, d: &mut SignDraft, ids: &[DigitalIdEntry], kept: Kept<'_>, date: &str, english_note: &str, asked: &mut Asked) {
+    let Kept { signature: saved, presets } = kept;
     let Some(entry) = d.selected.and_then(|i| ids.get(i)) else {
         d.step = SignStep::Choose;
         return;
@@ -509,6 +580,7 @@ fn sign_as(
         if Button::new(tl!("Choose image…")).show(ui).clicked() {
             asked.image = true;
         }
+        saved_appearances(ui, d, presets, saved.is_some(), asked);
     } else {
         caption(tl!("The signature will be invisible.")).show(ui);
     }
