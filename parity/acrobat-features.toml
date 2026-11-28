@@ -2191,11 +2191,11 @@ title = "Keep structure tags when editing"
 area = "C"
 tier = "P1"
 milestone = "M7"
-status = "planned"
-commands = []
-tools = []
-evidence = []
-notes = ""
+status = "partial"
+commands = ["edit.edit_text"]
+tools = ["text_edit"]
+evidence = ["crates/edit/src/tests.rs::a_rewritten_paragraph_stays_inside_its_tag", "crates/automation/tests/it/automation.rs::text_edit_keeps_the_paragraph_in_its_tag"]
+notes = "Rewriting a paragraph keeps the new text inside its structure tag (a marked-content sequence with an MCID, or an Artifact mark), whether the sequence opens outside the paragraph's text object or inside it; the MCID is used once and the sequences still nest. Gaps: a sequence shared with other text that stays is left where it is, so the new words can end up untagged; a paragraph spread over several MCIDs ends up under one of them, leaving the others empty; text drawn on top for a revealed OCR layer is not retagged; ActualText and Alt entries are not updated to the new words; adding, moving or deleting content does not create or remove structure elements."
 
 [[feature]]
 id = "edit.image-add"
