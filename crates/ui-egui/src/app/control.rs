@@ -252,6 +252,10 @@ impl PdfCraftApp {
                 let seconds = value.parse().ok().filter(|n| *n <= max).ok_or_else(|| format!("full-screen-advance must be between 0 and {max}"))?;
                 self.full_screen_advance = seconds;
             }
+            ("full-screen-background", _) => {
+                self.full_screen_background =
+                    crate::FullScreenBackground::from_id(value).ok_or("full-screen-background must be black, dark-gray, light-gray or white")?;
+            }
             ("full-screen-fill", _) => {
                 self.full_screen_fill = match value {
                     "on" => true,

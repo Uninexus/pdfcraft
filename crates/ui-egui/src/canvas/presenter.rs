@@ -68,6 +68,8 @@ struct Turn {
 /// Where the view stood before this pass's page view ran.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct PresentAt {
+    /// Preferences: the colour behind the pages, which a transition shows around them.
+    pub(crate) background: Color32,
     pub(crate) current: usize,
     pub(crate) display: PageDisplay,
     /// Whether the pages scroll continuously (full screen that keeps the window's display).
@@ -280,7 +282,7 @@ pub(super) fn frame(
                     presenter.shown = Some((page, now));
                 } else {
                     let f = transition::frame(&turn.effect, t);
-                    painter.rect_filled(from_rect.union(to_rect), CornerRadius::ZERO, Color32::BLACK);
+                    painter.rect_filled(from_rect.union(to_rect), CornerRadius::ZERO, at.background);
                     paint(painter, &turn.from, from_rect, &f.outgoing);
                     if let Some(tex) = &incoming {
                         paint(painter, tex, to_rect, &f.incoming);

@@ -147,6 +147,7 @@ struct PrefsDraft {
     view_defaults: ViewDefaults,
     full_screen_fill: bool,
     full_screen_advance: u32,
+    full_screen_background: crate::FullScreenBackground,
     full_screen_escape_exits: bool,
     highlight_fields: bool,
     always_default_view: bool,
@@ -199,6 +200,7 @@ impl PrefsDraft {
             view_defaults: app.view_defaults,
             full_screen_fill: app.full_screen_fill,
             full_screen_advance: app.full_screen_advance,
+            full_screen_background: app.full_screen_background,
             full_screen_escape_exits: app.full_screen_escape_exits,
             highlight_fields: app.highlight_fields,
             always_default_view: app.always_default_view,
@@ -255,6 +257,7 @@ impl PrefsDraft {
             view_defaults: ViewDefaults::default(),
             full_screen_fill: true,
             full_screen_advance: 0,
+            full_screen_background: Default::default(),
             full_screen_escape_exits: true,
             highlight_fields: true,
             always_default_view: false,
@@ -452,6 +455,16 @@ fn choice_row<'a, T: Copy + PartialEq>(key: &'a str, label: &'a str, current: T,
 /// The value a choice row's `id` stands for.
 fn lookup<T: Copy>(table: &Table<'_, T>, id: &str) -> Option<T> {
     table.iter().find(|(_, i, _)| *i == id).map(|(v, ..)| *v)
+}
+
+fn background_table<'a>() -> Table<'a, crate::FullScreenBackground> {
+    use crate::FullScreenBackground as B;
+    vec![
+        (B::Black, B::Black.id(), tl!("Black")),
+        (B::DarkGray, B::DarkGray.id(), tl!("Dark gray")),
+        (B::LightGray, B::LightGray.id(), tl!("Light gray")),
+        (B::White, B::White.id(), tl!("White")),
+    ]
 }
 
 fn side_table<'a>() -> Table<'a, bool> {
@@ -663,6 +676,9 @@ impl PreferencesModel for Prefs<'_> {
                 d.full_screen_advance = u32::try_from(v).unwrap_or(0).min(crate::FULL_SCREEN_ADVANCE_MAX);
             }
             ("view.full_screen_escape", PrefValue::Bool(v)) => d.full_screen_escape_exits = v,
+            ("view.full_screen_background", PrefValue::Choice(id)) => {
+                d.full_screen_background = lookup(&background_table(), &id).unwrap_or(d.full_screen_background);
+            }
             ("view.fit", PrefValue::Choice(id)) => d.view_defaults.fit = lookup(&fit_table(), &id).unwrap_or(d.view_defaults.fit),
             ("view.zoom", PrefValue::Int(v)) => {
                 d.view_defaults.fit = Fit::None;
@@ -860,6 +876,7 @@ impl PreferencesModel for Prefs<'_> {
                 d.view_defaults = fresh.view_defaults;
                 d.full_screen_fill = fresh.full_screen_fill;
                 d.full_screen_advance = fresh.full_screen_advance;
+                d.full_screen_background = fresh.full_screen_background;
                 d.full_screen_escape_exits = fresh.full_screen_escape_exits;
                 d.always_default_view = fresh.always_default_view;
                 d.text_links = fresh.text_links;
@@ -963,6 +980,7 @@ impl PreferencesDraft for Prefs<'_> {
         self.app.view_defaults = d.view_defaults;
         self.app.full_screen_fill = d.full_screen_fill;
         self.app.full_screen_advance = d.full_screen_advance;
+        self.app.full_screen_background = d.full_screen_background;
         self.app.full_screen_escape_exits = d.full_screen_escape_exits;
         self.app.highlight_fields = d.highlight_fields;
         self.app.always_default_view = d.always_default_view;
@@ -1133,6 +1151,7 @@ impl Prefs<'_> {
                 RowKind::int(i64::from(d.full_screen_advance), 0..=i64::from(crate::FULL_SCREEN_ADVANCE_MAX)),
             )
             .help(tl!("0 turns only pages that set a display time of their own.")),
+            choice_row("view.full_screen_background", tl!("Full screen background"), d.full_screen_background, &background_table()),
             RowSpec::new("view.full_screen_escape", tl!("Esc leaves full screen"), RowKind::Bool(d.full_screen_escape_exits))
                 .help(tl!("Turn off so that only Ctrl+L (⌘L on macOS) leaves full screen, as for a kiosk display.")),
             choice_row("view.fit", tl!("Default zoom"), v.fit, &fit_table())

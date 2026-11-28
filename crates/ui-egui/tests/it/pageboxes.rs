@@ -185,3 +185,24 @@ fn full_screen_turns_one_page_when_a_display_time_is_up() {
     }
     assert_eq!(h.state().views[0].current(), 1, "turned to the second page and stayed");
 }
+
+/// Full screen shows the pages on the colour chosen in Preferences, black unless changed, and the choice is kept.
+#[test]
+fn full_screen_shows_the_pages_on_the_chosen_background() {
+    let mut h = harness();
+    let behind = |h: &Harness<'static, PdfCraftApp>, color: egui::Color32| {
+        h.output().shapes.iter().any(|c| matches!(&c.shape, egui::Shape::Rect(r) if r.fill == color && r.rect.width() > 1000.0))
+    };
+    assert!(h.execute("view.full_screen"));
+    h.run_steps(8);
+    assert!(behind(&h, egui::Color32::BLACK), "black by default");
+    let grey = egui::Color32::from_gray(184);
+    let ctx = h.ctx.clone();
+    h.state_mut().set_option(&ctx, "full-screen-background", "light-gray").unwrap();
+    h.run_steps(4);
+    assert!(behind(&h, grey) && !behind(&h, egui::Color32::BLACK), "the chosen colour");
+    assert!(h.state_mut().set_option(&ctx, "full-screen-background", "plaid").is_err());
+    let mut fresh = crate::control::new_app();
+    fresh.apply_settings(&h.state().settings_snapshot());
+    assert_eq!(fresh.full_screen_background.id(), "light-gray", "kept across runs");
+}

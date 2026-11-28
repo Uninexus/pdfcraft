@@ -204,6 +204,7 @@ impl PdfCraftApp {
             default_page_gaps: Some(self.view_defaults.page_gaps),
             full_screen_fill: Some(self.full_screen_fill),
             full_screen_advance: Some(self.full_screen_advance),
+            full_screen_background: Some(self.full_screen_background.id().to_string()),
             find_match_case: Some(self.find_choices.match_case),
             find_whole_words: Some(self.find_choices.whole_word),
             find_include_comments: Some(self.find_choices.include_comments),
@@ -550,23 +551,30 @@ impl PdfCraftApp {
         }
     }
 
-    /// Switches for reopening, window chrome and file watching.
-    fn apply_behavior(&mut self, b: &settings::Behavior) {
-        if let Some(show) = b.default_page_gaps {
-            self.view_defaults.page_gaps = show;
-        }
-        if let Some(fill) = b.full_screen_fill {
-            self.full_screen_fill = fill;
-        }
+    fn apply_full_screen(&mut self, b: &settings::Behavior) {
+        self.full_screen_fill = b.full_screen_fill.unwrap_or(self.full_screen_fill);
         self.full_screen_advance = b.full_screen_advance.map_or(self.full_screen_advance, |s| s.min(crate::FULL_SCREEN_ADVANCE_MAX));
+        // Settings are untrusted: a name that is none of the colours keeps the current one.
+        self.full_screen_background =
+            b.full_screen_background.as_deref().and_then(crate::FullScreenBackground::from_id).unwrap_or(self.full_screen_background);
+        self.full_screen_escape_exits = b.full_screen_escape_exits.unwrap_or(self.full_screen_escape_exits);
+    }
+
+    fn apply_find_choices(&mut self, b: &settings::Behavior) {
         let find = &mut self.find_choices;
         find.match_case = b.find_match_case.unwrap_or(find.match_case);
         find.whole_word = b.find_whole_words.unwrap_or(find.whole_word);
         find.include_comments = b.find_include_comments.unwrap_or(find.include_comments);
         find.include_bookmarks = b.find_include_bookmarks.unwrap_or(find.include_bookmarks);
-        if let Some(exits) = b.full_screen_escape_exits {
-            self.full_screen_escape_exits = exits;
+    }
+
+    /// Switches for reopening, window chrome and file watching.
+    fn apply_behavior(&mut self, b: &settings::Behavior) {
+        if let Some(show) = b.default_page_gaps {
+            self.view_defaults.page_gaps = show;
         }
+        self.apply_full_screen(b);
+        self.apply_find_choices(b);
         if let Some(units) = b.units {
             self.units = units;
         }

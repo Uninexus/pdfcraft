@@ -84,6 +84,7 @@ pub struct Behavior {
     /// Full screen fills the screen with one page at a time (off keeps the page display).
     pub full_screen_fill: Option<bool>,
     pub full_screen_advance: Option<u32>,
+    pub full_screen_background: Option<String>,
     pub find_match_case: Option<bool>,
     pub find_whole_words: Option<bool>,
     pub find_include_comments: Option<bool>,
@@ -637,6 +638,7 @@ pub fn import_json(text: &str) -> (PdfCraftSettings, Vec<SectionError>) {
             full_screen_fill: r.bool("full_screen_fill"),
             full_screen_advance: r.f64("full_screen_advance").filter(|n| *n >= 0.0 && n.is_finite() && n.fract() == 0.0).map(|n| n as u32),
             full_screen_escape_exits: r.bool("full_screen_escape_exits"),
+            full_screen_background: r.text("full_screen_background"),
             find_match_case: r.bool("find_match_case"),
             find_whole_words: r.bool("find_whole_words"),
             find_include_comments: r.bool("find_include_comments"),
