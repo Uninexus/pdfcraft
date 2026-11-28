@@ -246,6 +246,10 @@ fn every_registered_command_is_implemented() {
         if spec.id == "view.layout.cover" {
             app.set_option(&egui::Context::default(), "layout", "two-up").unwrap();
         }
+        // Duplicate and Create multiple copies work on the field selected in Prepare a form.
+        if matches!(spec.id, "form.field.duplicate" | "form.field.copies") {
+            app.views[0].session.prepare.selected = Some(("name".into(), 0));
+        }
         // History commands need a real jump (and Back first to make Forward available).
         if matches!(spec.id, "view.previous_view" | "view.next_view") {
             app.views[0].go_to_page(1);
