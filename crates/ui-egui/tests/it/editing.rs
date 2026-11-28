@@ -11809,3 +11809,48 @@ fn an_edited_paragraph_becomes_a_numbered_list() {
     let all = blocks.join("\n");
     assert!(all.contains(&text) && all.contains("2. Second"), "{blocks:?}");
 }
+
+/// A wrapped paragraph is one item: the rows a wrap made take no number of their own.
+#[test]
+fn a_wrapped_paragraph_becomes_one_list_item() {
+    let bytes = source_font_fixture_with_text(
+        "BT /F2 10 Tf 14 TL 20 220 Td (The quick brown fox jumps over) Tj T* (the lazy dog and runs on to the) Tj T* (farm.) Tj ET",
+    );
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |cc| {
+        crate::support::install_runtime(&cc.egui_ctx);
+        {
+            let mut app = crate::control::new_app();
+            app.set_option(&egui::Context::default(), "language", "en").unwrap();
+            app.open_bytes(&egui::Context::default(), "wrapped.pdf", None, bytes).expect("opens");
+            app
+        }
+    });
+    h.run_steps(4);
+    assert!(h.execute("edit.edit_text"));
+    crate::support::settle(&mut h);
+    let page = h.state().views[0].page_screen_rect(0).expect("on screen");
+    let k = page.width() / 300.0;
+    let blocks = h.state().session.get(h.state().views[0].id).unwrap().text_blocks(0);
+    assert_eq!((blocks.len(), blocks[0].rows.len()), (1, 3), "{blocks:?}");
+    let block = blocks[0].rect;
+    let at = egui::pos2(page.left() + (block[0] + block[2]) as f32 / 2.0 * k, page.top() + (300.0 - (block[1] + block[3]) as f32 / 2.0) * k);
+    h.hover_at(at);
+    h.run_steps(1);
+    h.drag_at(at);
+    h.run_steps(1);
+    h.drop_at(at);
+    h.run_steps(3);
+    let shown = |h: &Harness<'static, PdfCraftApp>| {
+        let s = h.state();
+        let blocks = s.session.get(s.views[0].id).unwrap().text_blocks(0);
+        blocks.iter().map(|b| b.reflow_text.clone()).collect::<Vec<_>>().join("\n")
+    };
+    h.get_by_label("Numbered list").click();
+    h.run_steps(4);
+    assert_eq!(shown(&h), "1. The quick brown fox jumps over the lazy dog and runs on to the farm.");
+    // Off again: the same words, no number left behind.
+    // By role: the pointer rests on the button, so its tooltip says the name too.
+    h.get_by_role_and_label(Role::Button, "Numbered list").click();
+    h.run_steps(4);
+    assert_eq!(shown(&h), "The quick brown fox jumps over the lazy dog and runs on to the farm.");
+}
