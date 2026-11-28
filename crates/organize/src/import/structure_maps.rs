@@ -70,7 +70,46 @@ fn held(src: &Document, tree: &Dict, key: &[u8]) -> Dict {
     tree.get(key).and_then(|o| src.dict(o)).unwrap_or_default()
 }
 
+/// The identifiers of the name tree at `node`, each with its element.
+fn identifiers(src: &Document, node: &Object, depth: usize, seen: &mut HashSet<ObjRef>, out: &mut BTreeMap<Vec<u8>, ObjRef>) {
+    if depth >= MAX_DEPTH || node.as_ref().is_some_and(|r| !seen.insert(r)) {
+        return;
+    }
+    let Some(dict) = src.dict(node) else { return };
+    if let Some(names) = dict.get(b"Names").map(|n| src.resolve(n)).as_deref().and_then(Object::as_array) {
+        for pair in names.as_chunks::<2>().0 {
+            let [id, Object::Ref(element)] = pair else { continue };
+            if let Some(id) = src.resolve(id).as_string() {
+                out.insert(id.bytes.clone(), *element);
+            }
+        }
+    }
+    if let Some(kids) = dict.get(b"Kids").map(|k| src.resolve(k)).as_deref().and_then(Object::as_array) {
+        for kid in kids {
+            identifiers(src, kid, depth + 1, seen, out);
+        }
+    }
+}
+
 impl Maps {
+    /// The entries `tree`, the root of `doc`'s own tree, already has.
+    pub(super) fn open(doc: &Document, tree: &Dict) -> Self {
+        let mut maps = Maps { roles: held(doc, tree, b"RoleMap"), classes: held(doc, tree, b"ClassMap"), ..Maps::default() };
+        if let Some(ids) = tree.get(b"IDTree") {
+            identifiers(doc, ids, 0, &mut HashSet::new(), &mut maps.ids);
+        }
+        let list = tree.get(b"Namespaces").map(|n| doc.resolve(n));
+        for item in list.as_deref().and_then(Object::as_array).into_iter().flatten() {
+            let (Some(at), Some(dict)) = (item.as_ref(), doc.dict(item)) else { continue };
+            maps.namespaces.push(at);
+            let bare = dict.iter().all(|(k, _)| matches!(k.as_slice(), b"Type" | b"NS"));
+            if let Some(name) = dict.get(b"NS").filter(|_| bare).and_then(|n| doc.resolve(n).as_string().map(|s| s.bytes.clone())) {
+                maps.plain.insert(name, at);
+            }
+        }
+        maps
+    }
+
     /// Take in the root entries of `tree`, one file's structure tree.
     pub(super) fn add(&mut self, out: &mut Document, src: &Document, tree: &Dict, copier: &mut Copier<'_>) -> Result<Renames, OrganizeError> {
         self.namespaces(out, src, tree, copier)?;

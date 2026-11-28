@@ -16841,3 +16841,51 @@ fn text_edit_keeps_the_paragraph_in_its_tag() {
     let kept: Vec<String> = tags["tags"].as_array().unwrap().iter().map(|t| tagged(&mut a, again, t["object"].as_u64().unwrap() as u32)).collect();
     assert!(kept.len() == 2 && kept[0].contains("Rewritten opening") && kept[1].contains("Rewritten ending"), "{kept:?}");
 }
+
+/// Combine, Insert pages, Extract and Split give pages that still answer to their tags.
+#[test]
+fn tags_come_through_combine_insert_and_extract() {
+    let dir = workdir("tag-merge");
+    let content = "/P <</MCID 0>> BDC BT /F1 12 Tf 20 220 Td (Tagged words) Tj ET EMC";
+    let stream = format!("<< /Length {} >>\nstream\n{content}\nendstream", content.len());
+    let page = "<< /Type /Page /Parent 2 0 R /StructParents 0 /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>";
+    let pdf = pdf_of(&[
+        "<< /Type /Catalog /Pages 2 0 R /MarkInfo << /Marked true >> /StructTreeRoot 6 0 R >>",
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 300 300] >>",
+        page,
+        &stream,
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        "<< /Type /StructTreeRoot /K 7 0 R /ParentTree 8 0 R >>",
+        "<< /Type /StructElem /S /P /P 6 0 R /Pg 3 0 R /K 0 >>",
+        "<< /Nums [0 [7 0 R]] >>",
+    ]);
+    std::fs::write(dir.join("tagged.pdf"), pdf).unwrap();
+    let mut a = auto(&dir);
+    // The words under each P tag, in order.
+    let said = |a: &mut Automation, path: &str| -> Vec<String> {
+        let doc = ok(a, "doc_open", json!({ "path": path }))["doc"].as_u64().unwrap();
+        let tags = ok(a, "accessibility_tags", json!({ "doc": doc, "types": ["P"] }));
+        tags["tags"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| {
+                let content = ok(a, "accessibility_tag_content", json!({ "doc": doc, "object": t["object"], "generation": 0 }));
+                content["content"][0]["text"].as_str().unwrap_or_default().to_owned()
+            })
+            .collect()
+    };
+    ok(&mut a, "doc_combine", json!({ "paths": ["tagged.pdf", "tagged.pdf"], "out": "both.pdf" }));
+    assert_eq!(said(&mut a, "both.pdf"), ["Tagged words", "Tagged words"]);
+
+    let doc = ok(&mut a, "doc_open", json!({ "path": "both.pdf" }))["doc"].as_u64().unwrap();
+    ok(&mut a, "page_insert_file", json!({ "doc": doc, "path": "tagged.pdf", "at": 2 }));
+    ok(&mut a, "doc_save", json!({ "doc": doc, "path": "three.pdf" }));
+    assert_eq!(said(&mut a, "three.pdf").len(), 3);
+
+    ok(&mut a, "page_extract", json!({ "doc": doc, "pages": [2], "out": "one.pdf" }));
+    assert_eq!(said(&mut a, "one.pdf"), ["Tagged words"]);
+    let split = ok(&mut a, "doc_split", json!({ "doc": doc, "every": 2, "out_dir": "parts" }));
+    let first = split["files"][0]["path"].as_str().unwrap().to_owned();
+    assert_eq!(said(&mut a, &first).len(), 2, "{split}");
+}

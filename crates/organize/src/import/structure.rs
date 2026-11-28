@@ -1,5 +1,6 @@
-//! Structure trees through Combine (ISO 32000-2 §14.7): each file's tags come along with its
-//! pages, under one tree. Elements that lead to no copied page are left behind. The parent tree
+//! Structure trees through Combine, Insert pages, Extract and Split (ISO 32000-2 §14.7): each
+//! file's tags come along with its pages, under one tree. Elements that lead to no copied page
+//! are left behind. The parent tree
 //! (§14.7.5.4) is numbered afresh, so one file's keys never answer for another's pages,
 //! annotations or forms.
 
@@ -12,7 +13,7 @@ const MAX_DEPTH: usize = 256;
 /// The most elements, and parent tree entries, one file brings.
 const MAX_ITEMS: usize = 1_000_000;
 
-/// The combined tree as sources are added.
+/// The tree as sources are added: a new one, or a document's own ([`Tags::open`]).
 #[derive(Default)]
 pub(super) struct Tags {
     /// The combined `/StructTreeRoot`, made for the first tagged source.
@@ -27,6 +28,10 @@ pub(super) struct Tags {
     lang: Option<Option<Object>>,
     /// Role and class maps, identifiers and namespaces.
     maps: Maps,
+    /// The other entries of the document's own tree root.
+    base: Dict,
+    /// A source brought tags, so the tree has to be written.
+    changed: bool,
 }
 
 /// One source's elements being copied.
@@ -255,7 +260,37 @@ fn key_of(src: &Document, r: ObjRef, key: &[u8]) -> Option<i64> {
     }
 }
 
+/// Whether `doc` says it is a tagged document.
+fn marked(doc: &Document) -> bool {
+    let catalog = doc.root().map(|r| doc.get(r));
+    let info = catalog.as_deref().and_then(Object::as_dict).and_then(|c| c.get(b"MarkInfo")).and_then(|m| doc.dict(m));
+    info.is_some_and(|i| matches!(i.get(b"Marked").map(|v| doc.resolve(v)).as_deref(), Some(Object::Bool(true))))
+}
+
 impl Tags {
+    /// The tree `doc` already has, for pages inserted into it; its language is its own. `None` when
+    /// its tree root is not an object of its own, so no element can be added below it.
+    pub(super) fn open(doc: &Document) -> Option<Self> {
+        let mut tags = Tags { lang: Some(None), untagged: !marked(doc), ..Tags::default() };
+        let catalog = doc.root().map(|r| doc.get(r));
+        let entry = catalog.as_deref().and_then(Object::as_dict).and_then(|c| c.get(b"StructTreeRoot"));
+        let Some(entry) = entry else { return Some(tags) };
+        let (root, tree) = (entry.as_ref()?, doc.dict(entry)?);
+        tags.root = Some(root);
+        tags.kids = kids_of(doc, tree.get(b"K"));
+        let mut entries = HashMap::new();
+        if let Some(parents) = tree.get(b"ParentTree") {
+            numbers(doc, parents, 0, &mut HashSet::new(), &mut entries);
+        }
+        tags.nums = entries.into_iter().collect();
+        tags.nums.sort_unstable_by_key(|(k, _)| *k);
+        let past = tags.nums.last().map_or(0, |(k, _)| k.saturating_add(1));
+        tags.next = tree.int(b"ParentTreeNextKey").unwrap_or(0).max(past).max(0);
+        tags.maps = Maps::open(doc, &tree);
+        tags.base = tree;
+        Some(tags)
+    }
+
     /// Add the tags of `src`, whose pages `pages` and objects `objects` have been copied into `out`.
     pub(super) fn add(
         &mut self,
@@ -275,6 +310,7 @@ impl Tags {
         }
         let tree = catalog.and_then(|c| c.get(b"StructTreeRoot")).map(|t| src.resolve(t));
         let tree = tree.as_deref().and_then(Object::as_dict);
+        self.untagged |= tree.is_none() || !marked(src);
 
         let mut source = Source {
             src,
@@ -291,31 +327,29 @@ impl Tags {
             refs: Vec::new(),
         };
         let mut parents = HashMap::new();
-        match tree {
-            Some(tree) => {
-                let root = match self.root {
-                    Some(root) => root,
-                    None => *self.root.insert(out.add(Object::Null)),
-                };
-                source.renames = source.maps.add(out, src, tree, &mut source.copier)?;
-                for top in kids_of(src, tree.get(b"K")) {
-                    let Some(new) = source.element(out, &top, root, 0)? else { continue };
-                    // The file's language stays with its content.
-                    if let Some(lang) = &lang
-                        && let Some(mut d) = out.get(new).as_dict().cloned()
-                        && !d.contains(b"Lang")
-                    {
-                        d.set(b"Lang".to_vec(), lang.clone());
-                        out.set(new, Object::Dict(d));
-                    }
-                    self.kids.push(Object::Ref(new));
+        if let Some(tree) = tree {
+            self.changed = true;
+            let root = match self.root {
+                Some(root) => root,
+                None => *self.root.insert(out.add(Object::Null)),
+            };
+            source.renames = source.maps.add(out, src, tree, &mut source.copier)?;
+            for top in kids_of(src, tree.get(b"K")) {
+                let Some(new) = source.element(out, &top, root, 0)? else { continue };
+                // The file's language stays with its content.
+                if let Some(lang) = &lang
+                    && let Some(mut d) = out.get(new).as_dict().cloned()
+                    && !d.contains(b"Lang")
+                {
+                    d.set(b"Lang".to_vec(), lang.clone());
+                    out.set(new, Object::Dict(d));
                 }
-                source.finish(out);
-                if let Some(parent_tree) = tree.get(b"ParentTree") {
-                    numbers(src, parent_tree, 0, &mut HashSet::new(), &mut parents);
-                }
+                self.kids.push(Object::Ref(new));
             }
-            None => self.untagged = true,
+            source.finish(out);
+            if let Some(parent_tree) = tree.get(b"ParentTree") {
+                numbers(src, parent_tree, 0, &mut HashSet::new(), &mut parents);
+            }
         }
         // Pages, annotations and forms get new keys; a key that answers nothing now is dropped,
         // or it would answer for another file's content.
@@ -339,28 +373,39 @@ impl Tags {
         Ok(())
     }
 
-    /// Write the combined tree into `out`'s catalog, when any source had one.
+    /// Write the tree into `out`'s catalog, when any source had one.
     pub(super) fn finish(self, out: &mut Document) -> Result<(), OrganizeError> {
         let Some(root) = self.root else { return Ok(()) };
+        let catalog = out.root().ok_or_else(|| OrganizeError::Invalid("the document has no catalog".into()))?;
+        let mut info = out.get(catalog).as_dict().and_then(|c| c.get(b"MarkInfo")).and_then(|m| out.dict(m)).unwrap_or_default();
+        // Only a document tagged throughout says it is tagged.
+        let said = marked(out);
+        let mark = (said == self.untagged).then(|| {
+            info.set(b"Marked".to_vec(), Object::Bool(!self.untagged));
+            info
+        });
+        if !self.changed {
+            // Nothing new in the tree; pages without tags can still take the claim away.
+            if let Some(info) = mark {
+                out.update_dict(catalog, |c| c.set(b"MarkInfo".to_vec(), Object::Dict(info)))?;
+            }
+            return Ok(());
+        }
         let mut parent_tree = Dict::new();
         let nums = self.nums.into_iter().flat_map(|(k, v)| [Object::Int(k), v]).collect();
         parent_tree.set(b"Nums".to_vec(), Object::Array(nums));
         let parent_tree = out.add(Object::Dict(parent_tree));
-        let mut tree = Dict::new();
+        let mut tree = self.base;
         tree.set(b"Type".to_vec(), Object::name("StructTreeRoot"));
         tree.set(b"K".to_vec(), Object::Array(self.kids));
         tree.set(b"ParentTree".to_vec(), Object::Ref(parent_tree));
         tree.set(b"ParentTreeNextKey".to_vec(), Object::Int(self.next));
         self.maps.write(out, &mut tree);
         out.set(root, Object::Dict(tree));
-        let catalog = out.root().ok_or_else(|| OrganizeError::Invalid("the combined document has no catalog".into()))?;
-        let (untagged, lang) = (self.untagged, self.lang.flatten());
+        let lang = self.lang.flatten();
         out.update_dict(catalog, |c| {
             c.set(b"StructTreeRoot".to_vec(), Object::Ref(root));
-            // Only a document tagged throughout says it is tagged.
-            if !untagged {
-                let mut info = Dict::new();
-                info.set(b"Marked".to_vec(), Object::Bool(true));
+            if let Some(info) = mark {
                 c.set(b"MarkInfo".to_vec(), Object::Dict(info));
             }
             if let Some(lang) = lang {

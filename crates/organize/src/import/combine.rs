@@ -15,6 +15,10 @@ pub fn extract_pages(src: &Document, pages: &[usize]) -> Result<Document, Organi
     // same-named field roots stays one field, as it was), so Extract and Split never rename.
     let imported = import_pages_mapped(&mut out, src, pages, 0, FieldConflicts::Merge)?;
     crate::labels::finish_page_labels(&mut out, &labels, has_labels)?;
+    let mut tags = Tags::default();
+    let whole = pages.iter().collect::<HashSet<_>>().len() == crate::page_count(src)?;
+    tags.add(&mut out, src, &imported.page_map, &imported.objects, whole)?;
+    tags.finish(&mut out)?;
     // The bookmarks of these pages come along, mapped to the copies (#4020).
     let outline = kept_bookmarks(source_outline(src, imported.page_map));
     if !outline.is_empty() {

@@ -11434,12 +11434,13 @@ fn mapped_doc(role: &str, scope: &str) -> Document {
         "<< /Type /Page /Parent 2 0 R /StructParents 0 /Contents 4 0 R /Resources << /Font << /F1 9 0 R >> >> >>".into(), // 3
         body("cells"),                                                              // 4
         format!(
-            "<< /Type /StructTreeRoot /K [6 0 R 7 0 R] /RoleMap << /Heading /{role} >> /ClassMap << /wide << /O /Table /Scope /{scope} >> >> /Namespaces [8 0 R] >>"
+            "<< /Type /StructTreeRoot /K [6 0 R 7 0 R] /ParentTree 10 0 R /RoleMap << /Heading /{role} >> /ClassMap << /wide << /O /Table /Scope /{scope} >> >> /Namespaces [8 0 R] >>"
         ), // 5
         "<< /Type /StructElem /S /Heading /P 5 0 R /Pg 3 0 R /K 0 /ID (h1) /C /wide >>".into(), // 6
         "<< /Type /StructElem /S /TD /P 5 0 R /Pg 3 0 R /K 1 /A << /O /Table /Headers [(h1)] >> /Ref [6 0 R] >>".into(), // 7
         "<< /Type /Namespace /NS (http://iso.org/pdf2/ssn) >>".into(),              // 8
         "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".into(),            // 9
+        "<< /Nums [0 [6 0 R 7 0 R]] >>".into(),                                     // 10
     ];
     open(build(&b, "/Root 1 0 R"))
 }
@@ -11477,4 +11478,33 @@ fn combine_brings_roles_classes_identifiers_and_namespaces() {
     // The same file twice needs no second role or class; one namespace serves all.
     assert_eq!((roles.len(), classes.len()), (2, 2), "{roles:?} {classes:?}");
     assert_eq!(entry(&tree, b"Namespaces").as_array().map(Vec::len), Some(1));
+}
+
+#[test]
+fn insert_and_extract_bring_structure_trees() {
+    let source = mapped_doc("H2", "Column");
+    // Into a tagged document: its own elements stay, the inserted ones follow with their names.
+    let mut doc = tagged_doc("one", "two");
+    doc.update_dict(doc.root().unwrap(), |c| c.set(b"Lang".to_vec(), Object::String(pdfcraft_cos::PdfString::literal(b"fr-CA".to_vec())))).unwrap();
+    insert_file_pages(&mut doc, &source, "more", &[0], 1, FieldConflicts::Rename).unwrap();
+    insert_file_pages(&mut doc, &mapped_doc("H1", "Row"), "again", &[0], 0, FieldConflicts::Rename).unwrap();
+    let doc = open(write_full(&doc, &SaveOptions::default()).unwrap());
+    assert_eq!(tagged_pages(&doc).len(), 4, "every page keeps or gains its tags");
+    let dict = |o: &Object| doc.resolve(o).as_dict().cloned().unwrap();
+    let catalog = dict(&Object::Ref(doc.root().unwrap()));
+    let tree = dict(catalog.get(b"StructTreeRoot").unwrap());
+    assert_eq!(tree.get(b"K").and_then(Object::as_array).map(Vec::len), Some(5), "the document's own and two files'");
+    assert_eq!(dict(tree.get(b"RoleMap").unwrap()).len(), 2, "the second file's role is renamed");
+    // The inserted files say nothing about being tagged, so the whole no longer does.
+    assert_eq!(dict(catalog.get(b"MarkInfo").unwrap()).get(b"Marked"), Some(&Object::Bool(false)));
+
+    // Extract and Split take the elements of their pages along.
+    let source = tagged_doc("one", "two");
+    let part = extract_pages(&source, &[1]).unwrap();
+    assert_eq!(tagged_pages(&part).len(), 1);
+    let catalog = part.get(part.root().unwrap()).as_dict().cloned().unwrap();
+    assert!(catalog.contains(b"MarkInfo") && catalog.contains(b"Lang"));
+    assert_eq!(split(&source, &SplitBy::PageCount(1)).unwrap().iter().map(|p| tagged_pages(p).len()).collect::<Vec<_>>(), [1, 1]);
+    let plain = extract_pages(&doc_a(), &[0]).unwrap();
+    assert!(!plain.get(plain.root().unwrap()).as_dict().unwrap().contains(b"StructTreeRoot"));
 }
