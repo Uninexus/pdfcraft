@@ -152,6 +152,7 @@ struct PrefsDraft {
     highlight_fields: bool,
     always_default_view: bool,
     text_links: bool,
+    export_scans: bool,
     units: Unit,
     /// Preferences > Grid: the page grid, in points, and the unit its numbers are shown in.
     grid: pdfcraft_engine::guides::Grid,
@@ -205,6 +206,7 @@ impl PrefsDraft {
             highlight_fields: app.highlight_fields,
             always_default_view: app.always_default_view,
             text_links: app.text_links,
+            export_scans: app.ocr_draft.export_scans,
             units: app.units,
             grid: crate::grid_prefs::effective(&app.session),
             grid_unit: app.grid_unit,
@@ -262,6 +264,7 @@ impl PrefsDraft {
             highlight_fields: true,
             always_default_view: false,
             text_links: true,
+            export_scans: true,
             units: Unit::default(),
             grid: crate::grid_prefs::default_grid(),
             grid_unit: Unit::default(),
@@ -686,6 +689,7 @@ impl PreferencesModel for Prefs<'_> {
             }
             ("view.always", PrefValue::Bool(v)) => d.always_default_view = v,
             ("view.text_links", PrefValue::Bool(v)) => d.text_links = v,
+            ("view.export_scans", PrefValue::Bool(v)) => d.export_scans = v,
             ("view.units", PrefValue::Choice(id)) => d.units = lookup(&unit_table(), &id).unwrap_or(d.units),
             ("grid.unit", PrefValue::Choice(id)) => d.grid_unit = lookup(&unit_table(), &id).unwrap_or(d.grid_unit),
             ("grid.spacing", PrefValue::Float(v)) => d.grid.spacing = v / d.grid_unit.per_point(),
@@ -880,6 +884,7 @@ impl PreferencesModel for Prefs<'_> {
                 d.full_screen_escape_exits = fresh.full_screen_escape_exits;
                 d.always_default_view = fresh.always_default_view;
                 d.text_links = fresh.text_links;
+                d.export_scans = fresh.export_scans;
                 d.units = fresh.units;
                 d.blank_paper = fresh.blank_paper;
                 d.scroll_speed = fresh.scroll_speed;
@@ -985,6 +990,7 @@ impl PreferencesDraft for Prefs<'_> {
         self.app.highlight_fields = d.highlight_fields;
         self.app.always_default_view = d.always_default_view;
         self.app.text_links = d.text_links;
+        self.app.ocr_draft.export_scans = d.export_scans;
         self.app.units = d.units;
         self.app.grid_unit = d.grid_unit;
         // Only a grid that was changed becomes the session's preference, so an untouched page leaves it unset.
@@ -1160,6 +1166,8 @@ impl Prefs<'_> {
             RowSpec::new("view.always", tl!("Always use my default zoom and page layout"), RowKind::Bool(d.always_default_view)),
             RowSpec::new("view.text_links", tl!("Open web and email addresses written in the page text"), RowKind::Bool(d.text_links))
                 .help(tl!("Only web (http, https) and email addresses open, and PdfCraft asks first, as for other links.")),
+            RowSpec::new("view.export_scans", tl!("Recognize text in scanned pages when exporting"), RowKind::Bool(d.export_scans))
+                .help(tl!("For Word, PowerPoint, HTML, RTF and Markdown. The words go into the exported file; the PDF is not changed.")),
             choice_row("view.units", tl!("Units"), d.units, &unit_table()).help(tl!("For page sizes and margins.")),
             choice_row("view.paper", tl!("Paper for new blank pages"), d.blank_paper, &paper_table())
                 .help(tl!("Used by Create > Blank page. It starts as the paper of the system's region.")),
