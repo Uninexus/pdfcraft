@@ -11424,3 +11424,57 @@ fn combine_brings_each_files_structure_tree() {
     let out = combine(&[("p", &plain), ("q", &plain)]).unwrap();
     assert!(!out.get(out.root().unwrap()).as_dict().unwrap().contains(b"StructTreeRoot"));
 }
+
+/// A tagged page whose two elements use a role, a class, an identifier and a namespace: a header
+/// cell `h1` of the custom type `Heading`, and a cell naming it in `/Headers` and `/Ref`.
+fn mapped_doc(role: &str, scope: &str) -> Document {
+    let b: Vec<String> = vec![
+        "<< /Type /Catalog /Pages 2 0 R /StructTreeRoot 5 0 R >>".into(),           // 1
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 300 400] >>".into(), // 2
+        "<< /Type /Page /Parent 2 0 R /StructParents 0 /Contents 4 0 R /Resources << /Font << /F1 9 0 R >> >> >>".into(), // 3
+        body("cells"),                                                              // 4
+        format!(
+            "<< /Type /StructTreeRoot /K [6 0 R 7 0 R] /RoleMap << /Heading /{role} >> /ClassMap << /wide << /O /Table /Scope /{scope} >> >> /Namespaces [8 0 R] >>"
+        ), // 5
+        "<< /Type /StructElem /S /Heading /P 5 0 R /Pg 3 0 R /K 0 /ID (h1) /C /wide >>".into(), // 6
+        "<< /Type /StructElem /S /TD /P 5 0 R /Pg 3 0 R /K 1 /A << /O /Table /Headers [(h1)] >> /Ref [6 0 R] >>".into(), // 7
+        "<< /Type /Namespace /NS (http://iso.org/pdf2/ssn) >>".into(),              // 8
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".into(),            // 9
+    ];
+    open(build(&b, "/Root 1 0 R"))
+}
+
+#[test]
+fn combine_brings_roles_classes_identifiers_and_namespaces() {
+    let (a, b) = (mapped_doc("H1", "Row"), mapped_doc("H2", "Column"));
+    let out = combine(&[("a", &a), ("b", &b), ("again", &a)]).unwrap();
+    let out = open(write_full(&out, &SaveOptions::default()).unwrap());
+    let dict = |o: &Object| out.resolve(o).as_dict().cloned().unwrap();
+    let tree = dict(dict(&Object::Ref(out.root().unwrap())).get(b"StructTreeRoot").unwrap());
+    let entry = |d: &pdfcraft_cos::Dict, key: &[u8]| d.get(key).cloned().unwrap_or_else(|| panic!("{d:?}"));
+    let (roles, classes) = (dict(&entry(&tree, b"RoleMap")), dict(&entry(&tree, b"ClassMap")));
+    let elements: Vec<_> = entry(&tree, b"K").as_array().unwrap().iter().map(dict).collect();
+    assert_eq!(elements.len(), 6);
+    let ids = dict(&entry(&tree, b"IDTree"));
+    let names = ids.get(b"Names").and_then(Object::as_array).unwrap().clone();
+    assert_eq!(names.len(), 6, "three identifiers: {names:?}");
+
+    // Each file's heading keeps its own role, class and identifier, and its cell follows them.
+    for (file, role, scope) in [(0, "H1", "Row"), (1, "H2", "Column"), (2, "H1", "Row")] {
+        let (heading, cell) = (&elements[file * 2], &elements[file * 2 + 1]);
+        let name = heading.name(b"S").unwrap();
+        assert_eq!(roles.name(name), Some(role.as_bytes()), "file {file}: {roles:?}");
+        let class = dict(&entry(&classes, heading.name(b"C").unwrap()));
+        assert_eq!(class.name(b"Scope"), Some(scope.as_bytes()), "file {file}");
+        let id = entry(heading, b"ID");
+        let headers = entry(&dict(&entry(cell, b"A")), b"Headers");
+        assert_eq!(headers.as_array().unwrap()[0], id, "file {file}");
+        let named = entry(cell, b"Ref").as_array().unwrap()[0].clone();
+        assert_eq!(dict(&named), *heading, "file {file}: /Ref follows the copy");
+        let found = names.chunks(2).find(|pair| pair[0].as_string().map(|s| &s.bytes) == id.as_string().map(|s| &s.bytes)).unwrap();
+        assert_eq!(dict(&found[1]), *heading, "file {file}: the ID tree finds it");
+    }
+    // The same file twice needs no second role or class; one namespace serves all.
+    assert_eq!((roles.len(), classes.len()), (2, 2), "{roles:?} {classes:?}");
+    assert_eq!(entry(&tree, b"Namespaces").as_array().map(Vec::len), Some(1));
+}

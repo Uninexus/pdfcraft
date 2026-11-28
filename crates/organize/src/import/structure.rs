@@ -4,6 +4,7 @@
 //! annotations or forms.
 
 use super::copy::Copier;
+use super::structure_maps::{Maps, Renames};
 use super::{Dict, Document, HashMap, HashSet, ObjRef, Object, OrganizeError};
 
 /// How deep elements and number tree nodes are followed.
@@ -24,6 +25,8 @@ pub(super) struct Tags {
     untagged: bool,
     /// The first source's language, while every source says the same.
     lang: Option<Option<Object>>,
+    /// Role and class maps, identifiers and namespaces.
+    maps: Maps,
 }
 
 /// One source's elements being copied.
@@ -40,6 +43,11 @@ struct Source<'a> {
     elements: HashMap<ObjRef, ObjRef>,
     seen: HashSet<ObjRef>,
     left: usize,
+    maps: &'a mut Maps,
+    renames: Renames,
+    /// The elements copied, and those among them that named others in `/Ref`.
+    made: Vec<ObjRef>,
+    refs: Vec<(ObjRef, Object)>,
 }
 
 fn kids_of(src: &Document, k: Option<&Object>) -> Vec<Object> {
@@ -123,12 +131,17 @@ impl Source<'_> {
         }
         let mut copy = Dict::new();
         for (key, value) in dict.iter() {
-            // `/Ref` names other elements, which may be left behind or not copied yet.
+            // `/Ref` names other elements, which may not be copied yet: set once all are.
             if !matches!(key.as_slice(), b"K" | b"P" | b"Pg" | b"Ref") {
                 copy.set(key.clone(), self.copier.copy_value(out, value, None)?);
             }
         }
         copy.set(b"P".to_vec(), Object::Ref(parent));
+        self.maps.element(&mut self.renames, &mut copy, new);
+        self.made.push(new);
+        if let Some(named) = dict.get(b"Ref") {
+            self.refs.push((new, named.clone()));
+        }
         if let Some(here) = here {
             copy.set(b"Pg".to_vec(), Object::Ref(here));
         }
@@ -142,6 +155,33 @@ impl Source<'_> {
             self.elements.insert(from, new);
         }
         Ok(Some(new))
+    }
+
+    /// What can only be set once every element is copied: `/Ref`, and references to renamed
+    /// identifiers.
+    fn finish(&self, out: &mut Document) {
+        for (element, named) in &self.refs {
+            let kept: Vec<Object> = kids_of(self.src, Some(named))
+                .iter()
+                .filter_map(|o| o.as_ref().and_then(|r| self.elements.get(&r)))
+                .map(|r| Object::Ref(*r))
+                .collect();
+            if !kept.is_empty()
+                && let Some(mut dict) = out.get(*element).as_dict().cloned()
+            {
+                dict.set(b"Ref".to_vec(), Object::Array(kept));
+                out.set(*element, Object::Dict(dict));
+            }
+        }
+        let mut done = HashSet::new();
+        for element in &self.made {
+            let Some(mut dict) = out.get(*element).as_dict().cloned() else { continue };
+            let Some(attributes) = dict.get(b"A").cloned() else { continue };
+            if let Some(new) = Maps::headers(out, &self.renames, &attributes, &mut done, 0) {
+                dict.set(b"A".to_vec(), new);
+                out.set(*element, Object::Dict(dict));
+            }
+        }
     }
 
     /// A parent tree entry with its elements replaced by their copies; `None` when none is left.
@@ -245,6 +285,10 @@ impl Tags {
             elements: HashMap::new(),
             seen: HashSet::new(),
             left: MAX_ITEMS,
+            maps: &mut self.maps,
+            renames: Renames::default(),
+            made: Vec::new(),
+            refs: Vec::new(),
         };
         let mut parents = HashMap::new();
         match tree {
@@ -253,6 +297,7 @@ impl Tags {
                     Some(root) => root,
                     None => *self.root.insert(out.add(Object::Null)),
                 };
+                source.renames = source.maps.add(out, src, tree, &mut source.copier)?;
                 for top in kids_of(src, tree.get(b"K")) {
                     let Some(new) = source.element(out, &top, root, 0)? else { continue };
                     // The file's language stays with its content.
@@ -265,6 +310,7 @@ impl Tags {
                     }
                     self.kids.push(Object::Ref(new));
                 }
+                source.finish(out);
                 if let Some(parent_tree) = tree.get(b"ParentTree") {
                     numbers(src, parent_tree, 0, &mut HashSet::new(), &mut parents);
                 }
@@ -305,6 +351,7 @@ impl Tags {
         tree.set(b"K".to_vec(), Object::Array(self.kids));
         tree.set(b"ParentTree".to_vec(), Object::Ref(parent_tree));
         tree.set(b"ParentTreeNextKey".to_vec(), Object::Int(self.next));
+        self.maps.write(out, &mut tree);
         out.set(root, Object::Dict(tree));
         let catalog = out.root().ok_or_else(|| OrganizeError::Invalid("the combined document has no catalog".into()))?;
         let (untagged, lang) = (self.untagged, self.lang.flatten());
