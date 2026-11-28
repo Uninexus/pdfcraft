@@ -42,6 +42,7 @@ mod printing;
 mod reading;
 mod redact;
 mod redact_folder;
+mod security_policies;
 mod signing;
 mod signing_plan;
 mod text_cache;
@@ -110,6 +111,8 @@ pub struct Automation {
     next_ocr_review: u64,
     /// What object_copy copied, for object_paste into any open document.
     objects_clipboard: Option<pdfcraft_engine::ObjectClipboard>,
+    /// What security_policy_save kept, for this tool session. Never holds a password.
+    security_policies: Vec<pdfcraft_engine::security_policy::SecurityPolicy>,
 }
 
 impl Default for Automation {
@@ -131,6 +134,7 @@ impl Automation {
             ocr_reviews: HashMap::new(),
             next_ocr_review: 0,
             objects_clipboard: None,
+            security_policies: Vec::new(),
         }
     }
 

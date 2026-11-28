@@ -314,6 +314,10 @@ impl Automation {
                 out
             }
             "doc_protect" => self.doc_protect(&a)?,
+            "doc_protect_with_policy" => self.doc_protect_with_policy(&a)?,
+            "security_policy_list" => self.security_policy_list(),
+            "security_policy_save" => self.security_policy_save(&a)?,
+            "security_policy_delete" => self.security_policy_delete(&a)?,
             "page_replace" => {
                 let pages = self.pages(&a, "pages")?;
                 let path = self.resolve(a.str("path")?, false)?;

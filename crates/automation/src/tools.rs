@@ -1535,6 +1535,34 @@ fn all_tools() -> Vec<ToolDef> {
             }),
             &["doc"],
         )),
+        t("security_policy_list", "List security policies", "The saved password-protection settings of this tool session (security_policy_save). A policy never holds a password. The app's own saved policies are not shared with the tools.")
+            .ro()
+            .cmd("protect.password")
+            .with(schema(json!({}), &[])),
+        t("security_policy_save", "Save a security policy", "Keep password-protection settings under a name, for this tool session; a policy of the same name is replaced. No password is stored. password_for viewing: the password opens the document; editing: it changes the restrictions (printing, changes, copy, accessibility apply only then).")
+            .cmd("protect.password")
+            .with(schema(
+                json!({
+                    "name": { "type": "string", "minLength": 1, "maxLength": 80 },
+                    "password_for": { "type": "string", "enum": ["viewing", "editing"] },
+                    "printing": { "type": "string", "enum": ["none", "low", "high"] },
+                    "changes": { "type": "string", "enum": ["none", "pages", "fill-sign", "comment-fill-sign", "any-except-extract"] },
+                    "copy": { "type": "boolean" }, "accessibility": { "type": "boolean" },
+                    "compatibility": { "type": "string", "enum": ["aes-256", "aes-128", "rc4-128", "rc4-40"] },
+                    "encrypt_metadata": { "type": "boolean" },
+                }),
+                &["name", "password_for"],
+            )),
+        t("security_policy_delete", "Delete a security policy", "Forget a saved security policy.")
+            .destructive()
+            .cmd("protect.password")
+            .with(schema(json!({ "name": { "type": "string", "minLength": 1 } }), &["name"])),
+        t("doc_protect_with_policy", "Protect with a security policy", "Encrypt the document with a saved policy's settings and the password given (applied by the next doc_save). Undoable.")
+            .cmd("protect.password")
+            .with(schema(
+                json!({ "doc": doc(), "policy": { "type": "string", "minLength": 1 }, "password": { "type": "string", "minLength": 1 } }),
+                &["doc", "policy", "password"],
+            )),
         t("doc_unprotect", "Remove security", "Remove password security (the document must have been opened with its permissions password, or have none). Applied by the next doc_save. Undoable.")
             .cmd("protect.remove")
             .destructive()
