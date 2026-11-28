@@ -16776,3 +16776,31 @@ fn signing_a_field_another_signature_locks_is_refused() {
     assert_eq!(statuses.iter().filter(|(signed, _)| *signed).count(), 1, "{statuses:?}");
     assert!(statuses.iter().all(|(_, status)| status != "invalid"), "{statuses:?}");
 }
+
+/// `list` makes the lines of added text and of a paragraph list items, and takes the markers off.
+#[test]
+fn lists_through_tools() {
+    let dir = workdir("lists");
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "a.pdf" }))["doc"].as_u64().unwrap();
+    ok(&mut a, "page_add_text", json!({ "doc": doc, "page": 1, "text": "Milk\nEggs", "at": [20, 20], "list": "numbered" }));
+    let text = |a: &mut Automation| ok(a, "content_list", json!({ "doc": doc }))["items"][0]["text"].clone();
+    assert_eq!(text(&mut a), "1. Milk\n2. Eggs");
+    ok(&mut a, "content_update", json!({ "doc": doc, "page": 1, "index": 1, "list": "bulleted" }));
+    assert_eq!(text(&mut a), "• Milk\n• Eggs");
+    ok(&mut a, "content_update", json!({ "doc": doc, "page": 1, "index": 1, "list": "none" }));
+    assert_eq!(text(&mut a), "Milk\nEggs");
+    assert!(a.call("content_update", &json!({ "doc": doc, "page": 1, "index": 1, "list": "roman" })).is_err());
+
+    // A paragraph of the page's own text, without giving its words again.
+    let first = |a: &mut Automation| ok(a, "text_paragraphs", json!({ "doc": doc, "page": 1 }))["paragraphs"][0]["text"].as_str().unwrap().to_owned();
+    let words = first(&mut a);
+    ok(&mut a, "text_edit", json!({ "doc": doc, "page": 1, "paragraph": 1, "list": "bulleted" }));
+    assert_eq!(first(&mut a), format!("• {words}"));
+    ok(&mut a, "text_edit", json!({ "doc": doc, "page": 1, "paragraph": 1, "list": "none" }));
+    assert_eq!(first(&mut a), words);
+    assert!(matches!(
+        a.call("text_edit", &json!({ "doc": doc, "page": 1, "line": 1, "text": "x", "list": "bulleted" })),
+        Err(ToolError::InvalidArgs(_))
+    ));
+}

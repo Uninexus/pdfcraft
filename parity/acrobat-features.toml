@@ -2082,11 +2082,11 @@ title = "Bulleted and numbered lists"
 area = "C"
 tier = "P1"
 milestone = "M7"
-status = "planned"
-commands = []
-tools = []
-evidence = []
-notes = ""
+status = "shipped"
+commands = ["edit.edit_text", "edit.text"]
+tools = ["text_edit", "page_add_text", "content_update"]
+evidence = ["crates/ui-egui/tests/it/content.rs::added_text_takes_a_list_and_enter_continues_and_ends_it", "crates/ui-egui/tests/it/editing.rs::an_edited_paragraph_becomes_a_numbered_list", "crates/ui-egui/tests/it/editing.rs::a_wrapped_paragraph_becomes_one_list_item", "crates/edit/src/lists.rs::enter_starts_the_next_item_or_ends_the_list", "crates/automation/tests/it/automation.rs::lists_through_tools"]
+notes = "Format text's Bulleted list and Numbered list buttons work while a paragraph or added text is being typed in: they mark the selected lines, or all of them, and take the markers off again; the change is announced (the buttons show no pressed state). Enter in an item starts the next one, numbers after it counting on, and Enter on an empty item ends the list. Markers are ordinary characters in the text, so other programs show them. text_edit (paragraph), page_add_text and content_update take list: bulleted, numbered or none. Missing: letter and roman numbering, other bullet styles to choose, nesting levels, hanging indent; on existing page text each item reads back as its own paragraph, so editing one later does not renumber the others, and Enter on a wrapped row after an item's first does not continue the list."
 
 [[feature]]
 id = "edit.add-text"
