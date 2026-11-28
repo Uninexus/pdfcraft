@@ -10714,11 +10714,11 @@ title = "Preferences: accessibility"
 area = "N"
 tier = "P1"
 milestone = "M14"
-status = "planned"
-commands = []
+status = "partial"
+commands = ["app.preferences"]
 tools = []
-evidence = []
-notes = ""
+evidence = ["crates/ui-egui/tests/it/preferences.rs::preference_rows_apply_live_and_survive_closing", "crates/ui-egui/tests/it/preferences.rs::documents_open_with_the_text_cursor_when_asked", "crates/engine/src/tests.rs::pages_without_a_tab_order_can_follow_the_structure_tree", "crates/forms/src/tests.rs::structure_tab_order_follows_the_tags", "crates/ui-egui/tests/it/forms.rs::tabbing_between_text_fields_keeps_the_keyboard_in_the_field"]
+notes = "Preferences > Accessibility: documents can open with the keyboard text cursor (caret browsing) on, and Tab can follow the document structure on pages that set no tab order, without changing the file (XFA forms keep their template's order). Both persist; ui.set caret-on-open and tabs-follow-structure, ui.state caret_on_open and tabs_follow_structure. Related settings live on other pages: Reading colours (replacing document colours) under Appearance, Interface size and Animation effects under General & Interface. Missing: overriding the reading order of tagged documents, screen-reader delivery options, and using the system selection colour."
 
 [[feature]]
 id = "misc.prefs-color-management"
