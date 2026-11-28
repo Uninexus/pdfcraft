@@ -1032,6 +1032,7 @@ fn all_tools() -> Vec<ToolDef> {
         .with(schema(
             json!({
                 "doc": doc(), "page": { "type": "integer", "minimum": 1 }, "text": { "type": "string", "minLength": 1 },
+                "list": { "type": "string", "enum": ["bulleted", "numbered", "none"], "description": "Make every line of the text a list item with a bullet or a number before it, or take the markers off (none)." },
                 "at": { "type": "array", "items": { "type": "number" }, "minItems": 2, "maxItems": 2 },
                 "width": { "type": "number", "exclusiveMinimum": 0 },
                 "rect": { "type": "array", "items": { "type": "number" }, "minItems": 4, "maxItems": 4 },
@@ -1070,6 +1071,7 @@ fn all_tools() -> Vec<ToolDef> {
                     "rotate": { "type": "integer" }, "flip_h": { "type": "boolean" }, "flip_v": { "type": "boolean" },
                     "crop": { "type": "array", "items": { "type": "number", "minimum": 0, "maximum": 0.95 }, "minItems": 4, "maxItems": 4, "description": "Fractions trimmed: left, bottom, right, top. Left and right together, and bottom and top together, trim at most 0.95." },
                     "image": { "type": "string", "description": "Replace the picture with this file." },
+                    "list": { "type": "string", "enum": ["bulleted", "numbered", "none"], "description": "Make every line of the text a list item with a bullet or a number before it, or take the markers off (none)." },
                 }),
                 &["doc", "page", "index"],
             )),
@@ -2266,6 +2268,7 @@ fn all_tools() -> Vec<ToolDef> {
                     "substitute_fonts": { "type": "boolean", "description": "Paragraphs: default true, as before. false refuses the edit, leaving the document as it was, when the paragraph's own font lacks a letter of the new text (the error names the letters) instead of drawing the missing letters (or the paragraph) in a stand-in font." },
                     "ranges": { "type": "array", "maxItems": 1024, "items": { "type": "object", "properties": {"range":{"type":"array","items":{"type":"integer","minimum":0},"minItems":2,"maxItems":2},"font":{"type":"string","enum":["helvetica","times","courier"]},"bold":{"type":"boolean"},"italic":{"type":"boolean"},"font_resource":{"type":"string"},"size":{"type":"number","exclusiveMinimum":0},"color":{"type":"string"},"underline":{"type":"boolean"},"char_spacing":{"type":"number"},"scale":{"type":"number"}},"required":["range"]}, "description":"Disjoint UTF-8 byte ranges in replacement text; unspecified source formatting survives." },
                     "text": { "type": "string" },
+                    "list": { "type": "string", "enum": ["bulleted", "numbered", "none"], "description": "Paragraph only: make the paragraph (or each line of text) list items with a bullet or a number before them, or take the markers off (none). Rows a wrap made are not items. text may be omitted. Each item then reads back as its own paragraph." },
                     "font": { "type": "string", "enum": ["helvetica", "times", "courier"] },
                     "bold": { "type": "boolean" },
                     "italic": { "type": "boolean" },

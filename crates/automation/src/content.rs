@@ -2,6 +2,7 @@
 //! move/resize/retype/restyle it, delete it. Geometry is in points from the top-left of the
 //! displayed page (y down), like every other tool.
 
+use pdfcraft_engine::lists::ListKind;
 use pdfcraft_engine::{ADDED_CHAR_SPACING_LIMIT, AddedContent, AddedText, Edit, FontFamily, TextAlign, TextInk};
 use serde_json::{Value, json};
 
@@ -122,6 +123,25 @@ pub(crate) fn opt_aligns(a: &Args) -> Result<Option<Vec<Option<TextAlign>>>> {
         .map(Some)
 }
 
+/// The `list` argument: `None` when absent, `Some(None)` to take markers off.
+pub(crate) fn list_arg(a: &Args) -> Result<Option<Option<ListKind>>> {
+    Ok(match a.opt_str("list")? {
+        None => None,
+        Some("bulleted") => Some(Some(ListKind::Bullets)),
+        Some("numbered") => Some(Some(ListKind::Numbers)),
+        Some("none") => Some(None),
+        Some(other) => return Err(bad(format!("unknown list {other:?} (bulleted, numbered, none)"))),
+    })
+}
+
+/// `text` with the list `list_arg` asked for, each of its lines an item.
+pub(crate) fn listed(text: String, list: Option<Option<ListKind>>) -> String {
+    match list {
+        None => text,
+        Some(kind) => pdfcraft_engine::lists::set_list(&text, kind),
+    }
+}
+
 impl Automation {
     pub(crate) fn content_list(&self, a: &Args) -> Result<Value> {
         let doc = self.doc(a)?;
@@ -160,6 +180,7 @@ impl Automation {
     }
 
     pub(crate) fn page_add_text(&mut self, a: &Args) -> Result<Value> {
+        let list = list_arg(a)?;
         let page = self.page(a)?;
         let ph = self.doc(a)?.info.pages[page].height as f64;
         let rect = match (rect_arg(a, "rect")?, a.get("at")) {
@@ -171,7 +192,7 @@ impl Automation {
             }
             (None, None) => return Err(bad("pass at [x, y] (the text's top-left) or rect")),
         };
-        let mut t = AddedText { rect, text: a.str("text")?.to_string(), ..AddedText::default() };
+        let mut t = AddedText { rect, text: listed(a.str("text")?.to_string(), list), ..AddedText::default() };
         style(a, &mut t)?;
         let mut out = self.apply(a, Edit::AddText { page, text: t })?;
         out["index"] = json!(self.doc(a)?.added().iter().filter(|x| x.page == page).count());
@@ -210,6 +231,7 @@ impl Automation {
 
     pub(crate) fn content_update(&mut self, a: &Args) -> Result<Value> {
         let (page, index, content, ph) = self.item(a)?;
+        let list = list_arg(a)?;
         let mut content = match rect_arg(a, "rect")? {
             Some(r) => content.with_rect(to_display(r, ph)),
             None => content,
@@ -221,6 +243,8 @@ impl Automation {
                     t.aligns = pdfcraft_engine::paragraph_align::remap(&t.text, s, &t.aligns);
                     t.text = s.to_string();
                 }
+                // Markers keep every line where it was, so each keeps its alignment.
+                t.text = listed(std::mem::take(&mut t.text), list);
                 style(a, t)?;
                 if ["rotate", "flip_h", "flip_v", "crop", "image"].iter().any(|k| a.get(k).is_some()) {
                     return Err(bad("rotate, flip, crop and image apply to images"));
@@ -230,8 +254,11 @@ impl Automation {
                 if a.get("text").is_some() {
                     return Err(bad("images have no text"));
                 }
-                if ["font", "size", "bold", "italic", "color", "gray", "cmyk", "align", "aligns", "char_spacing"].iter().any(|k| a.get(k).is_some()) {
-                    return Err(bad("font, size, bold, italic, color, gray, cmyk, align, aligns and char_spacing apply to text"));
+                if ["font", "size", "bold", "italic", "color", "gray", "cmyk", "align", "aligns", "char_spacing", "list"]
+                    .iter()
+                    .any(|k| a.get(k).is_some())
+                {
+                    return Err(bad("font, size, bold, italic, color, gray, cmyk, align, aligns, char_spacing and list apply to text"));
                 }
                 if let Some(deg) = a.opt_int("rotate")? {
                     if deg.rem_euclid(90) != 0 {

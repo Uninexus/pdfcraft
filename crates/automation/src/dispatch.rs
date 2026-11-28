@@ -641,14 +641,18 @@ impl Automation {
                 let index = self.paragraph_index(id, page, k, &blocks)?;
                 let block = blocks.get(index).cloned().ok_or_else(|| ToolError::InvalidArgs(format!("paragraph {k} is out of range")))?;
                 let width = a.opt_num("width")?;
+                let list = content::list_arg(&a)?;
                 // Explicit row alignments keep the editor's row boundaries; a width-only
                 // reflow rejoins soft wraps while retaining typed newlines and spaces.
                 let text = match a.opt_str("text")? {
                     Some(text) => text.to_owned(),
+                    // An item is a paragraph or a typed line, never a row only a wrap made.
+                    None if list.is_some() => block.reflow_text.clone(),
                     None if a.get("aligns").is_some() => block.editor_text,
                     None if width.is_some() => block.reflow_text.clone(),
                     None => block.text,
                 };
+                let text = content::listed(text, list);
                 let mut style = pdfcraft_engine::BlockStyle {
                     ranges: parse_style_ranges(a.get("ranges"))?,
                     resource: a.opt_str("font_resource")?.map(str::to_owned),
@@ -721,6 +725,9 @@ impl Automation {
                 let line = a.int("line")?;
                 if line < 1 || line as usize > n {
                     return Err(ToolError::InvalidArgs(format!("line {line} is out of range: page {} has {n} lines", page + 1)));
+                }
+                if a.get("list").is_some() {
+                    return Err(ToolError::InvalidArgs("list is for paragraph edits (paragraph, from text_paragraphs)".into()));
                 }
                 let text = a.str("text")?.to_owned();
                 if a.opt_bool("substitute_fonts")? == Some(false) {

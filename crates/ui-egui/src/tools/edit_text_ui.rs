@@ -433,6 +433,24 @@ impl LineEditor {
         self.text != self.original
     }
 
+    /// Format text ▸ Bulleted or Numbered list on the paragraph. An item is a paragraph or a typed
+    /// line, so the rows a wrap broke are rejoined first, the selection keeping its place.
+    pub(crate) fn toggle_list(&mut self, ctx: &egui::Context, kind: ListKind) {
+        if let Some((block, _)) = &self.source {
+            let flowed = block.unwrapped(&self.text);
+            if flowed != self.text {
+                let end = flowed.chars().count();
+                self.selection = self.selection.map(|s| TextSelection::new(s.anchor.min(end), s.caret.min(end)));
+                // Whole paragraphs align the same way before and after; rows no longer do.
+                for look in [&mut self.look, &mut self.look0] {
+                    look.aligns = pdfcraft_engine::paragraph_align::remap(&self.text, &flowed, &look.aligns);
+                }
+                self.text = flowed;
+            }
+        }
+        toggle_list(ctx, &mut self.text, &mut self.selection, kind);
+    }
+
     /// The box as its history sees it.
     pub(crate) fn typed(&self) -> Typed {
         Typed::of(self.text.clone(), self.selection, self.look.aligns.clone())

@@ -55,6 +55,45 @@ impl TextBlock {
         draft.trim() == self.editor_text.trim()
     }
 
+    /// `draft`, an edit of [`TextBlock::editor_text`], with the rows that only a wrap broke rejoined
+    /// as [`TextBlock::reflow_text`] rejoins them. A break the draft typed stays: wraps are looked
+    /// for only before and after the part that differs.
+    pub fn unwrapped(&self, draft: &str) -> String {
+        let old = self.editor_text.as_str();
+        // With a break unaccounted for the joins can't be trusted.
+        if old.matches('\n').count() != self.joins.len() {
+            return draft.to_string();
+        }
+        let before = old.bytes().zip(draft.bytes()).take_while(|(a, b)| a == b).count();
+        let room = old.len().min(draft.len()) - before;
+        let after = old.bytes().rev().zip(draft.bytes().rev()).take(room).take_while(|(a, b)| a == b).count();
+        // The join of the break `old` has at byte `at`.
+        let join = |at: usize| old.get(..at).and_then(|head| self.joins.get(head.matches('\n').count())).copied().flatten();
+        let mut out = String::with_capacity(draft.len());
+        let mut from = 0;
+        for (at, _) in draft.match_indices('\n') {
+            out.push_str(draft.get(from..at).unwrap_or_default());
+            from = at + 1;
+            let wrap = if at < before {
+                join(at)
+            } else if at >= draft.len() - after {
+                join(at + old.len() - draft.len())
+            } else {
+                None
+            };
+            match wrap {
+                Some(_) if out.ends_with('-') => {
+                    out.pop();
+                }
+                Some(gap) if !out.ends_with(char::is_whitespace) => out.push_str(&" ".repeat(gap)),
+                Some(_) => {}
+                None => out.push('\n'),
+            }
+        }
+        out.push_str(draft.get(from..).unwrap_or_default());
+        out
+    }
+
     /// Preserve styles outside the changed ranges; inserted characters inherit the surrounding
     /// source run. The texts are aligned word by word, so words left untouched between two edits
     /// keep their own runs (#2198); past [`MAX_CHANGED_WORDS`] the draft counts as one change.

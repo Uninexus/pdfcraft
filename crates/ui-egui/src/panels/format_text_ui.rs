@@ -730,7 +730,7 @@ fn apply_paragraph(ctx: &egui::Context, app: &mut PdfCraftApp, ed: &mut LineEdit
             }
             Some(Special::Script(script)) => changed |= crate::edit_text_ui::toggle_script(&mut ed.text, &mut ed.selection, script),
             Some(Special::List(kind)) => {
-                crate::edit_text_ui::toggle_list(ctx, &mut ed.text, &mut ed.selection, kind);
+                ed.toggle_list(ctx, kind);
                 ed.focus = true;
                 changed = true;
             }
