@@ -1386,12 +1386,15 @@ fn page_before(ui: &mut egui::Ui, body: &PageBody<'_>, callbacks: &mut PageCallb
     }
     let focus = crate::forms_ui::focus_owner(&session.forms, cx.form);
     let parts_out = PageParts::new(&parts).id(page_parts::control_id(cx.view_key)).focus(focus).show_at(ui, body.rect);
+    // Set when the keys are sent to a field by request: no arrival is reported for that.
+    let mut handed = false;
     if session.forms.refocus
         && let Some(at) = focus.and_then(|owner| page_parts::focus_stop(&parts, owner))
     {
         session.forms.refocus = false;
         // The editor handed the keys on with Tab: the field the session moved to takes them, as Tab onto its part would.
         focus::request(ui.ctx(), FocusTarget::Part(parts_out.response.id, at));
+        handed = matches!(focus, Some(Owner::Field { .. }));
     }
     out.hovered_comment = match parts_out.hovered {
         Some((Owner::Comment { index }, page)) => Some((page, index)),
@@ -1497,7 +1500,7 @@ fn page_before(ui: &mut egui::Ui, body: &PageBody<'_>, callbacks: &mut PageCallb
     }
 
     *saved_parts = Some(parts_out);
-    *saved_arrived = field_arrived;
+    *saved_arrived = field_arrived || handed;
     tool_view
 }
 
