@@ -1,6 +1,7 @@
 //! Signature properties: one signature's verdict and details in a dialog, from `sign.properties` or the signature in
 //! the Signatures panel. It reads what validation already found and changes nothing.
 
+use craft::ui::buttons::Button;
 use craft::ui::contract::{Bind, Entry, Show as _, ShowContainer as _};
 use craft::ui::dialog::{DialogId, DialogResult, DialogStack, StackDialog, dialog_id};
 use craft::ui::display::Text;
@@ -25,6 +26,8 @@ pub(crate) struct SignaturePropsDialog {
     chosen: Chosen,
     /// The document's signatures as of this frame, oldest revision first.
     signatures: Vec<SignatureInfo>,
+    /// Show certificate… was clicked: the chain to open the viewer on.
+    certificate: Option<Vec<sign::Certificate>>,
 }
 
 fn signed(signatures: &[SignatureInfo]) -> Vec<SignatureInfo> {
@@ -98,12 +101,19 @@ impl PdfCraftApp {
             return;
         };
         let field = field.filter(|f| signatures.iter().any(|s| s.field == *f)).unwrap_or_else(|| first.field.clone());
-        crate::dialogs::host::open(self, SignaturePropsDialog { id: dialog_id("signature-properties"), chosen: Chosen { field }, signatures });
+        crate::dialogs::host::open(
+            self,
+            SignaturePropsDialog { id: dialog_id("signature-properties"), chosen: Chosen { field }, signatures, certificate: None },
+        );
     }
 
     /// Keeps the open dialog on the active document's signatures as they are now; it closes when there are none.
     pub(crate) fn signature_properties_pass(&mut self, ctx: &egui::Context) {
-        if self.dialogs.get::<SignaturePropsDialog>().is_none() {
+        let Some(dialog) = self.dialogs.get_mut::<SignaturePropsDialog>() else { return };
+        // The viewer takes this dialog's place: a window under a modal dialog could not be used.
+        if let Some(chain) = dialog.certificate.take() {
+            self.dialogs.cancel::<SignaturePropsDialog>(ctx);
+            crate::sign_ui::cert_viewer::open(self, chain);
             return;
         }
         let signatures = self.active_ids().and_then(|(_, id)| self.session.get(id)).map(|d| signed(&d.signatures)).unwrap_or_default();
@@ -123,7 +133,7 @@ impl StackDialog for SignaturePropsDialog {
     }
 
     fn show(&mut self, ui: &mut Ui, _: &DialogStack) -> Option<DialogResult<()>> {
-        let SignaturePropsDialog { chosen, signatures, .. } = self;
+        let SignaturePropsDialog { chosen, signatures, certificate, .. } = self;
         let close = FooterButton::new(tl!("Close").to_string(), DialogRole::Cancel);
         let out =
             FormDialog::new(tl!("Signature properties").to_string(), Bind::bound(chosen)).shaped(|d| d.buttons([close])).show(ui, |ui, _, c| {
@@ -154,6 +164,12 @@ impl StackDialog for SignaturePropsDialog {
                     Field::new(label.to_string()).value(value.clone()).show(ui, |ui, _| {
                         Text::new(value.clone()).show(ui);
                     });
+                }
+                if let Some(signer) = &s.certificate
+                    && Button::new(tl!("Show certificate…")).show(ui).clicked()
+                {
+                    *certificate = Some(crate::sign_ui::panel::certificate_chain(s, signer));
+                    ui.ctx().request_repaint();
                 }
                 true
             });
