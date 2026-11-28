@@ -523,6 +523,10 @@ impl<'a> Inspector<'a> {
                 }
             }
             "SetOCGState" => self.layer_state(a),
+            "Named" => match self.name(a, b"N").as_deref() {
+                Some(item @ ("NextPage" | "PrevPage" | "FirstPage" | "LastPage" | "Print")) => LinkTarget::Named(item.to_string()),
+                _ => LinkTarget::Other("Named".into()),
+            },
             "GoToR" => self.remote_go_to(a).unwrap_or_else(|| LinkTarget::Other("GoToR".into())),
             "Launch" => self.launch_pdf(a).unwrap_or_else(|| LinkTarget::Other("Launch".into())),
             other => LinkTarget::Other(spend(other.as_bytes(), text_budget, |b| String::from_utf8_lossy(b).into_owned()).unwrap_or_default()),

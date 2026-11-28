@@ -262,6 +262,9 @@ pub enum LinkTarget {
         destination: RemoteDestination,
         new_window: Option<bool>,
     },
+    /// A named action (ISO 32000-2 §12.6.4.12) that moves through the pages or prints: `NextPage`, `PrevPage`,
+    /// `FirstPage`, `LastPage` or `Print`. Any other name is [`Self::Other`] and is not run.
+    Named(String),
     Other(String),
 }
 

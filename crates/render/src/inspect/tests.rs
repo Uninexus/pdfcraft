@@ -2214,7 +2214,7 @@ fn bookmark_actions_are_read_as_links_read_them() {
                 Top,
                 Some(LinkTarget::RemoteGoTo { launch: true, file: "other.pdf".into(), destination: RemoteDestination::Default, new_window: None })
             ),
-            ("Menu item", None, Top, Some(LinkTarget::Other("Named".into()))),
+            ("Menu item", None, Top, Some(LinkTarget::Named("NextPage".into()))),
             ("Script", None, Top, Some(LinkTarget::Other("JavaScript".into()))),
             ("No type", Some(0), Fit, None),
         ]

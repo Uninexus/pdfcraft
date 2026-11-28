@@ -300,6 +300,7 @@ pub(crate) fn target_label(info: &DocInfo, target: &LinkTarget) -> String {
         LinkTarget::SetLayers { .. } => tl!("Set layer visibility").to_string(),
         LinkTarget::RemoteGoTo { file, .. } => file.clone(),
         LinkTarget::JavaScript(_) => crate::i18n::fmt(tl!("{s} action"), &[("s", "JavaScript")]),
+        LinkTarget::Named(item) => crate::prepare::menu_item_label(item).map_or_else(|| item.clone(), |label| tl!(label).to_string()),
         LinkTarget::Other(s) => crate::i18n::fmt(tl!("{s} action"), &[("s", s)]),
     }
 }

@@ -841,6 +841,19 @@ fn close_requested_tab(ctx: &egui::Context, app: &mut PdfCraftApp, index: usize)
     true
 }
 
+/// Runs the menu item a link or a bookmark names: only moving through the pages and Print, which asks first.
+fn run_named_link(app: &mut PdfCraftApp, index: usize, item: &str) {
+    let pages = app.session.get(app.views[index].id).map_or(0, |d| d.info.pages.len());
+    match item {
+        "NextPage" => app.views[index].step_page(true),
+        "PrevPage" => app.views[index].step_page(false),
+        "FirstPage" => app.views[index].go_to_page(0),
+        "LastPage" => app.views[index].go_to_page(pages.saturating_sub(1)),
+        "Print" => app.open_print(),
+        other => app.notify_fmt("This PDF uses the unsupported {s} action.", &[("s", other)]),
+    }
+}
+
 /// Follows the link, or the bookmark's action, that was clicked. A link to another file comes
 /// back, to be opened once the document is no longer borrowed.
 pub(crate) fn follow_link(
@@ -859,6 +872,7 @@ pub(crate) fn follow_link(
         LinkTarget::Uri(u) => app.request_document_url(&u, crate::LinkOrigin::Link),
         LinkTarget::SetLayers { changes, preserve_rb } => set_layers(app, index, &changes, preserve_rb),
         LinkTarget::RemoteGoTo { file, destination, .. } => return Some((view_id, file, destination)),
+        LinkTarget::Named(item) => run_named_link(app, index, &item),
         // Run by `PdfCraftApp::run_link_script`, which needs the link's page and index.
         LinkTarget::JavaScript(_) => {}
         LinkTarget::Other(s) => app.notify_fmt("This PDF uses the unsupported {s} action.", &[("s", &s)]),
