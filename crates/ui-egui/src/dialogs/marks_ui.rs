@@ -388,8 +388,8 @@ fn opening_fields(d: &MarksDraft, kind: MarkKind, m: &MarginUnits) -> DialogFiel
                 f.set("wm.behind", FieldValue::Text(if d.wm.behind { "behind" } else { "above" }.into()));
                 f.set("wm.from.0", FieldValue::Text(edge_id(0, d.wm.from[0]).into()));
                 f.set("wm.from.1", FieldValue::Text(edge_id(1, d.wm.from[1]).into()));
-                f.set("wm.offset.0", FieldValue::Number(d.wm.offset[0]));
-                f.set("wm.offset.1", FieldValue::Number(d.wm.offset[1]));
+                f.set("wm.offset.0", FieldValue::Number(d.wm.offset[0] * m.per));
+                f.set("wm.offset.1", FieldValue::Number(d.wm.offset[1] * m.per));
             } else {
                 f.set("file.scale", FieldValue::Number(d.bg.scale * 100.0));
                 f.set("marks.bg.colour", colour_value(d.bg.color));
@@ -475,7 +475,7 @@ fn read_fields(d: &mut MarksDraft, f: &DialogFields, kind: MarkKind, m: &MarginU
                 }
                 for k in 0..2 {
                     if let (Some(v), Some(slot)) = (f.number(&format!("wm.offset.{k}")), d.wm.offset.get_mut(k)) {
-                        *slot = v;
+                        *slot = if m.per > 0.0 { v / m.per } else { v };
                     }
                 }
             } else {
@@ -644,8 +644,12 @@ fn rows(kind: MarkKind, g: &Geometry) -> Vec<Param> {
             ] {
                 let options = EDGES.into_iter().zip(names).map(|(e, name)| (edge_id(k, e).to_string(), name.to_string()));
                 rows.push(Param::new(format!("wm.from.{k}"), from, choice(options, "centre")));
+                // In the Preferences unit, as the Header & Footer margins are; kept in points.
+                let m = &g.units;
                 rows.push(
-                    Param::number(format!("wm.offset.{k}"), distance, 0.0, 1.0, 1).unit(UnitKind::Points).bounds(Some(-MAX_OFFSET), Some(MAX_OFFSET)),
+                    Param::number(format!("wm.offset.{k}"), distance, 0.0, m.kind.step(), m.decimals)
+                        .unit(m.kind)
+                        .bounds(Some(-MAX_OFFSET * m.per), Some(MAX_OFFSET * m.per)),
                 );
             }
         }
@@ -1251,6 +1255,19 @@ mod tests {
         // And the dialog opens again on what was chosen.
         let again = opening_fields(&d, MarkKind::Watermark, &units);
         assert_eq!((again.text("wm.from.0"), again.text("wm.from.1")), (Some("right"), Some("top")));
+    }
+
+    #[test]
+    fn watermark_distances_are_typed_in_the_preference_unit_and_kept_in_points() {
+        let mut d = MarksDraft::default();
+        d.wm.offset = [72.0, -36.0];
+        let units = MarginUnits::of(crate::persist::units::Unit::Inches);
+        let mut fields = opening_fields(&d, MarkKind::Watermark, &units);
+        let shown = |f: &DialogFields, key: &str| f.number(key).unwrap();
+        assert!((shown(&fields, "wm.offset.0") - 1.0).abs() < 1e-9 && (shown(&fields, "wm.offset.1") + 0.5).abs() < 1e-9);
+        fields.set("wm.offset.0", FieldValue::Number(2.0));
+        read_fields(&mut d, &fields, MarkKind::Watermark, &units);
+        assert!((d.wm.offset[0] - 144.0).abs() < 1e-9 && (d.wm.offset[1] + 36.0).abs() < 1e-9, "{:?}", d.wm.offset);
     }
 
     #[test]
