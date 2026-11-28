@@ -4,7 +4,8 @@
 //! The grid is laid out in view space (points from the top-left of the page as displayed, after
 //! `/Rotate`) starting at the field itself, which stays where it is as the grid's first cell; the
 //! copies fill the rest, row by row. Everything is checked before anything is added, so either all
-//! of the copies are made or none.
+//! of the copies are made or none. Several fields on one page are copied as one block ([`edit_block`]): the first cell
+//! is the box around them, and each keeps its place in it.
 
 use std::collections::HashSet;
 
@@ -16,6 +17,8 @@ use crate::{Edit, EditError, FormField};
 
 /// The edit's name in the history ("Undo Copy field into a grid"), as [`Edit::label`] words it.
 pub const LABEL: &str = "Copy field into a grid";
+/// The same for several fields at once.
+pub const LABEL_FIELDS: &str = "Copy fields into a grid";
 /// The most rows a grid can have.
 pub const MAX_ROWS: usize = 100;
 /// The most columns a grid can have.
@@ -51,13 +54,53 @@ fn refuse(why: impl Into<String>) -> EditError {
 /// negative, copies that would run off the page, and names that are repeated, hold a period, or
 /// are a field's already.
 pub fn edit(source: &str, grid: &FieldGrid, pages: &[PageInfo], form: &[FormField]) -> Result<Edit, EditError> {
-    let field = form.iter().find(|f| f.name == source).ok_or_else(|| EditError::Form(FormError::NoSuchField(source.into())))?;
+    edit_block(&[source], grid, pages, form)
+}
+
+/// A field to copy: its name and where the page shows it (view space).
+struct Source<'a> {
+    name: &'a str,
+    view: [f64; 4],
+}
+
+/// `name`'s page and place, or why it can't be copied.
+fn source<'a>(name: &'a str, pages: &[PageInfo], form: &[FormField]) -> Result<(usize, Source<'a>), EditError> {
+    let field = form.iter().find(|f| f.name == name).ok_or_else(|| EditError::Form(FormError::NoSuchField(name.into())))?;
     if field.kind == FieldKind::Radio {
         return Err(refuse("a radio button belongs to its group: add another button to the group instead of copying it"));
     }
-    let widget = field.widgets.first().ok_or_else(|| refuse(format!("{source} has no widget")))?;
-    let page = widget.page.ok_or_else(|| refuse(format!("{source} is not on a page")))?;
+    let widget = field.widgets.first().ok_or_else(|| refuse(format!("{name} has no widget")))?;
+    let page = widget.page.ok_or_else(|| refuse(format!("{name} is not on a page")))?;
     let info = pages.get(page).ok_or_else(|| refuse(format!("page {} does not exist", page + 1)))?;
+    // The field as the page shows it.
+    let [ux0, uy0, ux1, uy1] = widget.rect;
+    let (a, b) = (info.user_to_view(ux0 as f32, uy0 as f32), info.user_to_view(ux1 as f32, uy1 as f32));
+    let view = [a[0].min(b[0]), a[1].min(b[1]), a[0].max(b[0]), a[1].max(b[1])].map(f64::from);
+    Ok((page, Source { name, view }))
+}
+
+/// [`edit`] for one field or several: one `CopyField` for one, a batch (one undo step) for several. Several
+/// must be different fields on one page, and take no name pattern, which would give them all the same names.
+pub fn edit_block(names: &[&str], grid: &FieldGrid, pages: &[PageInfo], form: &[FormField]) -> Result<Edit, EditError> {
+    let mut sources = Vec::with_capacity(names.len());
+    let mut on = None;
+    let mut asked: HashSet<&str> = HashSet::new();
+    for &name in names {
+        if !asked.insert(name) {
+            return Err(refuse(format!("{name} is listed twice")));
+        }
+        let (page, one) = source(name, pages, form)?;
+        if on.is_some_and(|p| p != page) {
+            return Err(refuse("the fields are on different pages: copy those of one page at a time"));
+        }
+        on = Some(page);
+        sources.push(one);
+    }
+    let page = on.ok_or_else(|| refuse("no field to copy"))?;
+    let info = pages.get(page).ok_or_else(|| refuse(format!("page {} does not exist", page + 1)))?;
+    if sources.len() > 1 && grid.pattern.is_some() {
+        return Err(refuse("a name pattern names one field's copies: leave it empty for several fields"));
+    }
     if !(1..=MAX_ROWS).contains(&grid.rows) || !(1..=MAX_COLUMNS).contains(&grid.columns) {
         return Err(refuse(format!("a grid has 1 to {MAX_ROWS} rows and 1 to {MAX_COLUMNS} columns")));
     }
@@ -66,17 +109,17 @@ pub fn edit(source: &str, grid: &FieldGrid, pages: &[PageInfo], form: &[FormFiel
     if copies == 0 {
         return Err(refuse("a grid of one field has no copies: give more than one row or column"));
     }
-    if copies > MAX_COPIES {
+    if copies.saturating_mul(sources.len()) > MAX_COPIES {
         return Err(refuse(format!("a grid makes at most {MAX_COPIES} copies")));
     }
     if ![grid.row_gap, grid.column_gap].iter().all(|g| g.is_finite() && *g >= 0.0) {
         return Err(refuse("the spacing must be a number, 0 or more"));
     }
-    // The field as the page shows it.
-    let [ux0, uy0, ux1, uy1] = widget.rect;
-    let (a, b) = (info.user_to_view(ux0 as f32, uy0 as f32), info.user_to_view(ux1 as f32, uy1 as f32));
-    let (x0, y0) = (f64::from(a[0].min(b[0])), f64::from(a[1].min(b[1])));
-    let (width, height) = (f64::from(a[0].max(b[0])) - x0, f64::from(a[1].max(b[1])) - y0);
+    // The block: the box around the fields.
+    let block = sources.iter().fold([f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY], |b, s| {
+        [b[0].min(s.view[0]), b[1].min(s.view[1]), b[2].max(s.view[2]), b[3].max(s.view[3])]
+    });
+    let (width, height) = (block[2] - block[0], block[3] - block[1]);
     let (page_w, page_h) = (f64::from(info.width), f64::from(info.height));
     // "a.b" also takes "a": a new field of that name would sit beside the parent of "a.b".
     let mut taken: HashSet<&str> = HashSet::new();
@@ -85,49 +128,66 @@ pub fn edit(source: &str, grid: &FieldGrid, pages: &[PageInfo], form: &[FormFiel
         taken.extend(f.name.match_indices('.').filter_map(|(at, _)| f.name.get(..at)));
     }
     let mut seen: HashSet<String> = HashSet::with_capacity(copies);
-    let mut places = Vec::with_capacity(copies);
-    for row in 0..grid.rows {
-        for column in 0..grid.columns {
-            if row == 0 && column == 0 {
-                continue;
+    let mut made = Vec::with_capacity(sources.len());
+    for one in &sources {
+        let source = one.name;
+        let mut places = Vec::with_capacity(copies);
+        for row in 0..grid.rows {
+            for column in 0..grid.columns {
+                if row == 0 && column == 0 {
+                    continue;
+                }
+                let seq = row * grid.columns + column;
+                // As the form stores it: a name's own spaces at either end are not part of it.
+                let name = match &grid.pattern {
+                    None => format!("{source}_{seq}"),
+                    Some(pattern) => cell_name(pattern, row + 1, column + 1, seq),
+                }
+                .trim()
+                .to_owned();
+                if name.is_empty() {
+                    return Err(refuse("a copy would have no name"));
+                }
+                // A field that sits under a parent (a.b) copies to a sibling (a.b_1), and the pattern
+                // is not allowed to make one.
+                if grid.pattern.is_some() && name.contains('.') {
+                    return Err(refuse(format!("field names can't contain a period: {name:?}")));
+                }
+                if !seen.insert(name.clone()) {
+                    return Err(refuse(format!("two copies would both be named {name:?}")));
+                }
+                if taken.contains(name.as_str()) {
+                    return Err(refuse(format!("a field named {name:?} already exists")));
+                }
+                // Counts of at most 100 and 50, so exact as floats.
+                let (dx, dy) = (column as f64 * (width + grid.column_gap), row as f64 * (height + grid.row_gap));
+                let view = [one.view[0] + dx, one.view[1] + dy, one.view[2] + dx, one.view[3] + dy];
+                if view[0] < -0.01 || view[1] < -0.01 || view[2] > page_w + 0.01 || view[3] > page_h + 0.01 {
+                    return Err(refuse("the copies would run off the page: use fewer rows or columns, or less spacing"));
+                }
+                let rect = info.view_rect_to_user(view.map(|v| v as f32)).map(f64::from);
+                if !rect.iter().all(|v| v.is_finite()) {
+                    return Err(refuse("the copies are outside the numbers a page can hold"));
+                }
+                places.push(FieldCopy { page, rect, name });
             }
-            let seq = row * grid.columns + column;
-            // As the form stores it: a name's own spaces at either end are not part of it.
-            let name = match &grid.pattern {
-                None => format!("{source}_{seq}"),
-                Some(pattern) => cell_name(pattern, row + 1, column + 1, seq),
-            }
-            .trim()
-            .to_owned();
-            if name.is_empty() {
-                return Err(refuse("a copy would have no name"));
-            }
-            // A field that sits under a parent (a.b) copies to a sibling (a.b_1), and the pattern
-            // is not allowed to make one.
-            if grid.pattern.is_some() && name.contains('.') {
-                return Err(refuse(format!("field names can't contain a period: {name:?}")));
-            }
-            if !seen.insert(name.clone()) {
-                return Err(refuse(format!("two copies would both be named {name:?}")));
-            }
-            if taken.contains(name.as_str()) {
-                return Err(refuse(format!("a field named {name:?} already exists")));
-            }
-            // Counts of at most 100 and 50, so exact as floats.
-            let left = x0 + column as f64 * (width + grid.column_gap);
-            let top = y0 + row as f64 * (height + grid.row_gap);
-            let view = [left, top, left + width, top + height];
-            if view[0] < -0.01 || view[1] < -0.01 || view[2] > page_w + 0.01 || view[3] > page_h + 0.01 {
-                return Err(refuse("the copies would run off the page: use fewer rows or columns, or less spacing"));
-            }
-            let rect = info.view_rect_to_user(view.map(|v| v as f32)).map(f64::from);
-            if !rect.iter().all(|v| v.is_finite()) {
-                return Err(refuse("the copies are outside the numbers a page can hold"));
-            }
-            places.push(FieldCopy { page, rect, name });
+        }
+        made.push((source.to_owned(), places));
+    }
+    if made.len() == 1
+        && let Some((name, copies)) = made.pop()
+    {
+        return Ok(Edit::CopyField { name, copies });
+    }
+    // Cell by cell, so the new fields' tab order runs along each copy of the block, as it does along the original.
+    let mut queues: Vec<_> = made.into_iter().map(|(name, copies)| (name, copies.into_iter())).collect();
+    let mut edits = Vec::new();
+    for _ in 0..copies {
+        for (name, rest) in &mut queues {
+            edits.extend(rest.next().map(|copy| Edit::CopyField { name: name.clone(), copies: vec![copy] }));
         }
     }
-    Ok(Edit::CopyField { name: source.to_owned(), copies: places })
+    Ok(Edit::Batch { label: LABEL_FIELDS.into(), edits })
 }
 
 #[cfg(test)]
@@ -296,5 +356,37 @@ mod tests {
     fn plan_for(s: &Session, id: crate::DocId, source: &str, grid: &FieldGrid) -> Result<Edit, EditError> {
         let doc = s.get(id).unwrap();
         edit(source, grid, &doc.info.pages, &doc.form)
+    }
+
+    #[test]
+    fn several_fields_are_copied_as_one_block_and_undone_as_one_step() {
+        let (mut s, id) = open_with_field();
+        let info = s.get(id).unwrap().info.pages[0].clone();
+        // A second field beside the first: the block is 50..170 across and 40..60 down.
+        let rect = info.view_rect_to_user([130.0, 40.0, 170.0, 60.0]).map(f64::from);
+        s.apply(id, Edit::AddField { page: 0, rect, kind: NewField::Text { multiline: false }, name: Some("qty".into()) }).unwrap();
+        let doc = s.get(id).unwrap();
+        let down = FieldGrid { rows: 3, columns: 1, row_gap: 10.0, column_gap: 0.0, pattern: None };
+        let mut named = down.clone();
+        named.pattern = Some("n{seq}".into());
+        assert!(edit_block(&["item", "qty"], &named, &doc.info.pages, &doc.form).unwrap_err().to_string().contains("pattern"));
+        assert!(edit_block(&["item", "item"], &down, &doc.info.pages, &doc.form).unwrap_err().to_string().contains("twice"));
+        let copies = edit_block(&["item", "qty"], &down, &doc.info.pages, &doc.form).unwrap();
+        s.apply(id, copies).unwrap();
+        let doc = s.get(id).unwrap();
+        let order: Vec<_> = doc.form.iter().map(|f| f.name.as_str()).collect();
+        assert_eq!(order, ["item", "qty", "item_1", "qty_1", "item_2", "qty_2"], "row by row");
+        let shown = |name: &str| {
+            let r = doc.form.iter().find(|f| f.name == name).unwrap().widgets[0].rect;
+            let info = &doc.info.pages[0];
+            let (a, b) = (info.user_to_view(r[0] as f32, r[1] as f32), info.user_to_view(r[2] as f32, r[3] as f32));
+            [a[0].min(b[0]), a[1].min(b[1])]
+        };
+        for (name, want) in [("item_1", [50.0, 70.0]), ("qty_1", [130.0, 70.0]), ("item_2", [50.0, 100.0]), ("qty_2", [130.0, 100.0])] {
+            let got = shown(name);
+            assert!((got[0] - want[0]).abs() < 0.01 && (got[1] - want[1]).abs() < 0.01, "{name}: {got:?}");
+        }
+        assert_eq!(s.undo(id).unwrap().to_string(), LABEL_FIELDS);
+        assert_eq!(s.get(id).unwrap().form.len(), 2, "one undo takes every copy back");
     }
 }

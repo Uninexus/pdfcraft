@@ -256,6 +256,13 @@ impl PdfCraftApp {
         self.session.get(id)?.form.iter().any(|f| f.name == *name).then(|| name.clone())
     }
 
+    /// Every field selected in Prepare a form that the active document still has.
+    fn selected_fields(&self) -> Vec<String> {
+        let Some((i, id)) = self.active_ids() else { return Vec::new() };
+        let (Some(view), Some(doc)) = (self.views.get(i), self.session.get(id)) else { return Vec::new() };
+        view.session.prepare.names().into_iter().filter(|name| doc.form.iter().any(|f| f.name == *name)).collect()
+    }
+
     /// Switches between light and dark from the mode the interface shows now.
     fn toggle_theme(&mut self, ctx: &egui::Context) {
         let next = if self.root_env(ctx).resolved(ctx).mode == craft::theme::Mode::Light { ModeChoice::Dark } else { ModeChoice::Light };
@@ -1087,9 +1094,8 @@ impl PdfCraftApp {
                 }
             }
             "form.field.copies" => {
-                if let Some(name) = self.selected_field() {
-                    crate::dialogs::field_copies_ui::open(self, ctx, name);
-                }
+                let names = self.selected_fields();
+                crate::dialogs::field_copies_ui::open(self, ctx, names);
             }
             "form.field.signer.set" => self.set_field_signer(ctx, false),
             "form.field.signer.clear" => self.set_field_signer(ctx, true),

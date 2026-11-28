@@ -201,6 +201,7 @@ pub const BATCH_LABELS: &[&str] = &[
     "Run JavaScript",
     "Recognize text",
     field_table::LABEL,
+    crate::field_copies::LABEL_FIELDS,
     "Style",
     crate::find_replace::REPLACE_ALL,
 ];
