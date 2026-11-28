@@ -123,6 +123,11 @@ pub enum Edit {
         path: Vec<usize>,
         page: usize,
     },
+    /// Make a bookmark open a web or email address, checked as a link's is ([`crate::links::document_url`]).
+    SetBookmarkUrl {
+        path: Vec<usize>,
+        url: String,
+    },
     /// Colour a bookmark's title (`/C`); `None` or black is the default black.
     SetBookmarkColor {
         path: Vec<usize>,

@@ -244,6 +244,10 @@ impl Automation {
                 let (path, page) = (a.path("path")?, self.page(&a)?);
                 self.apply(&a, Edit::SetBookmarkPage { path, page })?
             }
+            "bookmark_set_url" => {
+                let (path, url) = (a.path("path")?, a.str("url")?.to_string());
+                self.apply(&a, Edit::SetBookmarkUrl { path, url })?
+            }
             "bookmark_set_style" => {
                 let path = a.path("path")?;
                 // Left out keeps the colour; [0, 0, 0] is the default black.

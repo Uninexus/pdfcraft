@@ -722,6 +722,25 @@ pub fn set_bookmark_page(doc: &mut Document, path: &[usize], page: usize) -> Res
     put(doc, r, b"A", None) // `/Dest` and `/A` must not both be present (§12.3.3)
 }
 
+/// Make a bookmark open the web address `url` (a URI action, ISO 32000-2 §12.6.4.8), replacing its destination or
+/// action. Bytes outside visible ASCII are percent-encoded. The caller checks that the address is one to offer.
+pub fn set_bookmark_url(doc: &mut Document, path: &[usize], url: &str) -> Result<()> {
+    let mut bytes = Vec::with_capacity(url.len());
+    for &b in url.as_bytes() {
+        if (0x21..=0x7e).contains(&b) {
+            bytes.push(b);
+        } else {
+            bytes.extend_from_slice(format!("%{b:02X}").as_bytes());
+        }
+    }
+    let (r, _) = resolve_path(doc, path)?;
+    let mut action = Dict::new();
+    action.set(b"S".to_vec(), Object::name("URI"));
+    action.set(b"URI".to_vec(), PdfString::literal(bytes));
+    put(doc, r, b"A", Some(Object::Dict(action)))?;
+    put(doc, r, b"Dest", None) // `/Dest` and `/A` must not both be present (§12.3.3)
+}
+
 /// Remove a bookmark and everything under it. The removed items are unlinked (a full save drops
 /// them; an incremental save leaves the old objects unreferenced).
 pub fn delete_bookmark(doc: &mut Document, path: &[usize]) -> Result<()> {

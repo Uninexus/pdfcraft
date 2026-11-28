@@ -28,6 +28,7 @@ mod attach_picker_target;
 mod attachment_row;
 mod bates_multi;
 mod bookmark_position;
+mod bookmark_web_address;
 mod bookmarks;
 mod bookmarks_io;
 mod bulk_fields;
