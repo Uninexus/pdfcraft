@@ -1302,6 +1302,10 @@ impl PdfCraftApp {
             }
             A::Rename(path, title) => Edit::RenameBookmark { path, title },
             A::SetToCurrentPage(path) => Edit::SetBookmarkPage { path, page: current },
+            A::SetWebAddress(path) => {
+                crate::dialogs::bookmark_url_ui::open(self, ctx, path);
+                return;
+            }
             A::SetStyle(path, bold, italic) => Edit::SetBookmarkStyle { path, bold, italic },
             A::SetColor(path, color) => Edit::SetBookmarkColor { path, color: Some(color) },
             A::Delete(path) => Edit::DeleteBookmark { path },

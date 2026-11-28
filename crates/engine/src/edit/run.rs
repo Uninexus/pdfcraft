@@ -27,6 +27,7 @@ pub(crate) fn check_permission(edit: &Edit, p: &pdfcraft_cos::Permissions) -> Re
         | Edit::DeleteBookmark { .. }
         | Edit::MoveBookmark { .. }
         | Edit::SetBookmarkPage { .. }
+        | Edit::SetBookmarkUrl { .. }
         | Edit::SetBookmarkColor { .. }
         | Edit::SetBookmarkStyle { .. }
         | Edit::ImportBookmarks { .. }
@@ -658,6 +659,10 @@ pub(crate) fn run_edit(doc: &mut pdfcraft_cos::Document, edit: &Edit, cx: &mut E
             pdfcraft_organize::move_bookmark(doc, from, to_parent, *index)?;
         }
         Edit::SetBookmarkPage { path, page } => pdfcraft_organize::set_bookmark_page(doc, path, *page)?,
+        Edit::SetBookmarkUrl { path, url } => {
+            let url = crate::links::document_url(url).map_err(|why| EditError::Invalid(format!("that address can't be used: {why}")))?;
+            pdfcraft_organize::set_bookmark_url(doc, path, &url)?;
+        }
         Edit::SetBookmarkColor { path, color } => pdfcraft_organize::set_bookmark_color(doc, path, *color)?,
         Edit::SetBookmarkStyle { path, bold, italic } => pdfcraft_organize::set_bookmark_style(doc, path, *bold, *italic)?,
         Edit::ImportBookmarks { parent, index, bookmarks, replace } => {

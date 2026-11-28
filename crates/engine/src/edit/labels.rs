@@ -40,6 +40,7 @@ pub const EDIT_LABELS: &[&str] = &[
     "Delete bookmark",
     "Move bookmark",
     "Set bookmark destination",
+    "Set bookmark web address",
     "Colour",
     "Style",
     "Import bookmarks",
@@ -238,6 +239,7 @@ impl Edit {
             Edit::DeleteBookmark { .. } => Label::of("Delete bookmark"),
             Edit::MoveBookmark { .. } => Label::of("Move bookmark"),
             Edit::SetBookmarkPage { .. } => Label::of("Set bookmark destination"),
+            Edit::SetBookmarkUrl { .. } => Label::of("Set bookmark web address"),
             // The bookmark Style and Colour menus' own names, already said in every language.
             Edit::SetBookmarkColor { .. } => Label::of("Colour"),
             Edit::SetBookmarkStyle { .. } => Label::of("Style"),

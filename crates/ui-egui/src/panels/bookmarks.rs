@@ -23,6 +23,8 @@ pub enum BmAction {
     StartRename(Vec<usize>),
     Rename(Vec<usize>, String),
     SetToCurrentPage(Vec<usize>),
+    /// Make the bookmark open a web address.
+    SetWebAddress(Vec<usize>),
     /// Make the title bold or italic or not (`None` keeps that one).
     SetStyle(Vec<usize>, Option<bool>, Option<bool>),
     /// Colour the title; black is the default.
@@ -351,6 +353,9 @@ pub(super) fn body(app: &mut PdfCraftApp, ui: &mut egui::Ui) -> PanelResult {
             let set_page = crate::i18n::fmt(tl!("Set to current page ({n})"), &[("n", &(current + 1).to_string())]);
             if MenuItem::new(set_page).show(ui).ran {
                 picked.set(Some(BmAction::SetToCurrentPage(path.clone())));
+            }
+            if MenuItem::new(tl!("Set web address…")).show(ui).ran {
+                picked.set(Some(BmAction::SetWebAddress(path.clone())));
             }
             if let Some(item) = item_at(outline, &path) {
                 // The title's style and colour (ISO 32000-2 §12.3.3, Tables 151 and 152).

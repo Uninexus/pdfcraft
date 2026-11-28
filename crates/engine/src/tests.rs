@@ -16462,3 +16462,26 @@ fn no_group_with_a_working_tool_is_marked_planned() {
         .collect();
     assert!(stale.is_empty(), "listed as planned, but with tools that work: {stale:?}");
 }
+
+#[test]
+fn a_bookmark_can_be_given_a_web_address_and_back() {
+    let (mut s, id) = session_with(2);
+    s.apply(id, Edit::AddBookmark { parent: vec![], index: 0, title: "Manual".into(), page: 1, left: None, top: None }).unwrap();
+    let first = |s: &Session| {
+        let o = &s.get(id).unwrap().info.outline[0];
+        (o.page, o.action.clone())
+    };
+    // An address a document may not ask to open is refused and nothing changes.
+    for bad in ["file:///etc/passwd", "javascript:alert(1)", ""] {
+        assert!(s.apply(id, Edit::SetBookmarkUrl { path: vec![0], url: bad.into() }).is_err(), "{bad}");
+    }
+    assert_eq!(first(&s), (Some(1), None));
+    s.apply(id, Edit::SetBookmarkUrl { path: vec![0], url: "https://example.org/manual".into() }).unwrap();
+    assert_eq!(first(&s), (None, Some(pdfcraft_render::LinkTarget::Uri("https://example.org/manual".into()))));
+    assert_eq!(s.undo(id).unwrap().to_string(), "Set bookmark web address");
+    assert_eq!(first(&s), (Some(1), None));
+    // Pointing it at a page again drops the address.
+    s.apply(id, Edit::SetBookmarkUrl { path: vec![0], url: "mailto:help@example.org".into() }).unwrap();
+    s.apply(id, Edit::SetBookmarkPage { path: vec![0], page: 0 }).unwrap();
+    assert_eq!(first(&s), (Some(0), None));
+}

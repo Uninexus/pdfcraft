@@ -643,6 +643,8 @@ fn all_tools() -> Vec<ToolDef> {
         )),
         t("bookmark_set_page", "Set a bookmark's page", "Point a bookmark at another page. Undoable.")
             .with(schema(json!({ "doc": doc(), "path": path("The bookmark"), "page": { "type": "integer", "minimum": 1 } }), &["doc", "path", "page"])),
+        t("bookmark_set_url", "Set a bookmark's web address", "Make a bookmark open a web or email address (http, https or mailto) instead of what it does now, as the Bookmarks panel's Set web address does. An address a document may not ask to open is refused, with the reason. Undoable.")
+            .with(schema(json!({ "doc": doc(), "path": path("The bookmark"), "url": { "type": "string", "minLength": 1 } }), &["doc", "path", "url"])),
         t(
             "bookmark_set_style",
             "Set a bookmark's style and colour",

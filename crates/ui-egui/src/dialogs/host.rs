@@ -99,6 +99,9 @@ fn results(app: &mut PdfCraftApp, ctx: &egui::Context) {
     if let Some(fields) = param_ok(app, "redact.pages") {
         crate::redact_ui::dialogs::finish_pages(ctx, app, &fields);
     }
+    if let Some(fields) = param_ok(app, super::bookmark_url_ui::KEY) {
+        super::bookmark_url_ui::finish(ctx, app, &fields);
+    }
     if let Some(fields) = param_ok(app, super::field_copies_ui::KEY) {
         super::field_copies_ui::finish(ctx, app, &fields);
     }
