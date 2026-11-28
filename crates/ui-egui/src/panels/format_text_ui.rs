@@ -2,8 +2,8 @@
 //! subscript; line and paragraph spacing; horizontal scale and character spacing. One framework
 //! `FormatText` panel serves a paragraph being edited (with the fonts already on its page and the
 //! spacing controls) and added text (the standard families, size, colour, style, alignment and
-//! character spacing). What PdfCraft can't apply yet (lists, or line and paragraph spacing and
-//! scale for added text) is shown disabled and says so ([`unsupported`]).
+//! character spacing). The list buttons work on text being typed in. What PdfCraft can't apply (line
+//! and paragraph spacing and scale for added text, say) is shown disabled and says so ([`unsupported`]).
 //!
 //! This module maps the panel's values from the thing being formatted ([`values`]) and its edits back
 //! onto it ([`apply`]); the layout, the number fields and their parsing are the framework's.
@@ -16,13 +16,14 @@ use craft::font_manager::picker::{HostFontGroup, HostFontRow};
 #[cfg(not(target_arch = "wasm32"))]
 use craft::text::ui::character::FontPickerSource;
 use craft::text::ui::character::{
-    BaselinePosition, CharacterChange, CharacterValues, FormatControl, FormatText, FormatTextChange, FormatTextOutput, LineSpacing, ParagraphChange,
-    ParagraphValues, TextAlign as PanelAlign,
+    BaselinePosition, CharacterChange, CharacterValues, FormatControl, FormatText, FormatTextChange, FormatTextOutput, LineSpacing,
+    ListKind as ListButton, ParagraphChange, ParagraphValues, TextAlign as PanelAlign,
 };
 use craft::theme::Rgba;
 use craft::ui::contract::ShowContainer as _;
 use craft::ui::runtime::env::Label;
 use craft::ui::sections::Section;
+use pdfcraft_engine::lists::ListKind;
 use pdfcraft_engine::text_script::Script;
 use pdfcraft_engine::{AddedText, FontFamily, TextAlign};
 
@@ -344,13 +345,17 @@ pub(crate) fn values(target: &Target, fmt: Option<&SelectionFormatting>, sources
     Values { character, paragraph, line_spacing, font }
 }
 
-/// The controls `target` can't apply, each with why: the two list buttons always; underline, line
+/// The controls `target` can't apply, each with why: the two list buttons without text being typed in; underline, line
 /// and paragraph spacing and scale for added text; superscript and subscript for text
 /// that is not open for typing; alignment while a paragraph selection is not tidy.
 pub(crate) fn unsupported(target: &Target) -> Vec<(FormatControl, Label)> {
     let planned = || Label::from(tl!("Planned").to_string());
-    let mut out = vec![(FormatControl::BulletedList, planned()), (FormatControl::NumberedList, planned())];
+    let mut out = Vec::new();
     let paragraphs = target.paragraphs();
+    if paragraphs.is_none() {
+        let typing = || Label::from(tl!("Available while typing in the text").to_string());
+        out.extend([(FormatControl::BulletedList, typing()), (FormatControl::NumberedList, typing())]);
+    }
     if target.extras().is_none() {
         out.extend([
             (FormatControl::Underline, planned()),
@@ -499,6 +504,8 @@ fn show(
 enum Special {
     /// Superscript or Subscript, for the selected paragraphs' text.
     Script(Script),
+    /// Bulleted or Numbered list, for the selected lines.
+    List(ListKind),
     /// A size to commit, within [`SIZE_RANGE`].
     Size(f64),
     /// A font picked in the font row.
@@ -517,6 +524,8 @@ fn step(look: &mut AddedText, extras: Option<&mut Extras>, paragraphs: Option<&P
         v.is_finite().then(|| v.clamp(*range.start(), *range.end()))
     };
     match change {
+        FormatTextChange::List(ListButton::Bulleted) => Some(Special::List(ListKind::Bullets)),
+        FormatTextChange::List(ListButton::Numbered) => Some(Special::List(ListKind::Numbers)),
         FormatTextChange::Character(change) => match change {
             CharacterChange::Size(v) => {
                 let v = f64::from(*v);
@@ -646,6 +655,13 @@ pub(crate) fn apply(ctx: &egui::Context, app: &mut PdfCraftApp, view: usize, tar
                             toggled = Some(next);
                         }
                     }
+                    Some(Special::List(kind)) => {
+                        let mut next = toggled.take().unwrap_or_else(|| (*draft).clone());
+                        crate::edit_text_ui::toggle_list(ctx, &mut next.text, &mut next.selection, kind);
+                        // The lines keep their places, so each keeps its alignment.
+                        next.focus = true;
+                        toggled = Some(next);
+                    }
                     _ => {}
                 }
             }
@@ -713,6 +729,11 @@ fn apply_paragraph(ctx: &egui::Context, app: &mut PdfCraftApp, ed: &mut LineEdit
                 changed = true;
             }
             Some(Special::Script(script)) => changed |= crate::edit_text_ui::toggle_script(&mut ed.text, &mut ed.selection, script),
+            Some(Special::List(kind)) => {
+                crate::edit_text_ui::toggle_list(ctx, &mut ed.text, &mut ed.selection, kind);
+                ed.focus = true;
+                changed = true;
+            }
             Some(Special::Font(pick)) => match pick {
                 FontPick::KeepSource => {
                     ed.keep_source_font();

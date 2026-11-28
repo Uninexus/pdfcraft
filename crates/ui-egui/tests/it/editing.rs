@@ -11775,3 +11775,37 @@ fn a_modified_click_away_from_a_cropped_picture_applies_its_crop() {
         assert!(keep.iter().zip(visible).all(|(a, b)| (a - b).abs() < 0.5), "{mods:?}: the crop is applied: {visible:?}");
     }
 }
+
+/// The list buttons on a paragraph of existing text apply at once, and the items typed after it
+/// are numbered on.
+#[test]
+fn an_edited_paragraph_becomes_a_numbered_list() {
+    let mut h = harness(1, |_| {});
+    assert!(h.execute("edit.edit_text"));
+    h.run_steps(2);
+    let r = h.state().views[0].page_screen_rect(0).expect("on screen");
+    let at = egui::pos2(r.left() + 40.0 / 200.0 * r.width(), r.top() + (300.0 - 158.0) / 300.0 * r.height());
+    h.hover_at(at);
+    h.run_steps(1);
+    h.drag_at(at);
+    h.run_steps(1);
+    h.drop_at(at);
+    h.run_steps(3);
+    h.get_by_label("Numbered list").click();
+    h.run_steps(4);
+    let text = h.state().views[0].session.line_editor.as_ref().expect("still editing").text.clone();
+    assert!(text.starts_with("1. "), "{text}");
+    h.key_press(egui::Key::End);
+    h.run_steps(2);
+    h.key_press(egui::Key::Enter);
+    h.run_steps(2);
+    h.event(egui::Event::Text("Second".into()));
+    h.run_steps(2);
+    h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Enter);
+    h.run_steps(5);
+    let s = h.state();
+    let doc = s.session.get(s.views[0].id).unwrap();
+    let blocks: Vec<String> = doc.text_blocks(0).iter().map(|b| b.editor_text.clone()).collect();
+    let all = blocks.join("\n");
+    assert!(all.contains(&text) && all.contains("2. Second"), "{blocks:?}");
+}

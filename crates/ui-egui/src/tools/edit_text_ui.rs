@@ -18,11 +18,13 @@ use craft::draw::ui::transform::TransformBox;
 use craft::pages::ui::{PageBody, PlacedPage};
 use craft::text::ui::editor::{CaretLine, EditKind, EditorEnd, HostLine, HostRun, TextEditor, TextEditorHost, TextSelection};
 use craft::ui::canvas_controls::SelectionOutline;
-use craft::ui::contract::{Bind, Props as _, Show as _};
+use craft::ui::contract::{Bind, Politeness, Props as _, Show as _};
 use craft::ui::fonts::FontRef;
+use craft::ui::runtime::access::announce;
 use craft::ui::runtime::focus::FocusRequest;
 use egui::epaint::text::CharIndex;
 use egui::{Pos2, Rect, Vec2, pos2, vec2};
+use pdfcraft_engine::lists::ListKind;
 use pdfcraft_engine::{Edit, ObjectKind, ObjectTarget};
 use pdfcraft_render::DocInfo;
 
@@ -90,6 +92,40 @@ pub(crate) fn toggle_script(text: &mut String, selection: &mut Option<TextSelect
     }
     *text = toggled;
     true
+}
+
+/// Format text ▸ Bulleted or Numbered list on `text`: the lines a `selection` touches, or all of
+/// them, take the marker or lose it ([`pdfcraft_engine::lists`]). The change is announced, since the
+/// buttons show no pressed state.
+pub(crate) fn toggle_list(ctx: &egui::Context, text: &mut String, selection: &mut Option<TextSelection>, kind: ListKind) {
+    let bytes = selection.as_ref().map(|s| selected_bytes(text, s));
+    let lines = bytes.filter(|r| !r.is_empty()).map(|r| pdfcraft_engine::paragraph_align::selected(text, r));
+    let (listed, on) = pdfcraft_engine::lists::toggle(text, lines, kind);
+    if let Some(old) = *selection {
+        let at = |c| char_of(&listed, pdfcraft_engine::lists::moved(text, &listed, byte_of(text, c)));
+        *selection = Some(TextSelection::new(at(old.anchor), at(old.caret)));
+    }
+    *text = listed;
+    let words = match (kind, on) {
+        (ListKind::Bullets, true) => tl!("Bulleted list on"),
+        (ListKind::Bullets, false) => tl!("Bulleted list off"),
+        (ListKind::Numbers, true) => tl!("Numbered list on"),
+        (ListKind::Numbers, false) => tl!("Numbered list off"),
+    };
+    announce(ctx, words.to_string(), Politeness::Polite);
+}
+
+/// Enter typed at the caret `range` of `text` when that line is a list item: the next item, or the
+/// end of the list. The edit to make instead of the line break, and where the caret goes, in chars.
+pub(crate) fn list_enter(text: &str, range: &Range<usize>, typed: &str, kind: EditKind) -> Option<(pdfcraft_engine::lists::Enter, usize)> {
+    if typed != "\n" || kind != EditKind::Typed || !range.is_empty() {
+        return None;
+    }
+    let done = pdfcraft_engine::lists::enter(text, byte_of(text, range.start))?;
+    let mut after = text.to_string();
+    after.replace_range(done.range.clone(), &done.text);
+    let caret = char_of(&after, done.caret);
+    Some((done, caret))
 }
 
 /// What a paragraph box's text, selection and rows' alignments were at one point of its typing.
@@ -1080,6 +1116,8 @@ struct ParagraphHost<'a> {
     /// Where the laid-out text's top left is on screen.
     origin: Pos2,
     galley: Option<Arc<egui::Galley>>,
+    /// Where the last edit put the caret, when it is not after what the editor typed.
+    moved: Option<usize>,
 }
 
 /// The chars each row of `galley` holds, without its line break.
@@ -1164,9 +1202,14 @@ impl TextEditorHost for ParagraphHost<'_> {
 
     fn replace(&mut self, range: Range<usize>, text: &str, kind: EditKind) -> Option<usize> {
         let before = self.ed.text.clone();
-        let bytes = byte_of(&before, range.start)..byte_of(&before, range.end);
-        self.ed.text.replace_range(bytes, text);
-        let caret = range.start + text.chars().count();
+        let list = list_enter(&before, &range, text, kind);
+        let (bytes, put, caret) = match &list {
+            Some((done, caret)) => (done.range.clone(), done.text.as_str(), *caret),
+            None => (byte_of(&before, range.start)..byte_of(&before, range.end), text, range.start + text.chars().count()),
+        };
+        self.ed.text.replace_range(bytes, put);
+        // Ending a list takes characters before the caret away, which the count returned can't say.
+        self.moved = (caret < range.start).then_some(caret);
         // Rows aligned on their own keep their alignment; the caret, at the edit's end, says which of
         // two same rows changed.
         let caret_byte = byte_of(&self.ed.text, caret);
@@ -1177,7 +1220,7 @@ impl TextEditorHost for ParagraphHost<'_> {
         let now = self.ed.typed();
         self.ed.history.record(kind, now);
         self.galley = None;
-        Some(text.chars().count())
+        Some(caret.saturating_sub(range.start))
     }
 
     fn hit(&mut self, at: Point) -> (usize, usize) {
@@ -1302,13 +1345,17 @@ fn editor_session(
     // paragraph's reach outside the editor, where the editor sees a click away: it doesn't apply it.
     let fresh = std::mem::replace(&mut ed.focus, false);
     let (output, galley) = {
-        let mut host = ParagraphHost { ctx: &ctx, ed: &mut *ed, faces: &faces, view: body.view, scale, width, origin, galley: None };
+        let mut host = ParagraphHost { ctx: &ctx, ed: &mut *ed, faces: &faces, view: body.view, scale, width, origin, galley: None, moved: None };
         // Escape cancels and selects the paragraph's box (Acrobat); ⌘Enter and a press on the page
         // background apply.
         let editor = TextEditor::new(tl!("Text editing line").to_string(), &mut host, Bind::bound(&mut selection)).esc_commits(false);
         // The focus reveal and hit area must stay on this page, even when the paragraph extends beyond it.
         let output = if fresh { editor.request_focus(FocusRequest::Take) } else { editor }.show_at(ui, editor_rect);
-        (output, host.galley())
+        let galley = host.galley();
+        if let Some(caret) = host.moved {
+            selection = TextSelection::caret_at(caret);
+        }
+        (output, galley)
     };
     ed.selection = Some(selection);
     if ed.has_changes() {
