@@ -17003,3 +17003,24 @@ fn redact_folder_through_tools() {
     assert!(matches!(a.call("redact_folder", &words("../outside")), Err(ToolError::Failed(_) | ToolError::InvalidArgs(_))));
     assert!(matches!(a.call("redact_folder", &json!({ "folder": "in", "out": "out" })), Err(ToolError::InvalidArgs(_))));
 }
+
+/// Security policies through the tools: save, list without any password, protect with one, delete.
+#[test]
+fn security_policies_through_tools() {
+    let dir = workdir("security-policies");
+    let mut a = auto(&dir);
+    assert!(matches!(
+        a.call("security_policy_save", &json!({ "name": "Open only", "password_for": "viewing", "copy": true })),
+        Err(ToolError::InvalidArgs(_))
+    ));
+    ok(&mut a, "security_policy_save", json!({ "name": "Client copies", "password_for": "editing", "changes": "fill-sign" }));
+    let listed = ok(&mut a, "security_policy_list", json!({}));
+    assert_eq!(listed["policies"][0]["changes"], "fill-sign", "{listed}");
+    let doc = ok(&mut a, "doc_open", json!({ "path": "a.pdf" }))["doc"].as_u64().unwrap();
+    assert!(a.call("doc_protect_with_policy", &json!({ "doc": doc, "policy": "nobody", "password": "s3cret-pw" })).is_err());
+    let r = ok(&mut a, "doc_protect_with_policy", json!({ "doc": doc, "policy": "client copies", "password": "s3cret-pw" }));
+    assert!(!r.to_string().contains("s3cret-pw") && !r["security"].is_null(), "{r}");
+    assert!(!ok(&mut a, "security_policy_list", json!({})).to_string().contains("s3cret-pw"));
+    ok(&mut a, "security_policy_delete", json!({ "name": "CLIENT COPIES" }));
+    assert_eq!(ok(&mut a, "security_policy_list", json!({}))["policies"], json!([]));
+}

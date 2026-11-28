@@ -297,6 +297,7 @@ impl PdfCraftApp {
             ),
             trusted: Some(trusted),
             custom_stamps: json_text(&stamps_ui::encode(&self.custom_stamps)),
+            security_policies: json_text(&serde_json::Value::Array(self.security_policies.iter().map(|p| p.to_json()).collect())),
             sign_presets: json_text(&self.sign_presets),
             actions: json_text(&actions_ui::encode(&self.custom_actions)),
             javascript: Some(self.session.javascript()),
@@ -809,6 +810,15 @@ impl PdfCraftApp {
         if let Some(text) = &s.sign_presets {
             self.sign_presets = serde_json::from_str(text).unwrap_or_default();
             self.sign_presets.truncate(crate::sign_ui::MAX_SIGN_PRESETS);
+        }
+        if let Some(list) = parsed(&s.security_policies).as_ref().and_then(serde_json::Value::as_array) {
+            use pdfcraft_engine::security_policy::{MAX_POLICIES, SecurityPolicy, save_policy};
+            self.security_policies.clear();
+            // A damaged entry is left out rather than read as something looser.
+            for policy in list.iter().take(MAX_POLICIES).filter_map(SecurityPolicy::from_json) {
+                // The list has room: no more than it holds are read.
+                let _ = save_policy(&mut self.security_policies, policy);
+            }
         }
         if let Some(stamps) = parsed(&s.custom_stamps) {
             self.custom_stamps = stamps_ui::decode(&stamps);

@@ -5904,11 +5904,11 @@ title = "Local security policies (saved presets)"
 area = "G"
 tier = "P2"
 milestone = "M8"
-status = "planned"
-commands = []
-tools = []
-evidence = []
-notes = ""
+status = "partial"
+commands = ["protect.password"]
+tools = ["security_policy_list", "security_policy_save", "security_policy_delete", "doc_protect_with_policy"]
+evidence = ["crates/engine/src/security_policy.rs::a_policy_keeps_the_restrictions_and_never_a_password", "crates/automation/tests/it/automation.rs::security_policies_through_tools", "crates/ui-egui/src/dialogs/protect.rs::a_policy_saved_in_the_dialog_is_kept_without_the_password_and_sets_the_next_one"]
+notes = "Protect Using Password saves its settings (what the password is for, printing, changes, copying, screen-reader access, compatibility, metadata) as named policies kept between runs, lists, applies and deletes them (at most 100). A policy never holds a password: it is typed each time. The tools keep their own policies for the tool session. Missing: certificate-based policies, applying a policy to several files at once, importing and exporting policies, sharing the app's policies with the tools."
 
 [[feature]]
 id = "protect.rights-management"

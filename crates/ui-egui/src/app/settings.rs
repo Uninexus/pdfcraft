@@ -203,6 +203,8 @@ pub struct Signature {
     pub trusted: Option<Vec<String>>,
     /// JSON text: the custom stamps.
     pub custom_stamps: Option<String>,
+    /// JSON text: the saved security policies (no passwords).
+    pub security_policies: Option<String>,
     /// JSON text: the signature appearances saved by name.
     pub sign_presets: Option<String>,
     /// JSON text: the custom actions.
@@ -722,6 +724,7 @@ pub fn import_json(text: &str) -> (PdfCraftSettings, Vec<SectionError>) {
             digital_ids: r.list("digital_ids"),
             trusted: r.list("trusted"),
             custom_stamps: r.text("custom_stamps"),
+            security_policies: r.text("security_policies"),
             sign_presets: r.text("sign_presets"),
             actions: r.text("actions"),
             javascript: r.bool("javascript"),
