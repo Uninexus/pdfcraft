@@ -430,10 +430,17 @@ pub(crate) fn status_captions(lang: crate::i18n::Lang) -> StatusCaptions {
         .unwrap_or(english)
 }
 
-/// The detail lines of a visible signature, as `sign::pdf` stamps them (the distinguished name
-/// aside, which the dialog doesn't know before the ID is opened): the label above the name, then
-/// the reason, location and date, each after its label. `reason` and `location` are as typed.
-pub(super) fn detail_lines(a: &Appearance, labels: &AppearanceLabels, name: &str, reason: &str, location: &str, date: &str) -> Vec<String> {
+/// The detail lines of a visible signature, as `sign::pdf` stamps them: the label above the name, then the
+/// distinguished name (the certificate's `subject`, as the ID's list entry keeps it), reason, location and date,
+/// each after its label. `reason` and `location` are as typed.
+pub(super) fn detail_lines(
+    a: &Appearance,
+    labels: &AppearanceLabels,
+    [name, subject]: [&str; 2],
+    reason: &str,
+    location: &str,
+    date: &str,
+) -> Vec<String> {
     let label = |l: &str, v: &str| if a.labels { format!("{l}{v}") } else { v.to_string() };
     let mut lines = Vec::new();
     if a.name {
@@ -441,6 +448,11 @@ pub(super) fn detail_lines(a: &Appearance, labels: &AppearanceLabels, name: &str
             lines.push(labels.signed_by.clone());
         }
         lines.push(name.to_string());
+    }
+    if a.distinguished_name {
+        // An ID listed before its subject was kept: signing reads it from the certificate.
+        let subject = if subject.is_empty() { tl!("read from the certificate when signing") } else { subject };
+        lines.push(label(&labels.distinguished_name, subject));
     }
     if a.reason && !reason.trim().is_empty() {
         lines.push(label(&labels.reason, reason.trim()));
@@ -543,7 +555,7 @@ fn sign_as(ui: &mut egui::Ui, d: &mut SignDraft, ids: &[DigitalIdEntry], kept: K
     if d.rect.is_some() || d.field.is_some() {
         let graphic = graphic_of(saved, &d.graphic);
         let (labels, in_english) = appearance_labels(crate::i18n::current());
-        let lines = detail_lines(&d.appearance, &labels, &entry.name, &d.reason, &d.location, date);
+        let lines = detail_lines(&d.appearance, &labels, [&entry.name, &entry.subject], &d.reason, &d.location, date);
         preview(ui, &entry.name, &d.appearance, &lines, graphic);
         if in_english && d.appearance.labels {
             caption(english_note).show(ui);

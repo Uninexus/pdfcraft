@@ -757,6 +757,7 @@ fn os_store_identities_are_not_persisted() {
             issuer: "Test issuer".into(),
             email: String::new(),
             expires: "2030.01.01".into(),
+            subject: String::new(),
             unusable: None,
         });
     }
@@ -785,6 +786,7 @@ fn windows_store_identity_does_not_ask_for_a_file_password() {
         issuer: "Test issuer".into(),
         email: String::new(),
         expires: "2030.01.01".into(),
+        subject: String::new(),
         unusable: None,
     });
     let draft = h.state_mut().sign_draft.as_mut().unwrap();
@@ -814,6 +816,7 @@ fn an_unusable_id_is_shown_with_its_reason_and_cannot_be_chosen() {
         issuer: String::new(),
         email: String::new(),
         expires: String::new(),
+        subject: String::new(),
         unusable: Some("its private key can't be opened: the key is missing from its key store (Windows error 0x80090016)".into()),
     });
     let ctx_h = h.ctx.clone();
@@ -835,6 +838,7 @@ fn an_unusable_id_is_shown_with_its_reason_and_cannot_be_chosen() {
         issuer: "Test issuer".into(),
         email: String::new(),
         expires: "2030.01.01".into(),
+        subject: String::new(),
         unusable: None,
     });
     let ctx_h = h.ctx.clone();
@@ -1125,6 +1129,14 @@ fn signature_appearances_are_saved_by_name_and_picked_again() {
     let mut fresh = crate::control::new_app();
     fresh.apply_settings(&h.state().settings_snapshot());
     assert_eq!(fresh.sign_presets, h.state().sign_presets, "kept across runs");
+
+    // Ticking Distinguished name puts the certificate's subject in the preview.
+    assert!(h.query_by_label_contains("CN=").is_none());
+    h.get_by_label("Distinguished name").click();
+    h.run_steps(3);
+    assert!(h.query_by_label_contains("CN=").is_some(), "the subject is previewed");
+    h.get_by_label("Distinguished name").click();
+    h.run_steps(3);
 
     h.get_by_label("Delete appearance").click();
     h.run_steps(3);
