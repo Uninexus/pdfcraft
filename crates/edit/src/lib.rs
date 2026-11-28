@@ -58,6 +58,7 @@ pub use images::{ArrangeOrder, ImageChange, PageImage, change_image, page_images
 pub mod bidi;
 pub mod indic;
 mod linebreak;
+pub mod lists;
 pub mod paragraph_align;
 pub mod text;
 pub use text::{
