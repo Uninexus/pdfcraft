@@ -71,6 +71,7 @@ mod rich_copy;
 pub mod scan_clean;
 mod scan_colours;
 mod scan_fields;
+pub mod security_policy;
 mod session;
 pub mod signature_audit;
 pub mod signature_image;
