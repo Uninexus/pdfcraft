@@ -249,6 +249,13 @@ impl PdfCraftApp {
         true
     }
 
+    /// The name of the field selected in Prepare a form, if the active document still has it.
+    fn selected_field(&self) -> Option<String> {
+        let (i, id) = self.active_ids()?;
+        let (name, _) = self.views.get(i)?.session.prepare.selected.as_ref()?;
+        self.session.get(id)?.form.iter().any(|f| f.name == *name).then(|| name.clone())
+    }
+
     /// Switches between light and dark from the mode the interface shows now.
     fn toggle_theme(&mut self, ctx: &egui::Context) {
         let next = if self.root_env(ctx).resolved(ctx).mode == craft::theme::Mode::Light { ModeChoice::Dark } else { ModeChoice::Light };
@@ -290,6 +297,7 @@ impl PdfCraftApp {
                     self.active.and_then(|i| self.views.get(i)).is_some_and(|v| v.session.comments.primary().is_some())
                 }
                 "comment.paste" => self.comment_clipboard.is_some(),
+                "form.field.duplicate" | "form.field.copies" => self.selected_field().is_some(),
                 "view.previous_view" => self.active.and_then(|i| self.views.get(i)).is_some_and(|v| !v.back.is_empty()),
                 "view.next_view" => self.active.and_then(|i| self.views.get(i)).is_some_and(|v| !v.forward.is_empty()),
                 _ => true,
@@ -358,6 +366,9 @@ impl PdfCraftApp {
             } else {
                 tl!("Select two or more objects first").to_string()
             };
+        }
+        if matches!(spec.id, "form.field.duplicate" | "form.field.copies") && self.active.is_some() && self.command_enabled_by_document(spec) {
+            return tl!("Select a form field first").to_string();
         }
         match spec.needs {
             commands::Needs::Undo => tl!("Nothing to undo").to_string(),
@@ -1068,6 +1079,16 @@ impl PdfCraftApp {
             "form.field.properties" => {
                 if let Some((name, w)) = active.and_then(|i| self.views[i].session.prepare.selected.clone()) {
                     crate::prepare::dialog::open(self, &name, w, crate::prepare::FieldTab::General);
+                }
+            }
+            "form.field.duplicate" => {
+                if let Some(name) = self.selected_field() {
+                    crate::dialogs::duplicate_field::open(self, ctx, name);
+                }
+            }
+            "form.field.copies" => {
+                if let Some(name) = self.selected_field() {
+                    crate::dialogs::field_copies_ui::open(self, ctx, name);
                 }
             }
             "form.field.signer.set" => self.set_field_signer(ctx, false),

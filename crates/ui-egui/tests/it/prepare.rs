@@ -2216,3 +2216,25 @@ fn create_multiple_copies_previews_the_grid_on_the_page() {
     h.run_steps(3);
     assert!(!painted(&h, "Qty_1"));
 }
+
+/// Duplicate and Create multiple copies are commands too: for the field selected in Prepare a form.
+#[test]
+fn duplicate_and_multiple_copies_run_as_commands_on_the_selected_field() {
+    let mut h = harness_with("one.pdf", one_field_pdf());
+    h.execute("form.prepare");
+    h.run_steps(3);
+    for id in ["form.field.duplicate", "form.field.copies"] {
+        assert!(!h.execute(id), "{id} needs a selected field");
+    }
+    for (id, title) in [("form.field.duplicate", "Duplicate Field"), ("form.field.copies", "Create Multiple Copies")] {
+        h.state_mut().views[0].session.prepare.selected = Some(("Qty".into(), 0));
+        h.run_steps(2);
+        assert!(h.execute(id), "{id}");
+        h.run_steps(2);
+        h.get_by_role_and_label(Role::Dialog, title);
+        h.key_press(egui::Key::Escape);
+        h.run_steps(3);
+    }
+    h.state_mut().views[0].session.prepare.selected = Some(("Gone".into(), 0));
+    assert!(!h.execute("form.field.copies"), "a field the document no longer has");
+}
