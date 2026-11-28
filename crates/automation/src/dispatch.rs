@@ -852,6 +852,7 @@ impl Automation {
                 self.apply(&a, edit)?
             }
             "doc_convert_colours" => self.convert_colours(&a)?,
+            "doc_flatten_transparency" => self.doc_flatten_transparency(&a)?,
             "attachment_edit" => {
                 let key = a.opt_str("key")?;
                 let name = a.opt_str("name")?;
@@ -1086,6 +1087,24 @@ impl Automation {
 }
 
 impl Automation {
+    /// `doc_flatten_transparency`: Print production ▸ Flatten transparency.
+    fn doc_flatten_transparency(&mut self, a: &Args) -> Result<Value> {
+        let pages = match a.opt_ints("pages")? {
+            Some(_) => self.pages(a, "pages")?,
+            None => Vec::new(),
+        };
+        let dpi = a.opt_num("dpi")?.unwrap_or(pdfcraft_engine::flatten_transparency::DEFAULT_DPI);
+        let id = self.doc(a)?.id;
+        let report = self.session.flatten_transparency(id, &pages, dpi).map_err(failed)?;
+        let numbered = |p: &[usize]| p.iter().map(|p| p + 1).collect::<Vec<_>>();
+        let mut out = summary(self.doc(a)?);
+        out["pages_flattened"] = json!(numbered(&report.pages));
+        out["opaque"] = json!(numbered(&report.opaque));
+        out["failed"] = json!(numbered(&report.failed));
+        out["undo"] = json!(if report.pages.is_empty() { None } else { self.doc(a)?.can_undo() });
+        Ok(out)
+    }
+
     /// `page_enhance_scan`: Enhance ▸ Scanned document on the chosen pages (all by default).
     fn page_enhance_scan(&mut self, a: &Args) -> Result<Value> {
         let pages = match a.opt_ints("pages")? {
