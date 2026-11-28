@@ -79,6 +79,7 @@ mod marks;
 mod media_actions_ui;
 mod min_window;
 mod model3d_view;
+mod named_links;
 mod new_window;
 mod object_selection;
 mod ocr;

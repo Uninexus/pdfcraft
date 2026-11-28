@@ -422,6 +422,8 @@ fn link_target(i: &pdfcraft_render::DocInfo, target: &pdfcraft_render::LinkTarge
             },
             "new_window": new_window,
         }),
+        // `other` stays, as readers of earlier versions know a menu-item action.
+        pdfcraft_render::LinkTarget::Named(item) => json!({ "other": "Named", "named": item }),
         pdfcraft_render::LinkTarget::Other(o) => json!({ "other": o }),
     }
 }
