@@ -1079,3 +1079,49 @@ fn a_locked_signature_field_is_not_offered_for_signing() {
     let said = support::shown_notice(&h).expect("the lock is said");
     assert!(said.contains("covered by the lock of the signature in field \"First\""), "{said}");
 }
+
+/// What is chosen in Sign as can be saved under a name, picked again after other choices, deleted, and is still there
+/// after the settings are saved and loaded.
+#[test]
+fn signature_appearances_are_saved_by_name_and_picked_again() {
+    let dir = dir().join("presets");
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut h = harness(dir);
+    let p12 = concat!(env!("CARGO_MANIFEST_DIR"), "/../sign/tests/data/ec-p256.p12");
+    let cert = pdfcraft_engine::sign::pkcs12::open(&std::fs::read(p12).unwrap(), "test").unwrap().certificate;
+    // Only the dialog's choices are exercised: nothing is signed.
+    let ctx = h.ctx.clone();
+    h.state_mut().start_signing(&ctx, 0, Some([20.0, 20.0, 280.0, 80.0]), None, None);
+    let entry = h.state_mut().add_digital_id(p12, &cert);
+    let d = h.state_mut().sign_draft.as_mut().expect("signing");
+    (d.selected, d.step) = (Some(entry), SignStep::SignAs);
+    h.run_steps(4);
+    let chosen = |h: &Harness<'static, PdfCraftApp>| {
+        let d = h.state().sign_draft.as_ref().expect("signing");
+        (d.appearance.reason, d.appearance.date)
+    };
+    let d = h.state_mut().sign_draft.as_mut().unwrap();
+    (d.appearance.reason, d.appearance.date, d.preset_name) = (true, false, "Seal".into());
+    h.run_steps(3);
+    h.get_by_label("Save appearance").click();
+    h.run_steps(3);
+    assert_eq!(h.state().sign_presets.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(), ["Seal"]);
+
+    let d = h.state_mut().sign_draft.as_mut().unwrap();
+    (d.appearance.reason, d.appearance.date) = (false, true);
+    h.run_steps(3);
+    h.get_by_label("Saved appearance").click();
+    h.run_steps(3);
+    h.get_by_label("Seal").click();
+    h.run_steps(3);
+    assert_eq!(chosen(&h), (true, false), "picked again");
+
+    let mut fresh = crate::control::new_app();
+    fresh.apply_settings(&h.state().settings_snapshot());
+    assert_eq!(fresh.sign_presets, h.state().sign_presets, "kept across runs");
+
+    h.get_by_label("Delete appearance").click();
+    h.run_steps(3);
+    assert!(h.state().sign_presets.is_empty());
+    assert_eq!(chosen(&h), (true, false), "deleting the saved one leaves the choices");
+}

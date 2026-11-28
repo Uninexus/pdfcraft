@@ -111,6 +111,50 @@ pub enum SignGraphic {
     Image(SignatureImage),
 }
 
+/// The most appearances kept by name, and the longest name.
+pub(crate) const MAX_SIGN_PRESETS: usize = 20;
+pub(crate) const MAX_SIGN_PRESET_NAME: usize = 60;
+
+/// An appearance saved under a name: what a visible signature shows and its graphic. The date is not part of it; each
+/// signature takes the time it is made.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct SignPreset {
+    pub name: String,
+    pub show_name: bool,
+    pub show_date: bool,
+    pub show_reason: bool,
+    pub show_location: bool,
+    pub show_distinguished_name: bool,
+    pub show_labels: bool,
+    pub graphic: SignGraphic,
+}
+
+impl SignPreset {
+    pub(crate) fn new(name: String, shown: &Appearance, graphic: SignGraphic) -> Self {
+        Self {
+            name,
+            show_name: shown.name,
+            show_date: shown.date,
+            show_reason: shown.reason,
+            show_location: shown.location,
+            show_distinguished_name: shown.distinguished_name,
+            show_labels: shown.labels,
+            graphic,
+        }
+    }
+
+    pub(crate) fn appearance(&self) -> Appearance {
+        Appearance {
+            name: self.show_name,
+            date: self.show_date,
+            reason: self.show_reason,
+            location: self.show_location,
+            distinguished_name: self.show_distinguished_name,
+            labels: self.show_labels,
+        }
+    }
+}
+
 /// The signing dialogs' state.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SignDraft {
@@ -132,6 +176,8 @@ pub struct SignDraft {
     pub graphic: SignGraphic,
     /// The image the dialog holds (remembered or chosen), so Image can be chosen again.
     pub image: Option<SignatureImage>,
+    /// The name typed to save the appearance under.
+    pub preset_name: String,
     pub new_id: NewIdDraft,
     pub error: Option<String>,
     /// Sign with a Digital ID ▸ Remove was clicked for this list entry: asking to confirm.
@@ -156,6 +202,7 @@ impl SignDraft {
             appearance: Appearance::default(),
             graphic: SignGraphic::Name,
             image: None,
+            preset_name: String::new(),
             new_id: NewIdDraft::default(),
             error: None,
             confirm_remove: None,

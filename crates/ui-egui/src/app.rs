@@ -541,6 +541,7 @@ impl PdfCraftApp {
             signature: None,
             initials: None,
             sign_graphic: sign_ui::SignGraphic::Name,
+            sign_presets: Vec::new(),
             comment_props: None,
             redact_prefs: RedactPrefs::default(),
             redact_defaults: RedactPrefs::default(),

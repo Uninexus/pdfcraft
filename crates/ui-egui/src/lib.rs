@@ -58,7 +58,7 @@ pub mod marks {
 }
 pub use content_ui::TextDraft;
 pub use create_ui::Clip;
-pub use sign_ui::{DigitalIdEntry, SignDraft, SignGraphic, SignStep};
+pub use sign_ui::{DigitalIdEntry, SignDraft, SignGraphic, SignPreset, SignStep};
 mod dialogs;
 pub use edit_text_ui::{CropMode, ImageSelection};
 mod editing;
@@ -861,6 +861,8 @@ pub struct PdfCraftApp {
     pub initials: Option<craft::review::SavedSignature>,
     /// What visible digital signatures show on their left.
     pub sign_graphic: sign_ui::SignGraphic,
+    /// Signature appearances saved by name in the signing dialog.
+    pub sign_presets: Vec<sign_ui::SignPreset>,
     /// The Comment Properties dialog, while it is open.
     pub comment_props: Option<comment_props::CommentPropsDialog>,
     pub redact_prefs: RedactPrefs,
