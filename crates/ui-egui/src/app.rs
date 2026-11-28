@@ -267,6 +267,7 @@ impl PdfCraftApp {
             white_margins_jobs: queue(&host, &wake, "pdfcraft-white-margins"),
             bates_multi_jobs: queue(&host, &wake, "pdfcraft-bates-multi"),
             optimize_batch_jobs: queue(&host, &wake, "pdfcraft-optimize-batch"),
+            redact_folder_jobs: queue(&host, &wake, "pdfcraft-redact-folder"),
             office_jobs: queue(&host, &wake, "pdfcraft-office"),
             folder_search_jobs: queue(&host, &wake, "pdfcraft-folder-search"),
             export_jobs: queue(&host, &wake, "pdfcraft-export"),
@@ -503,6 +504,7 @@ impl PdfCraftApp {
             white_margins_run: None,
             bates_multi_run: None,
             optimize_batch_run: None,
+            redact_folder_run: None,
             office_run: None,
             office_converter: None,
             folder_search: Default::default(),
@@ -880,6 +882,7 @@ impl PdfCraftApp {
         self.poll_folder_search();
         self.poll_bates_multi();
         self.poll_optimize_batch();
+        self.poll_redact_folder();
         self.poll_office();
         self.poll_action();
         // The OCR Verify screen's runs and re-reads may have finished while no frame was drawn.

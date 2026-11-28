@@ -37,6 +37,8 @@ pub enum ProgressKey {
     BatesMulti,
     /// Optimize multiple files.
     OptimizeBatch,
+    /// Redact files in a folder.
+    RedactFolder,
     /// Converting Word, Excel and PowerPoint files to PDF.
     Office,
 }
@@ -75,6 +77,7 @@ pub fn title(key: ProgressKey) -> String {
         ProgressKey::FolderSearch => tl!("Searching a folder").to_owned(),
         ProgressKey::BatesMulti => tl!("Numbering files").to_owned(),
         ProgressKey::OptimizeBatch => tl!("Optimizing files").to_owned(),
+        ProgressKey::RedactFolder => tl!("Redacting files").to_owned(),
         ProgressKey::Office => tl!("Converting to PDF").to_owned(),
     }
 }
@@ -202,6 +205,7 @@ fn route(app: &mut PdfCraftApp, end: &NoticeEnd) {
         ProgressKey::FolderSearch => app.cancel_folder_search(),
         ProgressKey::BatesMulti => app.cancel_bates_multi(),
         ProgressKey::OptimizeBatch => app.cancel_optimize_batch(),
+        ProgressKey::RedactFolder => app.cancel_redact_folder(),
         ProgressKey::Office => app.cancel_office(),
         ProgressKey::Ocr if app.ocr_batch.is_some() => app.cancel_ocr_batch(),
         ProgressKey::Ocr => app.cancel_ocr(),

@@ -117,6 +117,7 @@ mod reading_colors;
 mod recent_files;
 mod recovery;
 mod redact;
+mod redact_folder;
 mod redact_pattern;
 mod reference_xobjects_ui;
 mod reload;

@@ -133,6 +133,7 @@ fn results(app: &mut PdfCraftApp, ctx: &egui::Context) {
     app.white_margins_pass(ctx);
     app.bates_multi_pass(ctx);
     app.optimize_batch_pass(ctx);
+    app.redact_folder_pass(ctx);
     // Workflows.
     crate::optimize_ui::pass(app, ctx);
     crate::create_ui::pass(app);

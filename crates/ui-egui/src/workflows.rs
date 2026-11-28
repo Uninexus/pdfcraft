@@ -26,6 +26,7 @@ pub(super) mod optimize_batch_ui;
 pub(super) mod optimize_ui;
 pub(super) mod print_paper;
 pub(super) mod print_ui;
+pub(super) mod redact_folder_ui;
 pub(super) mod scan_clean_ui;
 pub(super) mod web_print;
 pub(super) mod white_margins_ui;
