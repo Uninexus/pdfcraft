@@ -16986,3 +16986,20 @@ fn flatten_transparency_through_tools() {
     let again = ok(&mut a, "doc_flatten_transparency", json!({ "doc": doc }));
     assert_eq!(again["pages_flattened"], json!([]), "{again}");
 }
+
+/// Redact files in a folder through the tools: copies for the files with a match, reasons for
+/// the rest, and nothing written outside the write root.
+#[test]
+fn redact_folder_through_tools() {
+    let dir = workdir("redact-folder");
+    let mut a = auto(&dir);
+    std::fs::create_dir_all(dir.join("in")).unwrap();
+    std::fs::copy(dir.join("a.pdf"), dir.join("in").join("a.pdf")).unwrap();
+    std::fs::write(dir.join("in").join("bad.pdf"), b"not a PDF").unwrap();
+    let words = |out: &str| json!({ "folder": "in", "out": out, "words": ["Page"] });
+    let r = ok(&mut a, "redact_folder", words("out"));
+    assert_eq!((r["redacted"].as_u64(), r["skipped"].as_u64()), (Some(1), Some(1)), "{r}");
+    assert!(dir.join("out").join("a_Redacted.pdf").is_file(), "{r}");
+    assert!(matches!(a.call("redact_folder", &words("../outside")), Err(ToolError::Failed(_) | ToolError::InvalidArgs(_))));
+    assert!(matches!(a.call("redact_folder", &json!({ "folder": "in", "out": "out" })), Err(ToolError::InvalidArgs(_))));
+}

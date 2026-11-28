@@ -41,6 +41,7 @@ mod print_colour;
 mod printing;
 mod reading;
 mod redact;
+mod redact_folder;
 mod signing;
 mod signing_plan;
 mod text_cache;

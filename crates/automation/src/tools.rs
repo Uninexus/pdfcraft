@@ -930,6 +930,20 @@ fn all_tools() -> Vec<ToolDef> {
             }),
             &["doc"],
         )),
+        t("redact_folder", "Redact files in a folder", "Search every PDF of a folder for words and phrases, or one built-in pattern, and write a redacted copy of each file with a match into out (same sub-folders, name_Redacted.pdf). Originals are only read; nothing is overwritten; the redaction can't be undone in the copies. A file is skipped, with the reason, when the text of a page can't be read in full, or it is signed, protected or already holds redaction marks. Pages with no text (scans, drawings) can't be searched and are listed as unsearched_pages: check them. still_holding counts bookmarks, comments, attachments and metadata of a copy that may still hold the text. Pass exactly one of words or pattern.")
+            .destructive()
+            .cmd("redact.folder")
+            .with(schema(
+                json!({
+                    "folder": { "type": "string", "minLength": 1, "description": "Folder with the PDFs (relative to --root when one is set)." },
+                    "out": { "type": "string", "minLength": 1, "description": "Folder the redacted copies are written to; made if missing." },
+                    "words": { "type": "array", "items": { "type": "string" }, "description": "Words or phrases to redact." },
+                    "pattern": { "type": "string", "description": "A built-in pattern id, as redact_mark takes it (phone, email, credit-card, ssn, ...)." },
+                    "case_sensitive": { "type": "boolean" }, "whole_words": { "type": "boolean" },
+                    "recursive": { "type": "boolean", "description": "Also redact the PDFs of sub-folders (default false)." },
+                }),
+                &["folder", "out"],
+            )),
         t(
             "redact_apply",
             "Apply redactions",

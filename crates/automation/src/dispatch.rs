@@ -784,6 +784,7 @@ impl Automation {
             "doc_import_data" => self.doc_import_data(&a)?,
             "redact_mark" => self.redact_mark(&a)?,
             "redact_apply" => self.redact_apply(&a)?,
+            "redact_folder" => self.redact_folder(&a)?,
             "redact_clear" => self.redact_clear(&a)?,
             "doc_hidden_info" => self.doc_hidden_info(&a)?,
             "printers" => self.printers()?,

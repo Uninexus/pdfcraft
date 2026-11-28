@@ -6048,11 +6048,11 @@ title = "Search and redact across a folder"
 area = "G"
 tier = "P2"
 milestone = "M13"
-status = "planned"
-commands = []
-tools = []
-evidence = []
-notes = ""
+status = "partial"
+commands = ["redact.folder"]
+tools = ["redact_folder"]
+evidence = ["crates/engine/src/redact_folder.rs::only_matching_files_get_a_redacted_copy_and_originals_are_never_touched", "crates/automation/tests/it/automation.rs::redact_folder_through_tools", "crates/ui-egui/tests/it/redact_folder.rs::a_folder_is_redacted_into_copies_and_the_report_names_what_was_not"]
+notes = "Redact > Redact files in a folder (tool redact_folder): words, phrases or one built-in pattern, in a folder with or without sub-folders; each file with a match is redacted into name_Redacted.pdf in an output folder, with progress and Cancel and a report file. Originals are only read and nothing is overwritten. Left alone with the reason: files whose text can't be read in full, signed, protected or unreadable files and files already holding redaction marks; pages with no text are listed as not searched. Missing: running OCR on those pages, custom regular expressions, redaction codes, overlay text and fill choice, keeping parts of a match readable, removing hidden information from the copies in the same run, and the browser."
 
 [[feature]]
 id = "protect.redaction-properties"
