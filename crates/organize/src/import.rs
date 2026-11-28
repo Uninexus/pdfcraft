@@ -34,6 +34,7 @@ mod copy;
 mod fields;
 mod structure;
 mod structure_maps;
+mod structure_order;
 
 use carry::{Mark, source_outline, write_outline_level};
 pub(crate) use carry::{set_attachments, set_attachments_exact};

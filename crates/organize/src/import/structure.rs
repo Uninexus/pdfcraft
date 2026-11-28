@@ -6,6 +6,7 @@
 
 use super::copy::Copier;
 use super::structure_maps::{Maps, Renames};
+use super::structure_order::Order;
 use super::{Dict, Document, HashMap, HashSet, ObjRef, Object, OrganizeError};
 
 /// How deep elements and number tree nodes are followed.
@@ -19,6 +20,8 @@ pub(super) struct Tags {
     /// The combined `/StructTreeRoot`, made for the first tagged source.
     root: Option<ObjRef>,
     kids: Vec<Object>,
+    /// Elements added after those, each to be put where its pages are.
+    later: Vec<ObjRef>,
     /// Parent tree entries, in key order.
     nums: Vec<(i64, Object)>,
     next: i64,
@@ -334,6 +337,7 @@ impl Tags {
                 None => *self.root.insert(out.add(Object::Null)),
             };
             source.renames = source.maps.add(out, src, tree, &mut source.copier)?;
+            let first = self.kids.is_empty();
             for top in kids_of(src, tree.get(b"K")) {
                 let Some(new) = source.element(out, &top, root, 0)? else { continue };
                 // The file's language stays with its content.
@@ -344,7 +348,11 @@ impl Tags {
                     d.set(b"Lang".to_vec(), lang.clone());
                     out.set(new, Object::Dict(d));
                 }
-                self.kids.push(Object::Ref(new));
+                if first {
+                    self.kids.push(Object::Ref(new));
+                } else {
+                    self.later.push(new);
+                }
             }
             source.finish(out);
             if let Some(parent_tree) = tree.get(b"ParentTree") {
@@ -391,13 +399,18 @@ impl Tags {
             }
             return Ok(());
         }
+        let mut kids = self.kids;
+        let mut order = Order::new(crate::pages(out)?.iter().map(|p| p.obj));
+        for element in self.later {
+            order.place(out, &mut kids, root, element, 0);
+        }
         let mut parent_tree = Dict::new();
         let nums = self.nums.into_iter().flat_map(|(k, v)| [Object::Int(k), v]).collect();
         parent_tree.set(b"Nums".to_vec(), Object::Array(nums));
         let parent_tree = out.add(Object::Dict(parent_tree));
         let mut tree = self.base;
         tree.set(b"Type".to_vec(), Object::name("StructTreeRoot"));
-        tree.set(b"K".to_vec(), Object::Array(self.kids));
+        tree.set(b"K".to_vec(), Object::Array(kids));
         tree.set(b"ParentTree".to_vec(), Object::Ref(parent_tree));
         tree.set(b"ParentTreeNextKey".to_vec(), Object::Int(self.next));
         self.maps.write(out, &mut tree);

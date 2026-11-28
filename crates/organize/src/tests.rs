@@ -11420,6 +11420,8 @@ fn combine_brings_each_files_structure_tree() {
     // Files split into runs keep their tags where their pages went.
     let out = combine_grouped(&[(0, "a", &a, Some(&[0])), (1, "b", &b, Some(&[0, 1])), (0, "a", &a, Some(&[1]))]).unwrap();
     assert_eq!(tagged_pages(&out).len(), 4);
+    // The tags read in page order, though one file's pages lie on both sides of the other's.
+    assert_eq!(reading_order(&out), [0, 1, 2, 3]);
     // Files without tags give none.
     let out = combine(&[("p", &plain), ("q", &plain)]).unwrap();
     assert!(!out.get(out.root().unwrap()).as_dict().unwrap().contains(b"StructTreeRoot"));
@@ -11480,6 +11482,33 @@ fn combine_brings_roles_classes_identifiers_and_namespaces() {
     assert_eq!(entry(&tree, b"Namespaces").as_array().map(Vec::len), Some(1));
 }
 
+/// The page numbers the structure tree of `doc` goes through, in reading order, one for each element
+/// that has content of its own.
+fn reading_order(doc: &Document) -> Vec<usize> {
+    fn walk(doc: &Document, o: &Object, numbers: &[ObjRef], out: &mut Vec<usize>) {
+        let d = doc.resolve(o).as_dict().cloned().unwrap();
+        let kids = d.get(b"K").map(|k| doc.resolve(k).as_array().cloned().unwrap_or_else(|| vec![k.clone()])).unwrap_or_default();
+        if let Some(page) = d.reference(b"Pg") {
+            out.push(numbers.iter().position(|n| *n == page).unwrap());
+        }
+        for kid in kids {
+            if doc.resolve(&kid).as_dict().is_some_and(|d| d.contains(b"S")) {
+                // Its parent is the element that lists it.
+                assert_eq!(doc.resolve(&kid).as_dict().unwrap().reference(b"P"), o.as_ref());
+                walk(doc, &kid, numbers, out);
+            }
+        }
+    }
+    let numbers: Vec<ObjRef> = pages(doc).unwrap().iter().map(|p| p.obj).collect();
+    let catalog = doc.get(doc.root().unwrap()).as_dict().cloned().unwrap();
+    let tree = doc.resolve(catalog.get(b"StructTreeRoot").unwrap()).as_dict().cloned().unwrap();
+    let mut out = Vec::new();
+    for top in tree.get(b"K").and_then(Object::as_array).unwrap() {
+        walk(doc, top, &numbers, &mut out);
+    }
+    out
+}
+
 #[test]
 fn insert_and_extract_bring_structure_trees() {
     let source = mapped_doc("H2", "Column");
@@ -11493,7 +11522,10 @@ fn insert_and_extract_bring_structure_trees() {
     let dict = |o: &Object| doc.resolve(o).as_dict().cloned().unwrap();
     let catalog = dict(&Object::Ref(doc.root().unwrap()));
     let tree = dict(catalog.get(b"StructTreeRoot").unwrap());
-    assert_eq!(tree.get(b"K").and_then(Object::as_array).map(Vec::len), Some(5), "the document's own and two files'");
+    // Pages in order: the second file's page, the first of the document's, the first file's (put
+    // inside the document's own Document element), then the document's second. Each inserted page
+    // has two elements.
+    assert_eq!(reading_order(&doc), [0, 0, 1, 2, 2, 3]);
     assert_eq!(dict(tree.get(b"RoleMap").unwrap()).len(), 2, "the second file's role is renamed");
     // The inserted files say nothing about being tagged, so the whole no longer does.
     assert_eq!(dict(catalog.get(b"MarkInfo").unwrap()).get(b"Marked"), Some(&Object::Bool(false)));
