@@ -24,7 +24,7 @@ pub const MAX_FLATTENED_PIXELS: f64 = 80.0e6;
 pub const MAX_FLATTENED_SIDE: f64 = 16_000.0;
 /// The most bytes of encoded pictures one copy holds. A sheet whose picture would pass it keeps
 /// its vectors and prints as it would have without flattening.
-const MAX_FLATTENED_BYTES: usize = 512 << 20;
+pub(crate) const MAX_FLATTENED_BYTES: usize = 512 << 20;
 
 /// The print-ready PDF `bytes` ([`crate::Session::print_pdf`]) as they go to the system spooler
 /// with `job`. Three things happen on Windows only, in this order; elsewhere the bytes go as they
@@ -168,9 +168,9 @@ pub fn flattened(bytes: Arc<Vec<u8>>, dpi: f64) -> Option<Vec<u8>> {
 }
 
 /// A page drawn as tiles: the content that draws them, and each tile's resource name and image.
-struct Picture {
-    content: Vec<u8>,
-    tiles: Vec<(Vec<u8>, Stream)>,
+pub(crate) struct Picture {
+    pub(crate) content: Vec<u8>,
+    pub(crate) tiles: Vec<(Vec<u8>, Stream)>,
 }
 
 /// The scale (pixels per point) a `w` × `h` pt sheet is flattened at for `dpi`: lowered so the
@@ -184,7 +184,7 @@ fn flatten_scale(w: f64, h: f64, dpi: f64) -> f64 {
 /// content that draws them where the page shows. `None` when a tile doesn't render, or the
 /// tiles' encoded size would pass what is left of `budget`, which a page that succeeds is
 /// charged.
-fn sheet_picture(
+pub(crate) fn sheet_picture(
     doc: &pdfcraft_cos::Document,
     renderer: &mut PageRenderer,
     page: &pdfcraft_model::Page,

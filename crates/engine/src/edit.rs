@@ -634,6 +634,11 @@ pub enum Edit {
     EnhanceScan {
         images: Vec<(pdfcraft_cos::ObjRef, pdfcraft_cos::Stream)>,
     },
+    /// Print production ▸ Flatten transparency: each page draws a picture of its content, made
+    /// by a [`FlattenJob`](crate::flatten_transparency::FlattenJob).
+    FlattenTransparency {
+        pages: Vec<crate::flatten_transparency::FlatPage>,
+    },
     /// Edit a PDF ▸ Edit text: replace the text of line `line` (from `Document::text_lines`) on
     /// `page`, in its own font when it can show it, else in Helvetica.
     EditTextLine {
