@@ -16626,6 +16626,11 @@ fn text_box_runs_through_tools() {
     assert_eq!(listed(&mut a, again), runs);
     ok(&mut a, "edit_undo", json!({ "doc": doc }));
     assert!(listed(&mut a, doc).is_null(), "undone");
+    // Underline is said only where it is set.
+    let under = json!([{ "start": 0, "end": 5, "underline": true }]);
+    ok(&mut a, "comment_edit", json!({ "doc": doc, "page": page, "index": index, "text_runs": under }));
+    assert_eq!(listed(&mut a, doc), json!([{ "start": 0, "end": 5, "bold": false, "italic": false, "underline": true }]));
+    ok(&mut a, "edit_undo", json!({ "doc": doc }));
     for bad in [json!([{ "start": 0, "end": 99, "bold": true }]), json!("bold"), json!([{ "start": 1 }])] {
         assert!(a.call("comment_edit", &json!({ "doc": doc, "page": page, "index": index, "text_runs": bad })).is_err(), "{bad}");
     }

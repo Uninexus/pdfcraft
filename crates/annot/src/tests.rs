@@ -5697,7 +5697,7 @@ endstream",
 }
 
 fn run(start: usize, end: usize, bold: bool, italic: bool) -> TextRun {
-    TextRun { start, end, bold, italic }
+    TextRun { start, end, bold, italic, underline: false }
 }
 
 /// A text box with a bold word and an italic word, as `(document, index)`.

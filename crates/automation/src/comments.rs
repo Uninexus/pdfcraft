@@ -235,7 +235,17 @@ impl Automation {
             if c.subtype == "FreeText" {
                 let runs = doc.comment_text_runs(c.page, c.index);
                 if !runs.is_empty() {
-                    v["text_runs"] = runs.iter().map(|r| json!({ "start": r.start, "end": r.end, "bold": r.bold, "italic": r.italic })).collect();
+                    v["text_runs"] = runs
+                        .iter()
+                        .map(|r| {
+                            let mut run = json!({ "start": r.start, "end": r.end, "bold": r.bold, "italic": r.italic });
+                            // Said only where set, so a box without it reads as before.
+                            if r.underline {
+                                run["underline"] = json!(true);
+                            }
+                            run
+                        })
+                        .collect();
                 }
             }
             // A text box's or typed text's oval or circle (a rectangle is not reported).
@@ -1032,7 +1042,13 @@ fn text_runs(value: &Value) -> Result<Vec<pdfcraft_engine::TextRun>> {
                 None => Ok(false),
                 Some(v) => v.as_bool().ok_or_else(wrong),
             };
-            Ok(pdfcraft_engine::TextRun { start: at("start")?, end: at("end")?, bold: flag("bold")?, italic: flag("italic")? })
+            Ok(pdfcraft_engine::TextRun {
+                start: at("start")?,
+                end: at("end")?,
+                bold: flag("bold")?,
+                italic: flag("italic")?,
+                underline: flag("underline")?,
+            })
         })
         .collect()
 }
