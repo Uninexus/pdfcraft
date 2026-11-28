@@ -426,11 +426,11 @@ title = "PDF 2.0 UTF-8 text strings"
 area = "A"
 tier = "P1"
 milestone = "M2"
-status = "planned"
+status = "shipped"
 commands = []
-tools = []
-evidence = []
-notes = ""
+tools = ["doc_info", "comment_list", "form_fields"]
+evidence = ["crates/automation/tests/it/automation.rs::utf8_text_strings_read_everywhere", "craft-pdf::cos/object.rs::text_string_encodings"]
+notes = "Text strings with a UTF-8 byte order mark (PDF 2.0) read as their text wherever text strings are read, e.g. document information, bookmarks, page labels, comments, form field names and values; the mark never shows. PdfCraft writes its own non-ASCII text strings as UTF-16BE, which every PDF version reads."
 
 [[feature]]
 id = "core.pdf20-associated-files"

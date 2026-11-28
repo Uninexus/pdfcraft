@@ -16889,3 +16889,52 @@ fn tags_come_through_combine_insert_and_extract() {
     let first = split["files"][0]["path"].as_str().unwrap().to_owned();
     assert_eq!(said(&mut a, &first).len(), 2, "{split}");
 }
+
+/// PDF 2.0 UTF-8 text strings (a UTF-8 byte order mark, ISO 32000-2 §7.9.2.2) read as their text
+/// in the document information, bookmarks, page labels, comments and form fields, and still do
+/// after a save.
+#[test]
+fn utf8_text_strings_read_everywhere() {
+    let dir = workdir("utf8-strings");
+    let hex = |s: &str| format!("<EFBBBF{}>", s.bytes().map(|b| format!("{b:02X}")).collect::<String>());
+    let [title, mark, label, note, field, value] = ["Título 目录", "Chapître", "Äppendix-", "Rémarque ✓", "Prénom", "Zoë"].map(hex);
+    let objs = [
+        "<< /Type /Catalog /Pages 2 0 R /Outlines 6 0 R /PageLabels << /Nums [0 << /P LABEL >>] >> /AcroForm << /Fields [9 0 R] >> >>"
+            .replace("LABEL", &label),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 300 300] >>".to_string(),
+        "<< /Type /Page /Parent 2 0 R /Annots [8 0 R 9 0 R] >>".to_string(),
+        format!("<< /Title {title} >>"),
+        "null".to_string(),
+        "<< /Type /Outlines /First 7 0 R /Last 7 0 R /Count 1 >>".to_string(),
+        format!("<< /Title {mark} /Parent 6 0 R /Dest [3 0 R /Fit] >>"),
+        format!("<< /Type /Annot /Subtype /Text /Rect [10 10 30 30] /Contents {note} >>"),
+        format!("<< /Type /Annot /Subtype /Widget /FT /Tx /Rect [10 100 200 120] /T {field} /V {value} /P 3 0 R >>"),
+    ];
+    let mut pdf = pdf_of(&objs.iter().map(String::as_str).collect::<Vec<_>>());
+    // The header and trailer of a PDF 2.0 file with its information dictionary.
+    pdf[..8].copy_from_slice(b"%PDF-2.0");
+    let at = pdf.windows(15).position(|w| w == b"/Root 1 0 R >>\n").unwrap();
+    pdf.splice(at..at, *b"/Info 4 0 R ");
+    std::fs::write(dir.join("utf8.pdf"), pdf).unwrap();
+    let mut a = auto(&dir);
+    let read = |a: &mut Automation, path: &str| {
+        let doc = ok(a, "doc_open", json!({ "path": path }))["doc"].as_u64().unwrap();
+        let mut said = String::new();
+        for tool in ["doc_info", "comment_list", "form_fields"] {
+            said.push_str(&ok(a, tool, json!({ "doc": doc })).to_string());
+        }
+        (doc, said)
+    };
+    let wanted = ["Título 目录", "Chapître", "Äppendix-", "Rémarque ✓", "Prénom", "Zoë"];
+    let (doc, said) = read(&mut a, "utf8.pdf");
+    for text in wanted {
+        assert!(said.contains(text), "{text}: {said}");
+    }
+    assert!(!said.contains('\u{FEFF}') && !said.contains('ï'), "no byte order mark shows: {said}");
+    ok(&mut a, "form_fill", json!({ "doc": doc, "values": { "Prénom": "Zoë" } }));
+    ok(&mut a, "doc_save", json!({ "doc": doc, "path": "saved.pdf" }));
+    let (_, said) = read(&mut a, "saved.pdf");
+    for text in wanted {
+        assert!(said.contains(text), "after saving, {text}: {said}");
+    }
+}
