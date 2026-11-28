@@ -304,6 +304,7 @@ impl PdfCraftApp {
             units: Default::default(),
             grid_unit: Default::default(),
             blank_paper: crate::paper::Paper::system(),
+            split_template: String::new(),
             mode_override: None,
             left: LeftPanel::AllTools,
             last_right: RightPanel::Comments,

@@ -89,6 +89,9 @@ pub struct Behavior {
     pub find_whole_words: Option<bool>,
     pub find_include_comments: Option<bool>,
     pub find_include_bookmarks: Option<bool>,
+    pub split_template: Option<String>,
+    /// Remove white margins: points kept around the content.
+    pub white_margins_padding: Option<f64>,
     /// Esc leaves full screen (off leaves it to ⌘L / Ctrl+L only).
     pub full_screen_escape_exits: Option<bool>,
     pub units: Option<crate::units::Unit>,
@@ -643,6 +646,8 @@ pub fn import_json(text: &str) -> (PdfCraftSettings, Vec<SectionError>) {
             find_whole_words: r.bool("find_whole_words"),
             find_include_comments: r.bool("find_include_comments"),
             find_include_bookmarks: r.bool("find_include_bookmarks"),
+            split_template: r.string("split_template"),
+            white_margins_padding: r.f64("white_margins_padding"),
             units: r.typed("units"),
             grid_spacing: r.f64("grid_spacing"),
             grid_subdivisions: r.typed("grid_subdivisions"),

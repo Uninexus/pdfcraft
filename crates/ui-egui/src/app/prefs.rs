@@ -209,6 +209,8 @@ impl PdfCraftApp {
             find_whole_words: Some(self.find_choices.whole_word),
             find_include_comments: Some(self.find_choices.include_comments),
             find_include_bookmarks: Some(self.find_choices.include_bookmarks),
+            split_template: Some(self.split_template.clone()),
+            white_margins_padding: Some(self.white_margins_draft.padding),
             full_screen_escape_exits: Some(self.full_screen_escape_exits),
             units: Some(self.units),
             grid_spacing: grid.map(|g| g.spacing),
@@ -568,6 +570,18 @@ impl PdfCraftApp {
         find.include_bookmarks = b.find_include_bookmarks.unwrap_or(find.include_bookmarks);
     }
 
+    /// What Split and Remove white margins were last run with; a value neither dialog would take is left out.
+    fn apply_page_tool_choices(&mut self, b: &settings::Behavior) {
+        if let Some(template) = b.split_template.as_deref()
+            && (template.trim().is_empty() || pdfcraft_engine::split_name::Template::parse(template).is_ok())
+        {
+            self.split_template = template.to_string();
+        }
+        if let Some(padding) = b.white_margins_padding.filter(|p| (0.0..=pdfcraft_engine::white_margins::MAX_PADDING).contains(p)) {
+            self.white_margins_draft.padding = padding;
+        }
+    }
+
     /// Switches for reopening, window chrome and file watching.
     fn apply_behavior(&mut self, b: &settings::Behavior) {
         if let Some(show) = b.default_page_gaps {
@@ -575,6 +589,7 @@ impl PdfCraftApp {
         }
         self.apply_full_screen(b);
         self.apply_find_choices(b);
+        self.apply_page_tool_choices(b);
         if let Some(units) = b.units {
             self.units = units;
         }

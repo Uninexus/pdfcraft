@@ -383,6 +383,8 @@ pub struct PdfCraftApp {
     pub grid_unit: units::Unit,
     /// The paper Create ▸ Blank page makes (#5644): the system region's.
     pub blank_paper: paper::Paper,
+    /// The file name template Split was last run with; empty for the usual names. Kept between runs.
+    pub split_template: String,
     /// Explicit CLI/control mode lasts for this session and is never persisted.
     mode_override: Option<Mode>,
     pub left: LeftPanel,
