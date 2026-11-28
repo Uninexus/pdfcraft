@@ -1236,7 +1236,7 @@ impl Automation {
     }
 
     pub(crate) fn marks(&mut self, tool: &str, a: &Args) -> Result<Value> {
-        use pdfcraft_engine::{Background, HeaderFooter, MarkKind, Watermark};
+        use pdfcraft_engine::{Background, HeaderFooter, MarkEdge, MarkKind, Watermark};
         let n = self.doc(a)?.info.pages.len();
         let pages = match a.opt_ints("pages")? {
             Some(_) => self.pages(a, "pages")?,
@@ -1279,7 +1279,14 @@ impl Automation {
                     Some(_) => a.opt_str("text")?.unwrap_or_default().to_string(),
                     None => a.str("text")?.to_string(),
                 };
+                let from = |key: &str, start: &str, end: &str| match a.opt_str(key)? {
+                    None | Some("center") => Ok(MarkEdge::Center),
+                    Some(v) if v == start => Ok(MarkEdge::Start),
+                    Some(v) if v == end => Ok(MarkEdge::End),
+                    Some(_) => Err(ToolError::InvalidArgs(format!("{key} must be {start}, center or {end}"))),
+                };
                 let wm = Watermark {
+                    from: [from("from_x", "left", "right")?, from("from_y", "bottom", "top")?],
                     text,
                     source: None,
                     scale: a.opt_num("scale")?.unwrap_or(d.scale).clamp(0.01, 1.0),

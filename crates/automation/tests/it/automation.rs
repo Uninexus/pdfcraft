@@ -4234,6 +4234,20 @@ fn watermarks_move_from_the_page_centre_through_tools() {
     let moved = corner(&mut a);
     assert!((moved.0 - centred.0 - 30.0).abs() < 1.0, "right: {centred:?} → {moved:?}");
     assert!((centred.1 - moved.1 - 40.0).abs() < 1.0, "up is towards the top: {centred:?} → {moved:?}");
+    // From an edge the offset is measured inward, so a larger one moves the other way.
+    let mut from_edges = |a: &mut Automation, offset: f64| {
+        ok(
+            a,
+            "doc_watermark",
+            json!({ "doc": doc, "pages": [1], "text": "DRAFT", "rotation": 0, "font_size": 20,
+            "from_x": "right", "from_y": "top", "offset_x": offset, "offset_y": offset, "replace": true }),
+        );
+        corner(a)
+    };
+    let (near, far) = (from_edges(&mut a, 10.0), from_edges(&mut a, 40.0));
+    assert!((near.0 - far.0 - 30.0).abs() < 1.0, "inward from the right: {near:?} → {far:?}");
+    assert!((far.1 - near.1 - 30.0).abs() < 1.0, "inward from the top: {near:?} → {far:?}");
+    assert!(matches!(a.call("doc_watermark", &json!({ "doc": doc, "text": "X", "from_x": "top" })), Err(ToolError::InvalidArgs(_))));
     // Huge offsets are clamped, and a value that isn't a number is refused.
     ok(&mut a, "doc_watermark", json!({ "doc": doc, "pages": [1], "text": "DRAFT", "offset_y": 1e300, "replace": true }));
     assert!(matches!(a.call("doc_watermark", &json!({ "doc": doc, "text": "X", "offset_x": "left" })), Err(ToolError::InvalidArgs(_))));

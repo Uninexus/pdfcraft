@@ -15922,3 +15922,15 @@ fn updating_with_bates_replaces_them_and_updating_without_leaves_them() {
     add_header_footer(&mut doc, &[0], &header, true, &cx()).unwrap();
     assert_eq!(bates_streams(&doc), 1, "a header-only update leaves the Bates numbers");
 }
+
+#[test]
+fn a_watermark_placed_from_an_edge_keeps_that_distance_when_turned() {
+    use crate::{MarkEdge, Watermark};
+    let page = (600.0, 800.0);
+    // 100 x 20 turned a quarter turn takes 20 across and 100 up.
+    let wm = Watermark { rotation: 90.0, from: [MarkEdge::End, MarkEdge::Start], offset: [36.0, 18.0], ..Watermark::default() };
+    let [x, y] = wm.centre(page, (100.0, 20.0));
+    assert!((x - (600.0 - 36.0 - 10.0)).abs() < 1e-9 && (y - (18.0 + 50.0)).abs() < 1e-9, "{x} {y}");
+    let centred = Watermark { offset: [-100.0, 50.0], ..Watermark::default() };
+    assert_eq!(centred.centre(page, (100.0, 20.0)), [200.0, 450.0], "from the centre as before");
+}

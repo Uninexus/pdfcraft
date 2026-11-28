@@ -211,11 +211,43 @@ pub struct Watermark {
     pub rotation: f64,
     /// Draw behind the page content instead of on top.
     pub behind: bool,
-    /// Offset of the centre from the page centre, in points (right, up).
+    /// Where `offset` is measured from, across (`Start` is the left edge) and up (`Start` is the bottom edge).
+    pub from: [MarkEdge; 2],
+    /// Points from `from`: right and up from the page centre, or inward from an edge to the mark's own edge.
     pub offset: [f64; 2],
 }
 
+/// What a watermark's position is measured from, along one direction of the page.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum MarkEdge {
+    /// The left or bottom edge.
+    Start,
+    #[default]
+    Center,
+    /// The right or top edge.
+    End,
+}
+
+impl MarkEdge {
+    /// Where the middle of a mark `extent` wide (as turned) goes on a page `side` wide.
+    pub fn centre(self, side: f64, extent: f64, offset: f64) -> f64 {
+        match self {
+            Self::Start => extent / 2.0 + offset,
+            Self::Center => side / 2.0 + offset,
+            Self::End => side - extent / 2.0 - offset,
+        }
+    }
+}
+
 impl Watermark {
+    /// The middle of the mark on a `page`, given its `size` before it is turned.
+    pub fn centre(&self, page: (f64, f64), size: (f64, f64)) -> [f64; 2] {
+        let (s, c) = self.rotation.to_radians().sin_cos();
+        let across = (size.0 * c).abs() + (size.1 * s).abs();
+        let up = (size.0 * s).abs() + (size.1 * c).abs();
+        [self.from[0].centre(page.0, across, self.offset[0]), self.from[1].centre(page.1, up, self.offset[1])]
+    }
+
     /// The first character of a text watermark [`add_watermark`] would refuse, because neither
     /// the standard fonts nor (for Thai) the Thai face can draw it (#125). A picture watermark
     /// draws no text.
@@ -238,6 +270,7 @@ impl Default for Watermark {
             opacity: 0.5,
             rotation: 45.0,
             behind: false,
+            from: [MarkEdge::Center; 2],
             offset: [0.0; 2],
         }
     }
@@ -265,13 +298,18 @@ impl Default for Background {
     }
 }
 
+/// A picture mark's size on the page, fitted at `scale`: the factor and the width and height it gives.
+pub(crate) fn fitted(src: &MarkSource, page: (f64, f64), scale: f64) -> (f64, (f64, f64)) {
+    let (sw, sh) = (src.size.0.max(0.01), src.size.1.max(0.01));
+    let k = (page.0 / sw).min(page.1 / sh) * if scale.is_finite() && scale > 0.0 { scale } else { 1.0 };
+    (k, (sw * k, sh * k))
+}
+
 /// Drawing a picture mark: fitted to the page at `scale`, centred (plus `offset`), turned by
 /// `rotation` degrees. Returns the content and the resource name it uses.
 pub(crate) fn picture(src: &MarkSource, page: (f64, f64), scale: f64, rotation: f64, offset: [f64; 2]) -> String {
     let (w, h) = page;
-    let (sw, sh) = (src.size.0.max(0.01), src.size.1.max(0.01));
-    let k = (w / sw).min(h / sh) * if scale.is_finite() && scale > 0.0 { scale } else { 1.0 };
-    let (dw, dh) = (sw * k, sh * k);
+    let (k, (dw, dh)) = fitted(src, page, scale);
     let (s, c) = rotation.to_radians().sin_cos();
     let (cx, cy) = (w / 2.0 + offset[0], h / 2.0 + offset[1]);
     // Centre, rotate, then place the picture's box (unit square for images).
