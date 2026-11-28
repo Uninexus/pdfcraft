@@ -13,17 +13,43 @@ impl Automation {
             (_, "rich") => format,
             (_, _) => return Err(ToolError::InvalidArgs("html_mode is only available for HTML exports (rich or simple)".into())),
         };
-        let export = self.doc_to_copy(a)?.export_office_checked(format);
+        let recognize = a.opt_bool("recognize_scans")?.unwrap_or(true);
+        let id = self.doc_to_copy(a)?.id;
+        // Scanned pages have no text until it is recognized: read them first, as the app does.
+        let mut unread = None;
+        let mut found = None;
+        if recognize && let Some(job) = self.session.scan_ocr_job(id, pdfcraft_engine::ocr::OcrSettings::default()) {
+            match pdfcraft_engine::ocr::recognizers(&job.settings) {
+                Ok(recognizers) => found = Some(job.run(&recognizers, |_, _| true)),
+                Err(why) => unread = Some(why),
+            }
+        }
+        let doc = self.doc_to_copy(a)?;
+        let words = found.as_ref().map(|pages| pages.iter().map(|p| p.words.len()).sum::<usize>());
+        let export = match &found {
+            Some(found) => doc.export_office_with_ocr(format, found).map_err(failed)?,
+            None => doc.export_office_checked(format),
+        };
         write_atomic(&path, &export.bytes)?;
         // Text left out to keep a hostile page bounded is said, not silent (#3120).
         let truncated: Vec<usize> = export.truncated_pages.iter().map(|p| p.saturating_add(1)).collect();
         let mut out = json!({ "path": path.to_string_lossy(), "bytes": export.bytes.len(), "format": format.extension(),
             "truncated": !truncated.is_empty(), "truncated_pages": truncated });
+        let mut warnings = Vec::new();
         if !export.truncated_pages.is_empty() {
             use pdfcraft_engine::compare::{MAX_FORM_DEPTH, MAX_FORM_VISITS};
-            out["warnings"] = json!([format!(
+            warnings.push(format!(
                 "pictures past what one export may hold or decode, or forms nested more than {MAX_FORM_DEPTH} deep, or past the first {MAX_FORM_VISITS} forms of a page (forms the page draws itself count too), were left out on the pages in truncated_pages: their text and images are missing from the export, although the viewer may still show them"
-            )]);
+            ));
+        }
+        if let Some(why) = unread {
+            warnings.push(format!("scanned pages were not recognized, so their words are missing from the export: {why}"));
+        }
+        if let Some(words) = words {
+            out["recognized_words"] = json!(words);
+        }
+        if !warnings.is_empty() {
+            out["warnings"] = json!(warnings);
         }
         Ok(out)
     }

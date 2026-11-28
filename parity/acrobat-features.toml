@@ -7749,11 +7749,11 @@ title = "Run OCR automatically when exporting scans"
 area = "J"
 tier = "P1"
 milestone = "M10"
-status = "planned"
-commands = []
-tools = []
-evidence = []
-notes = ""
+status = "partial"
+commands = ["export.docx", "export.pptx", "export.html", "export.rtf"]
+tools = ["doc_export_office"]
+evidence = ["crates/engine/src/tests.rs::a_scanned_page_exports_the_words_recognized_on_it", "crates/ui-egui/src/workflows/ocr_ui.rs::an_export_takes_the_recognized_words_unless_cancelled_or_stale", "crates/automation/tests/it/automation.rs::office_export_recognizes_scanned_pages"]
+notes = "Exporting a document with scanned pages (a picture and no text of their own) to Word, PowerPoint, HTML or RTF reads them first, with progress and Cancel, and writes the words into the file; the PDF is not changed. Preferences > Documents and view > Recognize text in scanned pages when exporting turns it off (on by default); doc_export_office has recognize_scans (default true), also for Markdown. Without an OCR engine the file is written without the words and the notice or a warning says so. Gaps: plain-text export (Export to text, doc_export_text) does not recognize; the web build exports without recognizing; English only, as the OCR models read."
 
 [[feature]]
 id = "create.export-settings"

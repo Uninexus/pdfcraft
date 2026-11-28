@@ -16938,3 +16938,31 @@ fn utf8_text_strings_read_everywhere() {
         assert!(said.contains(text), "after saving, {text}: {said}");
     }
 }
+
+/// doc_export_office reads scanned pages first, unless told not to, and leaves the document alone.
+#[test]
+fn office_export_recognizes_scanned_pages() {
+    let dir = workdir("export-ocr");
+    let mut a = auto(&dir);
+    if ok(&mut a, "ocr_status", json!({}))["available"] != true {
+        eprintln!("skipped: OCR models not installed");
+        return;
+    }
+    let text = ok(&mut a, "doc_create", json!({ "from": "text", "text": "Searchable scans with recognised words" }))["doc"].as_u64().unwrap();
+    ok(&mut a, "doc_export_images", json!({ "doc": text, "folder": "scan", "dpi": 150, "pages": [1] }));
+    let png = std::fs::read_dir(dir.join("scan")).unwrap().next().unwrap().unwrap().path();
+    let scan = ok(&mut a, "doc_create", json!({ "from": "images", "paths": [png.to_string_lossy()] }))["doc"].as_u64().unwrap();
+    let said = |name: &str| std::fs::read_to_string(dir.join(name)).unwrap().to_lowercase();
+
+    let out = ok(&mut a, "doc_export_office", json!({ "doc": scan, "path": "read.md" }));
+    assert!(out["recognized_words"].as_u64().unwrap() >= 4, "{out}");
+    assert!(said("read.md").contains("searchable"), "{}", said("read.md"));
+    let out = ok(&mut a, "doc_export_office", json!({ "doc": scan, "path": "unread.md", "recognize_scans": false }));
+    assert!(out["recognized_words"].is_null(), "{out}");
+    assert!(!said("unread.md").contains("searchable"));
+    // The words went into the file only: the scan still has none to find.
+    assert!(ok(&mut a, "ocr_recognize", json!({ "doc": scan, "pages": [1] }))["pages"][0]["skipped"].is_null());
+    // A document with its own text has nothing to read.
+    let out = ok(&mut a, "doc_export_office", json!({ "doc": text, "path": "typed.md" }));
+    assert!(out["recognized_words"].is_null(), "{out}");
+}
