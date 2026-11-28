@@ -36,6 +36,7 @@ pub mod forms;
 mod interp;
 mod lines;
 mod rewrite;
+mod tags;
 
 #[cfg(test)]
 use blocks::wrap;

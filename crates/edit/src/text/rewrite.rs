@@ -308,7 +308,7 @@ pub(crate) fn missing_characters(metrics: &Metrics, text: &str) -> Vec<char> {
 }
 
 /// The `EMC` that closes the marked-content sequence `BMC`/`BDC` operator `open` begins.
-fn matching_emc(ops: &[Op], open: usize) -> Option<usize> {
+pub(super) fn matching_emc(ops: &[Op], open: usize) -> Option<usize> {
     let mut depth = 0usize;
     for (i, op) in ops.iter().enumerate().skip(open) {
         match op.op.as_slice() {
@@ -1331,6 +1331,10 @@ pub(crate) fn rewrite_block_from(
     };
     let mut block_ops = block_ops(&plan, &writer, &wrapped, &gaps, font.show_font.clone())?;
     let on_top = crate::lift_on_top(over, &mut block_ops);
+    // A tag opened inside the text object goes round the new text, or the text would lose it.
+    if !over && let Some(tag) = super::tags::tag_to_move(doc, &res, &ops, emit.bt_op, start, &dropped) {
+        tag.take(&mut block_ops, &mut dropped);
+    }
     block_ops.extend(after.ops().into_iter().filter(|op| !op.is("Tf") || after.font.is_some()));
     if split {
         block_ops.insert(0, Op::new("ET", vec![]));

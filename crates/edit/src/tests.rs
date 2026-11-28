@@ -15934,3 +15934,45 @@ fn a_watermark_placed_from_an_edge_keeps_that_distance_when_turned() {
     let centred = Watermark { offset: [-100.0, 50.0], ..Watermark::default() };
     assert_eq!(centred.centre(page, (100.0, 20.0)), [200.0, 450.0], "from the centre as before");
 }
+
+/// Every marked-content sequence and text object closes before the one round it does.
+fn nests(content: &[u8]) -> bool {
+    let mut open = Vec::new();
+    for op in pdfcraft_content::parse(content).ops {
+        match op.op.as_slice() {
+            b"BT" => open.push("text"),
+            b"BMC" | b"BDC" => open.push("mark"),
+            b"ET" if open.pop() != Some("text") => return false,
+            b"EMC" if open.pop() != Some("mark") => return false,
+            _ => {}
+        }
+    }
+    open.is_empty()
+}
+
+/// A tag opened inside a text object goes with the rewritten paragraph: the new words are in it,
+/// its `MCID` is still used once, and everything nests.
+#[test]
+fn a_rewritten_paragraph_stays_inside_its_tag() {
+    let one_run = "(First tagged) Tj";
+    // Two sizes take the path that keeps each run's style.
+    let two_runs = "(First ) Tj /F1 14 Tf (tagged) Tj /F1 12 Tf";
+    for first in [one_run, two_runs] {
+        let content = format!("BT /F1 12 Tf 72 600 Td /P <</MCID 0>> BDC {first} EMC 0 -60 Td /P <</MCID 1>> BDC (Second one) Tj EMC ET");
+        // The second paragraph has text before it in the same text object.
+        for (mcid, old, new) in [(0, "First", "First changed"), (1, "Second", "Second changed")] {
+            let mut doc = page_with_forms(&content, &[]);
+            let blocks = text::text_blocks(&doc, 0).unwrap();
+            let at = blocks.iter().position(|b| b.text.starts_with(old)).unwrap();
+            let draft = blocks[at].editor_text.replace(old, new);
+            text::rewrite_block(&mut doc, 0, at, Some(&draft), &Default::default()).unwrap();
+            let after = page_content(&doc);
+            for kept in 0..2 {
+                assert_eq!(after.matches(&format!("/MCID {kept}>>")).count(), 1, "{after}");
+            }
+            let tagged = region_through_matching_close(&after, &format!("/P <</MCID {mcid}>> BDC"));
+            assert!(tagged.contains("changed"), "MCID {mcid} lost its words: {after}");
+            assert!(nests(&page_content_bytes(&doc, 0)), "{after}");
+        }
+    }
+}
