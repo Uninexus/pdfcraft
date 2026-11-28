@@ -50,7 +50,8 @@ fn params(count: usize, current: usize, unit: Unit) -> Vec<Param> {
             tl!("Crops each page to where its content is. The pages are not changed otherwise, and Undo puts the margins back."),
         )
         .full_width(),
-        PageRangeOptions::param("range", tl!("Pages"), count, current, PageRangeChoices::CurrentFromTo),
+        // With the Subset list: the two sides of a scan can be trimmed one after the other.
+        PageRangeOptions::param("range", tl!("Pages"), count, current, PageRangeChoices::Current),
         Param::number("padding", tl!("Keep around the content"), 0.0, 0.001 * k, decimals)
             .bounds(Some(0.0), Some(MAX_PADDING * k))
             .unit(unit_kind(unit)),

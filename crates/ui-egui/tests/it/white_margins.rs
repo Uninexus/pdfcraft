@@ -155,3 +155,23 @@ fn the_pages_menu_lists_it_and_opens_the_dialog() {
     h.run_steps(3);
     h.get_by_role_and_label(Role::Dialog, "Remove white margins");
 }
+
+#[test]
+fn the_subset_trims_only_odd_or_even_pages() {
+    use craft::pages::{PageRange, Subset};
+
+    let (mut h, jobs) = harness();
+    // Even pages: the second is blank, so nothing changes, though the first has margins to trim.
+    h.state_mut().white_margins_draft.range = PageRange { subset: Subset::Even, ..PageRange::default() };
+    start(&mut h);
+    run_jobs(&mut h, &jobs);
+    assert_eq!(widths(&h), [300.0; 3], "the odd pages were left alone");
+    h.state_mut().white_margins_draft.range = PageRange { subset: Subset::Odd, ..PageRange::default() };
+    start(&mut h);
+    run_jobs(&mut h, &jobs);
+    assert!(widths(&h)[0] < 100.0, "the first page is odd");
+    // The dialog offers the list.
+    assert!(h.execute("page.remove_white_margins"));
+    h.run_steps(3);
+    h.get_by_role_and_label(Role::Dialog, "Remove white margins").get_by_role_and_label(Role::ComboBox, "Subset");
+}
