@@ -124,7 +124,7 @@ const ALL_GROUPS: &[ToolGroup] = &[
         icon: "file-pen-line",
         hue: PINK,
         badge: None,
-        availability: Planned("M7"),
+        availability: Ready,
         sections: &[
             ToolSection {
                 title: "Modify page",
@@ -295,7 +295,7 @@ const ALL_GROUPS: &[ToolGroup] = &[
         icon: "shield-check",
         hue: BLUE,
         badge: None,
-        availability: Planned("M8"),
+        availability: Ready,
         sections: &[
             ToolSection {
                 title: "Protect",
@@ -425,7 +425,7 @@ const ALL_GROUPS: &[ToolGroup] = &[
         icon: "printer",
         hue: PURPLE,
         badge: None,
-        availability: Planned("M11"),
+        availability: Ready,
         sections: &[ToolSection {
             title: "Print production",
             items: &[

@@ -16448,3 +16448,17 @@ fn no_listed_tool_with_a_command_is_marked_planned() {
         .collect();
     assert!(stale.is_empty(), "listed as planned, but registered: {stale:?}");
 }
+
+/// A group listed as planned is dimmed and left out of View > Tools and the palette, so none of them may hold a tool
+/// that works.
+#[test]
+fn no_group_with_a_working_tool_is_marked_planned() {
+    use crate::catalog::Availability;
+    let stale: Vec<&str> = crate::catalog::TOOL_GROUPS
+        .iter()
+        .filter(|group| matches!(group.availability, Availability::Planned(_)))
+        .filter(|group| group.sections.iter().flat_map(|section| section.items.iter()).any(|item| item.availability == Availability::Ready))
+        .map(|group| group.id)
+        .collect();
+    assert!(stale.is_empty(), "listed as planned, but with tools that work: {stale:?}");
+}
