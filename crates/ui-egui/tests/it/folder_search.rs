@@ -177,3 +177,21 @@ fn comments_and_bookmarks_of_the_files_are_listed_when_asked() {
     let found: Vec<_> = h.state().folder_search.results.iter().flat_map(|f| f.matches.iter()).map(|m| m.snippet()).collect();
     assert_eq!(found, ["Comment: ripe cherry"]);
 }
+
+/// A long folder path must not widen the panel past its edge: every button under it stays inside the panel.
+#[test]
+fn the_buttons_under_a_long_folder_path_stay_inside_the_panel() {
+    let dir = folder();
+    let long = dir.path().join("a-rather-long-folder-name-for-quarterly-reports").join("and-another-one-below-it-with-more-words");
+    std::fs::create_dir_all(&long).unwrap();
+    std::fs::write(long.join("one.pdf"), pdf(&["alpha invoice"])).unwrap();
+    let (mut h, _) = harness(&long);
+    ready(&mut h, "invoice");
+    // The panel ends where its close button does, give or take the header's padding.
+    let edge = h.get_by_label("Close Search").rect().max.x + 40.0;
+    assert!(edge <= h.ctx.content_rect().max.x, "the panel is inside the window");
+    for name in ["Search folder", "Search this document", "Search all open documents"] {
+        let r = h.get_by_role_and_label(Role::Button, name).rect();
+        assert!(r.max.x <= edge, "{name} is cut off: {r:?}, the panel ends at {edge}");
+    }
+}
