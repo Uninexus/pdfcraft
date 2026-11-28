@@ -846,3 +846,40 @@ fn applying_says_the_pdfa_identification_was_written_back() {
         "Applied 1 redaction mark. Save to remove the content from the file. The document's XMP metadata held the redacted text and was removed. Its PDF/A identification was written back on its own."
     );
 }
+
+/// Find text and redact can leave the ends of each pattern match readable ("all but the last four digits"), and says
+/// how many matches it left whole because they have no more characters than are kept.
+#[test]
+fn redaction_search_can_keep_the_ends_of_a_match_readable() {
+    let mut h = harness();
+    let ctx = h.ctx.clone();
+    let text = pdfcraft_engine::AddedText { text: "Call 613-555-0142 today".into(), rect: [20.0, 40.0, 280.0, 70.0], ..Default::default() };
+    assert!(h.state_mut().apply_edit(&ctx, pdfcraft_engine::Edit::AddText { page: 0, text }));
+    h.run_steps(4);
+    let width = |h: &Harness<'static, PdfCraftApp>| {
+        let doc = h.state().session.get(h.state().views[0].id).unwrap();
+        let marks: Vec<f32> = doc.info.annotations.iter().filter(|a| a.subtype == "Redact").map(|a| a.rect[2] - a.rect[0]).collect();
+        marks
+    };
+    let search = |h: &mut Harness<'static, PdfCraftApp>, keep: usize| {
+        let ctx = h.ctx.clone();
+        let app = h.state_mut();
+        app.redact_search.mode = pdfcraft_ui_egui::RedactSearchMode::Patterns;
+        app.redact_search.keep_last = keep;
+        let n = app.redact_search(&ctx);
+        h.run_steps(3);
+        n
+    };
+    assert_eq!(search(&mut h, 0), 1);
+    let whole = width(&h)[0];
+    h.undo();
+    h.run_steps(3);
+    assert_eq!(search(&mut h, 4), 1);
+    let partial = width(&h)[0];
+    assert!(partial < whole * 0.8, "the last four digits stay outside the box: {partial} of {whole}");
+    h.undo();
+    h.run_steps(3);
+    assert_eq!(search(&mut h, 64), 0, "nothing is left to cover");
+    assert_eq!(h.state().redact_search.left_readable, 1, "and that is counted");
+    assert!(width(&h).is_empty());
+}
