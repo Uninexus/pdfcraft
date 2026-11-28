@@ -11854,3 +11854,57 @@ fn a_wrapped_paragraph_becomes_one_list_item() {
     h.run_steps(4);
     assert_eq!(shown(&h), "The quick brown fox jumps over the lazy dog and runs on to the farm.");
 }
+
+/// Print production ▸ Flatten transparency: the dialog flattens the page that paints
+/// transparently in the background, as one undo step; Escape closes it unchanged.
+#[test]
+fn flatten_transparency_from_the_dialog() {
+    let mut doc = pdfcraft_cos::Document::open(std::sync::Arc::new(fixture(2))).unwrap();
+    let page = pdfcraft_model::pages(&doc).remove(0);
+    let cs = doc.add(pdfcraft_cos::Object::Stream(pdfcraft_cos::Stream::flate(pdfcraft_cos::Dict::new(), b"/Half gs 10 10 80 40 re f")));
+    let mut state = pdfcraft_cos::Dict::new();
+    state.set(b"ca".to_vec(), pdfcraft_cos::Object::Real(0.5));
+    let mut states = pdfcraft_cos::Dict::new();
+    states.set(b"Half".to_vec(), pdfcraft_cos::Object::Dict(state));
+    let mut resources = pdfcraft_cos::Dict::new();
+    resources.set(b"ExtGState".to_vec(), pdfcraft_cos::Object::Dict(states));
+    doc.update_dict(page.obj, |d| {
+        d.set(b"Contents".to_vec(), pdfcraft_cos::Object::Ref(cs));
+        d.set(b"Resources".to_vec(), pdfcraft_cos::Object::Dict(resources));
+    })
+    .unwrap();
+    let bytes = pdfcraft_cos::write_full(&doc, &Default::default()).unwrap();
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |cc| {
+        crate::support::install_runtime(&cc.egui_ctx);
+        {
+            let mut app = crate::control::new_app();
+            app.set_option(&egui::Context::default(), "language", "en").unwrap();
+            app.open_bytes(&egui::Context::default(), "soft.pdf", None, bytes.clone()).expect("opens");
+            app
+        }
+    });
+    h.run_steps(4);
+    let id = h.state().views[0].id;
+    assert!(h.execute("prepress.flatten_transparency"));
+    h.run_steps(2);
+    assert!(!h.state().dialogs.is_empty(), "Flatten transparency is open");
+    h.key_press(egui::Key::Escape);
+    h.run_steps(3);
+    assert!(h.state().dialogs.is_empty());
+    assert_eq!(h.state().session.get(id).unwrap().can_undo(), None, "Escape changes nothing");
+
+    assert!(h.execute("prepress.flatten_transparency"));
+    h.run_steps(2);
+    h.query_all_by_label("Flatten").last().unwrap().click();
+    for _ in 0..400 {
+        h.run_steps(2);
+        if h.state().session.get(id).unwrap().can_undo().is_some() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    h.run_steps(2);
+    assert_eq!(h.state().session.get(id).unwrap().can_undo(), Some("Flatten transparency"));
+    let said = support::shown_notice(&h).unwrap();
+    assert!(said.starts_with("Flattened 1 page.") && said.contains("1 page uses no transparency."), "{said}");
+}

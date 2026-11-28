@@ -227,6 +227,7 @@ use workflows::compare_ui;
 use workflows::create_ui;
 use workflows::export_ui;
 use workflows::files;
+use workflows::flatten_ui;
 use workflows::folder_search_ui;
 pub(crate) use workflows::job_count::JobCount;
 use workflows::js_dialogs;
@@ -807,6 +808,10 @@ pub struct PdfCraftApp {
     pub scan_clean_draft: scan_clean_ui::ScanCleanDraft,
     pub scan_clean_run: Option<scan_clean_ui::ScanCleanRun>,
     pub(crate) scan_cleans: Queue<DocId, Result<pdfcraft_engine::scan_clean::ScanCleaned, pdfcraft_engine::EditError>>,
+    /// Print production ▸ Flatten transparency: the dialog's choices and the running job.
+    pub(crate) flatten_draft: flatten_ui::FlattenDraft,
+    pub(crate) flatten_run: Option<flatten_ui::FlattenRun>,
+    pub(crate) flatten_jobs: Queue<DocId, Result<pdfcraft_engine::flatten_transparency::Flattened, pdfcraft_engine::EditError>>,
     /// Pages ▸ Remove white margins: the dialog's choices and the running measurement.
     pub white_margins_draft: white_margins_ui::WhiteMarginsDraft,
     pub white_margins_run: Option<white_margins_ui::WhiteMarginsRun>,

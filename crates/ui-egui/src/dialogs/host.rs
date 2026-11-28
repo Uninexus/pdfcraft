@@ -129,6 +129,7 @@ fn results(app: &mut PdfCraftApp, ctx: &egui::Context) {
     app.print_pass(ctx);
     app.recognize_text_pass(ctx);
     app.enhance_scan_pass(ctx);
+    app.flatten_transparency_pass(ctx);
     app.white_margins_pass(ctx);
     app.bates_multi_pass(ctx);
     app.optimize_batch_pass(ctx);
