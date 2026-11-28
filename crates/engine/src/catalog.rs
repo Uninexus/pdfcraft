@@ -364,6 +364,8 @@ const ALL_GROUPS: &[ToolGroup] = &[
                     item("Detect form fields", "scan", "form.detect", Ready),
                     item("Clear form", "eraser", "form.clear", Ready),
                     item("Field properties", "settings-2", "form.field.properties", Ready),
+                    item("Duplicate field", "copy-plus", "form.field.duplicate", Ready),
+                    item("Create multiple copies", "layout_grid", "form.field.copies", Ready),
                     item("Tab order by rows", "rows-3", "form.tab_order.row", Ready),
                     item("Tab order by columns", "columns-3", "form.tab_order.column", Ready),
                     item("Calculation order", "list_numbered", "form.calculation_order", Ready),

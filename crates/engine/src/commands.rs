@@ -446,6 +446,8 @@ const ALL_COMMANDS: &[CommandSpec] = &[
     c("protect.remove_hidden", "Remove hidden information…", None, None, Modification, "eye_off"),
     c("redact.sanitize", "Sanitize document…", None, None, Modification, "sparkles"),
     c("form.field.properties", "Field properties…", None, None, HasFields, "settings-2"),
+    c("form.field.duplicate", "Duplicate field…", None, None, Modification, "copy-plus"),
+    c("form.field.copies", "Create multiple copies of field…", None, None, Modification, "layout_grid"),
     c("form.field.signer.set", "Set the signer of a signature field", None, None, HasFields, "signature"),
     c("form.field.signer.clear", "Clear the signer of a signature field", None, None, HasFields, "eraser"),
     c("form.field.lock.set", "Set what a signature field locks when signed", None, None, HasFields, "signature"),
