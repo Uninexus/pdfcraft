@@ -449,6 +449,27 @@ fn find_bookmark_hits(outline: &[OutlineItem], query: &str, options: &FindOption
     hits
 }
 
+/// The comments and bookmarks of `doc` that hold `query`, for a list of results: where each is and what it says,
+/// labelled as the Search panel labels them.
+pub(crate) fn listed_matches(
+    doc: &pdfcraft_engine::Document,
+    query: &str,
+    options: &FindOptions,
+    comments: bool,
+    bookmarks: bool,
+) -> Vec<pdfcraft_engine::folder_search::Match> {
+    let listed = |page, kind: &str, text| pdfcraft_engine::folder_search::Match { page, before: format!("{kind}:"), text, after: String::new() };
+    let mut found = Vec::new();
+    if comments {
+        found.extend(find_comment_hits(doc, query, options).into_iter().map(|hit| listed(hit.key.0, tl!("Comment"), hit.excerpt)));
+    }
+    if bookmarks {
+        let hits = find_bookmark_hits(&doc.info.outline, query, options);
+        found.extend(hits.into_iter().map(|hit| listed(hit.page, tl!("Bookmark"), shortened(&hit.title))));
+    }
+    found
+}
+
 /// The find bar at the page view's top edge, end-aligned. In Edit text mode (`editing`) it offers a
 /// Replace row: Replace changes the highlighted match, Replace all every match, each inside its own
 /// paragraph.
