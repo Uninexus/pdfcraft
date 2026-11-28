@@ -243,7 +243,8 @@ fn add_watermark_in_place(doc: &mut Document, pages: &[usize], wm: &Watermark, r
         if let Some(src) = &wm.source {
             let mut content = begin(MarkKind::Watermark, "Watermark", page.view_matrix(doc));
             content.push_str(&format!("/PCGS{} gs\n", (opacity * 100.0).round() as i64));
-            content.push_str(&picture(src, (w, h), wm.scale, wm.rotation, wm.offset));
+            let [cx, cy] = wm.centre((w, h), crate::marks::fitted(src, (w, h), wm.scale).1);
+            content.push_str(&picture(src, (w, h), wm.scale, wm.rotation, [cx - w / 2.0, cy - h / 2.0]));
             content.push_str(END);
             add_resources(doc, &page, Some(opacity), None)?;
             add_picture_resource(doc, &page_list(doc)[i].clone(), src)?;
@@ -254,7 +255,8 @@ fn add_watermark_in_place(doc: &mut Document, pages: &[usize], wm: &Watermark, r
         let widest = lines.iter().map(|l| thai_width(l, 1.0, helvetica_width)).fold(0.0, f64::max).max(0.01);
         let size = if wm.font_size > 0.0 { wm.font_size } else { ((w * w + h * h).sqrt() * 0.5 / widest).clamp(6.0, 300.0) };
         let (s, c) = wm.rotation.to_radians().sin_cos();
-        let (cx, cy) = (w / 2.0 + wm.offset[0], h / 2.0 + wm.offset[1]);
+        let height = size * 1.15 * (lines.len() as f64 - 1.0) + size;
+        let [cx, cy] = wm.centre((w, h), (widest * size, height));
         let mut content = begin(MarkKind::Watermark, "Watermark", page.view_matrix(doc)).into_bytes();
         content.extend(
             format!(

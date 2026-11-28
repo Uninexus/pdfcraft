@@ -1596,7 +1596,7 @@ fn all_tools() -> Vec<ToolDef> {
             }),
             &["doc"],
         )),
-        t("doc_watermark", "Add watermark", "Add a watermark to pages: text, or a picture from `file` (an image, or page `file_page` of a PDF) at `scale` of the page (default 0.5); rotated (degrees counter-clockwise, default 45), semi-transparent (opacity 0–1, default 0.5), text fitted to the page unless font_size is given (Thai drawn from PdfCraft's built-in Thai face; a build without one refuses it), on top unless behind: true; moved from the page centre by `offset_x` (right) and `offset_y` (up) points (default 0). replace: true swaps out existing ones. Undoable.")
+        t("doc_watermark", "Add watermark", "Add a watermark to pages: text, or a picture from `file` (an image, or page `file_page` of a PDF) at `scale` of the page (default 0.5); rotated (degrees counter-clockwise, default 45), semi-transparent (opacity 0–1, default 0.5), text fitted to the page unless font_size is given (Thai drawn from PdfCraft's built-in Thai face; a build without one refuses it), on top unless behind: true; moved from the page centre by `offset_x` (right) and `offset_y` (up) points (default 0), or placed from an edge: with `from_x` left or right, or `from_y` top or bottom, that offset is the distance inward from the edge to the watermark's own edge. replace: true swaps out existing ones. Undoable.")
             .cmd("edit.watermark")
             .with(schema(
                 json!({
@@ -1611,8 +1611,10 @@ fn all_tools() -> Vec<ToolDef> {
                     "opacity": { "type": "number", "minimum": 0, "maximum": 1 },
                     "rotation": { "type": "number" },
                     "behind": { "type": "boolean" },
-                    "offset_x": { "type": "number", "description": "Points right of the page centre (negative: left)." },
-                    "offset_y": { "type": "number", "description": "Points above the page centre (negative: below)." },
+                    "from_x": { "type": "string", "enum": ["left", "center", "right"] },
+                    "from_y": { "type": "string", "enum": ["top", "center", "bottom"] },
+                    "offset_x": { "type": "number", "description": "Points right of the page centre (negative: left), or inward from the from_x edge." },
+                    "offset_y": { "type": "number", "description": "Points above the page centre (negative: below), or inward from the from_y edge." },
                     "replace": { "type": "boolean" },
                 }),
                 &["doc"],

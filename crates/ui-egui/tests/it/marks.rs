@@ -248,7 +248,7 @@ fn watermark_and_background_dialogs() {
     h.execute("edit.watermark");
     h.steps(2);
     assert!(ok_disabled(&h), "OK waits for text");
-    h.get_by_label("Horizontal offset from centre");
+    h.get_by_label("Horizontal position from");
     type_into(&mut h, WATERMARK_TEXT, "DRAFT");
     h.get_by_role_and_label(egui::accesskit::Role::Dialog, "Add Watermark").get_by_label("OK").click();
     h.steps(3);

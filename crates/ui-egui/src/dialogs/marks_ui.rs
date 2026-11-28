@@ -24,7 +24,7 @@ use craft::ui::runtime::requests::PathKind;
 use craft::ui::style::DataColor;
 use craft::ui::text::TextField;
 use egui::{Color32, CornerRadius, Rect, pos2, vec2};
-use pdfcraft_engine::{Backdrop, Background, DocId, Edit, FontFamily, HeaderFooter, MarkKind, Watermark};
+use pdfcraft_engine::{Backdrop, Background, DocId, Edit, FontFamily, HeaderFooter, MarkEdge, MarkKind, Watermark};
 
 use crate::PdfCraftApp;
 
@@ -386,6 +386,8 @@ fn opening_fields(d: &MarksDraft, kind: MarkKind, m: &MarginUnits) -> DialogFiel
                 f.set("wm.rotation", FieldValue::Number(d.wm.rotation));
                 f.set("wm.opacity", FieldValue::Number(d.wm.opacity * 100.0));
                 f.set("wm.behind", FieldValue::Text(if d.wm.behind { "behind" } else { "above" }.into()));
+                f.set("wm.from.0", FieldValue::Text(edge_id(0, d.wm.from[0]).into()));
+                f.set("wm.from.1", FieldValue::Text(edge_id(1, d.wm.from[1]).into()));
                 f.set("wm.offset.0", FieldValue::Number(d.wm.offset[0]));
                 f.set("wm.offset.1", FieldValue::Number(d.wm.offset[1]));
             } else {
@@ -398,6 +400,19 @@ fn opening_fields(d: &MarksDraft, kind: MarkKind, m: &MarginUnits) -> DialogFiel
         MarkKind::PrinterMarks => {}
     }
     f
+}
+
+const EDGES: [MarkEdge; 3] = [MarkEdge::Start, MarkEdge::Center, MarkEdge::End];
+
+/// The dialog's name for `edge`, across the page (`axis` 0) or up it.
+fn edge_id(axis: usize, edge: MarkEdge) -> &'static str {
+    match (edge, axis) {
+        (MarkEdge::Center, _) => "centre",
+        (MarkEdge::Start, 0) => "left",
+        (MarkEdge::Start, _) => "bottom",
+        (MarkEdge::End, 0) => "right",
+        (MarkEdge::End, _) => "top",
+    }
 }
 
 fn source_id(kind: MarkKind, use_file: bool) -> &'static str {
@@ -453,6 +468,11 @@ fn read_fields(d: &mut MarksDraft, f: &DialogFields, kind: MarkKind, m: &MarginU
                 d.wm.rotation = f.number("wm.rotation").unwrap_or(d.wm.rotation);
                 d.wm.opacity = f.number("wm.opacity").map_or(d.wm.opacity, |p| p / 100.0);
                 d.wm.behind = f.text("wm.behind").map_or(d.wm.behind, |b| b == "behind");
+                for (k, slot) in d.wm.from.iter_mut().enumerate() {
+                    if let Some(id) = f.text(&format!("wm.from.{k}")) {
+                        *slot = EDGES.into_iter().find(|e| edge_id(k, *e) == id).unwrap_or_default();
+                    }
+                }
                 for k in 0..2 {
                     if let (Some(v), Some(slot)) = (f.number(&format!("wm.offset.{k}")), d.wm.offset.get_mut(k)) {
                         *slot = v;
@@ -616,9 +636,16 @@ fn rows(kind: MarkKind, g: &Geometry) -> Vec<Param> {
             let place =
                 [("behind".to_string(), tl!("Appear behind page").to_string()), ("above".to_string(), tl!("Appear on top of page").to_string())];
             rows.push(Param::new("wm.behind", tl!("Location"), ParamKind::radio(place.map(|(i, l)| (i, l.into())).to_vec(), Some("behind".into()))));
-            for (k, label) in [(0, tl!("Horizontal offset from centre")), (1, tl!("Vertical offset from centre"))] {
+            let across = [tl!("Left"), tl!("Centre"), tl!("Right")];
+            let up = [tl!("Bottom"), tl!("Centre"), tl!("Top")];
+            for (k, from, names, distance) in [
+                (0, tl!("Horizontal position from"), across, tl!("Horizontal distance")),
+                (1, tl!("Vertical position from"), up, tl!("Vertical distance")),
+            ] {
+                let options = EDGES.into_iter().zip(names).map(|(e, name)| (edge_id(k, e).to_string(), name.to_string()));
+                rows.push(Param::new(format!("wm.from.{k}"), from, choice(options, "centre")));
                 rows.push(
-                    Param::number(format!("wm.offset.{k}"), label, 0.0, 1.0, 1).unit(UnitKind::Points).bounds(Some(-MAX_OFFSET), Some(MAX_OFFSET)),
+                    Param::number(format!("wm.offset.{k}"), distance, 0.0, 1.0, 1).unit(UnitKind::Points).bounds(Some(-MAX_OFFSET), Some(MAX_OFFSET)),
                 );
             }
         }
@@ -892,7 +919,10 @@ fn overlay(kind: MarkKind, d: &MarksDraft, size: (f64, f64)) -> SharedOverlay {
                 let half = galley.size() / 2.0;
                 let (sn, cs) = angle.sin_cos();
                 let offset = vec2(half.x * cs - half.y * sn, half.x * sn + half.y * cs);
-                let centre = r.center() + vec2(wm.offset[0] as f32 * s, -wm.offset[1] as f32 * s);
+                // The galley's size in points of the page, placed as the edit will place it.
+                let drawn = (f64::from(galley.size().x / s), f64::from(galley.size().y / s));
+                let [cx, cy] = wm.centre((page_w, page_h), drawn);
+                let centre = pos2(r.left() + cx as f32 * s, r.bottom() - cy as f32 * s);
                 p.add(egui::epaint::TextShape::new(centre - offset, galley, Color32::BLACK).with_angle(angle));
             }
             MarkKind::Background if use_file => {
@@ -1202,6 +1232,24 @@ mod tests {
         d.bg.replace_backdrop = false;
         assert_eq!(background_tint(&d, Some(Backdrop::Fill)), Color32::WHITE, "its white backdrop stays and hides it");
         assert_eq!(background_tint(&d, None), colour, "unticked changes nothing without a backdrop");
+    }
+
+    #[test]
+    fn the_watermark_edit_carries_the_edges_it_is_placed_from() {
+        let mut d = MarksDraft::default();
+        let units = MarginUnits { per: 1.0, kind: UnitKind::Points, decimals: 1 };
+        let mut fields = opening_fields(&d, MarkKind::Watermark, &units);
+        fields.set("wm.text", FieldValue::Text("DRAFT".into()));
+        fields.set("wm.from.0", FieldValue::Text("right".into()));
+        fields.set("wm.from.1", FieldValue::Text("top".into()));
+        read_fields(&mut d, &fields, MarkKind::Watermark, &units);
+        match edit(&d, MarkKind::Watermark, 3, 0, &[]) {
+            Edit::AddWatermark { settings, .. } => assert_eq!(settings.from, [MarkEdge::End, MarkEdge::End]),
+            other => panic!("expected AddWatermark, got {other:?}"),
+        }
+        // And the dialog opens again on what was chosen.
+        let again = opening_fields(&d, MarkKind::Watermark, &units);
+        assert_eq!((again.text("wm.from.0"), again.text("wm.from.1")), (Some("right"), Some("top")));
     }
 
     #[test]
