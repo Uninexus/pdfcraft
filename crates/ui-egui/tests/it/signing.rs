@@ -955,6 +955,12 @@ fn signature_properties_show_a_signatures_details() {
     h.run_steps(3);
     h.get_by_role_and_label(Role::Dialog, "Signature properties");
     assert_eq!(value(&h, "Reason"), "I approve");
+    // Its certificate opens from here too, in the dialog's place.
+    h.get_by_role_and_label(Role::Dialog, "Signature properties");
+    h.query_all_by_label("Show certificate…").last().expect("in the dialog").click();
+    h.run_steps(4);
+    assert!(h.state().dialogs.open_dialogs().is_empty());
+    h.get_by_role_and_label(Role::Dialog, "Certificate Viewer");
 }
 
 /// Whether a field-sized filled box is painted over the page point: the field highlight.

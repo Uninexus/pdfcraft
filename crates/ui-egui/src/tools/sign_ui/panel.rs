@@ -249,8 +249,7 @@ fn line_row<'a>(s: &SignatureInfo, child: &Child, action: &'a RefCell<Option<Pan
                 }
             });
             if let Some(c) = &s.certificate {
-                let mut chain = vec![c.clone()];
-                chain.extend(s.chain.iter().filter(|x| x.raw != c.raw).cloned());
+                let chain = certificate_chain(s, c);
                 row = row.below(Button::new(tl!("Show certificate…")), move |out| {
                     if out.clicked() {
                         *action.borrow_mut() = Some(PanelAction::ViewCertificate(chain));
@@ -266,6 +265,13 @@ fn line_row<'a>(s: &SignatureInfo, child: &Child, action: &'a RefCell<Option<Pan
             row
         }
     }
+}
+
+/// The certificates Show certificate lists for `s`: the signer's `c` first, then the rest of the chain.
+pub(crate) fn certificate_chain(s: &SignatureInfo, c: &Certificate) -> Vec<Certificate> {
+    let mut chain = vec![c.clone()];
+    chain.extend(s.chain.iter().filter(|x| x.raw != c.raw).cloned());
+    chain
 }
 
 /// The Signatures panel body.

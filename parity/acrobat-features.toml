@@ -6644,7 +6644,7 @@ status = "partial"
 commands = ["sign.panel", "sign.properties"]
 tools = ["sign_list"]
 evidence = ["crates/ui-egui/tests/it/signing.rs::drawing_a_signature_creating_an_id_signing_and_trusting", "crates/ui-egui/tests/it/signing.rs::signature_properties_show_a_signatures_details"]
-notes = "validity summary, signer, issuer, time, algorithm in the panel, and in a Signature properties dialog (command sign.properties, or Properties… on a signature in the panel; a choice of signature when there are several) with the findings, certificate validity, timestamp, reason, location, contact, format, certification, revision and field. Reading only. Missing: certificate chain and trust settings inside the dialog (Show certificate… in the panel), and Acrobat's other tabs"
+notes = "validity summary, signer, issuer, time, algorithm in the panel, and in a Signature properties dialog (command sign.properties, or Properties… on a signature in the panel; a choice of signature when there are several) with the findings, certificate validity, timestamp, reason, location, contact, format, certification, revision and field. Reading only; Show certificate… in the dialog closes it and opens the Certificate Viewer on the signer's chain. Missing: trust settings inside the dialog (Trust is in the panel), and Acrobat's other tabs"
 
 [[feature]]
 id = "sign.certificate-viewer"

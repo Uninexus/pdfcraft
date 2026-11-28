@@ -15,7 +15,7 @@ use crate::canvas::{DocView, Snapshot, SnapshotKind};
 
 pub(crate) mod cert_viewer;
 pub(crate) mod dialog;
-mod panel;
+pub(crate) mod panel;
 pub(crate) mod tool;
 
 #[cfg(test)]
