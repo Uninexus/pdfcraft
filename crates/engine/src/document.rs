@@ -59,6 +59,9 @@ pub struct Document {
     pub read_only_reason: Option<String>,
     /// Interactive form fields of the current state (empty without a form).
     pub form: Arc<Vec<pdfcraft_forms::Field>>,
+    /// Pages that set no tab order follow the structure tree (the session's, see
+    /// [`Session::set_tabs_follow_structure`](crate::Session::set_tabs_follow_structure)).
+    pub(crate) tabs_follow_structure: bool,
     pub(crate) marker_scan: OnceLock<pdfcraft_edit::MarkerScan>,
     pub(crate) links: OnceLock<Vec<pdfcraft_annot::links::LinkItem>>,
     /// Signature fields, validated against the session's trust store (Signatures panel).

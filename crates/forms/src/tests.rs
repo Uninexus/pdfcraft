@@ -9460,3 +9460,47 @@ fn a_next_chain_of_300_actions_is_cut_at_256_steps_and_capped() {
     let cut = chain(300);
     assert_eq!((cut.entries.len(), cut.capped), (256, true));
 }
+
+/// Name the widgets of `names`, in that order, in a structure tree of `doc`.
+fn tag_widgets(doc: &mut Document, names: &[&str]) {
+    let all = fields(doc);
+    let elements: Vec<Object> = names
+        .iter()
+        .map(|name| {
+            let widget = field(&all, name).widgets[0].obj;
+            let mut reference = Dict::new();
+            reference.set(b"Type".to_vec(), Object::name("OBJR"));
+            reference.set(b"Obj".to_vec(), Object::Ref(widget));
+            let mut element = Dict::new();
+            element.set(b"S".to_vec(), Object::name("Form"));
+            element.set(b"K".to_vec(), Object::Dict(reference));
+            Object::Ref(doc.add(Object::Dict(element)))
+        })
+        .collect();
+    let mut tree = Dict::new();
+    tree.set(b"Type".to_vec(), Object::name("StructTreeRoot"));
+    tree.set(b"K".to_vec(), Object::Array(elements));
+    let tree = doc.add(Object::Dict(tree));
+    doc.update_dict(doc.root().unwrap(), |c| c.set(b"StructTreeRoot".to_vec(), Object::Ref(tree))).unwrap();
+}
+
+#[test]
+fn structure_tab_order_follows_the_tags() {
+    let mut doc = one_page();
+    let text = NewField::Text { multiline: false };
+    for (name, y) in [("A", 700.0), ("B", 660.0), ("C", 620.0), ("D", 580.0)] {
+        add_field(&mut doc, 0, [50.0, y, 250.0, y + 20.0], &text, Some(name)).unwrap();
+    }
+    let order = |doc: &Document| -> String {
+        let mut all: Vec<(usize, String)> = fields(doc).into_iter().map(|f| (f.widgets[0].tab, f.name)).collect();
+        all.sort();
+        all.into_iter().map(|x| x.1).collect()
+    };
+    set_tab_order(&mut doc, &[0], TabOrder::Structure).unwrap();
+    assert_eq!(order(&doc), "ABCD", "no tags: annotation order");
+    // The tags name C, then A; the widgets they leave out follow in annotation order.
+    tag_widgets(&mut doc, &["C", "A"]);
+    assert_eq!(order(&reopen(&doc)), "CABD");
+    set_tab_order(&mut doc, &[0], TabOrder::Annotations).unwrap();
+    assert_eq!(order(&doc), "ABCD", "a page that does not ask is not moved");
+}

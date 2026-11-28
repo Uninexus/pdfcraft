@@ -818,7 +818,7 @@ pub(crate) fn enumerate(doc: &Document) -> (Vec<Field>, usize, usize) {
     let listed = out.len();
     adopt_page_fields(doc, &pages, &base, &page_of, &mut seen, &mut out);
     let adopted = out.len() - listed;
-    rank_tabs(doc, &pages, &annot_index, &mut out);
+    rank_tabs(doc, &pages, &annot_index, &mut out, false);
     (out, adopted, seen.options_omitted)
 }
 

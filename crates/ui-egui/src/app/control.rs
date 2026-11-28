@@ -510,6 +510,10 @@ impl PdfCraftApp {
                     _ => return Err("text-links must be true or false".into()),
                 };
             }
+            ("tabs-follow-structure", _) => {
+                let on = value.parse::<bool>().map_err(|_| "tabs-follow-structure must be true or false")?;
+                self.session.set_tabs_follow_structure(on);
+            }
             ("caret-on-open", _) => {
                 self.caret_on_open = value.parse::<bool>().map_err(|_| "caret-on-open must be true or false")?;
             }

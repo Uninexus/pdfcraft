@@ -111,6 +111,12 @@ fn cases() -> Vec<Case> {
             applied: |a| a.caret_on_open,
         },
         Case {
+            name: "tab order from the document structure",
+            page: "Accessibility",
+            edit: |h| click(h, "Use the document structure for tab order when a page sets none"),
+            applied: |a| a.session.tabs_follow_structure(),
+        },
+        Case {
             name: "units",
             page: "Documents and view",
             edit: |h| {

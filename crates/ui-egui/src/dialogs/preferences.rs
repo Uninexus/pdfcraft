@@ -154,6 +154,7 @@ struct PrefsDraft {
     text_links: bool,
     export_scans: bool,
     caret_on_open: bool,
+    tabs_follow_structure: bool,
     units: Unit,
     /// Preferences > Grid: the page grid, in points, and the unit its numbers are shown in.
     grid: pdfcraft_engine::guides::Grid,
@@ -209,6 +210,7 @@ impl PrefsDraft {
             text_links: app.text_links,
             export_scans: app.ocr_draft.export_scans,
             caret_on_open: app.caret_on_open,
+            tabs_follow_structure: app.session.tabs_follow_structure(),
             units: app.units,
             grid: crate::grid_prefs::effective(&app.session),
             grid_unit: app.grid_unit,
@@ -268,6 +270,7 @@ impl PrefsDraft {
             text_links: true,
             export_scans: true,
             caret_on_open: false,
+            tabs_follow_structure: false,
             units: Unit::default(),
             grid: crate::grid_prefs::default_grid(),
             grid_unit: Unit::default(),
@@ -695,6 +698,7 @@ impl PreferencesModel for Prefs<'_> {
             ("view.text_links", PrefValue::Bool(v)) => d.text_links = v,
             ("view.export_scans", PrefValue::Bool(v)) => d.export_scans = v,
             ("accessibility.caret", PrefValue::Bool(v)) => d.caret_on_open = v,
+            ("accessibility.tabs", PrefValue::Bool(v)) => d.tabs_follow_structure = v,
             ("view.units", PrefValue::Choice(id)) => d.units = lookup(&unit_table(), &id).unwrap_or(d.units),
             ("grid.unit", PrefValue::Choice(id)) => d.grid_unit = lookup(&unit_table(), &id).unwrap_or(d.grid_unit),
             ("grid.spacing", PrefValue::Float(v)) => d.grid.spacing = v / d.grid_unit.per_point(),
@@ -906,7 +910,10 @@ impl PreferencesModel for Prefs<'_> {
                 d.login_name = fresh.login_name;
                 d.author_from_login_name = fresh.author_from_login_name;
             }
-            "accessibility" => d.caret_on_open = fresh.caret_on_open,
+            "accessibility" => {
+                d.caret_on_open = fresh.caret_on_open;
+                d.tabs_follow_structure = fresh.tabs_follow_structure;
+            }
             "forms" => {
                 d.highlight_fields = fresh.highlight_fields;
                 d.field_highlight_color = fresh.field_highlight_color;
@@ -998,6 +1005,7 @@ impl PreferencesDraft for Prefs<'_> {
         self.app.text_links = d.text_links;
         self.app.ocr_draft.export_scans = d.export_scans;
         self.app.caret_on_open = d.caret_on_open;
+        self.app.session.set_tabs_follow_structure(d.tabs_follow_structure);
         self.app.units = d.units;
         self.app.grid_unit = d.grid_unit;
         // Only a grid that was changed becomes the session's preference, so an untouched page leaves it unset.
@@ -1195,6 +1203,12 @@ impl Prefs<'_> {
                     "Caret browsing: move through the page text and select it with the arrow keys. View > Caret browsing turns it off for a document."
                 ),
             ),
+            RowSpec::new(
+                "accessibility.tabs",
+                tl!("Use the document structure for tab order when a page sets none"),
+                RowKind::Bool(d.tabs_follow_structure),
+            )
+            .help(tl!("Tab moves through form fields as the document's tags list them. The document is not changed.")),
         ];
         PageSpec::new("accessibility", tl!("Accessibility"), rows)
     }

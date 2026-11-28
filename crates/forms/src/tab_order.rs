@@ -10,7 +10,8 @@ pub enum TabOrder {
     /// Columns, left to right, top to bottom within a column (`/C`; columns right to left in a
     /// document bound on the right).
     Column,
-    /// The document structure (`/S`; annotation order when the file has none).
+    /// The document structure (`/S`): the order the structure tree names the widgets in, then,
+    /// in annotation order, those it does not name (all of them when the file has no tags).
     Structure,
     /// Unspecified: annotation order.
     Annotations,
@@ -36,8 +37,32 @@ impl TabOrder {
 /// A widget on a page for tab ordering: (page, field, widget, rect, annotation index).
 type TabItem = (usize, usize, usize, [f64; 4], usize);
 
+/// Rank `fields` of `doc` again, with pages that set no tab order (`/Tabs`) following the
+/// structure tree when `unset_follows_structure`: a reader's choice, which changes nothing in the
+/// file.
+pub fn rank_tabs_with(doc: &Document, fields: &mut [Field], unset_follows_structure: bool) {
+    let pages = page_refs(doc);
+    let mut annot_index = std::collections::HashMap::new();
+    for page in &pages {
+        let annots = doc.get(*page).as_dict().and_then(|d| d.get(b"Annots").cloned());
+        let list = annots.map(|a| doc.resolve(&a));
+        for (at, entry) in list.as_deref().and_then(Object::as_array).into_iter().flatten().enumerate() {
+            if let Some(r) = entry.as_ref() {
+                annot_index.entry(r).or_insert(at);
+            }
+        }
+    }
+    rank_tabs(doc, &pages, &annot_index, fields, unset_follows_structure);
+}
+
 /// Every widget's place in the tab order.
-pub(crate) fn rank_tabs(doc: &Document, pages: &[ObjRef], annot_index: &std::collections::HashMap<ObjRef, usize>, out: &mut [Field]) {
+pub(crate) fn rank_tabs(
+    doc: &Document,
+    pages: &[ObjRef],
+    annot_index: &std::collections::HashMap<ObjRef, usize>,
+    out: &mut [Field],
+    unset_follows_structure: bool,
+) {
     let mut items: Vec<TabItem> = Vec::new();
     for (fi, f) in out.iter().enumerate() {
         for (wi, w) in f.widgets.iter().enumerate() {
@@ -53,13 +78,19 @@ pub(crate) fn rank_tabs(doc: &Document, pages: &[ObjRef], annot_index: &std::col
             i.3 = [-i.3[2], i.3[1], -i.3[0], i.3[3]];
         }
     }
+    // Read only when a page asks for it.
+    let mut structure = None;
     let mut ordered: Vec<(usize, usize)> = Vec::with_capacity(items.len());
     for (pi, p) in pages.iter().enumerate() {
         let mut on: Vec<_> = items.iter().filter(|i| i.0 == pi).collect();
         if on.is_empty() {
             continue;
         }
-        let tabs = TabOrder::of_page(doc, *p);
+        let mut tabs = TabOrder::of_page(doc, *p);
+        let unset = doc.get(*p).as_dict().is_none_or(|d| d.get(b"Tabs").is_none());
+        if unset && unset_follows_structure {
+            tabs = TabOrder::Structure;
+        }
         match tabs {
             TabOrder::Row | TabOrder::Column => {
                 let row = tabs == TabOrder::Row;
@@ -86,7 +117,16 @@ pub(crate) fn rank_tabs(doc: &Document, pages: &[ObjRef], annot_index: &std::col
                     ordered.extend(g.iter().map(|i| (i.1, i.2)));
                 }
             }
-            TabOrder::Structure | TabOrder::Annotations => {
+            TabOrder::Structure => {
+                let named = structure.get_or_insert_with(|| structure_places(doc));
+                let place = |i: &TabItem| {
+                    let widget = out.get(i.1).and_then(|f| f.widgets.get(i.2));
+                    widget.and_then(|w| named.get(&w.obj)).copied().unwrap_or(usize::MAX)
+                };
+                on.sort_by_key(|i| (place(i), i.4));
+                ordered.extend(on.iter().map(|i| (i.1, i.2)));
+            }
+            TabOrder::Annotations => {
                 on.sort_by_key(|i| i.4);
                 ordered.extend(on.iter().map(|i| (i.1, i.2)));
             }
@@ -100,6 +140,40 @@ pub(crate) fn rank_tabs(doc: &Document, pages: &[ObjRef], annot_index: &std::col
     for (rank, (fi, wi)) in ordered.into_iter().enumerate() {
         out[fi].widgets[wi].tab = rank;
     }
+}
+
+/// The most structure tree entries read for the tab order.
+const MAX_STRUCTURE_ENTRIES: usize = 1_000_000;
+
+/// Where each object the structure tree names (`/OBJR`, ISO 32000-2 §14.7.5.3) comes in it, read
+/// depth first.
+fn structure_places(doc: &Document) -> std::collections::HashMap<ObjRef, usize> {
+    let mut places = std::collections::HashMap::new();
+    let root = doc.root().and_then(|r| doc.get(r).as_dict().and_then(|c| c.get(b"StructTreeRoot")).map(|t| doc.resolve(t)));
+    let Some(kids) = root.as_deref().and_then(Object::as_dict).and_then(|t| t.get(b"K")) else { return places };
+    // What is left to read, the next one last.
+    let mut waiting = vec![kids.clone()];
+    let mut seen = std::collections::HashSet::new();
+    let mut read = 0;
+    while let Some(entry) = waiting.pop() {
+        read += 1;
+        if read > MAX_STRUCTURE_ENTRIES || entry.as_ref().is_some_and(|r| !seen.insert(r)) {
+            continue;
+        }
+        match &*doc.resolve(&entry) {
+            Object::Array(list) => waiting.extend(list.iter().rev().take(MAX_STRUCTURE_ENTRIES).cloned()),
+            Object::Dict(d) => {
+                if let Some(named) = d.reference(b"Obj") {
+                    let next = places.len();
+                    places.entry(named).or_insert(next);
+                } else if let Some(below) = d.get(b"K") {
+                    waiting.push(below.clone());
+                }
+            }
+            _ => {}
+        }
+    }
+    places
 }
 
 /// Whether the document is bound on the right (`/ViewerPreferences /Direction /R2L`).

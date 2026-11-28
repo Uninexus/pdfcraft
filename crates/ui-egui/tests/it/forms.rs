@@ -2783,3 +2783,38 @@ fn tab_leaves_the_page_view_at_both_ends_of_the_form() {
         assert_eq!(walked, modifiers.is_none(), "{modifiers:?}: Tab walks on through the fields, Shift+Tab from the first leaves at once");
     }
 }
+
+#[test]
+fn tabbing_between_text_fields_keeps_the_keyboard_in_the_field() {
+    use egui_kittest::kittest::NodeT as _;
+    let bytes = pdf_from_objects(&[
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [4 0 R 5 0 R 6 0 R] /DA (/Helv 0 Tf 0 g) /DR << /Font << /Helv 7 0 R >> >> >> >>",
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 300 400] >>",
+        "<< /Type /Page /Parent 2 0 R /Annots [4 0 R 5 0 R 6 0 R] >>",
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (one) /Rect [20 350 280 372] /P 3 0 R /F 4 >>",
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (two) /Rect [20 310 280 332] /P 3 0 R /F 4 >>",
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (three) /Rect [20 270 280 292] /P 3 0 R /F 4 >>",
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
+    ]);
+    let mut h = harness_with_bytes("three.pdf", bytes);
+    let typed = |h: &mut Harness<'static, PdfCraftApp>, name: &str, text: &str| {
+        let on = h.query_by(|n| n.is_focused()).and_then(|n| n.accesskit_node().label());
+        assert_eq!(on.as_deref(), Some(name), "the keyboard is in the field");
+        h.event(egui::Event::Text(text.into()));
+        h.run_steps(3);
+    };
+    click_field(&mut h, "one", 0);
+    h.run_steps(4);
+    typed(&mut h, "one", "a");
+    for (name, text) in [("two", "b"), ("three", "c")] {
+        h.key_press(egui::Key::Tab);
+        h.run_steps(4);
+        typed(&mut h, name, text);
+    }
+    h.key_press_modifiers(egui::Modifiers::SHIFT, egui::Key::Tab);
+    h.run_steps(4);
+    typed(&mut h, "two", "d");
+    h.key_press(egui::Key::Enter);
+    h.run_steps(4);
+    assert_eq!((value(&h, "one"), value(&h, "two"), value(&h, "three")), (vec!["a".to_string()], vec!["d".to_string()], vec!["c".to_string()]));
+}
