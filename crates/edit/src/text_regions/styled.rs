@@ -2182,6 +2182,11 @@ pub(crate) fn rewrite_styled_block(
     push_whole_paragraph_marker(&mut block_ops, marked, "EMC");
     block_ops.push(Op::new("Q", vec![]));
     let on_top = crate::lift_on_top(over, &mut block_ops);
+    // A tag opened inside the text object goes round the new text, or the text would lose it.
+    let mut drop = drop;
+    if !over && let Some(tag) = crate::text::tags::tag_to_move(doc, &res, &ops, o.bt_op, start, &drop) {
+        tag.take(&mut block_ops, &mut drop);
+    }
     block_ops.extend(after.ops());
     if split {
         block_ops.insert(0, Op::new("ET", vec![]));
