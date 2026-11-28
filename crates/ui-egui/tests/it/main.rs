@@ -89,6 +89,7 @@ mod optimize;
 mod optimize_batch;
 mod organize_drag;
 mod page_selection_menu;
+mod page_tool_choices;
 mod page_view;
 mod pageboxes;
 mod panel_snapshots;

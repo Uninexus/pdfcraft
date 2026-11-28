@@ -414,7 +414,7 @@ impl PdfCraftApp {
     /// Show Split; `before_selected` opens it on the cuts before the selected pages when there are any.
     pub fn open_split(&mut self, ctx: &egui::Context, before_selected: bool) {
         let Some(facts) = self.split_facts() else { return };
-        let mut seeds = Vec::new();
+        let mut seeds = vec![("template", FieldValue::from(self.split_template.as_str()))];
         if before_selected && !facts.cuts.is_empty() {
             seeds.push(("mode", FieldValue::from("selection")));
         }
@@ -491,6 +491,7 @@ impl PdfCraftApp {
         {
             let plan = facts.plan(&result.fields);
             let template = result.fields.text("template").map(str::to_string);
+            self.split_template = template.clone().unwrap_or_default();
             self.split_active_named(ctx, &plan, template.as_deref());
         }
         if let Some(result) = self.answered(ctx, EXTRACT) {
