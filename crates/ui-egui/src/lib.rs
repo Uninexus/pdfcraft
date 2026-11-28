@@ -93,6 +93,45 @@ pub use files::{ExtractOptions, FilePurpose, SplitPlan};
 pub use recovery::{AUTOSAVE_MINUTES_MAX, AUTOSAVE_SECS};
 /// The longest time Preferences let full screen wait before turning a page, in seconds.
 pub const FULL_SCREEN_ADVANCE_MAX: u32 = 3600;
+
+/// Preferences: the colour behind the pages in full screen.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum FullScreenBackground {
+    #[default]
+    Black,
+    DarkGray,
+    LightGray,
+    White,
+}
+
+impl FullScreenBackground {
+    /// Every choice, in the order Preferences lists them.
+    pub const ALL: [Self; 4] = [Self::Black, Self::DarkGray, Self::LightGray, Self::White];
+
+    /// The name settings and `ui.set full-screen-background` use.
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Black => "black",
+            Self::DarkGray => "dark-gray",
+            Self::LightGray => "light-gray",
+            Self::White => "white",
+        }
+    }
+
+    /// The choice named `id`.
+    pub fn from_id(id: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|c| c.id() == id)
+    }
+
+    pub fn color(self) -> egui::Color32 {
+        egui::Color32::from_gray(match self {
+            Self::Black => 0,
+            Self::DarkGray => 40,
+            Self::LightGray => 184,
+            Self::White => 255,
+        })
+    }
+}
 pub use workflows::js_dialogs::JsDialog;
 pub use workflows::ocr_verify::{OcrVerify, Phase};
 
@@ -516,6 +555,8 @@ pub struct PdfCraftApp {
     session_keeper: craft::platform::session::SessionKeeper,
     /// Preferences: the seconds after which full screen turns a page that has no display time of its own; 0 never.
     pub full_screen_advance: u32,
+    /// Preferences: the colour behind the pages in full screen.
+    pub full_screen_background: FullScreenBackground,
     /// Find's case-sensitive, whole words, Include comments and Include bookmarks, as last chosen.
     pub(crate) find_choices: crate::canvas::FindChoices,
     /// Preferences: reload a document when its file changes on disk (#431).

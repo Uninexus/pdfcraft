@@ -1893,8 +1893,12 @@ fn pages_at(app: &mut PdfCraftApp, index: usize, rect: Rect, ui: &mut egui::Ui) 
         .session
         .get(doc_id)
         .and_then(|doc| crate::dialogs::field_copies_ui::preview(&app.dialogs, app.units.per_point(), &doc.info.pages, &doc.form));
-    // Full screen shows the pages on black, as production does.
-    let surround = if app.full_screen_document() { PasteboardColor::Black } else { PasteboardColor::Default };
+    // Full screen shows the pages on the colour chosen in Preferences, black unless changed.
+    let surround = if app.full_screen_document() {
+        PasteboardColor::Custom(craft::ui::style::DataColor::new(app.full_screen_background.color()))
+    } else {
+        PasteboardColor::Default
+    };
     // Auto-Complete: only for the focused plain text field, and only with the preference on (the session says none otherwise).
     let form_suggestions: Vec<String> = app.views[index]
         .session
@@ -1929,6 +1933,7 @@ fn pages_at(app: &mut PdfCraftApp, index: usize, rect: Rect, ui: &mut egui::Ui) 
 
     let find_marks: Vec<TextMark> = view.find.as_ref().map(Find::marks).unwrap_or_default();
     let present_at = presenting.then_some(presenter::PresentAt {
+        background: app.full_screen_background.color(),
         current: view.view.current,
         display: view.view.display,
         continuous: view.view.continuous,

@@ -604,7 +604,7 @@ impl Panels<'_> {
 fn document_view(app: &mut PdfCraftApp, ui: &mut Ui, rect: egui::Rect) {
     app.settle_document_view();
     if app.full_screen_document() {
-        ui.painter().rect_filled(rect, 0.0, egui::Color32::BLACK);
+        ui.painter().rect_filled(rect, 0.0, app.full_screen_background.color());
         if let Some(i) = app.active {
             match crate::compare_ui::side_by_side(app, i) {
                 Some((old, new)) => crate::compare_ui::compare_area(app, old, new, ui),

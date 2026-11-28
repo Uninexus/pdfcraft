@@ -348,6 +348,7 @@ fn presenter_frame_with(
     let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
         let painter = ui.ctx().layer_painter(egui::LayerId::background());
         let at = presenter::PresentAt {
+            background: egui::Color32::BLACK,
             current: v.view.current,
             display: v.view.display,
             continuous: v.view.continuous,
