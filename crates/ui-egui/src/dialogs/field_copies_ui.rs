@@ -1,12 +1,16 @@
 //! Create Multiple Copies (field menu while preparing a form): a field copied into a grid of rows and columns, each
 //! copy a field of its own. The rows, columns, spacing (in the Preferences unit) and an optional name pattern; the
 //! engine lays the grid out as the page is shown and adds every copy as one undo step, or refuses the whole grid with
-//! the reason (a copy off the page, a repeated or existing name). The tool `form_copy_field_grid` does the same
-//! headlessly.
+//! the reason (a copy off the page, a repeated or existing name). While the dialog is open the page shows where the
+//! copies would go, or that reason. The tool `form_copy_field_grid` does the same headlessly.
 
 use craft::ui::contract::Bind;
+use craft::ui::dialog::{DialogHost, dialog_id};
 use craft::ui::patterns::form_dialogs::{DialogFields, HostedParamDialog, Param, ParamDialog, ParamKind};
 use pdfcraft_engine::field_copies::{FieldGrid, MAX_COLUMNS, MAX_ROWS};
+use pdfcraft_engine::field_table::Cell;
+use pdfcraft_engine::{Edit, FormField};
+use pdfcraft_render::PageInfo;
 
 use crate::PdfCraftApp;
 use crate::pageboxes::unit_kind;
@@ -64,20 +68,55 @@ pub(crate) fn open(app: &mut PdfCraftApp, ctx: &egui::Context, name: String) {
     crate::dialogs::host::open(app, dialog);
 }
 
-/// The dialog was confirmed with `fields`: copies the field into the grid, or says why not.
-pub(crate) fn finish(ctx: &egui::Context, app: &mut PdfCraftApp, fields: &DialogFields) {
-    let Some(name) = fields.text(FIELD).map(str::to_owned) else { return };
-    let Some((_, id)) = app.active_ids() else { return };
+/// The grid the dialog's values ask for; the spacing there is in the Preferences unit, `per_point` of it to a point.
+fn grid_of(fields: &DialogFields, per_point: f64) -> FieldGrid {
     let count = |key: &str| fields.int(key).and_then(|v| usize::try_from(v).ok()).unwrap_or(1);
-    let per_point = app.units.per_point();
     let gap = |key: &str| fields.number(key).map_or(0.0, |v| v / per_point);
-    let grid = FieldGrid {
+    FieldGrid {
         rows: count("rows"),
         columns: count("columns"),
         row_gap: gap("row_gap"),
         column_gap: gap("column_gap"),
         pattern: fields.text("pattern").map(str::trim).filter(|p| !p.is_empty()).map(str::to_owned),
+    }
+}
+
+/// What the page shows while the dialog is open: where each copy would go, or why none can be made. Rectangles are as
+/// the page is shown (from its top-left corner), which is what the page overlay draws in.
+pub(crate) struct CopiesPreview {
+    /// The page the field is on, 0-based.
+    pub page: usize,
+    /// The field being copied.
+    pub field: [f64; 4],
+    pub cells: Result<Vec<Cell>, String>,
+}
+
+/// The preview for the open dialog; `pages` and `form` are the active document's, which the modal dialog keeps active.
+pub(crate) fn preview(dialogs: &DialogHost, per_point: f64, pages: &[PageInfo], form: &[FormField]) -> Option<CopiesPreview> {
+    let dialog = dialogs.get_by_id::<HostedParamDialog>(dialog_id(KEY))?;
+    let fields = dialog.fields();
+    let name = fields.text(FIELD)?;
+    let widget = form.iter().find(|f| f.name == name)?.widgets.first()?;
+    let page = widget.page?;
+    let info = pages.get(page)?;
+    let shown = |[x0, y0, x1, y1]: [f64; 4]| {
+        let (a, b) = (info.user_to_view(x0 as f32, y0 as f32), info.user_to_view(x1 as f32, y1 as f32));
+        [a[0].min(b[0]), a[1].min(b[1]), a[0].max(b[0]), a[1].max(b[1])].map(f64::from)
     };
+    let field = shown(widget.rect);
+    let cells = match pdfcraft_engine::field_copies::edit(name, &grid_of(fields, per_point), pages, form) {
+        Ok(Edit::CopyField { copies, .. }) => Ok(copies.into_iter().map(|c| Cell { rect: shown(c.rect), name: c.name }).collect()),
+        Ok(_) => return None,
+        Err(e) => Err(e.to_string()),
+    };
+    Some(CopiesPreview { page, field, cells })
+}
+
+/// The dialog was confirmed with `fields`: copies the field into the grid, or says why not.
+pub(crate) fn finish(ctx: &egui::Context, app: &mut PdfCraftApp, fields: &DialogFields) {
+    let Some(name) = fields.text(FIELD).map(str::to_owned) else { return };
+    let Some((_, id)) = app.active_ids() else { return };
+    let grid = grid_of(fields, app.units.per_point());
     let copies = grid.rows.saturating_mul(grid.columns).saturating_sub(1);
     let Some(doc) = app.session.get(id) else { return };
     let edit = match pdfcraft_engine::field_copies::edit(&name, &grid, &doc.info.pages, &doc.form) {

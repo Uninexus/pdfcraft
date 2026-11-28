@@ -972,6 +972,7 @@ struct PageBodyCx<'a> {
     /// The rulers are shown (View > Show Rulers): the guides can be dragged.
     rulers: bool,
     table_preview: Option<&'a crate::field_table_ui::Preview>,
+    copies_preview: Option<&'a crate::dialogs::field_copies_ui::CopiesPreview>,
 }
 
 impl PageBodyCx<'_> {
@@ -1668,6 +1669,13 @@ fn page_body(ui: &mut egui::Ui, body: &PageBody<'_>, callbacks: &mut PageCallbac
     {
         crate::field_table_ui::TablePreview::new(tl!("Table cells"), preview, xf).show_at(ui, body.rect);
     }
+    // Where Create Multiple Copies would put the copies.
+    if let Some(copies) = cx.copies_preview
+        && let Some(xf) = session.page_xform(copies.page, cx.geometry(body))
+    {
+        let cells = copies.cells.as_ref().map(Vec::as_slice).map_err(String::as_str);
+        crate::field_table_ui::TablePreview::cells(tl!("Copies"), copies.field, cells, xf).show_at(ui, body.rect);
+    }
     // The find marks under any tool, and the text selection where the Select tool is not the one painting it.
     let texts = selection::DocTexts::new(&session.texts, &session.text_failed, cx.rotation, cx.sizes);
     let paints_selection = !page_tools::tool_selects_text(cx.tool, cx.preparing);
@@ -1881,6 +1889,10 @@ fn pages_at(app: &mut PdfCraftApp, index: usize, rect: Rect, ui: &mut egui::Ui) 
         Color32::from_rgb(r, g, b)
     });
     let table_preview = crate::field_table_ui::preview(&mut app.dialogs, doc_id);
+    let copies_preview = app
+        .session
+        .get(doc_id)
+        .and_then(|doc| crate::dialogs::field_copies_ui::preview(&app.dialogs, app.units.per_point(), &doc.info.pages, &doc.form));
     // Full screen shows the pages on black, as production does.
     let surround = if app.full_screen_document() { PasteboardColor::Black } else { PasteboardColor::Default };
     // Auto-Complete: only for the focused plain text field, and only with the preference on (the session says none otherwise).
@@ -2028,6 +2040,7 @@ fn pages_at(app: &mut PdfCraftApp, index: usize, rect: Rect, ui: &mut egui::Ui) 
         grid,
         rulers: view_rulers,
         table_preview: table_preview.as_ref(),
+        copies_preview: copies_preview.as_ref(),
     };
     let source = DocPages::new(&app.session, doc_id).rotated(state.rotation).revisions(revisions).reports(reports);
     // A modal over the pages blocks the canvas's keys and presses in the framework, so the view needs no gate here.
