@@ -993,7 +993,8 @@ impl PdfCraftApp {
             }
             dialog
         });
-        // The pager row is there from the first pass, so the dialog is sized with its row.
+        // The picture's place and the pager row are there from the first pass, so the dialog is sized with them.
+        dialog.set_preview(Some(PreviewState::Pending(None)));
         dialog.set_preview_pager(Some(PanePager { shown: current + 1, count, shown_label: None, back: false, next: false, unit: PagerUnit::Page }));
         self.dialogs.open(dialog);
         self.marks_preview = Some(MarksPreview::new(kind, self.host.jobs_shared().clone(), self.wake.clone()));

@@ -768,3 +768,34 @@ fn removing_bates_numbering_from_chosen_pages_leaves_the_others() {
     assert!(marks(&h).is_empty(), "no page is numbered");
     assert!(!h.execute("edit.bates_remove_pages"));
 }
+
+/// In a short window the rows scroll under the fixed buttons, far enough to bring the whole preview into view.
+#[test]
+fn the_preview_can_be_scrolled_into_view_in_a_short_window() {
+    for command in ["edit.watermark", "edit.background", "edit.header_footer"] {
+        let mut h = harness();
+        h.set_size(egui::vec2(1100.0, 620.0));
+        h.steps(3);
+        assert!(h.execute(command), "{command}");
+        h.steps(4);
+        // A focused number field takes the wheel for itself: move the focus off Header & Footer's Size first.
+        h.key_press(egui::Key::Tab);
+        h.steps(2);
+        h.hover_at(egui::pos2(880.0, 470.0));
+        for _ in 0..20 {
+            h.event(egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                delta: egui::vec2(0.0, -200.0),
+                phase: egui::TouchPhase::Move,
+                modifiers: egui::Modifiers::NONE,
+                source: egui::MouseWheelSource::Unknown,
+            });
+            h.steps(3);
+        }
+        let ok = h.get_by_label("OK").rect();
+        assert!(ok.max.y <= 620.0, "{command}: OK stays in the window: {ok:?}");
+        let pager = h.get_by_label_contains("Preview: page").rect();
+        let preview = h.get_by_role_and_label(egui::accesskit::Role::Group, "Preview").rect();
+        assert!(preview.max.y <= ok.min.y && pager.max.y <= ok.min.y, "{command}: the preview ends above the buttons: {preview:?} {ok:?}");
+    }
+}
