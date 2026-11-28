@@ -51,6 +51,8 @@ pub struct Session {
     /// Highlight fields, as the viewer shows it: what forms' scripts read as
     /// `app.runtimeHighlight` (off by default, as in a session without a viewer).
     pub(crate) field_highlight: bool,
+    /// See [`Session::set_tabs_follow_structure`].
+    pub(crate) tabs_follow_structure: bool,
     /// Preferences ▸ Forms ▸ Auto-Complete: on remembers what is typed into text fields and offers
     /// it back (off by default), and what it has remembered (see [`crate::form_entries`]).
     pub(crate) form_autocomplete: bool,

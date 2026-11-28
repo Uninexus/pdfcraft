@@ -100,6 +100,10 @@ impl Session {
         } else if *document.captions != *self.captions {
             Self::draw_captions(&mut document, self.captions.clone());
         }
+        document.tabs_follow_structure = self.tabs_follow_structure;
+        if self.tabs_follow_structure {
+            Self::rank_form(&mut document);
+        }
         self.docs.push(document);
         self.run_open_scripts(id);
         id
@@ -406,6 +410,7 @@ impl Session {
             generation: 0,
             read_only_reason,
             form: Arc::new(form),
+            tabs_follow_structure: false,
             marker_scan: OnceLock::new(),
             links: OnceLock::new(),
             signatures: Arc::new(signatures),

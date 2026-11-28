@@ -37,8 +37,32 @@ impl TabOrder {
 /// A widget on a page for tab ordering: (page, field, widget, rect, annotation index).
 type TabItem = (usize, usize, usize, [f64; 4], usize);
 
+/// Rank `fields` of `doc` again, with pages that set no tab order (`/Tabs`) following the
+/// structure tree when `unset_follows_structure`: a reader's choice, which changes nothing in the
+/// file.
+pub fn rank_tabs_with(doc: &Document, fields: &mut [Field], unset_follows_structure: bool) {
+    let pages = page_refs(doc);
+    let mut annot_index = std::collections::HashMap::new();
+    for page in &pages {
+        let annots = doc.get(*page).as_dict().and_then(|d| d.get(b"Annots").cloned());
+        let list = annots.map(|a| doc.resolve(&a));
+        for (at, entry) in list.as_deref().and_then(Object::as_array).into_iter().flatten().enumerate() {
+            if let Some(r) = entry.as_ref() {
+                annot_index.entry(r).or_insert(at);
+            }
+        }
+    }
+    rank_tabs(doc, &pages, &annot_index, fields, unset_follows_structure);
+}
+
 /// Every widget's place in the tab order.
-pub(crate) fn rank_tabs(doc: &Document, pages: &[ObjRef], annot_index: &std::collections::HashMap<ObjRef, usize>, out: &mut [Field]) {
+pub(crate) fn rank_tabs(
+    doc: &Document,
+    pages: &[ObjRef],
+    annot_index: &std::collections::HashMap<ObjRef, usize>,
+    out: &mut [Field],
+    unset_follows_structure: bool,
+) {
     let mut items: Vec<TabItem> = Vec::new();
     for (fi, f) in out.iter().enumerate() {
         for (wi, w) in f.widgets.iter().enumerate() {
@@ -62,7 +86,11 @@ pub(crate) fn rank_tabs(doc: &Document, pages: &[ObjRef], annot_index: &std::col
         if on.is_empty() {
             continue;
         }
-        let tabs = TabOrder::of_page(doc, *p);
+        let mut tabs = TabOrder::of_page(doc, *p);
+        let unset = doc.get(*p).as_dict().is_none_or(|d| d.get(b"Tabs").is_none());
+        if unset && unset_follows_structure {
+            tabs = TabOrder::Structure;
+        }
         match tabs {
             TabOrder::Row | TabOrder::Column => {
                 let row = tabs == TabOrder::Row;

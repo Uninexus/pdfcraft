@@ -60,7 +60,7 @@ pub use read::{
 #[cfg(test)]
 use read::{MAX_SCRIPT_BYTES, PageWalk, enumerate, form_reads_on_this_thread as form_reads};
 use read::{first_by_export, qualified_name, script, script_budget};
-pub use tab_order::{TabOrder, move_in_tab_order, set_tab_order, tab_orders};
+pub use tab_order::{TabOrder, move_in_tab_order, rank_tabs_with, set_tab_order, tab_orders};
 #[cfg(test)]
 use values::has_password_flag;
 use values::write_value;

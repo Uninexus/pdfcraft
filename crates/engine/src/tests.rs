@@ -16510,3 +16510,50 @@ fn a_scanned_page_exports_the_words_recognized_on_it() {
     assert!(!doc.dirty);
     assert!(!said(doc.export_office(OfficeFormat::Markdown)).contains("INVOICE"));
 }
+
+/// With the reader's setting, a page that sets no tab order tabs as the structure tree lists its
+/// widgets, in documents already open and opened later, and after edits; the file is not changed.
+#[test]
+fn pages_without_a_tab_order_can_follow_the_structure_tree() {
+    let widget = |name: &str, y: u32| format!("<< /Type /Annot /Subtype /Widget /FT /Tx /T ({name}) /Rect [10 {y} 90 {}] /P 3 0 R >>", y + 20);
+    let objs = [
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [4 0 R 5 0 R] >> /StructTreeRoot 6 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 200 200] >>".to_string(),
+        "<< /Type /Page /Parent 2 0 R /Annots [4 0 R 5 0 R] >>".to_string(),
+        widget("A", 100),
+        widget("B", 40),
+        // The tags list B before A.
+        "<< /Type /StructTreeRoot /K [<< /S /Form /K << /Type /OBJR /Obj 5 0 R >> >> << /S /Form /K << /Type /OBJR /Obj 4 0 R >> >>] >>".to_string(),
+    ];
+    let mut pdf = b"%PDF-1.7\n".to_vec();
+    let mut offsets = Vec::new();
+    for (i, o) in objs.iter().enumerate() {
+        offsets.push(pdf.len());
+        pdf.extend_from_slice(format!("{} 0 obj\n{o}\nendobj\n", i + 1).as_bytes());
+    }
+    let xref = pdf.len();
+    pdf.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1).as_bytes());
+    for o in offsets {
+        pdf.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+    }
+    pdf.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objs.len() + 1).as_bytes());
+    let order = |s: &Session, id| {
+        let mut all: Vec<(usize, String)> = s.get(id).unwrap().form.iter().map(|f| (f.widgets[0].tab, f.name.clone())).collect();
+        all.sort();
+        all.into_iter().map(|x| x.1).collect::<String>()
+    };
+    let mut s = Session::new().with_clock(|| 1_700_000_000);
+    let first = s.open("a.pdf", None, Arc::new(pdf.clone()), None).unwrap();
+    assert_eq!(order(&s, first), "AB", "off: annotation order");
+    s.set_tabs_follow_structure(true);
+    assert_eq!(order(&s, first), "BA");
+    assert!(!s.get(first).unwrap().dirty);
+    let later = s.open("b.pdf", None, Arc::new(pdf), None).unwrap();
+    assert_eq!(order(&s, later), "BA");
+    s.apply(later, Edit::SetFieldValue { name: "A".into(), value: FieldValue::Text("x".into()) }).unwrap();
+    assert_eq!(order(&s, later), "BA", "kept after an edit");
+    s.apply(later, Edit::SetTabOrder { pages: vec![0], order: TabOrder::Row }).unwrap();
+    assert_eq!(order(&s, later), "AB", "a page's own order wins");
+    s.set_tabs_follow_structure(false);
+    assert_eq!(order(&s, first), "AB");
+}

@@ -27,6 +27,7 @@ pub struct Layout {
     pub show_secured_notice: Option<bool>,
     pub text_links: Option<bool>,
     pub caret_on_open: Option<bool>,
+    pub tabs_follow_structure: Option<bool>,
     /// JSON text: the pinned folders.
     pub pinned_folders: Option<String>,
     /// JSON text: which pinned folders are collapsed.
@@ -590,6 +591,7 @@ pub fn import_json(text: &str) -> (PdfCraftSettings, Vec<SectionError>) {
             show_secured_notice: r.bool("show_secured_notice"),
             text_links: r.bool("text_links"),
             caret_on_open: r.bool("caret_on_open"),
+            tabs_follow_structure: r.bool("tabs_follow_structure"),
             pinned_folders: r.text("pinned_folders"),
             pinned_folders_collapsed: r.text("pinned_folders_collapsed"),
             pinned_tools: r.list("pinned_tools"),

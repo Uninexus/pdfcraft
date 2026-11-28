@@ -142,6 +142,15 @@ enum Act {
     Signing,
 }
 
+/// The form of `cos`, tabbed as the reader chose for pages that set no order.
+fn form_of(cos: &pdfcraft_cos::Document, structure: bool) -> Vec<pdfcraft_forms::Field> {
+    let mut form = pdfcraft_forms::fields(cos);
+    if structure {
+        pdfcraft_forms::rank_tabs_with(cos, &mut form, true);
+    }
+    form
+}
+
 impl Act {
     fn outcome(self) -> &'static str {
         match self {
@@ -669,6 +678,32 @@ impl Session {
         Ok(label)
     }
 
+    /// Preferences ▸ Accessibility: whether pages that set no tab order are tabbed in the order of
+    /// their document's structure tree, in the open documents and those opened later. Nothing in
+    /// a document changes.
+    pub fn set_tabs_follow_structure(&mut self, on: bool) {
+        if self.tabs_follow_structure == on {
+            return;
+        }
+        self.tabs_follow_structure = on;
+        for doc in &mut self.docs {
+            doc.tabs_follow_structure = on;
+            Self::rank_form(doc);
+        }
+    }
+
+    pub fn tabs_follow_structure(&self) -> bool {
+        self.tabs_follow_structure
+    }
+
+    /// Rank `doc`'s form again for its tab setting. An XFA form's order is its template's.
+    pub(crate) fn rank_form(doc: &mut Document) {
+        let Some(editor) = doc.editor.as_ref().filter(|_| doc.info.xfa.is_none()) else { return };
+        let mut form = (*doc.form).clone();
+        pdfcraft_forms::rank_tabs_with(&editor.cos, &mut form, doc.tabs_follow_structure);
+        doc.form = Arc::new(form);
+    }
+
     /// Unsaved when the working graph is not the last opened or saved file. Undo back to that
     /// file is clean; undo past a later save is not, because the restored snapshot's own base
     /// is an earlier revision.
@@ -745,7 +780,7 @@ impl Session {
             doc.bytes = bytes;
             return Ok(());
         }
-        let mut form = pdfcraft_forms::fields(&editor.cos);
+        let mut form = form_of(&editor.cos, doc.tabs_follow_structure && doc.info.xfa.is_none());
         xfa::mark_script_buttons(&editor.cos, &mut form);
         let form = Arc::new(form);
         match scope {
@@ -948,7 +983,7 @@ impl Session {
         doc.info = info;
         doc.config.print_layers = print_preview_layers(Some(&editor.cos), &doc.info.layers);
         doc.fonts_stale = false;
-        let mut form = pdfcraft_forms::fields(&editor.cos);
+        let mut form = form_of(&editor.cos, doc.tabs_follow_structure && doc.info.xfa.is_none());
         xfa::mark_script_buttons(&editor.cos, &mut form);
         doc.form = Arc::new(form);
         if invalidate_markers {
