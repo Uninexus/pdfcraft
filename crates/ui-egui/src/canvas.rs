@@ -68,6 +68,7 @@ pub use find::Find;
 pub(crate) use find::FindChoices;
 pub(crate) use find::Listed;
 use find::find_bar;
+pub(crate) use find::listed_matches;
 use organize::organize_grid;
 use page_menu::{FieldMenu, PageMenuAction};
 use page_overlays::{LinkEvent, LinkMode, PageLinks, PageOverlays, overlay_parts};

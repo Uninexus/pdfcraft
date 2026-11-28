@@ -96,3 +96,42 @@ fn a_word_only_the_second_document_has_is_found_only_there() {
     let state = &h.state().open_docs_search;
     assert!(state.docs.iter().all(|d| (d.name == "second.pdf") == (d.found() > 0)), "only the second document lists it");
 }
+
+#[test]
+fn comments_and_bookmarks_of_the_other_documents_are_searched_when_asked() {
+    use pdfcraft_engine::{Edit, NewAnnotation, NoteIcon, Shape, Style};
+    let mut h = harness();
+    // "cherry" is only in a comment of the second document, "damson" only in a bookmark of it.
+    let ctx = h.ctx.clone();
+    h.state_mut().active = Some(1);
+    let note = NewAnnotation {
+        page: 0,
+        shape: Shape::Note { at: [20.0, 100.0], icon: NoteIcon::Comment },
+        style: Style::default(),
+        contents: "ripe cherry".into(),
+        author: "Tester".into(),
+    };
+    assert!(h.state_mut().apply_edit(&ctx, Edit::AddAnnotation(note)));
+    let bookmark = Edit::AddBookmark { parent: Vec::new(), index: 0, title: "damson notes".into(), page: 1, left: None, top: None };
+    assert!(h.state_mut().apply_edit(&ctx, bookmark));
+    h.state_mut().active = Some(0);
+    h.run_steps(4);
+    assert!(h.execute("edit.advanced_search"));
+    h.run_steps(3);
+    h.get_by_role_and_label(Role::Button, "Search all open documents").click();
+    h.run_steps(3);
+    for (word, option, page) in [("cherry", "Include comments", 0), ("damson", "Include bookmarks", 1)] {
+        h.state_mut().views[0].find.as_mut().unwrap().query = word.into();
+        h.run_steps(4);
+        assert!(step_until(&mut h, |h| h.state().open_docs_search.done()), "searched");
+        assert_eq!(h.state().open_docs_search.found(), 0, "{word}: not in any page's text");
+        h.get_by_label(option).click();
+        h.run_steps(4);
+        assert!(step_until(&mut h, |h| h.state().open_docs_search.done() && h.state().open_docs_search.found() == 1), "{word} is found");
+        let state = &h.state().open_docs_search;
+        let hit = state.docs.iter().find(|d| d.found() == 1).expect("a document lists it");
+        assert_eq!((hit.name.as_str(), hit.matches()[0].page), ("second.pdf", page), "{word}");
+        h.get_by_label(option).click();
+        h.run_steps(4);
+    }
+}

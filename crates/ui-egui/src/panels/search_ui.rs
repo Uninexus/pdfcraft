@@ -90,8 +90,8 @@ pub(crate) fn show(app: &mut PdfCraftApp, ui: &mut egui::Ui) -> PanelResult {
     if before != (find.options.whole_word, find.options.match_case) {
         find.case_query.clear();
     }
-    // Comments and bookmarks are searched in this document only.
-    if !open_docs.on && !folder.on {
+    // Comments and bookmarks are not searched in a folder's files.
+    if !folder.on {
         let before = (find.include_comments, find.include_bookmarks);
         Row::new().show(ui, |ui, _| {
             Checkbox::new(Bind::bound(&mut find.include_comments)).label(tl!("Include comments").to_string()).show(ui);
@@ -105,7 +105,14 @@ pub(crate) fn show(app: &mut PdfCraftApp, ui: &mut egui::Ui) -> PanelResult {
     if open_docs.on {
         let (query, case, whole) = (find.query.clone(), find.options.match_case, find.options.whole_word);
         let can_search = !query.trim().is_empty();
-        open_docs.pass(&mut app.views, &app.session, &names, &query, case, whole);
+        let wanted = crate::open_docs_search_ui::Wanted {
+            query,
+            match_case: case,
+            whole_word: whole,
+            comments: find.include_comments,
+            bookmarks: find.include_bookmarks,
+        };
+        open_docs.pass(&mut app.views, &app.session, &names, &wanted);
         let action = crate::open_docs_search_ui::section(ui, open_docs, can_search);
         return apply_open_docs(app, action, result);
     }

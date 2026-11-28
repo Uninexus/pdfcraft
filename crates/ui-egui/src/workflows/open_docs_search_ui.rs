@@ -2,7 +2,8 @@
 //! document, with the matcher the find bar uses (`PageText::find_opts_limited`), and the matches are listed by document
 //! with their page and context. A click on one switches to that document's tab and goes to its page.
 //!
-//! Each document's pages are read in the background the way the find bar reads them. A page's matches are kept when it
+//! With Include comments or Include bookmarks, each document's matching comments and bookmark titles follow its page
+//! matches. Each document's pages are read in the background the way the find bar reads them. A page's matches are kept when it
 //! is read, so a long document is searched whole without holding on to more than the matches. The list is bounded per
 //! document and in all, and says when it was cut short.
 
@@ -39,23 +40,25 @@ pub struct DocHits {
     scanned: HashSet<usize>,
     failed: usize,
     by_page: BTreeMap<usize, Vec<Match>>,
+    /// Matching comments and bookmarks, listed after the page matches.
+    listed: Vec<Match>,
     /// The document's own cap was reached.
     pub capped: bool,
 }
 
 impl DocHits {
     fn new(key: u64, name: String, pages: usize) -> Self {
-        Self { key, name, pages, scanned: HashSet::new(), failed: 0, by_page: BTreeMap::new(), capped: false }
+        Self { key, name, pages, scanned: HashSet::new(), failed: 0, by_page: BTreeMap::new(), listed: Vec::new(), capped: false }
     }
 
     /// Matches found, in page order.
     pub fn matches(&self) -> Vec<&Match> {
-        self.by_page.values().flatten().collect()
+        self.by_page.values().flatten().chain(&self.listed).collect()
     }
 
     /// Matches found.
     pub fn found(&self) -> usize {
-        self.by_page.values().map(Vec::len).sum()
+        self.by_page.values().map(Vec::len).sum::<usize>() + self.listed.len()
     }
 
     /// Every page was read (or the cap ended the search of this document).
@@ -73,8 +76,18 @@ pub struct OpenDocsSearch {
     pub docs: Vec<DocHits>,
     /// The total cap was reached.
     pub total_capped: bool,
-    /// What the results are for: query, case, whole words.
-    signature: Option<(String, bool, bool)>,
+    /// What the results are for.
+    signature: Option<Wanted>,
+}
+
+/// What is searched for in every document.
+#[derive(Clone, PartialEq, Eq)]
+pub(crate) struct Wanted {
+    pub query: String,
+    pub match_case: bool,
+    pub whole_word: bool,
+    pub comments: bool,
+    pub bookmarks: bool,
 }
 
 impl OpenDocsSearch {
@@ -157,20 +170,12 @@ fn absorb(doc: &mut DocHits, view: &DocView, query: &str, case: bool, whole: boo
 impl OpenDocsSearch {
     /// One pass: starts over when the query or an option changed, forgets closed tabs, takes what the documents read
     /// since the last pass and asks for the pages not read yet. `names` are the tab names by key.
-    pub(crate) fn pass(
-        &mut self,
-        views: &mut [DocView],
-        session: &pdfcraft_engine::Session,
-        names: &[(u64, String)],
-        query: &str,
-        case: bool,
-        whole: bool,
-    ) {
-        let signature = (query.to_owned(), case, whole);
-        if self.signature.as_ref() != Some(&signature) {
+    pub(crate) fn pass(&mut self, views: &mut [DocView], session: &pdfcraft_engine::Session, names: &[(u64, String)], wanted: &Wanted) {
+        let (query, case, whole) = (wanted.query.as_str(), wanted.match_case, wanted.whole_word);
+        if self.signature.as_ref() != Some(wanted) {
             self.docs.clear();
             self.total_capped = false;
-            self.signature = Some(signature);
+            self.signature = Some(wanted.clone());
         }
         self.docs.retain(|d| names.iter().any(|(key, _)| *key == d.key));
         if query.trim().is_empty() {
@@ -189,7 +194,17 @@ impl OpenDocsSearch {
             let at = match self.docs.iter().position(|d| d.key == key) {
                 Some(at) => at,
                 None => {
-                    self.docs.push(DocHits::new(key, name.clone(), view.page_count()));
+                    let mut doc = DocHits::new(key, name.clone(), view.page_count());
+                    if let Some(open) = session.get(view.id) {
+                        let options = craft::text::find::FindOptions { match_case: case, whole_word: whole, ..Default::default() };
+                        let mut listed = crate::canvas::listed_matches(open, query, &options, wanted.comments, wanted.bookmarks);
+                        let room = MAX_PER_DOCUMENT.min(MAX_TOTAL.saturating_sub(total));
+                        doc.capped = listed.len() > room;
+                        listed.truncate(room);
+                        total += listed.len();
+                        doc.listed = listed;
+                    }
+                    self.docs.push(doc);
                     self.docs.len() - 1
                 }
             };
