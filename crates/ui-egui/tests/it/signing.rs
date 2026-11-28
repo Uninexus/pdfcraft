@@ -1143,3 +1143,17 @@ fn signature_appearances_are_saved_by_name_and_picked_again() {
     assert!(h.state().sign_presets.is_empty());
     assert_eq!(chosen(&h), (true, false), "deleting the saved one leaves the choices");
 }
+
+/// An ID listed before its subject was kept gets it the first time its password opens it for signing.
+#[test]
+fn signing_keeps_the_subject_of_an_older_list_entry() {
+    let dir = dir().join("subject");
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut h = harness(dir.clone());
+    create_signing_id(&mut h);
+    // As a list entry saved by an earlier version: no subject.
+    h.state_mut().digital_ids[0].subject.clear();
+    sign_with_created_id(&mut h, &dir);
+    let kept = &h.state().digital_ids[0].subject;
+    assert!(kept.contains("CN=Grace Hopper"), "{kept:?}");
+}
