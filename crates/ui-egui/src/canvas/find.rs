@@ -458,7 +458,10 @@ pub(crate) fn listed_matches(
     comments: bool,
     bookmarks: bool,
 ) -> Vec<pdfcraft_engine::folder_search::Match> {
-    let listed = |page, kind: &str, text| pdfcraft_engine::folder_search::Match { page, before: format!("{kind}:"), text, after: String::new() };
+    let listed = |page, kind: &str, text| {
+        let from = pdfcraft_engine::folder_search::Found::Page;
+        pdfcraft_engine::folder_search::Match { from, page, before: format!("{kind}:"), text, after: String::new() }
+    };
     let mut found = Vec::new();
     if comments {
         found.extend(find_comment_hits(doc, query, options).into_iter().map(|hit| listed(hit.key.0, tl!("Comment"), hit.excerpt)));
