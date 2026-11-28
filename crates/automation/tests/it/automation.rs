@@ -2171,6 +2171,24 @@ fn parallel_text_extraction_keeps_page_order_and_follows_edits() {
 }
 
 #[test]
+fn a_bookmark_is_given_a_web_address_through_the_tool() {
+    let dir = workdir("bookmark-url");
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "a.pdf" }))["doc"].as_u64().unwrap();
+    ok(&mut a, "bookmark_add", json!({ "doc": doc, "title": "Manual", "page": 2 }));
+    let first = |a: &mut Automation| ok(a, "bookmark_list", json!({ "doc": doc }))["bookmarks"][0].clone();
+    let before = first(&mut a);
+    // A file on this computer is not an address a document may ask to open.
+    let refused = a.call("bookmark_set_url", &json!({ "doc": doc, "path": [1], "url": "file:///etc/passwd" }));
+    assert!(matches!(&refused, Err(ToolError::Failed(m) | ToolError::InvalidArgs(m)) if m.contains("file")), "{refused:?}");
+    assert_eq!(first(&mut a), before, "nothing changed");
+    ok(&mut a, "bookmark_set_url", json!({ "doc": doc, "path": [1], "url": "https://example.org/manual" }));
+    assert!(first(&mut a)["page"].is_null(), "it no longer goes to a page");
+    let info = ok(&mut a, "doc_info", json!({ "doc": doc })).to_string();
+    assert!(info.contains("https://example.org/manual"), "{info}");
+}
+
+#[test]
 fn bookmarks_through_tools() {
     let dir = workdir("bookmarks");
     let mut a = auto(&dir);
