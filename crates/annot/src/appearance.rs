@@ -1573,6 +1573,8 @@ fn draw_free_text(context: &AppearanceContext<'_>, mut drawing: AppearanceDrawin
     let mut fonts = font_resources(face);
     let (pieces, shaped) = shaped_text::appearance_lines(&lines, &mut fonts);
     let mut current = None;
+    // Underlines are rectangles, drawn once the text object is closed.
+    let mut underlines = Vec::new();
     for (number, pieces) in pieces.iter().enumerate() {
         if y < rect[1] - size {
             break;
@@ -1582,7 +1584,8 @@ fn draw_free_text(context: &AppearanceContext<'_>, mut drawing: AppearanceDrawin
         match rich.as_ref().and_then(|rich| rich.get(number)) {
             // The line is placed as a whole, its stretches one after another.
             Some(segments) => {
-                show_runs(&mut out, &mut fonts, segments, line_start(q, [rect[0], rect[2]], pad, crate::rich::line_width(segments, size)), y, size);
+                let from = line_start(q, [rect[0], rect[2]], pad, crate::rich::line_width(segments, size));
+                underlines.extend(show_runs(&mut out, &mut fonts, segments, from, y, size));
             }
             None => {
                 shaped.show_line(
@@ -1601,6 +1604,10 @@ fn draw_free_text(context: &AppearanceContext<'_>, mut drawing: AppearanceDrawin
         y -= size * 1.2;
     }
     out.extend_from_slice(b"ET\n");
+    // In the text's colour, still the fill colour.
+    for [x, y, w] in underlines {
+        out.extend(format!("{} {} {} {} re f\n", n(x), n(y - size * 0.15), n(w), n(size * 0.06)).bytes());
+    }
     res.set(b"Font".to_vec(), Object::Dict(fonts));
     let mut stream = form(full, &out, res);
     if let Some(m) = matrix {
@@ -1609,7 +1616,7 @@ fn draw_free_text(context: &AppearanceContext<'_>, mut drawing: AppearanceDrawin
     Some(stream)
 }
 
-/// A line of a text box with bold or italic runs: stretches of one face each.
+/// A line of a text box with runs: stretches of one face each.
 type RunLines = Vec<Vec<crate::rich::Segment>>;
 
 /// The lines of a text box's `text`, `width` wide, and for one with bold or italic runs each line's stretches: runs
@@ -1620,14 +1627,16 @@ fn free_text_lines(d: &Dict, text: &str, face: pdfcraft_fonts::Std14, size: f64,
         return (pdfcraft_fonts::wrap_with(text, size, width, |s, size| text_width_in(face, s, size)), None);
     }
     let rich = crate::rich::wrap(text, &runs, face, size, width);
-    let lines = rich.iter().map(|line| line.iter().map(|(_, t)| t.as_str()).collect()).collect();
+    let lines = rich.iter().map(|line| line.iter().map(|(_, t, _)| t.as_str()).collect()).collect();
     (lines, Some(rich))
 }
 
-/// Draw `segments` from (`x`, `y`), each in its own face, which joins `fonts`.
-fn show_runs(out: &mut Vec<u8>, fonts: &mut Dict, segments: &[crate::rich::Segment], x: f64, y: f64, size: f64) {
+/// Draw `segments` from (`x`, `y`), each in its own face, which joins `fonts`. Returns where underlines go, as
+/// (x, baseline, width).
+fn show_runs(out: &mut Vec<u8>, fonts: &mut Dict, segments: &[crate::rich::Segment], x: f64, y: f64, size: f64) -> Vec<[f64; 3]> {
     let mut pen = x;
-    for (face, words) in segments {
+    let mut underlines = Vec::new();
+    for (face, words, underline) in segments {
         let name = crate::text_style::resource_name(*face);
         if let Some(font) = font_resources(*face).get(name.as_bytes()) {
             fonts.set(name.as_bytes().to_vec(), font.clone());
@@ -1635,8 +1644,13 @@ fn show_runs(out: &mut Vec<u8>, fonts: &mut Dict, segments: &[crate::rich::Segme
         out.extend(format!("/{name} {} Tf 1 0 0 1 {} {} Tm ", n(size), n(pen), n(y)).bytes());
         out.extend(literal(&win_ansi(words)));
         out.extend_from_slice(b" Tj\n");
-        pen += face.text_width(words, size);
+        let width = face.text_width(words, size);
+        if *underline {
+            underlines.push([pen, y, width]);
+        }
+        pen += width;
     }
+    underlines
 }
 
 /// Where a line `line` wide starts in a text box from `left` to `right`, as `/Q` aligns it.

@@ -33,13 +33,39 @@ use crate::canvas::PageSession;
 
 /// Line height over font size, as the text box appearance lays its lines out.
 const LINE: f64 = 1.2;
-/// The bar's buttons: Bold, Italic, Post or Save, Cancel.
-const BAR: usize = 4;
+/// The bar's buttons: Bold, Italic, Underline, Post or Save, Cancel.
+const BAR: usize = 5;
 /// The widest a new box grows before it wraps.
 const MAX_WIDTH: f64 = 300.0;
 
-/// (bold, italic) of one character.
-type Style = (bool, bool);
+/// (bold, italic, underline) of one character.
+type Style = (bool, bool, bool);
+
+/// One of the three things a character can be given.
+#[derive(Clone, Copy)]
+enum Mark {
+    Bold,
+    Italic,
+    Underline,
+}
+
+impl Mark {
+    fn of(self, style: Style) -> bool {
+        match self {
+            Mark::Bold => style.0,
+            Mark::Italic => style.1,
+            Mark::Underline => style.2,
+        }
+    }
+
+    fn set(self, style: &mut Style, on: bool) {
+        match self {
+            Mark::Bold => style.0 = on,
+            Mark::Italic => style.1 = on,
+            Mark::Underline => style.2 = on,
+        }
+    }
+}
 
 /// Which box is being typed into.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -102,10 +128,10 @@ pub(crate) fn on_page(c: &Composer, cx: &BoxCx<'_>) -> bool {
 }
 
 fn styles_of(text: &str, runs: &[TextRun]) -> Vec<Style> {
-    let mut styles = vec![(false, false); text.chars().count()];
+    let mut styles = vec![(false, false, false); text.chars().count()];
     for run in runs {
         for style in styles.iter_mut().take(run.end).skip(run.start) {
-            *style = (style.0 || run.bold, style.1 || run.italic);
+            *style = (style.0 || run.bold, style.1 || run.italic, style.2 || run.underline);
         }
     }
     styles
@@ -113,19 +139,19 @@ fn styles_of(text: &str, runs: &[TextRun]) -> Vec<Style> {
 
 fn runs_of(styles: &[Style]) -> Vec<TextRun> {
     let mut runs: Vec<TextRun> = Vec::new();
-    for (at, &(bold, italic)) in styles.iter().enumerate() {
-        if !bold && !italic {
+    for (at, &(bold, italic, underline)) in styles.iter().enumerate() {
+        if !bold && !italic && !underline {
             continue;
         }
         match runs.last_mut() {
-            Some(last) if last.end == at && (last.bold, last.italic) == (bold, italic) => last.end = at + 1,
-            _ => runs.push(TextRun { start: at, end: at + 1, bold, italic }),
+            Some(last) if last.end == at && (last.bold, last.italic, last.underline) == (bold, italic, underline) => last.end = at + 1,
+            _ => runs.push(TextRun { start: at, end: at + 1, bold, italic, underline }),
         }
     }
     runs
 }
 
-fn face((bold, italic): Style) -> Std14 {
+fn face((bold, italic, _): Style) -> Std14 {
     match (bold, italic) {
         (false, false) => Std14::Helvetica,
         (true, false) => Std14::HelveticaBold,
@@ -189,17 +215,16 @@ impl RichBox {
         any && every
     }
 
-    /// Whether the selection (or what typing will take) is bold and italic.
+    /// Whether the selection (or what typing will take) is bold, italic and underlined.
     fn shown_style(&self) -> Style {
         let range = self.selection.range();
-        if range.is_empty() { self.typing } else { (self.all(range.clone(), |s| s.0), self.all(range, |s| s.1)) }
+        if range.is_empty() { self.typing } else { (self.all(range.clone(), |s| s.0), self.all(range.clone(), |s| s.1), self.all(range, |s| s.2)) }
     }
 
-    /// Turns bold (or italic) on or off for the selection, or for what is typed next.
-    fn toggle(&mut self, italic: bool) -> bool {
-        let shown = self.shown_style();
-        let on = !(if italic { shown.1 } else { shown.0 });
-        let set = |style: &mut Style| if italic { style.1 = on } else { style.0 = on };
+    /// Turns `mark` on or off for the selection, or for what is typed next.
+    fn toggle(&mut self, mark: Mark) -> bool {
+        let on = !mark.of(self.shown_style());
+        let set = |style: &mut Style| mark.set(style, on);
         let range = self.selection.range();
         if range.is_empty() {
             set(&mut self.typing);
@@ -215,8 +240,8 @@ impl RichBox {
         self.typing = at.checked_sub(1).and_then(|i| self.styles.get(i)).or_else(|| self.styles.first()).copied().unwrap_or_default();
     }
 
-    /// A key pressed while the box, its text or its bar, has the keyboard: Ctrl+B and Ctrl+I (Command on macOS) bold
-    /// and italicise, and in the bar Tab and Shift+Tab walk the buttons, Escape goes back to the text and Cmd+Enter
+    /// A key pressed while the box, its text or its bar, has the keyboard: Ctrl+B, Ctrl+I and Ctrl+U (Command on macOS)
+    /// bold, italicise and underline, and in the bar Tab and Shift+Tab walk the buttons, Escape goes back to the text and Cmd+Enter
     /// commits. False for a key the box leaves be.
     fn take_key(&mut self, ctx: &egui::Context, key: egui::Key, modifiers: egui::Modifiers) -> bool {
         if let Some(button) = self.in_bar {
@@ -229,20 +254,21 @@ impl RichBox {
         if !modifiers.command || modifiers.shift || modifiers.alt {
             return false;
         }
-        let italic = match key {
-            egui::Key::B => false,
-            egui::Key::I => true,
+        let mark = match key {
+            egui::Key::B => Mark::Bold,
+            egui::Key::I => Mark::Italic,
+            egui::Key::U => Mark::Underline,
             _ => return false,
         };
-        let on = self.toggle(italic);
-        say(ctx, italic, on);
+        let on = self.toggle(mark);
+        say(ctx, mark, on);
         true
     }
 
     /// A key pressed with the keyboard on bar button `button`; false when the bar leaves it be.
     fn bar_key(&mut self, button: usize, key: egui::Key, modifiers: egui::Modifiers) -> bool {
-        // Post (2) is passed over while there is nothing to post.
-        let skip = |place: usize| place == 2 && !self.postable();
+        // Post (3) is passed over while there is nothing to post.
+        let skip = |place: usize| place == 3 && !self.postable();
         match key {
             egui::Key::Escape if modifiers.is_none() => self.focus = true,
             egui::Key::Enter if modifiers.command => self.commit = true,
@@ -343,7 +369,7 @@ fn adopt(session: &mut PageSession, cx: &BoxCx<'_>) {
         before: (text.clone(), runs),
         text,
         styles,
-        typing: (false, false),
+        typing: (false, false, false),
         selection: TextSelection::caret_at(end),
         size,
         color,
@@ -441,7 +467,7 @@ impl Host<'_> {
         let fit = [false, true].map(|bold| {
             let (mut shown, mut saved) = (0.0, 0.0);
             for (ch, &style) in self.open.text.chars().zip(&self.open.styles).filter(|(ch, s)| s.0 == bold && !ch.is_control()) {
-                let job = word_job(ch.encode_utf8(&mut [0; 4]), (bold, false), size, ink, 0.0);
+                let job = word_job(ch.encode_utf8(&mut [0; 4]), (bold, false, false), size, ink, 0.0);
                 shown += painter.layout_job(job).size().x;
                 saved += (advance(ch, style, self.open.size) * self.zoom) as f32;
             }
@@ -451,6 +477,13 @@ impl Host<'_> {
             let columns = self.columns(chars.clone());
             let text: Vec<char> = self.slice(chars.clone()).chars().collect();
             let styles = self.open.styles.get(chars).unwrap_or_default();
+            // Underlines run under spaces too, where the saved box draws them.
+            let under = (line as f32 + 1.0) * self.line_height() - (self.open.size * self.zoom) as f32 * 0.05;
+            for (k, _) in styles.iter().enumerate().filter(|(_, s)| s.2) {
+                let (Some(&from), Some(&to)) = (columns.get(k), columns.get(k + 1)) else { continue };
+                let ends = [self.origin + vec2(from, under), self.origin + vec2(to, under)];
+                painter.line_segment(ends, Stroke::new(((self.open.size * self.zoom) as f32 * 0.06).max(1.0), ink));
+            }
             for word in words(&text, styles) {
                 let style = styles.get(word.start).copied().unwrap_or_default();
                 let (Some(&from), Some(&to)) = (columns.get(word.start), columns.get(word.end)) else { continue };
@@ -480,7 +513,7 @@ fn words(text: &[char], styles: &[Style]) -> Vec<Range<usize>> {
     out
 }
 
-fn word_job(text: &str, (bold, italic): Style, size: f32, ink: Color32, spacing: f32) -> egui::text::LayoutJob {
+fn word_job(text: &str, (bold, italic, _): Style, size: f32, ink: Color32, spacing: f32) -> egui::text::LayoutJob {
     let family = if bold { FontFamily::Name("semibold".into()) } else { FontFamily::Proportional };
     let format =
         egui::TextFormat { font_id: FontId::new(size, family), color: ink, italics: italic, extra_letter_spacing: spacing, ..Default::default() };
@@ -591,23 +624,25 @@ impl TextEditorHost for Host<'_> {
     }
 
     fn style_key(&mut self, key: StyleKey, selection: TextSelection) -> bool {
-        let italic = match key {
-            StyleKey::Toggle(CharToggle::FauxBold) => false,
-            StyleKey::Toggle(CharToggle::FauxItalic) => true,
+        let mark = match key {
+            StyleKey::Toggle(CharToggle::FauxBold) => Mark::Bold,
+            StyleKey::Toggle(CharToggle::FauxItalic) => Mark::Italic,
             _ => return false,
         };
         self.open.selection = selection;
-        self.open.toggle(italic);
+        self.open.toggle(mark);
         true
     }
 }
 
-fn say(ctx: &egui::Context, italic: bool, on: bool) {
-    let words = match (italic, on) {
-        (false, true) => tl!("Bold on"),
-        (false, false) => tl!("Bold off"),
-        (true, true) => tl!("Italic on"),
-        (true, false) => tl!("Italic off"),
+fn say(ctx: &egui::Context, mark: Mark, on: bool) {
+    let words = match (mark, on) {
+        (Mark::Bold, true) => tl!("Bold on"),
+        (Mark::Bold, false) => tl!("Bold off"),
+        (Mark::Italic, true) => tl!("Italic on"),
+        (Mark::Italic, false) => tl!("Italic off"),
+        (Mark::Underline, true) => tl!("Underline on"),
+        (Mark::Underline, false) => tl!("Underline off"),
     };
     announce(ctx, words.to_string(), Politeness::Polite);
 }
@@ -640,7 +675,7 @@ pub(crate) struct BoxCx<'a> {
     pub prefs: &'a CommentPrefs,
 }
 
-/// The page body's part: the box being typed into, its editor and its Bold, Italic, Post and Cancel bar. Returns the
+/// The page body's part: the box being typed into, its editor and its Bold, Italic, Underline, Post and Cancel bar. Returns the
 /// edit once it is committed (Post or Save, Cmd+Enter, or a press elsewhere on the page); Escape in the text or Cancel
 /// drops it.
 pub(crate) fn show(ui: &mut egui::Ui, body: &PageBody<'_>, session: &mut PageSession, cx: &BoxCx<'_>) -> Option<Edit> {
@@ -697,8 +732,8 @@ pub(crate) fn show(ui: &mut egui::Ui, body: &PageBody<'_>, session: &mut PageSes
 
     // The bar under the box.
     let anchor: Vec<Point> = [rect.left_top(), rect.right_top(), rect.right_bottom(), rect.left_bottom()].map(|p| body.view.to_doc(p)).to_vec();
-    let (mut bold, mut italic) = open.shown_style();
-    let (was_bold, was_italic) = (bold, italic);
+    let (mut bold, mut italic, mut underline) = open.shown_style();
+    let (was_bold, was_italic, was_underline) = (bold, italic, underline);
     let (mut post, mut cancel) = (std::mem::take(&mut open.commit), false);
     // Tab out of the text goes to the bar's first button, Shift+Tab to its last.
     let wanted = match ended {
@@ -718,28 +753,31 @@ pub(crate) fn show(ui: &mut egui::Ui, body: &PageBody<'_>, session: &mut PageSes
         };
         let mut bold = ToggleButton::new(tl!("Bold"), Bind::bound(&mut bold));
         let mut italic = ToggleButton::new(tl!("Italic"), Bind::bound(&mut italic));
+        let mut underline = ToggleButton::new(tl!("Underline"), Bind::bound(&mut underline));
         let mut answer = Button::new(post_word).enabled(postable);
         let mut leave = Button::new(tl!("Cancel"));
         match wanted {
             Some(0) => bold = bold.request_focus(FocusRequest::Take),
             Some(1) => italic = italic.request_focus(FocusRequest::Take),
-            Some(2) => answer = answer.request_focus(FocusRequest::Take),
+            Some(2) => underline = underline.request_focus(FocusRequest::Take),
+            Some(3) => answer = answer.request_focus(FocusRequest::Take),
             Some(_) => leave = leave.request_focus(FocusRequest::Take),
             None => {}
         }
         held(0, bold.show(ui).response.has_focus());
         held(1, italic.show(ui).response.has_focus());
+        held(2, underline.show(ui).response.has_focus());
         let answer = answer.show(ui);
         post |= answer.clicked();
-        held(2, answer.response.has_focus());
+        held(3, answer.response.has_focus());
         let leave = leave.show(ui);
         cancel = leave.clicked();
-        held(3, leave.response.has_focus());
+        held(4, leave.response.has_focus());
     });
     open.in_bar = in_bar;
     // A press on the bar takes the focus from the text, which ends the editor's session but not the box.
     let on_bar = ui.input(|i| i.pointer.primary_pressed() && i.pointer.interact_pos().is_some_and(|at| bar.response.rect.contains(at)));
-    for (slot, changed_to, was) in [(false, bold, was_bold), (true, italic, was_italic)] {
+    for (slot, changed_to, was) in [(Mark::Bold, bold, was_bold), (Mark::Italic, italic, was_italic), (Mark::Underline, underline, was_underline)] {
         if changed_to != was {
             let on = open.toggle(slot);
             say(&ctx, slot, on);
@@ -770,8 +808,8 @@ mod tests {
         let ctx = egui::Context::default();
         let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
             for factor in [0.9, 1.1] {
-                let natural = fitted(ui.painter(), "R", (false, false), 20.0, Color32::BLACK, 0.0).size().x;
-                let wanted = fitted(ui.painter(), "Really.", (false, false), 20.0, Color32::BLACK, natural * 5.0 * factor);
+                let natural = fitted(ui.painter(), "R", (false, false, false), 20.0, Color32::BLACK, 0.0).size().x;
+                let wanted = fitted(ui.painter(), "Really.", (false, false, false), 20.0, Color32::BLACK, natural * 5.0 * factor);
                 assert!((wanted.size().x - natural * 5.0 * factor).abs() < 1.5, "{} {}", wanted.size().x, natural * 5.0 * factor);
             }
         });

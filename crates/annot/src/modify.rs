@@ -423,7 +423,7 @@ fn fitted_box(doc: &Document, r: ObjRef, text: &str) -> Option<[f64; 4]> {
     let lines = if runs.is_empty() || rich::shaped_only(text) {
         pdfcraft_fonts::wrap_with(text, size, width, measure)
     } else {
-        rich::wrap(text, &runs, face, size, width).iter().map(|line| line.iter().map(|(_, t)| t.as_str()).collect()).collect()
+        rich::wrap(text, &runs, face, size, width).iter().map(|line| line.iter().map(|(_, t, _)| t.as_str()).collect()).collect()
     };
     let height = appearance::text_lines_height(&lines, size);
     Some([x0, top - height - 2.0 * pad - 2.0, x0 + w, top])

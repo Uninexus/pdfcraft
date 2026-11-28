@@ -5408,6 +5408,39 @@ fn a_text_box_is_typed_on_the_page_with_bold_and_italic() {
     }
 }
 
+/// Ctrl+U and the Underline button underline what is selected or typed next, and the box keeps it.
+#[test]
+fn a_text_box_is_underlined_while_it_is_typed() {
+    let mut h = harness(|app| app.set_option(&egui::Context::default(), "quick", "freetext").unwrap());
+    click_pt(&mut h, (50.0, 150.0));
+    h.run_steps(3);
+    let typing = |h: &mut Harness<'static, PdfCraftApp>, text: &str| {
+        h.event(egui::Event::Text(text.into()));
+        h.run_steps(3);
+    };
+    let key = |h: &mut Harness<'static, PdfCraftApp>, modifiers: egui::Modifiers, key: egui::Key| {
+        h.key_press_modifiers(modifiers, key);
+        h.run_steps(3);
+    };
+    typing(&mut h, "due ");
+    key(&mut h, egui::Modifiers::COMMAND, egui::Key::U);
+    typing(&mut h, "now");
+    key(&mut h, egui::Modifiers::COMMAND, egui::Key::U);
+    typing(&mut h, " ok");
+    // Select the last word and underline it with the button.
+    for _ in 0..2 {
+        key(&mut h, egui::Modifiers::SHIFT, egui::Key::ArrowLeft);
+    }
+    h.get_by_label("Underline").click();
+    h.run_steps(4);
+    key(&mut h, egui::Modifiers::COMMAND, egui::Key::Enter);
+    h.run_steps(4);
+    let app = h.state();
+    let runs = app.session.get(app.views[0].id).unwrap().comment_text_runs(0, 0);
+    let got: Vec<_> = runs.iter().map(|r| (r.start, r.end, r.bold, r.underline)).collect();
+    assert_eq!(got, [(4, 7, false, true), (8, 10, false, true)]);
+}
+
 /// One page with a text box drawn in Courier.
 const COURIER_BOX_FIXTURE: &[u8] = b"%PDF-1.7
 1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj

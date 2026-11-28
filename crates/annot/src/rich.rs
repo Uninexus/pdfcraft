@@ -1,4 +1,4 @@
-//! Bold and italic runs in a text box's text: held in its rich text (`/RC`, XHTML, ISO 32000-2 §12.7.4.3) as spans,
+//! Bold, italic and underlined runs in a text box's text: held in its rich text (`/RC`, XHTML, ISO 32000-2 §12.7.4.3) as spans,
 //! read back from it (PdfCraft's own or another program's), and laid out for the drawn appearance.
 //!
 //! Positions count the characters of the text as `/Contents` holds it, with every line break (`\r\n`, `\r` or `\n`)
@@ -10,13 +10,28 @@ use pdfcraft_fonts::Std14;
 
 use crate::text_style::{is_bold, is_italic, styled};
 
-/// Characters `start..end` of a text box's text, drawn bold, italic or both.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// Characters `start..end` of a text box's text, drawn bold, italic, underlined or any of them.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct TextRun {
     pub start: usize,
     pub end: usize,
     pub bold: bool,
     pub italic: bool,
+    pub underline: bool,
+}
+
+/// What a character is drawn with beyond the box's own face.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Flags {
+    pub bold: bool,
+    pub italic: bool,
+    pub underline: bool,
+}
+
+impl Flags {
+    fn or(self, other: Flags) -> Flags {
+        Flags { bold: self.bold || other.bold, italic: self.italic || other.italic, underline: self.underline || other.underline }
+    }
 }
 
 /// The most rich text read: past this it is left alone and the box is drawn without runs.
@@ -32,28 +47,28 @@ pub(crate) fn lines_normalized(text: &str) -> String {
     text.replace("\r\n", "\n").replace('\r', "\n")
 }
 
-/// (bold, italic) for each of `count` characters.
-pub(crate) fn per_char(runs: &[TextRun], count: usize) -> Vec<(bool, bool)> {
-    let mut flags = vec![(false, false); count];
+/// What each of `count` characters is drawn with.
+pub(crate) fn per_char(runs: &[TextRun], count: usize) -> Vec<Flags> {
+    let mut flags = vec![Flags::default(); count];
     for run in runs {
         for flag in flags.iter_mut().take(run.end).skip(run.start) {
-            flag.0 |= run.bold;
-            flag.1 |= run.italic;
+            *flag = flag.or(Flags { bold: run.bold, italic: run.italic, underline: run.underline });
         }
     }
     flags
 }
 
 /// The fewest runs that say `flags`.
-fn runs_of(flags: &[(bool, bool)]) -> Vec<TextRun> {
+fn runs_of(flags: &[Flags]) -> Vec<TextRun> {
     let mut runs: Vec<TextRun> = Vec::new();
-    for (at, &(bold, italic)) in flags.iter().enumerate() {
-        if !bold && !italic {
+    for (at, &flag) in flags.iter().enumerate() {
+        if flag == Flags::default() {
             continue;
         }
+        let Flags { bold, italic, underline } = flag;
         match runs.last_mut() {
-            Some(last) if last.end == at && (last.bold, last.italic) == (bold, italic) => last.end = at + 1,
-            _ => runs.push(TextRun { start: at, end: at + 1, bold, italic }),
+            Some(last) if last.end == at && (last.bold, last.italic, last.underline) == (bold, italic, underline) => last.end = at + 1,
+            _ => runs.push(TextRun { start: at, end: at + 1, bold, italic, underline }),
         }
     }
     runs
@@ -81,8 +96,8 @@ pub(crate) fn body(text: &str, runs: &[TextRun]) -> String {
     for line in text.split('\n') {
         out.push_str("<p dir=\"ltr\">");
         let mut piece = String::new();
-        let mut current = (false, false);
-        let close = |out: &mut String, piece: &mut String, (bold, italic): (bool, bool)| {
+        let mut current = Flags::default();
+        let close = |out: &mut String, piece: &mut String, Flags { bold, italic, underline }: Flags| {
             if piece.is_empty() {
                 return;
             }
@@ -92,6 +107,9 @@ pub(crate) fn body(text: &str, runs: &[TextRun]) -> String {
             }
             if italic {
                 css.push("font-style:italic");
+            }
+            if underline {
+                css.push("text-decoration:underline");
             }
             if css.is_empty() {
                 out.push_str(&escape(piece));
@@ -136,20 +154,21 @@ fn entity(name: &str) -> Option<char> {
     }
 }
 
-/// What a tag's `style` attribute adds: (bold, italic).
-fn css_adds(tag: &str) -> (bool, bool) {
+/// What a tag's `style` attribute adds.
+fn css_adds(tag: &str) -> Flags {
     let lower = tag.to_ascii_lowercase();
-    let Some(at) = lower.find("style=") else { return (false, false) };
+    let Some(at) = lower.find("style=") else { return Flags::default() };
     let rest = lower.get(at + 6..).unwrap_or_default();
-    let Some(quote) = rest.chars().next().filter(|c| matches!(c, '"' | '\'')) else { return (false, false) };
+    let Some(quote) = rest.chars().next().filter(|c| matches!(c, '"' | '\'')) else { return Flags::default() };
     let value = rest.get(1..).unwrap_or_default().split(quote).next().unwrap_or_default();
-    let mut adds = (false, false);
+    let mut adds = Flags::default();
     for declaration in value.split(';') {
         let Some((name, value)) = declaration.split_once(':') else { continue };
         let value = value.trim();
         match name.trim() {
-            "font-weight" => adds.0 |= value.starts_with("bold") || value.parse::<u32>().is_ok_and(|w| w >= 600),
-            "font-style" => adds.1 |= value.starts_with("italic") || value.starts_with("oblique"),
+            "font-weight" => adds.bold |= value.starts_with("bold") || value.parse::<u32>().is_ok_and(|w| w >= 600),
+            "font-style" => adds.italic |= value.starts_with("italic") || value.starts_with("oblique"),
+            "text-decoration" => adds.underline |= value.contains("underline"),
             _ => {}
         }
     }
@@ -164,16 +183,16 @@ pub(crate) fn runs(rc: &str, contents: &str) -> Vec<TextRun> {
     }
     let wanted = lines_normalized(contents);
     let mut text = String::new();
-    let mut flags: Vec<(bool, bool)> = Vec::new();
+    let mut flags: Vec<Flags> = Vec::new();
     // The elements open inside a paragraph, with what each adds. The body's own style is the box's.
-    let mut open: Vec<(bool, bool)> = Vec::new();
+    let mut open: Vec<Flags> = Vec::new();
     let mut inside = false;
     let mut paragraphs = 0;
     let mut chars = rc.chars();
     while let Some(ch) = chars.next() {
-        let mut push = |c: char, open: &[(bool, bool)]| {
+        let mut push = |c: char, open: &[Flags]| {
             text.push(c);
-            flags.push((open.iter().any(|f| f.0), open.iter().any(|f| f.1)));
+            flags.push(open.iter().fold(Flags::default(), |all, f| all.or(*f)));
         };
         match ch {
             '<' => {
@@ -195,12 +214,16 @@ pub(crate) fn runs(rc: &str, contents: &str) -> Vec<TextRun> {
                         open = vec![css_adds(&tag)];
                     }
                     "br" if inside && !closing => push('\n', &[]),
-                    "span" | "b" | "strong" | "i" | "em" if inside && !empty => {
+                    "span" | "b" | "strong" | "i" | "em" | "u" if inside && !empty => {
                         if closing {
                             open.pop();
                         } else {
-                            let own = css_adds(&tag);
-                            open.push((own.0 || matches!(name.as_str(), "b" | "strong"), own.1 || matches!(name.as_str(), "i" | "em")));
+                            let named = Flags {
+                                bold: matches!(name.as_str(), "b" | "strong"),
+                                italic: matches!(name.as_str(), "i" | "em"),
+                                underline: name == "u",
+                            };
+                            open.push(css_adds(&tag).or(named));
                         }
                     }
                     _ => {}
@@ -223,23 +246,23 @@ pub(crate) fn runs(rc: &str, contents: &str) -> Vec<TextRun> {
 }
 
 /// The face of text with `flags` in a box whose own face is `base`.
-fn face(base: Std14, (bold, italic): (bool, bool)) -> Std14 {
-    styled(base, bold || is_bold(base), italic || is_italic(base))
+fn face(base: Std14, flags: Flags) -> Std14 {
+    styled(base, flags.bold || is_bold(base), flags.italic || is_italic(base))
 }
 
-/// A stretch of one line in one face.
-pub(crate) type Segment = (Std14, String);
+/// A stretch of one line in one face, underlined or not.
+pub(crate) type Segment = (Std14, String, bool);
 
-fn push(line: &mut Vec<Segment>, face: Std14, ch: char) {
+fn push(line: &mut Vec<Segment>, face: Std14, underline: bool, ch: char) {
     match line.last_mut() {
-        Some(last) if last.0 == face => last.1.push(ch),
-        _ => line.push((face, ch.to_string())),
+        Some(last) if last.0 == face && last.2 == underline => last.1.push(ch),
+        _ => line.push((face, ch.to_string(), underline)),
     }
 }
 
 /// The width of a line of segments at `size`.
 pub(crate) fn line_width(line: &[Segment], size: f64) -> f64 {
-    line.iter().map(|(face, text)| face.text_width(text, size)).sum()
+    line.iter().map(|(face, text, _)| face.text_width(text, size)).sum()
 }
 
 /// The lines `text` with `runs` is broken into, `width` wide in Helvetica at `size`, as ranges of characters (a line
@@ -309,12 +332,13 @@ fn ranges(styled: &[(char, Std14)], size: f64, width: f64) -> Vec<Range<usize>> 
 /// `text` wrapped `width` wide in lines of one-face segments.
 pub(crate) fn wrap(text: &str, runs: &[TextRun], base: Std14, size: f64, width: f64) -> Vec<Vec<Segment>> {
     let styled = faces(text, runs, base);
+    let flags = per_char(runs, styled.len());
     ranges(&styled, size, width)
         .into_iter()
         .map(|range| {
             let mut line: Vec<Segment> = Vec::new();
-            for &(ch, face) in styled.get(range).unwrap_or_default() {
-                push(&mut line, face, ch);
+            for (&(ch, face), flag) in styled.get(range.clone()).unwrap_or_default().iter().zip(flags.get(range).unwrap_or_default()) {
+                push(&mut line, face, flag.underline, ch);
             }
             line
         })
@@ -330,11 +354,24 @@ mod tests {
     #[test]
     fn runs_are_read_from_other_programs_rich_text() {
         let rc = "<?xml version=\"1.0\"?><body style=\"font-weight:normal\">\n<p>A <b>b&amp;c <i>d</i></b></p>\n<p><span style='font-weight:700'>e</span>&#x66;</p></body>";
-        let bold = |start, end| TextRun { start, end, bold: true, italic: false };
-        assert_eq!(runs(rc, "A b&c d\r\nef"), [bold(2, 6), TextRun { start: 6, end: 7, bold: true, italic: true }, bold(8, 9)]);
+        let bold = |start, end| TextRun { start, end, bold: true, ..TextRun::default() };
+        assert_eq!(runs(rc, "A b&c d\r\nef"), [bold(2, 6), TextRun { start: 6, end: 7, bold: true, italic: true, underline: false }, bold(8, 9)]);
         assert!(runs(rc, "something else").is_empty());
         for junk in ["<p><b>", "</p></p></span>", "<p>&#xFFFFFFFF;&;</p>", "<span style=\"", ""] {
             let _ = runs(junk, "x");
         }
+    }
+
+    #[test]
+    fn underlined_runs_are_written_and_read_back_and_split_the_drawn_line() {
+        let runs = [TextRun { start: 4, end: 8, underline: true, ..TextRun::default() }];
+        let rc = format!("<body>{}</body>", body("Due now, please", &runs));
+        assert!(rc.contains("text-decoration:underline"), "{rc}");
+        assert_eq!(super::runs(&rc, "Due now, please"), runs);
+        // Other programs' <u> too.
+        assert_eq!(super::runs("<body><p>a <u>b</u></p></body>", "a b"), [TextRun { start: 2, end: 3, underline: true, ..TextRun::default() }]);
+        let line = &wrap("Due now, please", &runs, Std14::Helvetica, 12.0, 500.0)[0];
+        let said: Vec<_> = line.iter().map(|(_, words, under)| (words.as_str(), *under)).collect();
+        assert_eq!(said, [("Due ", false), ("now,", true), (" please", false)]);
     }
 }
