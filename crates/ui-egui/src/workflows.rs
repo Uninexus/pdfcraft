@@ -8,6 +8,7 @@ pub(super) mod create_multiple_ui;
 pub(super) mod create_ui;
 pub(super) mod export_ui;
 pub(super) mod files;
+pub(super) mod flatten_ui;
 pub(super) mod folder_search_ui;
 pub(super) mod insert_clipboard;
 pub(crate) mod job_count;

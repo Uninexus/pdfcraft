@@ -103,6 +103,7 @@ pub(crate) fn scope_of(edit: &Edit) -> Scope {
         | Edit::PrepareText { .. }
         | Edit::EditPageImage { .. }
         | Edit::EnhanceScan { .. }
+        | Edit::FlattenTransparency { .. }
         | Edit::AddText { .. }
         | Edit::AddImage { .. }
         | Edit::UpdateContent { .. }

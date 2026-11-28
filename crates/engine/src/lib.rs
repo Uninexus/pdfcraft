@@ -43,6 +43,7 @@ pub mod field_copies;
 pub mod field_table;
 mod fill_sign;
 pub mod find_replace;
+pub mod flatten_transparency;
 pub mod folder_search;
 pub mod form_entries;
 pub mod guides;

@@ -566,6 +566,7 @@ const ALL_COMMANDS: &[CommandSpec] = &[
     c("prepress.marks.remove", "Remove printer marks", None, None, Marks(crate::MarkKind::PrinterMarks), "ruler"),
     c("prepress.convert_colors", "Convert colours…", None, None, Modification, "palette"),
     c("prepress.hairlines", "Fix hairlines…", None, None, Modification, "minus"),
+    c("prepress.flatten_transparency", "Flatten transparency…", None, None, Modification, "layers"),
     c("print.ink_manager", "Ink Manager…", None, None, Document, "palette"),
     c("prepress.readiness", "Print readiness…", None, None, Document, "file-check"),
     c("page.properties", "Page properties…", PAGES, None, Modification, "info"),

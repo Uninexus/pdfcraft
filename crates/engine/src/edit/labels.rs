@@ -337,6 +337,7 @@ impl Edit {
             Edit::LayoutTableToBlocks { .. } => Label::of("Change tag properties"),
             Edit::AddOcrText { .. } => Label::of("Recognize text"),
             Edit::EnhanceScan { .. } => Label::of("Enhance scanned file"),
+            Edit::FlattenTransparency { .. } => Label::of("Flatten transparency"),
             Edit::ApplyScriptChanges { .. } => Label::of("Run JavaScript"),
             Edit::XfaEvent { .. } => Label::of("Run form script"),
             // The level is the standard's own name ("PDF/A-2b"), so it goes in as it stands.

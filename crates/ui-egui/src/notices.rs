@@ -25,6 +25,8 @@ pub enum ProgressKey {
     Print,
     /// Scan clean-up.
     ScanClean,
+    /// Flatten transparency.
+    Flatten,
     /// Text recognition, one run or a batch.
     Ocr,
     /// Pages ▸ Remove white margins.
@@ -67,6 +69,7 @@ pub fn title(key: ProgressKey) -> String {
         ProgressKey::Action => tl!("Working").to_owned(),
         ProgressKey::Print => tl!("Printing").to_owned(),
         ProgressKey::ScanClean => tl!("Cleaning up scans").to_owned(),
+        ProgressKey::Flatten => tl!("Flattening transparency").to_owned(),
         ProgressKey::Ocr => tl!("Recognizing text").to_owned(),
         ProgressKey::WhiteMargins => tl!("Removing white margins").to_owned(),
         ProgressKey::FolderSearch => tl!("Searching a folder").to_owned(),
@@ -194,6 +197,7 @@ fn route(app: &mut PdfCraftApp, end: &NoticeEnd) {
     match key {
         ProgressKey::Optimize => app.cancel_optimize(),
         ProgressKey::ScanClean => app.cancel_scan_clean(),
+        ProgressKey::Flatten => app.cancel_flatten_transparency(),
         ProgressKey::WhiteMargins => app.cancel_white_margins(),
         ProgressKey::FolderSearch => app.cancel_folder_search(),
         ProgressKey::BatesMulti => app.cancel_bates_multi(),

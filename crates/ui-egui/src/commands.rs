@@ -491,6 +491,7 @@ impl PdfCraftApp {
             "protect.password" => self.open_protect(),
             "prepress.convert_colors" => self.open_convert_colours(ctx),
             "prepress.hairlines" => self.open_fix_hairlines(ctx),
+            "prepress.flatten_transparency" => self.open_flatten_transparency(ctx),
             "print.ink_manager" => self.open_ink_manager(),
             "prepress.readiness" => self.open_print_readiness(),
             "ai.ask" | "ai.summary" | "ai.translate" | "ai.edit" if pdfcraft_engine::AI_ENABLED => self.open_ai_for(id),

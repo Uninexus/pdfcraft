@@ -288,6 +288,13 @@ fn all_tools() -> Vec<ToolDef> {
         t("attachment_delete", "Delete an attachment", "Remove the document-level attachment with this name (as doc_info lists it). Undoable.")
             .destructive()
             .with(schema(json!({"doc": doc(), "name": {"type": "string"}}), &["doc", "name"])),
+        t("doc_flatten_transparency", "Flatten transparency", "Print production: each page whose own content paints transparently becomes an opaque picture of that content at dpi pixels per inch (72 to 600, default 300). Its text can no longer be selected or searched, content of hidden layers is dropped and its tags are lost; comments and form fields stay on top as they were. Returns pages_flattened, opaque (pages left alone: nothing transparent) and failed (pages that could not be drawn, left as they were), 1-based. Undoable.")
+            .cmd("prepress.flatten_transparency")
+            .destructive()
+            .with(schema(
+                json!({ "doc": doc(), "pages": pages("to flatten (default all)"), "dpi": { "type": "number", "minimum": 72, "maximum": 600 } }),
+                &["doc"],
+            )),
         t("doc_convert_colours", "Convert colours", "Print production: every colour operator in the pages' content and the artwork it draws rewritten in the target space (to: gray, rgb or cmyk) by the standard device formulas (device spaces, ICC by component count, Lab, Indexed, Separation and DeviceN tints; patterns, shadings and inline images stay). Not a prepress separation: no ICC profile and no output intent is used. Spot colours are converted, not kept: exact through a Type 2 tint, otherwise a gray of their darkness; /None stays. preserve_black (default true) keeps pure black as 100% K / gray 0; images (default true) re-encodes 8-bit gray and RGB pictures (JPEG stays JPEG, compressed again at quality 80; CMYK written lossless; soft masks kept), and leaves indexed, CMYK, masked and other pictures as they are; annotations also converts the pages' comment and field appearances. Returns how many colours and pictures changed on how many pages, images_left (pictures not in the target that stayed), and loses_conformance (the PDF/A level and output intents the file declared: it may no longer meet them, and still declares them; standards_remove_id takes that off). Undoable.")
             .cmd("prepress.convert_colors")
             .with(schema(

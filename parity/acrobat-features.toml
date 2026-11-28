@@ -7909,11 +7909,11 @@ title = "Flatten transparency"
 area = "K"
 tier = "P1"
 milestone = "M11"
-status = "planned"
-commands = []
-tools = []
-evidence = []
-notes = ""
+status = "partial"
+commands = ["prepress.flatten_transparency"]
+tools = ["doc_flatten_transparency"]
+evidence = ["crates/engine/src/tests.rs::flattening_transparency_turns_only_transparent_pages_into_pictures", "crates/automation/tests/it/automation.rs::flatten_transparency_through_tools", "crates/ui-egui/tests/it/editing.rs::flatten_transparency_from_the_dialog"]
+notes = "Print production > Flatten transparency (tool doc_flatten_transparency): chosen pages whose own content paints transparently become opaque RGB pictures at 72 to 600 ppi (default 300), in the background with progress and Cancel, as one undo step. Pages without transparency stay as they are; comments and form fields stay on top, unflattened. Missing: keeping text and vectors where they are not transparent (a flattened page is all picture: no selection or search, hidden layers dropped, tags lost), a raster/vector balance, outlining text and strokes, CMYK or spot-colour output, flattening the transparency of annotation appearances, and a preview."
 
 [[feature]]
 id = "optimize.discard-javascript"

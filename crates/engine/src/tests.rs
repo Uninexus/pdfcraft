@@ -16557,3 +16557,64 @@ fn pages_without_a_tab_order_can_follow_the_structure_tree() {
     s.set_tabs_follow_structure(false);
     assert_eq!(order(&s, first), "AB");
 }
+
+/// A page whose content paints transparently turns into a picture that looks the same; its
+/// comment stays a comment, an opaque page is left alone, and undo brings the content back.
+#[test]
+fn flattening_transparency_turns_only_transparent_pages_into_pictures() {
+    let stream = |s: &str| format!("<< /Length {} >>\nstream\n{s}\nendstream", s.len());
+    let objs = [
+        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 /MediaBox [0 0 100 100] >>".to_string(),
+        "<< /Type /Page /Parent 2 0 R /Resources << /ExtGState << /Half << /ca 0.5 >> >> >> /Contents 5 0 R /Annots [7 0 R] >>".to_string(),
+        "<< /Type /Page /Parent 2 0 R /Contents 6 0 R >>".to_string(),
+        stream("/Half gs 1 0 0 rg 10 10 80 40 re f"),
+        stream("0 0 1 rg 10 10 80 40 re f"),
+        "<< /Type /Annot /Subtype /Square /Rect [10 60 90 90] /C [0 1 0] >>".to_string(),
+    ];
+    let mut pdf = b"%PDF-1.7\n".to_vec();
+    let mut offsets = Vec::new();
+    for (i, o) in objs.iter().enumerate() {
+        offsets.push(pdf.len());
+        pdf.extend_from_slice(format!("{} 0 obj\n{o}\nendobj\n", i + 1).as_bytes());
+    }
+    let xref = pdf.len();
+    pdf.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1).as_bytes());
+    for o in offsets {
+        pdf.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+    }
+    pdf.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objs.len() + 1).as_bytes());
+
+    let mut s = Session::new().with_clock(|| 1_700_000_000);
+    let id = s.open("t.pdf", None, Arc::new(pdf), None).unwrap();
+    // The page as shown, and whether it still paints transparently by itself.
+    let shot = |s: &Session| {
+        let doc = s.get(id).unwrap();
+        let mut r = pdfcraft_render::PageRenderer::new(doc.bytes.clone(), Default::default());
+        r.render(pdfcraft_render::RenderRequest { page: 0, scale: 1.0, ..Default::default() }).rgba.to_vec()
+    };
+    let transparent = |s: &Session, page: usize| {
+        let cos = &s.get(id).unwrap().editor.as_ref().unwrap().cos;
+        let mut dict = pdfcraft_model::pages(cos)[page].dict.clone();
+        dict.remove(b"Annots");
+        pdfcraft_preflight::page_uses_transparency(cos, &dict)
+    };
+    let before = shot(&s);
+    assert!(transparent(&s, 0) && !transparent(&s, 1));
+    assert!(s.flatten_transparency(id, &[], 20.0).is_err(), "too coarse a resolution is refused");
+
+    let report = s.flatten_transparency(id, &[], 144.0).unwrap();
+    assert_eq!((report.pages, report.opaque, report.failed), (vec![0], vec![1], vec![]));
+    assert!(!transparent(&s, 0));
+    assert_eq!(s.get(id).unwrap().info.pages.len(), 2);
+    let after = shot(&s);
+    let far = before.iter().zip(&after).filter(|(a, b)| a.abs_diff(**b) > 12).count();
+    assert!(far < before.len() / 50, "looks the same: {far} of {} values differ", before.len());
+    let cos = &s.get(id).unwrap().editor.as_ref().unwrap().cos;
+    assert!(pdfcraft_model::pages(cos)[0].dict.get(b"Annots").is_some(), "the comment stays a comment");
+
+    s.undo(id).unwrap();
+    assert!(transparent(&s, 0));
+    let nothing = s.flatten_transparency(id, &[1], 144.0).unwrap();
+    assert!(nothing.pages.is_empty() && !s.get(id).unwrap().dirty);
+}

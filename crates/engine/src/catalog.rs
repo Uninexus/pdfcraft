@@ -437,6 +437,7 @@ const ALL_GROUPS: &[ToolGroup] = &[
                 item("Set page boxes", "square-dashed-mouse-pointer", "page.boxes", Ready),
                 item("Add printer marks", "ruler", "prepress.marks", Ready),
                 item("Fix hairlines", "minus", "prepress.hairlines", Ready),
+                item("Flatten transparency", "layers", "prepress.flatten_transparency", Ready),
                 item("Print readiness", "file-check", "prepress.readiness", Ready),
                 item("Ink Manager", "palette", "print.ink_manager", Ready),
             ],

@@ -16966,3 +16966,23 @@ fn office_export_recognizes_scanned_pages() {
     let out = ok(&mut a, "doc_export_office", json!({ "doc": text, "path": "typed.md" }));
     assert!(out["recognized_words"].is_null(), "{out}");
 }
+
+/// Flatten transparency through the tools: only the page that paints transparently is turned
+/// into a picture, also in a document just protected with a password.
+#[test]
+fn flatten_transparency_through_tools() {
+    let dir = workdir("flatten-transparency");
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "a.pdf" }))["doc"].as_u64().unwrap();
+    // Nothing transparent: nothing to do, and no undo step.
+    let r = ok(&mut a, "doc_flatten_transparency", json!({ "doc": doc }));
+    assert_eq!((r["pages_flattened"].clone(), r["opaque"].clone(), r["undo"].is_null()), (json!([]), json!([1, 2, 3]), true), "{r}");
+    ok(&mut a, "doc_watermark", json!({ "doc": doc, "pages": [2], "text": "Draft", "opacity": 0.4 }));
+    assert!(matches!(a.call("doc_flatten_transparency", &json!({ "doc": doc, "dpi": 5000 })), Err(ToolError::Failed(_) | ToolError::InvalidArgs(_))));
+    ok(&mut a, "doc_protect", json!({ "doc": doc, "open_password": "open sesame" }));
+    let r = ok(&mut a, "doc_flatten_transparency", json!({ "doc": doc, "dpi": 150 }));
+    assert_eq!((r["pages_flattened"].clone(), r["failed"].clone()), (json!([2]), json!([])), "{r}");
+    assert_eq!(r["undo"], "Flatten transparency", "{r}");
+    let again = ok(&mut a, "doc_flatten_transparency", json!({ "doc": doc }));
+    assert_eq!(again["pages_flattened"], json!([]), "{again}");
+}

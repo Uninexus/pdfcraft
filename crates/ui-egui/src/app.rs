@@ -263,6 +263,7 @@ impl PdfCraftApp {
             space_audit_jobs: queue(&host, &wake, "pdfcraft-space-audit"),
             optimize_jobs: queue(&host, &wake, "pdfcraft-optimize"),
             scan_cleans: queue(&host, &wake, "pdfcraft-scan-clean"),
+            flatten_jobs: queue(&host, &wake, "pdfcraft-flatten"),
             white_margins_jobs: queue(&host, &wake, "pdfcraft-white-margins"),
             bates_multi_jobs: queue(&host, &wake, "pdfcraft-bates-multi"),
             optimize_batch_jobs: queue(&host, &wake, "pdfcraft-optimize-batch"),
@@ -496,6 +497,8 @@ impl PdfCraftApp {
             optimize_run: None,
             scan_clean_draft: scan_clean_ui::ScanCleanDraft::default(),
             scan_clean_run: None,
+            flatten_draft: Default::default(),
+            flatten_run: None,
             white_margins_draft: white_margins_ui::WhiteMarginsDraft::default(),
             white_margins_run: None,
             bates_multi_run: None,
@@ -872,6 +875,7 @@ impl PdfCraftApp {
         self.poll_ocr(ctx);
         self.poll_optimize();
         self.poll_scan_clean();
+        self.poll_flatten_transparency();
         self.poll_white_margins(ctx);
         self.poll_folder_search();
         self.poll_bates_multi();
