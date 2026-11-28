@@ -819,6 +819,8 @@ struct AddedTextHost<'a> {
     view: craft::behavior::CanvasView,
     layout: BoxLayout,
     laid_out: Option<(String, Vec<Option<pdfcraft_engine::TextAlign>>, Arc<egui::Galley>)>,
+    /// Where the last edit put the caret, when it is not after what the editor typed.
+    moved: Option<usize>,
 }
 
 impl AddedTextHost<'_> {
@@ -865,17 +867,26 @@ impl TextEditorHost for AddedTextHost<'_> {
 
     fn replace(&mut self, range: Range<usize>, text: &str, kind: EditKind) -> Option<usize> {
         let before = self.draft.text.clone();
-        let start = byte_at(&before, range.start);
-        let end = byte_at(&before, range.end).max(start);
-        self.draft.text.replace_range(start..end, text);
+        let list = crate::edit_text_ui::list_enter(&before, &range, text, kind);
+        let (start, end, put) = match &list {
+            Some((done, _)) => (done.range.start, done.range.end, done.text.as_str()),
+            None => {
+                let start = byte_at(&before, range.start);
+                (start, byte_at(&before, range.end).max(start), text)
+            }
+        };
+        self.draft.text.replace_range(start..end, put);
         // Each paragraph keeps its own alignment through the typing, the edit's place telling which of
         // two equal paragraphs changed.
-        let caret = start + text.len();
+        let caret = list.as_ref().map_or(start + put.len(), |(done, _)| done.caret);
         self.draft.style.aligns = pdfcraft_engine::paragraph_align::remap_at(&before, &self.draft.text, &self.draft.style.aligns, Some(caret));
-        self.draft.selection = Some(TextSelection::caret_at(range.start + text.chars().count()));
+        let at = list.as_ref().map_or(range.start + text.chars().count(), |(_, at)| *at);
+        // Ending a list takes characters before the caret away, which the count returned can't say.
+        self.moved = (at < range.start).then_some(at);
+        self.draft.selection = Some(TextSelection::caret_at(at));
         let now = self.draft.typed();
         self.draft.history.record(kind, now);
-        Some(text.chars().count())
+        Some(at.saturating_sub(range.start))
     }
 
     fn hit(&mut self, at: Point) -> (usize, usize) {
@@ -1027,12 +1038,15 @@ fn draft_session(
     // canvas background: that press is the one that opened it, not a click away from it.
     let fresh = if body.pass.is_some() { std::mem::replace(&mut draft.focus, false) } else { draft.focus };
     let mut selection = draft.selection.unwrap_or_else(|| TextSelection::caret_at(draft.text.chars().count()));
-    let mut host = AddedTextHost { draft, ctx: ctx.clone(), view: body.view, layout, laid_out: None };
+    let mut host = AddedTextHost { draft, ctx: ctx.clone(), view: body.view, layout, laid_out: None, moved: None };
     let paper = Rect::from_min_size(at, egui::vec2(width, host.galley().rect.height() + INSET.y * 2.0));
     let editor = TextEditor::new(tl!("Added text"), &mut host, Bind::bound(&mut selection)).esc_commits(false).id(editor_id);
     let output = if fresh { editor.request_focus(FocusRequest::Take) } else { editor }.show_at(ui, paper);
     let ended = output.ended.filter(|end| !(fresh && *end == EditorEnd::Commit));
     let galley = host.galley();
+    if let Some(caret) = host.moved {
+        selection = TextSelection::caret_at(caret);
+    }
     let paper = Rect::from_min_size(at, egui::vec2(width, galley.rect.height() + INSET.y * 2.0));
     cv.drawn = Some(DraftPaint {
         paper,

@@ -1731,3 +1731,40 @@ fn escape_closing_a_dialog_over_added_text_being_typed_keeps_the_typing() {
     let added = added(&h).iter().any(|a| matches!(&a.content, pdfcraft_engine::AddedContent::Text(t) if t.text.contains("Reviewed")));
     assert!(open || added, "the typing stays");
 }
+
+/// Format text's list buttons while typing: Enter starts the next item, Enter on an empty one ends
+/// the list, and a button works from the keyboard.
+#[test]
+fn added_text_takes_a_list_and_enter_continues_and_ends_it() {
+    let mut h = harness();
+    assert!(h.execute("edit.text"));
+    h.run_steps(2);
+    let p = at(&h, 40.0, 300.0);
+    click(&mut h, p);
+    let typing = |h: &mut Harness<'static, PdfCraftApp>, text: &str| {
+        h.event(egui::Event::Text(text.into()));
+        h.run_steps(3);
+    };
+    let enter = |h: &mut Harness<'static, PdfCraftApp>| {
+        h.key_press(egui::Key::Enter);
+        h.run_steps(3);
+    };
+    let text = |h: &Harness<'static, PdfCraftApp>| h.state().views[0].session.content.draft.as_ref().map(|d| d.text.clone()).unwrap_or_default();
+    typing(&mut h, "Milk");
+    h.get_by_label("Numbered list").click();
+    h.run_steps(4);
+    assert_eq!(text(&h), "1. Milk");
+    enter(&mut h);
+    typing(&mut h, "Eggs");
+    enter(&mut h);
+    assert_eq!(text(&h), "1. Milk\n2. Eggs\n3. ");
+    enter(&mut h);
+    typing(&mut h, "Done");
+    assert_eq!(text(&h), "1. Milk\n2. Eggs\nDone", "the caret is where the empty item was");
+    // The last line is not in the list, so the button puts every line in one; from the keyboard.
+    h.get_by_label("Bulleted list").focus();
+    h.run_steps(2);
+    h.key_press(egui::Key::Space);
+    h.run_steps(4);
+    assert_eq!(text(&h), "• Milk\n• Eggs\n• Done");
+}
