@@ -800,6 +800,8 @@ pub struct PdfCraftApp {
     pub image_import: Option<create_ui::ImageImport>,
     /// The custom stamp library.
     pub custom_stamps: Vec<stamps_ui::CustomStamp>,
+    /// Saved password-protection settings (Protect Using Password), without passwords.
+    pub security_policies: Vec<pdfcraft_engine::security_policy::SecurityPolicy>,
     /// Create custom stamp, while it is open.
     pub(crate) stamp_dialog: Option<stamps_ui::CreateStampDialog>,
     /// The running optimization (Optimize PDF ▸ Advanced optimization).

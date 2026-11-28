@@ -2,6 +2,7 @@
 //! Password Security settings behind "Advanced Options" (compatibility, what to encrypt,
 //! printing, changes, copying, screen readers). Execution plan M8.1.
 
+use craft::ui::buttons::Button;
 use craft::ui::choice::{Checkbox, Radio, RadioGroup};
 use craft::ui::contract::{Bind, Entry, Props as _, Show as _, ShowContainer as _};
 use craft::ui::controls::disclosure::Disclosure;
@@ -13,7 +14,9 @@ use craft::ui::patterns::form_dialogs::{FormDialog, PasswordFields};
 use craft::ui::pickers::Select;
 use craft::ui::runtime::env::Label;
 use craft::ui::style::TypeRole;
+use craft::ui::text::TextField;
 use egui::Ui;
+use pdfcraft_engine::security_policy::{SecurityPolicy, find_policy, save_policy};
 use pdfcraft_engine::{Algorithm, Changes, Edit, Printing, Protection};
 
 use crate::PdfCraftApp;
@@ -27,11 +30,32 @@ pub struct ProtectDraft {
     pub confirm: String,
     pub advanced: bool,
     pub protection: Protection,
+    /// The saved security policies, as this dialog shows them.
+    pub policies: Vec<SecurityPolicy>,
+    /// The policy chosen from them.
+    pub picked: Option<usize>,
+    /// The name to save the settings under.
+    pub policy_name: String,
+    /// Policies were saved or deleted here and the app has not taken them yet.
+    pub policies_changed: bool,
+    /// Why the last Save was refused.
+    pub policy_error: Option<String>,
 }
 
 impl Default for ProtectDraft {
     fn default() -> Self {
-        Self { viewing: true, password: String::new(), confirm: String::new(), advanced: false, protection: Protection::default() }
+        Self {
+            viewing: true,
+            password: String::new(),
+            confirm: String::new(),
+            advanced: false,
+            protection: Protection::default(),
+            policies: Vec::new(),
+            picked: None,
+            policy_name: String::new(),
+            policies_changed: false,
+            policy_error: None,
+        }
     }
 }
 
@@ -63,6 +87,41 @@ impl ProtectDraft {
         }
     }
 
+    /// Take the settings of policy `index`; the passwords typed stay.
+    pub fn use_policy(&mut self, index: usize) {
+        let Some(policy) = self.policies.get(index) else { return };
+        self.viewing = policy.viewing;
+        self.protection = policy.settings().clone();
+        self.policy_name = policy.name.clone();
+        self.picked = Some(index);
+        self.policy_error = None;
+    }
+
+    /// Keep the settings shown as a policy called `policy_name`.
+    pub fn save_as_policy(&mut self) {
+        let saved = SecurityPolicy::new(&self.policy_name, self.viewing, &self.protection).and_then(|policy| {
+            let name = policy.name.clone();
+            save_policy(&mut self.policies, policy).map(|()| name)
+        });
+        match saved {
+            Ok(name) => {
+                self.picked = find_policy(&self.policies, &name).and_then(|p| self.policies.iter().position(|q| q == p));
+                self.policies_changed = true;
+                self.policy_error = None;
+            }
+            Err(why) => self.policy_error = Some(why),
+        }
+    }
+
+    /// Delete the chosen policy.
+    pub fn delete_policy(&mut self) {
+        if let Some(index) = self.picked.take().filter(|i| *i < self.policies.len()) {
+            self.policies.remove(index);
+            self.policy_name.clear();
+            self.policies_changed = true;
+        }
+    }
+
     /// The edit Apply makes.
     pub fn edit(&self) -> Edit {
         let mut p = self.protection.clone();
@@ -84,8 +143,10 @@ pub(crate) struct ProtectDialog {
 }
 
 impl ProtectDialog {
-    fn new() -> Self {
-        ProtectDialog { id: dialog_id("protect"), draft: ProtectDraft::default() }
+    fn new(policies: Vec<SecurityPolicy>) -> Self {
+        let mut draft = ProtectDraft::default();
+        draft.policies = policies;
+        ProtectDialog { id: dialog_id("protect"), draft }
     }
 }
 
@@ -96,6 +157,9 @@ fn text(s: &str) -> String {
 /// The dialog's rows; returns whether Apply can be pressed.
 fn body(ui: &mut Ui, d: &mut ProtectDraft) -> bool {
     let error = d.problem().filter(|_| !d.password.is_empty() || !d.confirm.is_empty()).map(|p| Label::from(text(p)));
+    if !d.policies.is_empty() {
+        policy_choice(ui, d);
+    }
     let requires = text("Requires user to enter a password for:");
     Field::new(requires.clone()).show(ui, |ui, _| {
         RadioGroup::new(requires.clone(), Bind::bound(&mut d.viewing)).show(ui, |ui, _| {
@@ -112,6 +176,7 @@ fn body(ui: &mut Ui, d: &mut ProtectDraft) -> bool {
     if d.advanced {
         advanced_rows(ui, d);
     }
+    policy_rows(ui, d);
     let note = if d.viewing {
         text("Anyone opening the document will need this password. It's applied when you save.")
     } else {
@@ -119,6 +184,43 @@ fn body(ui: &mut Ui, d: &mut ProtectDraft) -> bool {
     };
     Text::new(note).role(TypeRole::Caption).shade(Shade::Muted).show(ui);
     d.problem().is_none()
+}
+
+/// The saved policies to take settings from.
+fn policy_choice(ui: &mut Ui, d: &mut ProtectDraft) {
+    let mut entries = vec![Entry::new(None, text("None"))];
+    entries.extend(d.policies.iter().enumerate().map(|(i, p)| Entry::new(Some(i), p.name.clone())));
+    let label = text("Security policy");
+    let mut chosen = None;
+    Field::new(label.clone()).show(ui, |ui, _| {
+        chosen = Select::new(label.clone(), Bind::given(d.picked), &entries).show(ui).value().copied();
+    });
+    match chosen {
+        Some(Some(index)) => d.use_policy(index),
+        Some(None) => d.picked = None,
+        None => {}
+    }
+}
+
+/// Keep the settings shown as a policy, or delete the chosen one.
+fn policy_rows(ui: &mut Ui, d: &mut ProtectDraft) {
+    let label = text("Policy name");
+    TextField::new(label.clone(), Bind::bound(&mut d.policy_name)).placeholder(label.clone()).show(ui);
+    let (mut save, mut delete) = (false, false);
+    Row::new().show(ui, |ui, _| {
+        save = Button::new(text("Save as policy")).enabled(!d.policy_name.trim().is_empty()).show(ui).clicked();
+        delete = Button::new(text("Delete policy")).enabled(d.picked.is_some()).show(ui).clicked();
+    });
+    if save {
+        d.save_as_policy();
+    }
+    if delete {
+        d.delete_policy();
+    }
+    if let Some(why) = &d.policy_error {
+        Text::new(why.clone()).show(ui);
+    }
+    Text::new(text("A policy keeps these settings, never a password.")).role(TypeRole::Caption).shade(Shade::Muted).show(ui);
 }
 
 /// The classic Password Security settings.
@@ -210,11 +312,17 @@ impl PdfCraftApp {
     /// Opens Protect Using Password with an empty draft.
     pub(crate) fn open_protect(&mut self) {
         // PLAN: assumed `fn open<D: StackDialog>(app: &mut PdfCraftApp, dialog: D)` (pdf-hub-w2)
-        crate::dialogs::host::open(self, ProtectDialog::new());
+        crate::dialogs::host::open(self, ProtectDialog::new(self.security_policies.clone()));
     }
 
     /// Applies the draft of a Protect dialog that finished with Apply.
     pub(crate) fn protect_pass(&mut self, ctx: &egui::Context) {
+        // Policies saved or deleted in the open dialog are kept at once, whatever it ends with.
+        if let Some(dialog) = self.dialogs.get_mut_by_id::<ProtectDialog>(dialog_id("protect"))
+            && std::mem::take(&mut dialog.draft.policies_changed)
+        {
+            self.security_policies = dialog.draft.policies.clone();
+        }
         // PLAN: assumed `self.dialogs: DialogHost` with `fn take<D: StackDialog>(&mut self) -> Option<DialogResult<D::Result>>` (pdf-hub-w1 field, pdf-hub-w2 host)
         if let Some(DialogResult::Ok(draft)) = self.dialogs.take::<ProtectDialog>()
             && self.apply_edit(ctx, draft.edit())
@@ -301,5 +409,40 @@ mod tests {
         h.run_steps(2);
         assert!(h.query_by_label("Apply").is_none());
         assert_fresh(&mut h);
+    }
+
+    #[test]
+    fn a_policy_saved_in_the_dialog_is_kept_without_the_password_and_sets_the_next_one() {
+        use egui::accesskit::Role;
+        let mut h = Harness::builder().with_size(egui::vec2(1200.0, 900.0)).build_eframe(|cc| {
+            crate::PdfCraftApp::install_runtime(&cc.egui_ctx);
+            let mut app = PdfCraftApp::for_unit_tests();
+            app.set_option(&cc.egui_ctx, "language", "en").unwrap();
+            app
+        });
+        open_and_fill(&mut h, "TopSecret123!");
+        h.get_by_label("Editing").click();
+        h.run_steps(2);
+        h.get_by(|n| n.label().as_deref() == Some("Policy name") && n.role() == Role::TextInput).click();
+        h.run_steps(2);
+        h.get_by(|n| n.label().as_deref() == Some("Policy name") && n.role() == Role::TextInput).type_text("Client copies");
+        h.run_steps(2);
+        h.get_by_label("Save as policy").click();
+        h.run_steps(3);
+        // Cancel: the policy stays, the password typed goes with the dialog.
+        h.get_by_label("Cancel").click();
+        h.run_steps(3);
+        h.state_mut().protect_pass(&egui::Context::default());
+        let kept = h.state().security_policies.clone();
+        assert_eq!(kept.iter().map(|p| (p.name.as_str(), p.viewing)).collect::<Vec<_>>(), [("Client copies", false)]);
+        assert!(!kept[0].to_json().to_string().contains("TopSecret"));
+
+        h.state_mut().open_protect();
+        h.run_steps(2);
+        let mut draft = ProtectDraft::default();
+        draft.policies = kept;
+        draft.use_policy(0);
+        assert!(!draft.viewing && draft.password.is_empty(), "the policy sets what the password is for, not the password");
+        h.get_by_role_and_label(Role::ComboBox, "Security policy");
     }
 }

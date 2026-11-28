@@ -494,6 +494,7 @@ impl PdfCraftApp {
             organize_zoom: 1.0,
             image_import: None,
             custom_stamps: Vec::new(),
+            security_policies: Vec::new(),
             stamp_dialog: None,
             optimize_run: None,
             scan_clean_draft: scan_clean_ui::ScanCleanDraft::default(),
