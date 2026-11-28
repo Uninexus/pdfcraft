@@ -11346,3 +11346,81 @@ fn signature_seed_names_and_required_entries_are_checked_before_they_are_written
     assert_eq!(Entry::parse("DigestMethod"), None);
     assert_eq!([Entry::SubFilter, Entry::Reasons, Entry::AddRevInfo, Entry::DigestMethod].map(Entry::bit), [2, 8, 32, 64]);
 }
+
+/// Two tagged pages: on each a paragraph (MCID 0), the second with a note its tag names.
+fn tagged_doc(first: &str, second: &str) -> Document {
+    let page = |contents: u32, key: u32, annots: &str| {
+        format!("<< /Type /Page /Parent 2 0 R /StructParents {key} /Contents {contents} 0 R /Resources << /Font << /F1 7 0 R >> >> {annots} >>")
+    };
+    let b: Vec<String> = vec![
+        "<< /Type /Catalog /Pages 2 0 R /MarkInfo << /Marked true >> /Lang (en-CA) /StructTreeRoot 8 0 R >>".into(), // 1
+        "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 /MediaBox [0 0 300 400] >>".into(),                            // 2
+        page(5, 0, ""),                                                                                              // 3
+        page(6, 1, "/Annots [13 0 R]"),                                                                              // 4
+        body(first),                                                                                                 // 5
+        body(second),                                                                                                // 6
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".into(),                                             // 7
+        "<< /Type /StructTreeRoot /K 9 0 R /ParentTree 12 0 R >>".into(),                                            // 8
+        "<< /Type /StructElem /S /Document /P 8 0 R /K [10 0 R 11 0 R] >>".into(),                                   // 9
+        "<< /Type /StructElem /S /P /P 9 0 R /Pg 3 0 R /K 0 >>".into(),                                              // 10
+        "<< /Type /StructElem /S /P /P 9 0 R /Pg 4 0 R /K [0 << /Type /OBJR /Obj 13 0 R >>] >>".into(),              // 11
+        "<< /Kids [14 0 R] >>".into(),                                                                               // 12
+        "<< /Type /Annot /Subtype /Text /Rect [10 10 30 30] /StructParent 2 >>".into(),                              // 13
+        "<< /Nums [0 [10 0 R] 1 [11 0 R] 2 11 0 R] /Limits [0 2] >>".into(),                                         // 14
+    ];
+    open(build(&b, "/Root 1 0 R"))
+}
+
+/// Each page of `doc` that has tags, as the page's number and the element its MCID 0 belongs to; the
+/// element's own page must be that page.
+fn tagged_pages(doc: &Document) -> Vec<(usize, pdfcraft_cos::Dict)> {
+    let dict = |o: &Object| doc.resolve(o).as_dict().cloned().unwrap();
+    let catalog = dict(&Object::Ref(doc.root().unwrap()));
+    let tree = dict(catalog.get(b"StructTreeRoot").expect("a structure tree"));
+    let parents = dict(tree.get(b"ParentTree").unwrap());
+    let nums = parents.get(b"Nums").and_then(Object::as_array).unwrap().clone();
+    let entry = |key: i64| nums.chunks(2).find(|p| p[0] == Object::Int(key)).map(|p| p[1].clone()).expect("an entry");
+    let mut found = Vec::new();
+    for (number, page) in pages(doc).unwrap().iter().enumerate() {
+        let d = dict(&Object::Ref(page.obj));
+        let Some(key) = d.int(b"StructParents") else { continue };
+        let elements = doc.resolve(&entry(key)).as_array().cloned().unwrap();
+        let element = dict(&elements[0]);
+        assert_eq!(element.reference(b"Pg"), Some(page.obj), "page {number}");
+        // A note on the page answers to the same element.
+        for annot in d.get(b"Annots").and_then(Object::as_array).into_iter().flatten() {
+            let key = dict(annot).int(b"StructParent").expect("the note keeps its tag");
+            assert_eq!(entry(key), elements[0]);
+        }
+        found.push((number, element));
+    }
+    found
+}
+
+#[test]
+fn combine_brings_each_files_structure_tree() {
+    let (a, b) = (tagged_doc("A one", "A two"), tagged_doc("B one", "B two"));
+    let out = combine(&[("a", &a), ("b", &b)]).unwrap();
+    let out = open(write_full(&out, &SaveOptions::default()).unwrap());
+    assert_eq!(tagged_pages(&out).iter().map(|p| p.0).collect::<Vec<_>>(), [0, 1, 2, 3]);
+    let catalog = out.get(out.root().unwrap()).as_dict().cloned().unwrap();
+    assert!(catalog.contains(b"MarkInfo") && catalog.contains(b"Lang"), "tagged throughout, in one language");
+    let tree = out.resolve(catalog.get(b"StructTreeRoot").unwrap()).as_dict().cloned().unwrap();
+    assert_eq!(tree.get(b"K").and_then(Object::as_array).map(Vec::len), Some(2), "each file's Document element");
+
+    // Chosen pages bring only their elements; an untagged file leaves the whole not marked tagged.
+    let plain = doc_a();
+    let out = combine_selected(&[("a", &a, Some(&[1])), ("plain", &plain, None)]).unwrap();
+    let pages = tagged_pages(&out);
+    assert_eq!(pages.len(), 1);
+    let document = out.resolve(pages[0].1.get(b"P").unwrap()).as_dict().cloned().unwrap();
+    assert!(!matches!(document.get(b"K"), Some(Object::Array(_))), "the other page's element is left behind: {document:?}");
+    assert!(!out.get(out.root().unwrap()).as_dict().unwrap().contains(b"MarkInfo"));
+
+    // Files split into runs keep their tags where their pages went.
+    let out = combine_grouped(&[(0, "a", &a, Some(&[0])), (1, "b", &b, Some(&[0, 1])), (0, "a", &a, Some(&[1]))]).unwrap();
+    assert_eq!(tagged_pages(&out).len(), 4);
+    // Files without tags give none.
+    let out = combine(&[("p", &plain), ("q", &plain)]).unwrap();
+    assert!(!out.get(out.root().unwrap()).as_dict().unwrap().contains(b"StructTreeRoot"));
+}
