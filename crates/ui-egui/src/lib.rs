@@ -372,6 +372,9 @@ pub struct PdfCraftApp {
     /// Documents and view). Continuous scrolling at fit width by default, which never snaps
     /// between pages.
     pub view_defaults: canvas::ViewDefaults,
+    /// Preferences ▸ Accessibility: documents open with caret browsing on (saved as
+    /// `caret_on_open`).
+    pub caret_on_open: bool,
     /// Preferences ▸ Highlight fields for newly opened forms (saved as `highlight_fields`).
     pub(crate) highlight_fields: bool,
     /// Whether what Auto-Complete remembered is written to the settings file and read from it. False in a portable

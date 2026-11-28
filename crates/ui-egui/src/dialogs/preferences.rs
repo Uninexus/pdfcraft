@@ -153,6 +153,7 @@ struct PrefsDraft {
     always_default_view: bool,
     text_links: bool,
     export_scans: bool,
+    caret_on_open: bool,
     units: Unit,
     /// Preferences > Grid: the page grid, in points, and the unit its numbers are shown in.
     grid: pdfcraft_engine::guides::Grid,
@@ -207,6 +208,7 @@ impl PrefsDraft {
             always_default_view: app.always_default_view,
             text_links: app.text_links,
             export_scans: app.ocr_draft.export_scans,
+            caret_on_open: app.caret_on_open,
             units: app.units,
             grid: crate::grid_prefs::effective(&app.session),
             grid_unit: app.grid_unit,
@@ -265,6 +267,7 @@ impl PrefsDraft {
             always_default_view: false,
             text_links: true,
             export_scans: true,
+            caret_on_open: false,
             units: Unit::default(),
             grid: crate::grid_prefs::default_grid(),
             grid_unit: Unit::default(),
@@ -595,6 +598,7 @@ impl PreferencesModel for Prefs<'_> {
             self.general_page(),
             self.appearance_page(),
             self.documents_page(),
+            self.accessibility_page(),
             self.grid_page(),
             self.identity_page(),
             self.comment_page(),
@@ -690,6 +694,7 @@ impl PreferencesModel for Prefs<'_> {
             ("view.always", PrefValue::Bool(v)) => d.always_default_view = v,
             ("view.text_links", PrefValue::Bool(v)) => d.text_links = v,
             ("view.export_scans", PrefValue::Bool(v)) => d.export_scans = v,
+            ("accessibility.caret", PrefValue::Bool(v)) => d.caret_on_open = v,
             ("view.units", PrefValue::Choice(id)) => d.units = lookup(&unit_table(), &id).unwrap_or(d.units),
             ("grid.unit", PrefValue::Choice(id)) => d.grid_unit = lookup(&unit_table(), &id).unwrap_or(d.grid_unit),
             ("grid.spacing", PrefValue::Float(v)) => d.grid.spacing = v / d.grid_unit.per_point(),
@@ -901,6 +906,7 @@ impl PreferencesModel for Prefs<'_> {
                 d.login_name = fresh.login_name;
                 d.author_from_login_name = fresh.author_from_login_name;
             }
+            "accessibility" => d.caret_on_open = fresh.caret_on_open,
             "forms" => {
                 d.highlight_fields = fresh.highlight_fields;
                 d.field_highlight_color = fresh.field_highlight_color;
@@ -991,6 +997,7 @@ impl PreferencesDraft for Prefs<'_> {
         self.app.always_default_view = d.always_default_view;
         self.app.text_links = d.text_links;
         self.app.ocr_draft.export_scans = d.export_scans;
+        self.app.caret_on_open = d.caret_on_open;
         self.app.units = d.units;
         self.app.grid_unit = d.grid_unit;
         // Only a grid that was changed becomes the session's preference, so an untouched page leaves it unset.
@@ -1178,6 +1185,18 @@ impl Prefs<'_> {
                 .help(tl!("Z picks Marquee zoom and G picks Snapshot. V (Select) and H (Hand) always work.")),
         ];
         PageSpec::new("documents", tl!("Documents and view"), rows)
+    }
+
+    fn accessibility_page(&self) -> PageSpec<'_> {
+        let d = &*self.draft;
+        let rows = vec![
+            RowSpec::new("accessibility.caret", tl!("Turn on the keyboard text cursor when a document opens"), RowKind::Bool(d.caret_on_open)).help(
+                tl!(
+                    "Caret browsing: move through the page text and select it with the arrow keys. View > Caret browsing turns it off for a document."
+                ),
+            ),
+        ];
+        PageSpec::new("accessibility", tl!("Accessibility"), rows)
     }
 
     fn grid_page(&self) -> PageSpec<'_> {

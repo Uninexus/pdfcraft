@@ -105,6 +105,12 @@ fn cases() -> Vec<Case> {
             },
         },
         Case {
+            name: "caret browsing as documents open",
+            page: "Accessibility",
+            edit: |h| click(h, "Turn on the keyboard text cursor when a document opens"),
+            applied: |a| a.caret_on_open,
+        },
+        Case {
             name: "units",
             page: "Documents and view",
             edit: |h| {
@@ -283,4 +289,23 @@ fn no_check_box_label_is_cut_off() {
     assert!(seen.len() > 10, "the labels were painted: {seen:?}");
     let wrapped: Vec<_> = seen.iter().filter(|(_, rows)| *rows > 1).collect();
     assert!(wrapped.is_empty(), "{wrapped:?}");
+}
+
+/// With the Accessibility setting on, a document opens with the keyboard text cursor, in the
+/// Select tool; the documents already open are left as they were.
+#[test]
+fn documents_open_with_the_text_cursor_when_asked() {
+    let mut h = harness();
+    let caret = |h: &H, tab: usize| h.state().views[tab].caret_screen_rect().is_some();
+    assert!(!caret(&h, 0), "off unless chosen");
+    h.state_mut().set_option(&egui::Context::default(), "caret-on-open", "true").unwrap();
+    // A page with words for the cursor to stand on.
+    let words = pdfcraft_engine::Session::new().create_from_text("t", "Some words to stand on").unwrap();
+    h.state_mut().open_bytes(&egui::Context::default(), "again.pdf", None, words.to_vec()).unwrap();
+    crate::support::settle(&mut h);
+    assert!(caret(&h, 1), "the new document has its cursor");
+    assert!(h.state_mut().set_option(&egui::Context::default(), "caret-on-open", "yes").is_err());
+    h.state_mut().active = Some(0);
+    h.run_steps(3);
+    assert!(!caret(&h, 0), "the one already open is unchanged");
 }

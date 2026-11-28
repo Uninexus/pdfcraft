@@ -299,6 +299,7 @@ impl PdfCraftApp {
             mode: Mode::AllTools,
             default_mode: Mode::AllTools,
             view_defaults: Default::default(),
+            caret_on_open: false,
             highlight_fields: true,
             remember_entries_on_disk: settings::entries_persist(),
             units: Default::default(),

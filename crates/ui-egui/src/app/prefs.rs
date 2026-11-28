@@ -166,6 +166,7 @@ impl PdfCraftApp {
             update_check_at_start: Some(self.update_check_at_start),
             show_secured_notice: Some(self.show_secured_notice),
             text_links: Some(self.text_links),
+            caret_on_open: Some(self.caret_on_open),
             pinned_folders: json_text(&self.pinned.folders),
             pinned_folders_collapsed: json_text(&self.pinned.collapsed),
             pinned_tools: Some(self.pinned_tools.clone()),
@@ -412,6 +413,9 @@ impl PdfCraftApp {
         }
         if let Some(on) = s.text_links {
             self.text_links = on;
+        }
+        if let Some(on) = s.caret_on_open {
+            self.caret_on_open = on;
         }
         self.pinned.restore(&parsed(&s.pinned_folders).unwrap_or(serde_json::Value::Null));
         self.pinned.restore_collapsed(&parsed(&s.pinned_folders_collapsed).unwrap_or(serde_json::Value::Null));
