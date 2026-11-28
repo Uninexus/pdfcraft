@@ -256,6 +256,16 @@ fn search_rows(ui: &mut Ui, d: &mut SearchDraft, import: &mut bool) {
         let phrase_or_words = !matches!(mode, SearchMode::Patterns | SearchMode::Regex);
         Checkbox::new(Bind::bound(&mut d.whole_words)).label(tl!("Whole words only")).enabled(phrase_or_words).show(ui);
         Checkbox::new(Bind::bound(&mut d.case_sensitive)).label(tl!("Case-sensitive")).enabled(phrase_or_words).show(ui);
+        // Patterns and expressions only: "all but the last four digits" of a card or account number.
+        for (label, value) in [(tl!("Keep first characters readable"), &mut d.keep_first), (tl!("Keep last characters readable"), &mut d.keep_last)] {
+            let most = pdfcraft_engine::redact_keep::KEEP_MAX;
+            let mut typed = Some(*value as f64);
+            Field::new(label).enabled(!phrase_or_words).show(ui, |ui, _| {
+                NumberField::new(label, Bind::bound(&mut typed)).range(0.0..=most as f64).step(1.0).show(ui);
+            });
+            // An emptied field keeps the number.
+            *value = typed.map_or(*value, |v| (v.round().max(0.0) as usize).min(most));
+        }
         Text::new(tl!("Text in images isn't found; recognise text (OCR) first.")).shade(Shade::Muted).show(ui);
         if let Some(reason) = &d.error {
             Text::new(crate::i18n::fmt(tl!("The expression was refused, so nothing was marked: {reason}"), &[("reason", reason)])).show(ui);
@@ -266,6 +276,10 @@ fn search_rows(ui: &mut Ui, d: &mut SearchDraft, import: &mut bool) {
                 crate::i18n::fmt(tl!("{n} match(es) marked for redaction."), &[("n", &n.to_string())])
             };
             Text::new(line).show(ui);
+            if d.left_readable > 0 {
+                let n = d.left_readable.to_string();
+                Text::new(crate::i18n::fmt(tl!("{n} match(es) not marked: no more characters than are kept."), &[("n", &n)])).show(ui);
+            }
         }
     });
 }

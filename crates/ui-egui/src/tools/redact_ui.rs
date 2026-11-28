@@ -192,6 +192,11 @@ pub struct SearchDraft {
     pub regex: String,
     /// The checksum a Regex match must pass (`None` keeps every match).
     pub validator: Option<RedactValidator>,
+    /// Patterns and regular expressions: this many letters or digits at the start and end of each match stay readable.
+    pub keep_first: usize,
+    pub keep_last: usize,
+    /// Matches the last search left unmarked because all of each would have stayed readable.
+    pub left_readable: usize,
     /// Why the last search was refused (the expression is invalid, too long, matches nothing
     /// but the empty string, or matches too often); nothing was marked then.
     pub error: Option<String>,
@@ -210,6 +215,9 @@ impl Default for SearchDraft {
             pattern: RedactPattern::Phone,
             regex: String::new(),
             validator: None,
+            keep_first: 0,
+            keep_last: 0,
+            left_readable: 0,
             error: None,
             found: None,
         }
@@ -242,6 +250,7 @@ impl PdfCraftApp {
         let Some(doc) = self.session.get(id) else { return 0 };
         let d = self.redact_search.clone();
         self.redact_search.error = None;
+        self.redact_search.left_readable = 0;
         let needles = match d.mode {
             SearchMode::Phrase if !d.text.trim().is_empty() => vec![d.text.clone()],
             SearchMode::Words => pdfcraft_engine::redact_word_list(&d.words),
@@ -262,6 +271,12 @@ impl PdfCraftApp {
         let config = pdfcraft_render::RenderConfig { password: doc.password.as_deref().map(std::sync::Arc::from), ..Default::default() };
         let mut r = pdfcraft_render::PageRenderer::new(doc.bytes.clone(), config);
         let mut edits = Vec::new();
+        let mut left_readable = 0usize;
+        // Only a pattern's or an expression's matches have ends worth keeping (a typed word would simply show).
+        let (keep_first, keep_last) = match d.mode {
+            SearchMode::Patterns | SearchMode::Regex => (d.keep_first, d.keep_last),
+            SearchMode::Phrase | SearchMode::Words => (0, 0),
+        };
         let author = self.comment_author();
         for (page, page_info) in doc.info.pages.iter().enumerate() {
             let out = r.render(pdfcraft_render::RenderRequest { page, kind: pdfcraft_render::RequestKind::Text, scale: 1.0, ..Default::default() });
@@ -279,12 +294,24 @@ impl PdfCraftApp {
                 _ => needles.iter().flat_map(|w| text.find_opts(w, d.case_sensitive, d.whole_words)).collect(),
             };
             for h in hits {
+                let h = if keep_first > 0 || keep_last > 0 {
+                    match pdfcraft_engine::redact_keep::trim_kept_ends(&text, h, keep_first, keep_last) {
+                        Some(h) => h,
+                        None => {
+                            left_readable += 1;
+                            continue;
+                        }
+                    }
+                } else {
+                    h
+                };
                 let quads: Vec<[f64; 8]> = text.line_rects(h).into_iter().map(|r| page_info.view_rect_to_quad(r)).collect();
                 if !quads.is_empty() {
                     edits.push(self.redact_prefs.mark(page, quads, &author));
                 }
             }
         }
+        self.redact_search.left_readable = left_readable;
         let n = edits.len();
         if n > 0 {
             self.apply_edit(ctx, Edit::Batch { label: "Mark for redaction".into(), edits });
