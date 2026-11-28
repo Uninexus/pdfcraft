@@ -778,9 +778,8 @@ fn the_preview_can_be_scrolled_into_view_in_a_short_window() {
         h.steps(3);
         assert!(h.execute(command), "{command}");
         h.steps(4);
-        // A focused number field takes the wheel for itself: move the focus off Header & Footer's Size first.
-        h.key_press(egui::Key::Tab);
-        h.steps(2);
+        let size = |h: &Rig| h.query_all_by_role(egui::accesskit::Role::SpinButton).next().and_then(|n| n.value());
+        let before = size(&h);
         h.hover_at(egui::pos2(880.0, 470.0));
         for _ in 0..20 {
             h.event(egui::Event::MouseWheel {
@@ -792,6 +791,7 @@ fn the_preview_can_be_scrolled_into_view_in_a_short_window() {
             });
             h.steps(3);
         }
+        assert_eq!(size(&h), before, "{command}: scrolling the rows leaves a focused number field's value");
         let ok = h.get_by_label("OK").rect();
         assert!(ok.max.y <= 620.0, "{command}: OK stays in the window: {ok:?}");
         let pager = h.get_by_label_contains("Preview: page").rect();
