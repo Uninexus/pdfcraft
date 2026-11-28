@@ -245,6 +245,7 @@ use workflows::optimize_batch_ui;
 use workflows::optimize_ui;
 use workflows::print_paper;
 use workflows::print_ui;
+use workflows::redact_folder_ui;
 use workflows::scan_clean_ui;
 use workflows::web_print;
 use workflows::white_margins_ui;
@@ -822,6 +823,9 @@ pub struct PdfCraftApp {
     pub(crate) bates_multi_jobs: Queue<(), bates_multi_ui::BatesOutcome>,
     /// File ▸ Optimize multiple files: the running job.
     pub optimize_batch_run: Option<optimize_batch_ui::OptimizeBatchRun>,
+    /// Redact ▸ Redact files in a folder: the running job.
+    pub(crate) redact_folder_run: Option<redact_folder_ui::RedactFolderRun>,
+    pub(crate) redact_folder_jobs: Queue<(), String>,
     pub(crate) optimize_batch_jobs: Queue<(), optimize_batch_ui::OptimizeBatchOutcome>,
     /// Word, Excel and PowerPoint files being converted to PDF for Insert, Combine and Create.
     pub office_run: Option<office_batch::OfficeRun>,

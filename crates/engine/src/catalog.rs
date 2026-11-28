@@ -329,6 +329,7 @@ const ALL_GROUPS: &[ToolGroup] = &[
                 item("Find text and redact", "file-search", "redact.search", Ready),
                 item("Set properties", "settings-2", "redact.properties", Ready),
                 item("Sanitize document", "sparkles", "redact.sanitize", Ready),
+                item("Redact files in a folder", "folder", "redact.folder", Ready),
             ],
         }],
     },

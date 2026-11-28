@@ -437,6 +437,7 @@ const ALL_COMMANDS: &[CommandSpec] = &[
     c("edit.bates_remove", "Remove Bates numbering", None, None, Marks(crate::MarkKind::Bates), "hash"),
     c("edit.bates_remove_pages", "Remove Bates numbering from pages…", None, None, Marks(crate::MarkKind::Bates), "hash"),
     c("edit.image", "Add image…", None, None, Modification, "image-plus"),
+    c("redact.folder", "Redact files in a folder…", None, None, Nothing, "folder"),
     c("redact.mark", "Redact text and images", None, None, Modification, "rectangle"),
     c("redact.pages", "Redact pages…", None, None, Modification, "file-x"),
     c("redact.search", "Find text and redact…", None, None, Modification, "file-search"),
